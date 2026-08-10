@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 import aiosqlite
 import pytest
 
+from naumi_agent.evolution.proposal_outcomes import EvolutionProposalOutcomeProjection
 from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.tasks.store import TaskStore
 from naumi_agent.workbench.models import (
@@ -181,12 +182,61 @@ async def test_dashboard_keeps_approved_evolution_proposal_actionable(tmp_path) 
         decision_note="允许进入契约阶段",
     )
 
+    class _EmptyOutcomeReader:
+        async def project_session(self, session_id: str):
+            return {}
+
+    service.bind_proposal_outcome_reader(_EmptyOutcomeReader())
+
     snapshot = await service.dashboard_snapshot("s")
 
     assert snapshot["counts"]["reviews"] == 1
     assert snapshot["active_selection"]["review_id"] == proposal["id"]
     assert snapshot["active_selection"]["review_kind"] == "proposal"
     assert snapshot["proposals"][0]["state"] == "approved"
+    assert snapshot["proposals"][0]["contract_issue_allowed"] is True
+
+    projection = EvolutionProposalOutcomeProjection(
+        workbench_session_id="s",
+        workbench_proposal_id=proposal["id"],
+        outcome_id=f"evrerollbackout_{'1' * 24}",
+        outcome_sha256="2" * 64,
+        rollback_receipt_id=f"evrerollbackexec_{'3' * 24}",
+        experiment_contract_id=f"evx_{'4' * 24}",
+        candidate_id=f"evc_{'5' * 24}",
+        candidate_revision=2,
+        breach_reasons=("runtime_guardrail_breach",),
+        recorded_at="2026-08-10T00:00:00+00:00",
+        authority_valid=True,
+        active_baseline=True,
+    )
+
+    class _OutcomeReader:
+        async def project_session(self, session_id: str):
+            return {proposal["id"]: projection}
+
+    service.bind_proposal_outcome_reader(_OutcomeReader())
+    rolled_back = await service.dashboard_snapshot("s")
+    persisted = await service.get_proposal("s", proposal["id"])
+
+    assert persisted is not None and persisted["state"] == "approved"
+    assert rolled_back["proposals"][0]["state"] == "approved"
+    assert rolled_back["proposals"][0]["outcome_status"] == "rolled_back"
+    assert rolled_back["proposals"][0]["contract_issue_allowed"] is False
+    assert rolled_back["proposals"][0]["outcome"]["outcome_id"] == projection.outcome_id
+
+    class _UnavailableOutcomeReader:
+        async def project_session(self, session_id: str):
+            raise OSError("private database path")
+
+    service.bind_proposal_outcome_reader(_UnavailableOutcomeReader())
+    unavailable = await service.dashboard_snapshot("s")
+    assert unavailable["proposals"][0]["outcome"] is None
+    assert unavailable["proposals"][0]["outcome_error"] == (
+        "proposal_outcome_unavailable"
+    )
+    assert unavailable["proposals"][0]["contract_issue_allowed"] is False
+    assert "private database path" not in str(unavailable["proposals"][0])
 
 
 @pytest.mark.asyncio

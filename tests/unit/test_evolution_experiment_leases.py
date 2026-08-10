@@ -416,11 +416,18 @@ async def _lease_fixture(
         now=NOW + timedelta(minutes=5),
     )
     assert governed is not None
-    contract = await EvolutionExperimentContractIssuer(
+    issuer = EvolutionExperimentContractIssuer(
         review_service=review_service,
         workbench_service=service,
         store=EvolutionExperimentContractStore(runtime_db),
-    ).issue(
+    )
+
+    class _NoProposalOutcomeReader:
+        async def project_session(self, session_id: str):
+            return {}
+
+    issuer.bind_proposal_outcome_reader(_NoProposalOutcomeReader())
+    contract = await issuer.issue(
         workspace,
         session_id="session-1",
         proposal_id=queued.proposal["id"],

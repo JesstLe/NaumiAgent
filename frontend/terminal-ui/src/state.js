@@ -3921,6 +3921,15 @@ export function handleWorkbenchOverviewKey(state, key, send) {
       && selected.source_kind === "evolution_candidate"
       && normalized === "c"
     ) {
+      if (selected.contract_issue_allowed !== true) {
+        state.workbench.action_error = selected.outcome_error
+          ? "Outcome source 暂不可用，已安全阻止 Contract 签发。"
+          : selected.outcome
+            ? "该 Proposal 已形成实施 Outcome，不能再次签发 Contract。"
+            : "Contract authority 状态未就绪，请刷新 Workbench 后重试。";
+        state.workbench.proposal_action = null;
+        return true;
+      }
       beginWorkbenchProposalAction(state, selected, "issue_contract", send);
       return true;
     }

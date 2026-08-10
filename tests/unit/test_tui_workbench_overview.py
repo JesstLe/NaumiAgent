@@ -167,6 +167,19 @@ def test_reviews_formatter_renders_approved_proposal_contract_boundary() -> None
     assert "不会修改代码、运行实验或授予发布权限" in rendered
 
 
+def test_reviews_formatter_renders_rollback_outcome_without_contract_action() -> None:
+    snapshot = _rolled_back_proposal_snapshot()
+
+    rendered = format_workbench_reviews_markdown(snapshot)
+
+    assert "实施 Outcome" in rendered
+    assert r"rolled\_back" in rendered
+    assert "evrerollbackout" in rendered
+    assert "治理状态仍保留 approved 审计" in rendered
+    assert "不能再次签发 Experiment Contract" in rendered
+    assert "`c` 签发" not in rendered
+
+
 def test_workbench_formatter_escapes_store_markdown_and_control_characters() -> None:
     snapshot = _snapshot()
     snapshot["missions"][0]["title"] = "# injected\n[link](file:///secret)"  # type: ignore[index]
@@ -572,6 +585,28 @@ async def test_textual_workbench_bypass_issues_contract_without_modal() -> None:
 
 
 @pytest.mark.asyncio
+async def test_textual_workbench_blocks_contract_when_rollback_outcome_exists() -> None:
+    engine = create_agent_engine(AppConfig())
+    engine._session = SimpleNamespace(id="session-workbench-tui")
+    engine.workbench_service.dashboard_snapshot = AsyncMock(  # type: ignore[method-assign]
+        return_value=_rolled_back_proposal_snapshot()
+    )
+    engine.evolution_experiment_contract_issuer.issue = AsyncMock()  # type: ignore[method-assign]
+    app = NaumiApp(engine)
+
+    async with app.run_test(size=(100, 32)) as pilot:
+        app._handle_slash_command("/workbench")
+        await pilot.pause(0.1)
+        await pilot.press("3", "c")
+        await pilot.pause(0.05)
+
+        assert isinstance(app.screen, WorkbenchOverviewScreen)
+        rendered = app.screen.query_one("#workbench-content", Markdown)._markdown
+        assert "不能再次签发 Contract" in rendered
+        engine.evolution_experiment_contract_issuer.issue.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_textual_workbench_rejects_cross_session_snapshot() -> None:
     engine = create_agent_engine(AppConfig())
     engine._session = SimpleNamespace(id="session-current")
@@ -780,6 +815,22 @@ def _approved_proposal_snapshot() -> dict[str, object]:
     snapshot = _proposal_snapshot()
     proposal = snapshot["proposals"][0]  # type: ignore[index]
     proposal["state"] = "approved"
+    proposal["contract_issue_allowed"] = True
+    return snapshot
+
+
+def _rolled_back_proposal_snapshot() -> dict[str, object]:
+    snapshot = _approved_proposal_snapshot()
+    proposal = snapshot["proposals"][0]  # type: ignore[index]
+    proposal["contract_issue_allowed"] = False
+    proposal["outcome_status"] = "rolled_back"
+    proposal["outcome"] = {
+        "outcome_id": f"evrerollbackout_{'1' * 24}",
+        "rollback_receipt_id": f"evrerollbackexec_{'2' * 24}",
+        "experiment_contract_id": f"evx_{'3' * 24}",
+        "breach_reasons": ["runtime_guardrail_breach"],
+        "authority_valid": True,
+    }
     return snapshot
 
 

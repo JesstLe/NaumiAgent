@@ -1203,7 +1203,22 @@ function normalizeWorkbenchApproval(value) {
 
 function normalizeWorkbenchProposal(value) {
   const item = harnessObject(value, "workbench proposal");
-  return {
+  const outcome = item.outcome == null ? null : normalizeWorkbenchProposalOutcome(item.outcome);
+  const outcomeStatus = harnessChoice(
+    item.outcome_status ?? "",
+    "workbench proposal.outcome_status",
+    new Set(["", "rolled_back", "evidence_invalid"]),
+  );
+  const outcomeError = workbenchText(
+    item.outcome_error ?? "",
+    "workbench proposal.outcome_error",
+    128,
+  );
+  const contractIssueAllowed = harnessBoolean(
+    item.contract_issue_allowed ?? false,
+    "workbench proposal.contract_issue_allowed",
+  );
+  const normalized = {
     id: workbenchText(item.id, "workbench proposal.id", 128),
     session_id: workbenchText(item.session_id, "workbench proposal.session_id", 500),
     mission_id: workbenchText(item.mission_id, "workbench proposal.mission_id", 500),
@@ -1256,9 +1271,154 @@ function normalizeWorkbenchProposal(value) {
       "workbench proposal.governance_policy_version",
       80,
     ),
+    outcome,
+    outcome_status: outcomeStatus,
+    outcome_error: outcomeError,
+    contract_issue_allowed: contractIssueAllowed,
     created_at: workbenchText(item.created_at, "workbench proposal.created_at", 100),
     updated_at: workbenchText(item.updated_at, "workbench proposal.updated_at", 100),
   };
+  if (outcome) {
+    const expectedStatus = outcome.authority_valid ? "rolled_back" : "evidence_invalid";
+    if (
+      outcome.workbench_session_id !== normalized.session_id
+      || outcome.workbench_proposal_id !== normalized.id
+      || outcomeStatus !== expectedStatus
+      || outcomeError
+      || contractIssueAllowed
+      || normalized.state !== "approved"
+    ) {
+      throw new Error("workbench proposal outcome 外层绑定无效");
+    }
+  } else if (outcomeStatus) {
+    throw new Error("workbench proposal.outcome_status 缺少 Outcome");
+  }
+  if (
+    contractIssueAllowed
+    && (
+      normalized.state !== "approved"
+      || normalized.source_kind !== "evolution_candidate"
+      || outcomeError
+    )
+  ) {
+    throw new Error("workbench proposal.contract_issue_allowed 超出 authority");
+  }
+  return normalized;
+}
+
+function normalizeWorkbenchProposalOutcome(value) {
+  const item = harnessObject(value, "workbench proposal outcome");
+  if (Number(item.schema_version) !== 1) {
+    throw new Error(`workbench proposal outcome schema_version 不兼容: ${item.schema_version}`);
+  }
+  const policy = workbenchText(
+    item.policy_version,
+    "workbench proposal outcome.policy_version",
+    80,
+  );
+  if (policy !== "evolution-proposal-outcome-projection-v1") {
+    throw new Error(`workbench proposal outcome policy_version 不兼容: ${policy}`);
+  }
+  const normalized = {
+    schema_version: 1,
+    policy_version: policy,
+    workbench_session_id: workbenchText(
+      item.workbench_session_id,
+      "workbench proposal outcome.workbench_session_id",
+      128,
+    ),
+    workbench_proposal_id: workbenchText(
+      item.workbench_proposal_id,
+      "workbench proposal outcome.workbench_proposal_id",
+      128,
+    ),
+    governance_state_unchanged: harnessBoolean(
+      item.governance_state_unchanged,
+      "workbench proposal outcome.governance_state_unchanged",
+    ),
+    status: harnessChoice(
+      item.status,
+      "workbench proposal outcome.status",
+      new Set(["rolled_back"]),
+    ),
+    outcome_id: workbenchText(item.outcome_id, "workbench proposal outcome.outcome_id", 128),
+    outcome_sha256: workbenchText(
+      item.outcome_sha256,
+      "workbench proposal outcome.outcome_sha256",
+      64,
+    ),
+    rollback_receipt_id: workbenchText(
+      item.rollback_receipt_id,
+      "workbench proposal outcome.rollback_receipt_id",
+      128,
+    ),
+    experiment_contract_id: workbenchText(
+      item.experiment_contract_id,
+      "workbench proposal outcome.experiment_contract_id",
+      128,
+    ),
+    candidate_id: workbenchText(item.candidate_id, "workbench proposal outcome.candidate_id", 128),
+    candidate_revision: harnessNonnegativeInteger(
+      item.candidate_revision,
+      "workbench proposal outcome.candidate_revision",
+    ),
+    breach_reasons: harnessTextArray(
+      item.breach_reasons,
+      "workbench proposal outcome.breach_reasons",
+      16,
+    ),
+    recorded_at: workbenchText(item.recorded_at, "workbench proposal outcome.recorded_at", 100),
+    authority_valid: harnessBoolean(item.authority_valid, "workbench proposal outcome.authority_valid"),
+    active_baseline: harnessBoolean(item.active_baseline, "workbench proposal outcome.active_baseline"),
+    contract_issue_allowed: harnessBoolean(
+      item.contract_issue_allowed,
+      "workbench proposal outcome.contract_issue_allowed",
+    ),
+    before_after_recorded: harnessBoolean(
+      item.before_after_recorded,
+      "workbench proposal outcome.before_after_recorded",
+    ),
+    long_term_metrics_recorded: harnessBoolean(
+      item.long_term_metrics_recorded,
+      "workbench proposal outcome.long_term_metrics_recorded",
+    ),
+    promoted: harnessBoolean(item.promoted, "workbench proposal outcome.promoted"),
+    learning_authority: harnessBoolean(
+      item.learning_authority,
+      "workbench proposal outcome.learning_authority",
+    ),
+    promotion_authority: harnessBoolean(
+      item.promotion_authority,
+      "workbench proposal outcome.promotion_authority",
+    ),
+  };
+  if (
+    normalized.governance_state_unchanged !== true
+    || normalized.contract_issue_allowed !== false
+    || normalized.before_after_recorded !== false
+    || normalized.long_term_metrics_recorded !== false
+    || normalized.promoted !== false
+    || normalized.learning_authority !== false
+    || normalized.promotion_authority !== false
+    || normalized.candidate_revision < 1
+    || normalized.breach_reasons.length < 1
+    || (normalized.active_baseline && !normalized.authority_valid)
+  ) {
+    throw new Error("workbench proposal outcome authority 字段无效");
+  }
+  const identities = [
+    [normalized.outcome_id, /^evrerollbackout_[0-9a-f]{24}$/, "outcome_id"],
+    [normalized.outcome_sha256, /^[0-9a-f]{64}$/, "outcome_sha256"],
+    [normalized.rollback_receipt_id, /^evrerollbackexec_[0-9a-f]{24}$/, "rollback_receipt_id"],
+    [normalized.experiment_contract_id, /^evx_[0-9a-f]{24}$/, "experiment_contract_id"],
+    [normalized.candidate_id, /^evc_[0-9a-f]{24}$/, "candidate_id"],
+  ];
+  for (const [identity, pattern, field] of identities) {
+    if (!pattern.test(identity)) {
+      throw new Error(`workbench proposal outcome.${field} 格式无效`);
+    }
+  }
+  return normalized;
 }
 
 function normalizeWorkbenchProposalActionResult(payload) {

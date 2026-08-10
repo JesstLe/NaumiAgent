@@ -69,8 +69,9 @@ Outcome 固定：
 1. promotion/deployment 成功后的 `promoted` Outcome；
 2. 新 rollout 替代旧 Outcome 的显式 `superseded` ledger；
 3. HAR-08 before/after 与长期观察窗口；
-4. HAR-09.6 将 Proposal 最终状态和指标回注 Workbench；
+4. HAR-09.6b 将 HAR-08 before/after 和长期指标回注 Workbench；
 5. ARC-07.6 配置/数据恢复分支。
 
-下一最小切片应优先补 `HAR-09.6a Proposal Outcome Projection`：只读消费本 Outcome，把 Proposal 显示为
-`rolled_back`，但在长期指标缺失时继续禁止 `promoted` 与 policy learning。
+`HAR-09.6a Proposal Outcome Projection` 已完成：它只读消费本 Outcome，在不改写 `approved` 治理记录的
+前提下显示 `rolled_back`，并在服务端禁止再次签发 Contract。下一最小切片是 `HAR-09.6b Before/After
+Outcome Evidence`；长期指标缺失时仍禁止 `promoted` 与 policy learning。

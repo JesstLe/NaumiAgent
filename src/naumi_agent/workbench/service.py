@@ -66,6 +66,10 @@ class WorktreeStatusProvider(Protocol):
     ) -> WorktreeRecord | list[WorktreeRecord]: ...
 
 
+class ProposalOutcomeReader(Protocol):
+    async def project_session(self, session_id: str) -> dict[str, Any]: ...
+
+
 def _status_text(value: Any) -> str:
     return str(getattr(value, "value", value) or "").strip().lower()
 
@@ -194,6 +198,12 @@ class WorkbenchService:
         self._worktree_manager = worktree_manager
         self._snapshot_locks: OrderedDict[str, asyncio.Lock] = OrderedDict()
         self._snapshot_states: OrderedDict[str, tuple[str, str, int]] = OrderedDict()
+        self._proposal_outcome_reader: ProposalOutcomeReader | None = None
+
+    def bind_proposal_outcome_reader(self, reader: ProposalOutcomeReader) -> None:
+        if not callable(getattr(reader, "project_session", None)):
+            raise TypeError("Proposal Outcome reader 必须实现 project_session()。")
+        self._proposal_outcome_reader = reader
 
     def _tasks_for_session(self, session_id: str) -> TaskStore:
         return self._task_store.scoped(session_id)
@@ -859,6 +869,9 @@ class WorkbenchService:
             session_id, [task.id for task in tasks]
         )
         proposals = await self._workbench_store.list_proposals_for_snapshot(session_id)
+        proposal_outcomes, proposal_outcome_error = (
+            await self._proposal_outcome_projections(session_id)
+        )
         proposal_snapshots = []
         for proposal in proposals:
             snapshot = self._proposal_to_dict(proposal)
@@ -866,6 +879,23 @@ class WorkbenchService:
                 target.id
                 for target in eligible_proposal_merge_targets(proposal, proposals)
             ]
+            projection = proposal_outcomes.get(proposal.id)
+            is_evolution = proposal.source_kind is ProposalSourceKind.EVOLUTION_CANDIDATE
+            snapshot["outcome"] = projection
+            snapshot["outcome_status"] = (
+                "rolled_back"
+                if projection is not None and projection.get("authority_valid") is True
+                else "evidence_invalid"
+                if projection is not None
+                else ""
+            )
+            snapshot["outcome_error"] = proposal_outcome_error if is_evolution else ""
+            snapshot["contract_issue_allowed"] = bool(
+                is_evolution
+                and proposal.state is ProposalState.APPROVED
+                and projection is None
+                and not proposal_outcome_error
+            )
             proposal_snapshots.append(snapshot)
         worktrees, worktrees_status, worktrees_code, worktrees_total = (
             await self._worktree_snapshot(tasks_by_id=tasks_by_id, leases=leases)
@@ -902,6 +932,50 @@ class WorkbenchService:
             "worktrees_truncated": worktrees_total > len(worktrees),
         }
         return self._version_dashboard_snapshot(snapshot)
+
+    async def _proposal_outcome_projections(
+        self,
+        session_id: str,
+    ) -> tuple[dict[str, dict[str, Any]], str]:
+        reader = self._proposal_outcome_reader
+        if reader is None:
+            return {}, "proposal_outcome_unavailable"
+        try:
+            raw = await reader.project_session(session_id)
+            if not isinstance(raw, dict) or len(raw) > _MAX_SNAPSHOT_REVIEWS:
+                raise ValueError("Proposal Outcome projection 集合无效。")
+            normalized: dict[str, dict[str, Any]] = {}
+            for proposal_id, value in raw.items():
+                if hasattr(value, "model_dump"):
+                    payload = value.model_dump(mode="json")
+                elif isinstance(value, dict):
+                    payload = dict(value)
+                else:
+                    raise TypeError("Proposal Outcome projection 类型无效。")
+                if not (
+                    str(proposal_id) == str(payload.get("workbench_proposal_id") or "")
+                    and session_id == str(payload.get("workbench_session_id") or "")
+                    and payload.get("schema_version") == 1
+                    and payload.get("policy_version")
+                    == "evolution-proposal-outcome-projection-v1"
+                    and payload.get("governance_state_unchanged") is True
+                    and payload.get("status") == "rolled_back"
+                    and payload.get("contract_issue_allowed") is False
+                    and payload.get("before_after_recorded") is False
+                    and payload.get("long_term_metrics_recorded") is False
+                    and payload.get("promoted") is False
+                    and payload.get("learning_authority") is False
+                    and payload.get("promotion_authority") is False
+                    and not (
+                        payload.get("active_baseline") is True
+                        and payload.get("authority_valid") is not True
+                    )
+                ):
+                    raise ValueError("Proposal Outcome projection 绑定无效。")
+                normalized[str(proposal_id)] = payload
+            return normalized, ""
+        except (OSError, RuntimeError, TypeError, ValueError):
+            return {}, "proposal_outcome_unavailable"
 
     async def _worktree_snapshot(
         self,

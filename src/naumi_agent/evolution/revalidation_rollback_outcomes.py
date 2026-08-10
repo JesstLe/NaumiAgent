@@ -180,6 +180,45 @@ class EvolutionRevalidationRollbackOutcomeStore:
                 "Rollback Outcome 损坏或无法读取。",
             ) from exc
 
+    async def list_by_session(
+        self,
+        session_id: str,
+        *,
+        limit: int = 100,
+    ) -> tuple[EvolutionRevalidationRollbackOutcome, ...]:
+        normalized = str(session_id or "").strip()
+        if re.fullmatch(_SAFE_BINDING_RE, normalized) is None:
+            raise ValueError("Workbench Session ID 格式无效。")
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100:
+            raise ValueError("Rollback Outcome 查询上限必须为 1..100。")
+        if not self.db_path.is_file():
+            return ()
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                db.row_factory = aiosqlite.Row
+                await _ensure_schema(db)
+                rows = await (
+                    await db.execute(
+                        "SELECT outcome_json FROM evolution_revalidation_rollback_outcomes "
+                        "WHERE workbench_session_id = ? "
+                        "ORDER BY recorded_at DESC, outcome_id DESC LIMIT ?",
+                        (normalized, limit + 1),
+                    )
+                ).fetchall()
+            if len(rows) > limit:
+                raise EvolutionRevalidationRollbackOutcomeError(
+                    "rollback_outcome_projection_limit_exceeded",
+                    "Rollback Outcome 数量超过单次投影上限。",
+                )
+            return tuple(_restore_outcome(row["outcome_json"]) for row in rows)
+        except EvolutionRevalidationRollbackOutcomeError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise EvolutionRevalidationRollbackOutcomeError(
+                "rollback_outcome_store_corrupt",
+                "Rollback Outcome 损坏或无法读取。",
+            ) from exc
+
     async def record(
         self, outcome: EvolutionRevalidationRollbackOutcome
     ) -> EvolutionRevalidationRollbackOutcome:

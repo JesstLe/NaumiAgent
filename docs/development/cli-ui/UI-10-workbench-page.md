@@ -135,6 +135,16 @@
 - 完整用户状态机见 `UI-10-6c-experiment-contract-action.md`，后端契约见
   `../harness/HAR-09-5c-explicit-experiment-contract-issuance.md`。
 
+### UI-10.6d/HAR-09.6a 已实现：Proposal Outcome Projection
+
+- Reviews 同时保留 `approved` 治理事实和 `rolled_back` 实施终态，不把两种状态压成一个枚举。
+- New UI/TUI 显示 Outcome、Rollback Receipt、Contract、breach 与 authority；黄色表示 rollback，绿色表示
+  authority 有效，红色表示证据失效或来源不可用。
+- 终态 Outcome 或不可用 source 会移除 `c` 动作；`EvolutionExperimentContractIssuer` 同时在服务端阻断，
+  因此前端事件、Agent Tool 或 Slash 都不能绕过。
+- before/after、长期指标、promoted Outcome 和 policy learning 仍未完成。完整边界见
+  `../harness/HAR-09-6a-proposal-outcome-projection.md`。
+
 ### UI-10.6b1 已实现：Proposal defer
 
 - open Proposal 增加 `d` 延后；New UI 与 Textual TUI 都收集必填原因和 1/7/30 天有界预设。

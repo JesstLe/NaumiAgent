@@ -43,6 +43,17 @@ from naumi_agent.workbench.store import WorkbenchStore
 NOW = datetime(2026, 7, 18, 22, 0, tzinfo=UTC)
 
 
+class _ProposalOutcomeReader:
+    def __init__(self, projections=None, *, error: Exception | None = None) -> None:
+        self.projections = projections or {}
+        self.error = error
+
+    async def project_session(self, session_id: str):
+        if self.error is not None:
+            raise self.error
+        return self.projections
+
+
 def _git(root: Path, *args: str) -> str:
     completed = subprocess.run(
         ["git", "-C", str(root), *args],
@@ -135,6 +146,7 @@ async def _approved_fixture(
         workbench_service=service,
         store=contract_store,
     )
+    issuer.bind_proposal_outcome_reader(_ProposalOutcomeReader())
     return (
         workspace,
         evolution_store,
@@ -268,6 +280,46 @@ async def test_approved_proposal_issues_stable_non_executable_contract(
     with pytest.raises(EvolutionExperimentContractStoreError) as corrupt:
         await contract_store.get(workspace, first.contract_id)
     assert corrupt.value.code == "experiment_contract_authority_store_corrupt"
+
+
+@pytest.mark.asyncio
+async def test_contract_issuer_fails_closed_for_terminal_or_unavailable_outcome(
+    tmp_path: Path,
+) -> None:
+    workspace, _store, _service, _contract_store, issuer, proposal_id = (
+        await _approved_fixture(tmp_path)
+    )
+    terminal = {
+        "workbench_session_id": "session-1",
+        "workbench_proposal_id": proposal_id,
+        "status": "rolled_back",
+        "contract_issue_allowed": False,
+    }
+    issuer.bind_proposal_outcome_reader(
+        _ProposalOutcomeReader({proposal_id: terminal})
+    )
+
+    with pytest.raises(EvolutionExperimentContractStoreError) as blocked:
+        await issuer.issue(
+            workspace,
+            session_id="session-1",
+            proposal_id=proposal_id,
+            seed=42,
+        )
+    assert blocked.value.code == "experiment_contract_outcome_terminal"
+
+    issuer.bind_proposal_outcome_reader(
+        _ProposalOutcomeReader(error=OSError("private storage detail"))
+    )
+    with pytest.raises(EvolutionExperimentContractStoreError) as unavailable:
+        await issuer.issue(
+            workspace,
+            session_id="session-1",
+            proposal_id=proposal_id,
+            seed=42,
+        )
+    assert unavailable.value.code == "experiment_contract_outcome_source_unavailable"
+    assert "private storage detail" not in str(unavailable.value)
 
 
 @pytest.mark.asyncio

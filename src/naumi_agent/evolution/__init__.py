@@ -398,6 +398,12 @@ if TYPE_CHECKING:
         EvolutionPromotionTargetSnapshot,
         render_evolution_promotion_package,
     )
+    from naumi_agent.evolution.proposal_outcomes import (
+        EVOLUTION_PROPOSAL_OUTCOME_PROJECTION_POLICY,
+        EvolutionProposalOutcomeProjection,
+        EvolutionProposalOutcomeProjectionError,
+        EvolutionProposalOutcomeProjectionService,
+    )
     from naumi_agent.evolution.reflection_memories import (
         EvolutionReflectionAction,
         EvolutionReflectionEvidenceKind,
@@ -1767,6 +1773,10 @@ __all__ = [
     "EvolutionCandidateEvent",
     "EvolutionCandidateStore",
     "EvolutionProposalPreview",
+    "EVOLUTION_PROPOSAL_OUTCOME_PROJECTION_POLICY",
+    "EvolutionProposalOutcomeProjection",
+    "EvolutionProposalOutcomeProjectionError",
+    "EvolutionProposalOutcomeProjectionService",
     "adapt_harness_failure_evidence",
     "adapt_self_review_static_evidence",
     "build_candidate_draft",
@@ -2800,6 +2810,12 @@ def __getattr__(name: str) -> object:
         "generate_proposal_preview",
         "parse_proposal_scope_files",
     }
+    proposal_outcome_exports = {
+        "EVOLUTION_PROPOSAL_OUTCOME_PROJECTION_POLICY",
+        "EvolutionProposalOutcomeProjection",
+        "EvolutionProposalOutcomeProjectionError",
+        "EvolutionProposalOutcomeProjectionService",
+    }
     experiment_exports = {
         "EvolutionExperimentContract",
         "EvolutionExperimentContractAuthority",
@@ -3190,6 +3206,8 @@ def __getattr__(name: str) -> object:
         module_name = "promotion_packages"
     elif name in proposal_exports:
         module_name = "proposal"
+    elif name in proposal_outcome_exports:
+        module_name = "proposal_outcomes"
     elif name in experiment_exports:
         module_name = "experiments"
     elif name in experiment_lease_exports:

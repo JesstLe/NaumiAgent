@@ -565,6 +565,7 @@ test("workbench Reviews tab distinguishes an approved Proposal and its non-execu
     agent_id: "Evolution-Agent", task_id: "task-1",
     intended_files: ["frontend/terminal-ui/src/components/footer.js"],
     validation_plan: ["node --test footer.test.js"],
+    contract_issue_allowed: true,
   };
   const view = {
     ...workbenchOverviewFixture(),
@@ -590,6 +591,50 @@ test("workbench Reviews tab distinguishes an approved Proposal and its non-execu
     assert(plain.includes("c 签发/重开 Contract"));
     assert(plain.includes(view.experiment_contract.contract_id));
     assert(plain.includes("execution_ready=false"));
+  }
+});
+
+test("workbench Reviews tab renders rollback Outcome and removes Contract action", () => {
+  const proposal = {
+    id: "proposal-1", state: "approved", title: "优化 footer 截断", risk_level: "medium",
+    proposal_kind: "code", source_kind: "evolution_candidate",
+    source_id: `evc_${"a".repeat(24)}`, source_revision: 4,
+    impact_scope: "frontend/terminal-ui/src/components/footer.js",
+    agent_id: "Evolution-Agent", task_id: "task-1",
+    intended_files: ["frontend/terminal-ui/src/components/footer.js"],
+    validation_plan: ["node --test footer.test.js"],
+    contract_issue_allowed: false,
+    outcome_status: "rolled_back",
+    outcome: {
+      outcome_id: `evrerollbackout_${"1".repeat(24)}`,
+      rollback_receipt_id: `evrerollbackexec_${"2".repeat(24)}`,
+      experiment_contract_id: `evx_${"3".repeat(24)}`,
+      breach_reasons: ["runtime_guardrail_breach"],
+      authority_valid: true,
+    },
+  };
+  const view = {
+    ...workbenchOverviewFixture(),
+    selected_tab: "reviews",
+    selected_review_id: "proposal-1",
+    selected_review_kind: "proposal",
+    approvals: [],
+    proposals: [proposal],
+    proposal_action: null,
+  };
+
+  for (const width of [80, 120, 200]) {
+    const rendered = renderWorkbenchOverview(view, width, 30);
+    const plain = rendered.map(stripAnsi).join("\n");
+    assert(rendered.every((line) => visibleWidth(line) <= width));
+    assert(plain.includes("rolled_back"));
+    assert(plain.includes("实施 Outcome"));
+    assert(plain.includes(proposal.outcome.outcome_id));
+    assert(plain.includes("approved 治理记录保持不变"));
+    assert(plain.includes("不能再次签发 Contract"));
+    assert(!plain.includes("c 签发/重开 Contract"));
+    assert(rendered.join("\n").includes(ANSI.yellow));
+    assert(rendered.join("\n").includes(ANSI.green));
   }
 });
 

@@ -248,10 +248,12 @@ def format_workbench_reviews_markdown(
     for offset, item in enumerate(reviews[start : start + 8], start=start):
         marker = "▶" if offset == index else "·"
         if item.get("review_kind") == "proposal":
+            outcome_status = _normalized(item.get("outcome_status"))
+            outcome_label = f" · {outcome_status}" if outcome_status else ""
             lines.append(
                 f"- {marker} Proposal · "
                 f"{_plain(item.get('title') or item.get('id'))} · "
-                f"{_risk_label(item.get('risk_level'))}"
+                f"{_risk_label(item.get('risk_level'))}{outcome_label}"
             )
         else:
             lines.append(
@@ -355,6 +357,30 @@ def _append_proposal_review(
     )
     files = _strings(proposal.get("intended_files"))
     validation = _strings(proposal.get("validation_plan"))
+    outcome = _mapping(proposal.get("outcome"))
+    outcome_status = _normalized(proposal.get("outcome_status"))
+    if outcome:
+        authority = "可验证" if outcome.get("authority_valid") is True else "证据已失效"
+        lines.extend(
+            [
+                "",
+                "### 实施 Outcome",
+                f"- 终态：{_plain(outcome_status or outcome.get('status'))} · {authority}",
+                f"- Outcome：`{_code(outcome.get('outcome_id'))}`",
+                f"- Rollback Receipt：`{_code(outcome.get('rollback_receipt_id'))}`",
+                f"- Experiment Contract：`{_code(outcome.get('experiment_contract_id'))}`",
+                f"- Breach：{', '.join(_strings(outcome.get('breach_reasons'))) or '-'}",
+                "- HAR-08 before/after：尚未记录；长期指标：尚未记录",
+            ]
+        )
+    elif proposal.get("outcome_error"):
+        lines.extend(
+            [
+                "",
+                "### 实施 Outcome",
+                "- Outcome source 暂不可用；未把 Proposal 冒充为已完成。",
+            ]
+        )
     lines.extend(["", f"### 目标文件 · {len(files)}"])
     lines.extend(f"- `{_code(path)}`" for path in files[:8])
     if not files:
@@ -363,7 +389,32 @@ def _append_proposal_review(
     lines.extend(f"- {_plain(step)}" for step in validation[:8])
     if not validation:
         lines.append("- 未声明")
-    if _normalized(proposal.get("state")) == "approved":
+    if outcome:
+        lines.extend(
+            [
+                "",
+                (
+                    "> 该 Proposal 已形成历史 rollback Outcome；治理状态仍保留 approved 审计，"
+                    "但不能再次签发 Experiment Contract，也不能标记 promoted 或进入 "
+                    "policy learning。"
+                ),
+                "",
+                "`r` 刷新 · `Esc` 返回",
+            ]
+        )
+    elif (
+        _normalized(proposal.get("state")) == "approved"
+        and proposal.get("contract_issue_allowed") is not True
+    ):
+        lines.extend(
+            [
+                "",
+                "> Contract authority 暂不可用；已安全阻止签发，请刷新后重试。",
+                "",
+                "`r` 刷新 · `Esc` 返回",
+            ]
+        )
+    elif _normalized(proposal.get("state")) == "approved":
         lines.extend(
             [
                 "",
@@ -925,6 +976,12 @@ class WorkbenchOverviewScreen(Screen[None]):
             and _normalized(selected.get("state")) == "approved"
             and _normalized(selected.get("source_kind")) == "evolution_candidate"
         ):
+            return
+        if selected.get("contract_issue_allowed") is not True:
+            self.review_error = (
+                "该 Proposal 已有实施 Outcome 或 Outcome source 不可用，不能再次签发 Contract。"
+            )
+            self._render_snapshot()
             return
         proposal_id = _normalized(selected.get("id"))
         decision = self.engine._permission_checker.check(
