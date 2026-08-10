@@ -10,8 +10,15 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from naumi_agent.cli.slash_router import execute_slash_command
+from naumi_agent.daemons.authenticated_worker_identity import (
+    AuthenticatedWorkerIdentityAuthority,
+    AuthenticatedWorkerIdentityStore,
+    issue_authenticated_worker_identity,
+)
 from naumi_agent.daemons.worker_contract import (
     WorkerCapability,
     WorkerIsolationContract,
@@ -30,6 +37,12 @@ from naumi_agent.evolution.post_rollback_behavioral_coverage import (
     EvolutionPostRollbackBehavioralCoverageStore,
     EvolutionPostRollbackBehavioralCoverageView,
     _build_contract,
+)
+from naumi_agent.evolution.post_rollback_remote_claims import (
+    EvolutionPostRollbackRemoteClaimError,
+    EvolutionPostRollbackRemoteClaimService,
+    EvolutionPostRollbackRemoteClaimStore,
+    render_post_rollback_remote_claim,
 )
 from naumi_agent.evolution.post_rollback_remote_dispatches import (
     EvolutionPostRollbackRemoteDispatchError,
@@ -72,6 +85,7 @@ from naumi_agent.release.channel_catalog import (
 from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
 from naumi_agent.tools.base import ToolCall, ToolRegistry, ToolResult
 from naumi_agent.tools.evolution_review import (
+    EvolutionPostRollbackRemoteClaimTool,
     EvolutionPostRollbackRemoteDispatchTool,
     EvolutionPostRollbackRemoteLanePlacementTool,
     EvolutionPostRollbackTargetBaselineTool,
@@ -198,7 +212,14 @@ class _CoverageService:
         return self.view
 
 
-def _worker(worker_id: str, *, system: str = "windows", machine: str = "AMD64"):
+def _worker(
+    worker_id: str,
+    *,
+    system: str = "windows",
+    machine: str = "AMD64",
+    epoch: int = 1,
+    issued_at: str = NOW,
+):
     capabilities = tuple(
         sorted(
             (
@@ -215,8 +236,8 @@ def _worker(worker_id: str, *, system: str = "windows", machine: str = "AMD64"):
     )
     return issue_worker_contract(
         worker_id=worker_id,
-        instance_id=f"{worker_id}-instance",
-        epoch=1,
+        instance_id=f"{worker_id}-instance-{epoch}",
+        epoch=epoch,
         kind=WorkerKind.TOOL,
         protocol_min=1,
         protocol_max=1,
@@ -236,7 +257,7 @@ def _worker(worker_id: str, *, system: str = "windows", machine: str = "AMD64"):
             max_output_bytes=16 * 1024 * 1024,
         ),
         isolation=WorkerIsolationContract(True, True, True, True, True, True),
-        issued_at=NOW,
+        issued_at=issued_at,
     )
 
 
@@ -992,3 +1013,287 @@ async def test_remote_dispatch_rejects_tampered_before_after_lineage(
         assessed_at="2026-08-10T08:03:02+00:00",
     )
     assert capacity is not None and capacity.reserved == 0
+
+
+async def _claim_fixture(tmp_path: Path):
+    service, registry, contract, remote, worker, _, _ = await _dispatch_fixture(tmp_path)
+    dispatch = await service.queue(
+        request_id=contract.request_id,
+        comparison_id=remote.original_comparison_id,
+        channel="stable",
+        queued_at="2026-08-10T08:03:02+00:00",
+    )
+    private_key = Ed25519PrivateKey.from_private_bytes(b"c" * 32)
+    public_key = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    supervisor_key = b"post-rollback-worker-supervisor-key"
+    identity_store = AuthenticatedWorkerIdentityStore(service.store.db_path)
+    identity_authority = AuthenticatedWorkerIdentityAuthority(
+        worker_registry=registry,
+        store=identity_store,
+        supervisor_key_provider=lambda: supervisor_key,
+    )
+    identity = issue_authenticated_worker_identity(
+        contract=worker,
+        public_key_base64=base64.b64encode(public_key).decode("ascii"),
+        enrolled_at="2026-08-10T08:03:02+00:00",
+        supervisor_key=supervisor_key,
+    )
+    await identity_authority.enroll(identity)
+    claim_service = EvolutionPostRollbackRemoteClaimService(
+        dispatch_service=service,
+        dispatch_store=service.store,
+        worker_registry=registry,
+        identity_authority=identity_authority,
+        store=EvolutionPostRollbackRemoteClaimStore(service.store.db_path),
+    )
+    return claim_service, registry, dispatch, worker, private_key
+
+
+def _sign_claim(private_key, challenge) -> str:
+    signature = private_key.sign(challenge.payload.canonical_bytes())
+    return base64.b64encode(signature).decode("ascii")
+
+
+@pytest.mark.asyncio
+async def test_remote_claim_one_time_signature_renewal_and_fencing(
+    tmp_path: Path,
+) -> None:
+    service, registry, dispatch, worker, private_key = await _claim_fixture(tmp_path)
+    challenge = await service.prepare_claim(
+        dispatch_id=dispatch.dispatch.dispatch_id,
+        issued_at="2026-08-10T08:03:03+00:00",
+        challenge_ttl_seconds=2,
+        lease_seconds=5,
+    )
+    repeated_challenge = await service.prepare_claim(
+        dispatch_id=dispatch.dispatch.dispatch_id,
+        issued_at="2026-08-10T08:03:03+00:00",
+        challenge_ttl_seconds=2,
+        lease_seconds=5,
+    )
+    assert repeated_challenge == challenge
+    assert challenge.one_time
+    assert not challenge.transport_delivered
+
+    class _ClaimService:
+        async def prepare_claim(self, **arguments):
+            assert arguments == {"dispatch_id": dispatch.dispatch.dispatch_id}
+            return challenge
+
+    tool = EvolutionPostRollbackRemoteClaimTool(
+        SimpleNamespace(
+            evolution_post_rollback_remote_claim_service=_ClaimService()
+        )
+    )
+    arguments = {
+        "action": "prepare",
+        "dispatch_id": dispatch.dispatch.dispatch_id,
+    }
+    for mode in (PermissionMode.MODERATE, PermissionMode.BYPASS):
+        decision = PermissionChecker(mode).check(tool.name, arguments, tool=tool)
+        assert decision.allowed
+        assert not decision.requires_confirmation
+    prepared = await tool.execute(**arguments)
+    assert challenge.payload.challenge_id in prepared
+    assert challenge.payload.model_dump_json() in prepared
+    tool_registry = ToolRegistry()
+    tool_registry.register(tool)
+
+    class _SlashEngine:
+        def __init__(self) -> None:
+            self.tool_registry = tool_registry
+
+        async def execute_tool(self, call: ToolCall, *, agent_name=None):
+            registered = self.tool_registry.get(call.name)
+            assert registered is not None and agent_name == "cli"
+            parsed = registered.parse_arguments(call.arguments)
+            return ToolResult(
+                call_id=call.id,
+                status="success",
+                content=await registered.execute(**parsed),
+            )
+
+    slash = await execute_slash_command(
+        _SlashEngine(),
+        f"/evolution outcome-claim-behavior prepare "
+        f"{dispatch.dispatch.dispatch_id}",
+    )
+    assert challenge.payload.challenge_id in slash
+    signature = _sign_claim(private_key, challenge)
+
+    first = await service.submit(
+        challenge_id=challenge.payload.challenge_id,
+        signature_base64=signature,
+        claimed_at="2026-08-10T08:03:04+00:00",
+    )
+    repeated = await service.submit(
+        challenge_id=challenge.payload.challenge_id,
+        signature_base64=signature,
+        claimed_at="2026-08-10T08:03:04+00:00",
+    )
+    assert repeated == first
+    assert first.status == "current"
+    assert first.worker_claimed
+    assert first.receipt.sequence == 1
+    assert first.receipt.lease_epoch == 1
+    assert first.receipt.lease_expires_at == "2026-08-10T08:03:09+00:00"
+    assert first.receipt.reservation_deadline == "2026-08-10T08:03:15+00:00"
+    assert not first.transport_delivered
+    assert not first.execution_authority
+    assert "尚未传输 baseline" in render_post_rollback_remote_claim(first)
+
+    renewal = await service.prepare_renewal(
+        claim_id=first.receipt.claim_id,
+        issued_at="2026-08-10T08:03:05+00:00",
+        challenge_ttl_seconds=1,
+        lease_seconds=5,
+    )
+    renewed = await service.submit(
+        challenge_id=renewal.payload.challenge_id,
+        signature_base64=_sign_claim(private_key, renewal),
+        claimed_at="2026-08-10T08:03:05.500000+00:00",
+    )
+    assert renewed.status == "current"
+    assert renewed.receipt.sequence == 2
+    assert renewed.receipt.lease_epoch == 2
+    assert renewed.receipt.previous_receipt_sha256 == first.receipt.receipt_sha256
+    assert renewed.receipt.lease_expires_at == "2026-08-10T08:03:10.500000+00:00"
+
+    takeover = _worker(
+        worker.worker_id,
+        epoch=2,
+        issued_at="2026-08-10T08:03:07+00:00",
+    )
+    await registry.register(takeover, registered_at="2026-08-10T08:03:07+00:00")
+    stale = await service.inspect(
+        claim_id=renewed.receipt.claim_id,
+        assessed_at="2026-08-10T08:03:08+00:00",
+    )
+    assert stale.status == "stale"
+    assert not stale.lease_active
+    assert not stale.worker_claimed
+
+
+@pytest.mark.asyncio
+async def test_remote_claim_rejects_forgery_replay_and_expired_window(
+    tmp_path: Path,
+) -> None:
+    service, _, dispatch, _, private_key = await _claim_fixture(tmp_path)
+    challenge = await service.prepare_claim(
+        dispatch_id=dispatch.dispatch.dispatch_id,
+        issued_at="2026-08-10T08:03:03+00:00",
+        challenge_ttl_seconds=2,
+        lease_seconds=20,
+    )
+    forged_key = Ed25519PrivateKey.from_private_bytes(b"d" * 32)
+    with pytest.raises(EvolutionPostRollbackRemoteClaimError) as forged:
+        await service.submit(
+            challenge_id=challenge.payload.challenge_id,
+            signature_base64=_sign_claim(forged_key, challenge),
+            claimed_at="2026-08-10T08:03:04+00:00",
+        )
+    assert forged.value.code == "post_rollback_remote_claim_signature_invalid"
+
+    signature = _sign_claim(private_key, challenge)
+    claimed = await service.submit(
+        challenge_id=challenge.payload.challenge_id,
+        signature_base64=signature,
+        claimed_at="2026-08-10T08:03:04+00:00",
+    )
+    assert claimed.receipt.lease_expires_at == dispatch.dispatch.reservation_expires_at
+    other_signature = base64.b64encode(b"x" * 64).decode("ascii")
+    with pytest.raises(EvolutionPostRollbackRemoteClaimError) as replay:
+        await service.submit(
+            challenge_id=challenge.payload.challenge_id,
+            signature_base64=other_signature,
+            claimed_at="2026-08-10T08:03:04+00:00",
+        )
+    assert replay.value.code == "post_rollback_remote_claim_challenge_closed"
+
+    expired = await service.inspect(
+        claim_id=claimed.receipt.claim_id,
+        assessed_at=dispatch.dispatch.reservation_expires_at,
+    )
+    assert expired.status == "expired"
+    with pytest.raises(EvolutionPostRollbackRemoteClaimError) as already_claimed:
+        await service.prepare_claim(
+            dispatch_id=dispatch.dispatch.dispatch_id,
+            issued_at="2026-08-10T08:03:06+00:00",
+        )
+    assert already_claimed.value.code == "post_rollback_remote_claim_already_claimed"
+
+
+@pytest.mark.asyncio
+async def test_remote_claim_challenge_cannot_outlive_reservation(
+    tmp_path: Path,
+) -> None:
+    service, _, dispatch, _, _ = await _claim_fixture(tmp_path)
+    with pytest.raises(EvolutionPostRollbackRemoteClaimError) as window:
+        await service.prepare_claim(
+            dispatch_id=dispatch.dispatch.dispatch_id,
+            issued_at="2026-08-10T08:03:03+00:00",
+            challenge_ttl_seconds=20,
+            lease_seconds=5,
+        )
+    assert (
+        window.value.code
+        == "post_rollback_remote_claim_window_exceeds_reservation"
+    )
+
+
+@pytest.mark.asyncio
+async def test_remote_claim_pending_challenge_rechecks_health_and_store_authority(
+    tmp_path: Path,
+) -> None:
+    service, registry, dispatch, worker, _ = await _claim_fixture(tmp_path)
+    await service.prepare_claim(
+        dispatch_id=dispatch.dispatch.dispatch_id,
+        issued_at="2026-08-10T08:03:03+00:00",
+        challenge_ttl_seconds=2,
+        lease_seconds=5,
+    )
+    draining = HarnessHeartbeat(
+        workspace_root=dispatch.dispatch.workspace_root,
+        subject_kind=HarnessRunKind.TOOL,
+        subject_id=worker.worker_id,
+        instance_id=worker.instance_id,
+        epoch=worker.epoch,
+        sequence=2,
+        phase=HarnessHeartbeatPhase.DRAINING,
+        observed_at="2026-08-10T08:03:03.500000+00:00",
+        timeout_seconds=60,
+        detail_code="draining",
+    )
+    await registry.record_health_report(
+        issue_worker_health_report(
+            contract=worker,
+            heartbeat=draining,
+            active_jobs=1,
+            accepting_jobs=False,
+        ),
+        recorded_at="2026-08-10T08:03:03.500000+00:00",
+    )
+    with pytest.raises(EvolutionPostRollbackRemoteClaimError) as stale:
+        await service.prepare_claim(
+            dispatch_id=dispatch.dispatch.dispatch_id,
+            issued_at="2026-08-10T08:03:04+00:00",
+        )
+    assert stale.value.code == "post_rollback_remote_claim_authority_stale"
+
+    with pytest.raises(ValueError, match="共享同一 SQLite"):
+        EvolutionPostRollbackRemoteClaimService(
+            dispatch_service=service.dispatch_service,
+            dispatch_store=service.dispatch_store,
+            worker_registry=registry,
+            identity_authority=AuthenticatedWorkerIdentityAuthority(
+                worker_registry=registry,
+                store=AuthenticatedWorkerIdentityStore(
+                    (tmp_path / "other-identities.db").resolve()
+                ),
+                supervisor_key_provider=lambda: b"x" * 32,
+            ),
+            store=service.store,
+        )

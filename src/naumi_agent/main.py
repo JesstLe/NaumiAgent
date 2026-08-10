@@ -2920,7 +2920,7 @@ def _print_help() -> None:
             "outcome-before-after|outcome-verify-runtime|"
             "outcome-verify-behavior|outcome-behavior-coverage|"
             "outcome-place-behavior|outcome-resolve-behavior|"
-            "outcome-dispatch-behavior|enqueue]",
+            "outcome-dispatch-behavior|outcome-claim-behavior|enqueue]",
             "审查 Candidate、执行回滚，并记录 Outcome、实施前后、Runtime 与行为证据",
         ),
         (
@@ -3842,6 +3842,34 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 arg="",
             )
             return
+        if action == "outcome-claim-behavior":
+            if len(parts) < 3 or parts[1] not in {"prepare", "submit", "renew"}:
+                raise ValueError(
+                    "outcome-claim-behavior 需要 prepare、submit 或 renew 子命令。"
+                )
+            operation = parts[1]
+            if operation in {"prepare", "renew"} and len(parts) != 3:
+                raise ValueError(f"outcome-claim-behavior {operation} 需要一个 ID。")
+            if operation == "submit" and len(parts) != 4:
+                raise ValueError(
+                    "outcome-claim-behavior submit 需要 Challenge ID 与 signature。"
+                )
+            arguments = {"action": operation}
+            if operation == "prepare":
+                arguments["dispatch_id"] = parts[2]
+            elif operation == "renew":
+                arguments["claim_id"] = parts[2]
+            else:
+                arguments["challenge_id"] = parts[2]
+                arguments["signature_base64"] = parts[3]
+            await _run_tool_slash_command(
+                engine,
+                slash_command="/evolution",
+                tool_name="evolution_post_rollback_remote_claim",
+                parse_args=lambda _arg: arguments,
+                arg="",
+            )
+            return
         service = engine.evolution_review_service
         if action == "detail":
             if len(parts) != 2:
@@ -3879,7 +3907,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "outcome-before-after、outcome-verify-runtime、"
                 "outcome-verify-behavior、outcome-behavior-coverage、"
                 "outcome-place-behavior、outcome-resolve-behavior、"
-                "outcome-dispatch-behavior 或 enqueue。"
+                "outcome-dispatch-behavior、outcome-claim-behavior 或 enqueue。"
             )
     except ValueError as exc:
         if action == "enqueue":
@@ -4076,6 +4104,9 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "<final-evaluation-comparison-id> <channel>；"
             "/evolution outcome-dispatch-behavior <rollback-request-id> "
             "<final-evaluation-comparison-id> <channel>；"
+            "/evolution outcome-claim-behavior prepare <dispatch-id>；"
+            "/evolution outcome-claim-behavior submit <challenge-id> <signature-base64>；"
+            "/evolution outcome-claim-behavior renew <claim-id>；"
             "/evolution enqueue <candidate-id> --mission <id> --task <id> "
             "[--agent <name>]",
             style="yellow",

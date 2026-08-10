@@ -102,9 +102,9 @@ capacity、trust 或 durable authority。
 
 ## 下一切片
 
-`HAR-09.6c2a3c` 必须在本 Dispatch 上实现 authenticated Worker claim 与 fenced lease。claim 之前仍不能传输
-baseline 或签发执行授权；claim/lease 完成后，再由独立切片实现 retry attempt authority、execution
-authorization、签名结果摄取和矩阵聚合。
+`HAR-09.6c2a3c` 已在本 Dispatch 上实现 authenticated Worker claim 与 fenced lease，且继续保持
+`transport_delivered=false`。下一步先建立 baseline transport delivery authority，再独立实现 retry attempt、
+execution authorization、签名结果摄取和矩阵聚合。
 
-`ARC-04.1d` 已先交付 supervisor-attested Ed25519 Worker Identity，避免 6c2a3c 仅凭公开 worker/instance/epoch
-字段接受冒名 claim。
+`ARC-04.1d` 提供 supervisor-attested Ed25519 Worker Identity，6c2a3c 已消费该 authority，拒绝仅凭公开
+worker/instance/epoch 字段的冒名 claim。

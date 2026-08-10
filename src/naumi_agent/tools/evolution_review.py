@@ -77,6 +77,11 @@ from naumi_agent.evolution.post_rollback_behavioral_lanes import (
     EvolutionPostRollbackBehavioralLaneError,
     render_post_rollback_behavioral_lane,
 )
+from naumi_agent.evolution.post_rollback_remote_claims import (
+    EvolutionPostRollbackRemoteClaimError,
+    render_post_rollback_remote_claim,
+    render_post_rollback_remote_claim_challenge,
+)
 from naumi_agent.evolution.post_rollback_remote_dispatches import (
     EvolutionPostRollbackRemoteDispatchError,
     render_post_rollback_remote_dispatch,
@@ -3082,6 +3087,112 @@ class EvolutionPostRollbackRemoteDispatchTool(Tool):
         return render_post_rollback_remote_dispatch(view)
 
 
+class EvolutionPostRollbackRemoteClaimTool(Tool):
+    """Prepare, submit or renew an authenticated remote Worker claim."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_post_rollback_remote_claim"
+
+    @property
+    def description(self) -> str:
+        return (
+            "为 queued post-rollback Dispatch 准备一次性 Ed25519 challenge、"
+            "提交 Worker signature 或准备短 lease renewal；不传输 baseline、不执行。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["prepare", "submit", "renew"]},
+                "dispatch_id": {
+                    "type": "string",
+                    "pattern": "^evpostdispatch_[0-9a-f]{24}$",
+                },
+                "challenge_id": {
+                    "type": "string",
+                    "pattern": "^evpostclaimchallenge_[0-9a-f]{24}$",
+                },
+                "claim_id": {
+                    "type": "string",
+                    "pattern": "^evpostclaim_[0-9a-f]{24}$",
+                },
+                "signature_base64": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9+/]{86}==$",
+                },
+            },
+            "required": ["action"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="回滚后远端 Worker Claim",
+            search_hint=(
+                "evolution post rollback remote worker claim ed25519 challenge "
+                "lease renew 自进化 回滚 远端 认证 领取 续租"
+            ),
+        )
+
+    async def execute(
+        self,
+        action: str,
+        dispatch_id: str = "",
+        challenge_id: str = "",
+        claim_id: str = "",
+        signature_base64: str = "",
+    ) -> str:
+        normalized = str(action or "").strip().lower()
+        try:
+            service = self._engine.evolution_post_rollback_remote_claim_service
+            if normalized == "prepare":
+                if challenge_id or claim_id or signature_base64:
+                    raise ValueError("prepare 只接受 dispatch_id。")
+                challenge = await service.prepare_claim(
+                    dispatch_id=str(dispatch_id or "").strip(),
+                )
+                return render_post_rollback_remote_claim_challenge(challenge)
+            if normalized == "submit":
+                if dispatch_id or claim_id:
+                    raise ValueError("submit 只接受 challenge_id 与 signature_base64。")
+                view = await service.submit(
+                    challenge_id=str(challenge_id or "").strip(),
+                    signature_base64=str(signature_base64 or "").strip(),
+                )
+                return render_post_rollback_remote_claim(view)
+            if normalized == "renew":
+                if dispatch_id or challenge_id or signature_base64:
+                    raise ValueError("renew 只接受 claim_id。")
+                challenge = await service.prepare_renewal(
+                    claim_id=str(claim_id or "").strip(),
+                )
+                return render_post_rollback_remote_claim_challenge(challenge)
+            raise ValueError("action 仅支持 prepare、submit 或 renew。")
+        except (
+            AttributeError,
+            EvolutionPostRollbackRemoteClaimError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "post_rollback_remote_claim_failed")
+            return f"回滚后远端 Claim 未完成（`{code}`）：{exc}"
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -3130,6 +3241,7 @@ def create_evolution_review_tools(
         EvolutionPostRollbackRemoteLanePlacementTool(engine),
         EvolutionPostRollbackTargetBaselineTool(engine),
         EvolutionPostRollbackRemoteDispatchTool(engine),
+        EvolutionPostRollbackRemoteClaimTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -3161,6 +3273,7 @@ __all__ = [
     "EvolutionPostRollbackBehavioralCoverageTool",
     "EvolutionPostRollbackRemoteLanePlacementTool",
     "EvolutionPostRollbackRemoteDispatchTool",
+    "EvolutionPostRollbackRemoteClaimTool",
     "EvolutionPostRollbackTargetBaselineTool",
     "EvolutionPostRollbackRuntimeVerificationTool",
     "EvolutionProposalBeforeAfterEvidenceTool",
