@@ -49,5 +49,7 @@
 
 [EVO-05.5f4c](../self-evolution/EVO-05-5f4c-release-bound-execution-outcome-ledger.md) 已消费本 provenance、同一
 `ChatRunStore` 中的真实终态 `CompletionReceipt`、单次运行用量和覆盖运行区间的 HAR observation，形成独立
-content-addressed Outcome。下一步仍需对不同 run ID 动态重验并聚合 `minimum_completed_runs`；本 provenance 与单个 Outcome
-都不能直接成为 Stage Completion Evidence。
+content-addressed Opt-in Outcome。
+[EVO-05.5f5h](../self-evolution/EVO-05-5f5h-percentage-release-bound-execution-outcome.md) 已在 percentage 路线复用同一
+provenance authority，并绑定 exact Assignment/Exposure/Window。下一步仍需对不同 run ID 动态重验并聚合
+`minimum_completed_runs`；本 provenance 与单个 Outcome 都不能直接成为 Stage Completion Evidence。

@@ -688,6 +688,19 @@ if TYPE_CHECKING:
         EvolutionRevalidationPercentageDeploymentStore,
         EvolutionRevalidationPercentageDeploymentView,
     )
+    from naumi_agent.evolution.revalidation_percentage_execution_outcome_ledger import (
+        EVOLUTION_REVALIDATION_PERCENTAGE_EXECUTION_OUTCOME_LEDGER_POLICY,
+        EvolutionRevalidationPercentageExecutionOutcomeLedgerService,
+        EvolutionRevalidationPercentageExecutionOutcomeLedgerStore,
+        EvolutionRevalidationPercentageExecutionOutcomeView,
+    )
+    from naumi_agent.evolution.revalidation_percentage_execution_outcomes import (
+        EVOLUTION_REVALIDATION_PERCENTAGE_EXECUTION_OUTCOME_POLICY,
+        EvolutionRevalidationPercentageExecutionOutcome,
+        EvolutionRevalidationPercentageExecutionOutcomeError,
+        EvolutionRevalidationPercentageLivenessSourceRef,
+        build_percentage_execution_outcome,
+    )
     from naumi_agent.evolution.revalidation_percentage_observation_window_assessments import (
         EVOLUTION_REVALIDATION_PERCENTAGE_OBSERVATION_ASSESSMENT_POLICY,
         EvolutionRevalidationPercentageObservationAssessmentError,
@@ -1272,6 +1285,15 @@ __all__ = [
     "EvolutionRevalidationPercentageDeploymentService",
     "EvolutionRevalidationPercentageDeploymentStore",
     "EvolutionRevalidationPercentageDeploymentView",
+    "EVOLUTION_REVALIDATION_PERCENTAGE_EXECUTION_OUTCOME_LEDGER_POLICY",
+    "EvolutionRevalidationPercentageExecutionOutcomeLedgerService",
+    "EvolutionRevalidationPercentageExecutionOutcomeLedgerStore",
+    "EvolutionRevalidationPercentageExecutionOutcomeView",
+    "EVOLUTION_REVALIDATION_PERCENTAGE_EXECUTION_OUTCOME_POLICY",
+    "EvolutionRevalidationPercentageExecutionOutcome",
+    "EvolutionRevalidationPercentageExecutionOutcomeError",
+    "EvolutionRevalidationPercentageLivenessSourceRef",
+    "build_percentage_execution_outcome",
     "EVOLUTION_REVALIDATION_PERCENTAGE_OBSERVATION_ASSESSMENT_POLICY",
     "EvolutionRevalidationPercentageObservationAssessmentError",
     "EvolutionRevalidationPercentageObservationWindowService",
@@ -2264,6 +2286,19 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationPercentageDeploymentStore",
         "EvolutionRevalidationPercentageDeploymentView",
     }
+    revalidation_percentage_execution_outcome_ledger_exports = {
+        "EVOLUTION_REVALIDATION_PERCENTAGE_EXECUTION_OUTCOME_LEDGER_POLICY",
+        "EvolutionRevalidationPercentageExecutionOutcomeLedgerService",
+        "EvolutionRevalidationPercentageExecutionOutcomeLedgerStore",
+        "EvolutionRevalidationPercentageExecutionOutcomeView",
+    }
+    revalidation_percentage_execution_outcome_exports = {
+        "EVOLUTION_REVALIDATION_PERCENTAGE_EXECUTION_OUTCOME_POLICY",
+        "EvolutionRevalidationPercentageExecutionOutcome",
+        "EvolutionRevalidationPercentageExecutionOutcomeError",
+        "EvolutionRevalidationPercentageLivenessSourceRef",
+        "build_percentage_execution_outcome",
+    }
     revalidation_percentage_observation_assessment_exports = {
         "EVOLUTION_REVALIDATION_PERCENTAGE_OBSERVATION_ASSESSMENT_POLICY",
         "EvolutionRevalidationPercentageObservationAssessmentError",
@@ -2876,6 +2911,10 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_percentage_deployment_intents"
     elif name in revalidation_percentage_deployment_exports:
         module_name = "revalidation_percentage_deployments"
+    elif name in revalidation_percentage_execution_outcome_ledger_exports:
+        module_name = "revalidation_percentage_execution_outcome_ledger"
+    elif name in revalidation_percentage_execution_outcome_exports:
+        module_name = "revalidation_percentage_execution_outcomes"
     elif name in revalidation_percentage_observation_assessment_exports:
         module_name = "revalidation_percentage_observation_window_assessments"
     elif name in revalidation_percentage_observation_window_exports:

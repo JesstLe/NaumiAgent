@@ -73,7 +73,7 @@ Service 先读取 Binding 和 heartbeat head，再读取 origin metadata，计�
 
 ## 当前边界与下一步
 
-5f5g 只观察单 selected installation，`completed_runs_observed` 仍为 0。下一最小切片应为
-`EVO-05.5f5h Percentage Release-bound Execution Outcome`：复用 HAR-10.2k run provenance 与 5f4c outcome 约束，把真实
-percentage 用户 run 绑定到 exact Assignment/Exposure/Window。随后才能设计 cohort completed-run aggregation 与 percentage
-stage completion，不能直接从 liveness 推断 rollout 成功。
+5f5g 只观察单 selected installation，`completed_runs_observed` 仍为 0。
+[EVO-05.5f5h](EVO-05-5f5h-percentage-release-bound-execution-outcome.md) 已复用 HAR-10.2k run provenance 与 5f4c outcome
+约束，把真实 percentage 用户 run 绑定到 exact Assignment/Exposure/Window。下一步仍须独立聚合不同 run ID，并且不能直接从
+liveness 或单 Outcome 推断 rollout 成功。
