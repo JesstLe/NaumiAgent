@@ -108,6 +108,7 @@ async def _exposure_context(
         "harness_store": harness_store,
         "factory": factory,
         "identity": identity,
+        "runtime_now": runtime_now,
         "next_now": next_now,
         "build_exposure_service": build_exposure_service,
     }

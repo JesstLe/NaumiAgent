@@ -70,5 +70,6 @@ retention、Binding/ledger 篡改或 Deployment source 损坏会撤销 fact auth
 本机 fixture 使用真实 ReleaseSlot、Stable Deployment、Harness Store 与 TerminalRuntimeLifecycle，但 executable 是 POSIX fixture；
 Windows 真 `.exe` 与 packaged New UI/TUI 启动仍需三平台发布 CI 验收。
 
-下一独立切片应建立 Stable Runtime Observation Window：从本 Exposure origin 有界读取 heartbeat hash chain，按 Rollout Plan 的 stable
-门槛验证持续时长、样本数、最大 gap 与 stale 状态。单 installation window 仍不得冒充完整 population stable completion。
+[EVO-05.5f5o](EVO-05-5f5o-stable-observation-window.md) 已建立 Stable Runtime Observation Window：从本 Exposure origin
+验证 heartbeat hash chain，并按 Rollout Plan stable 门槛计算持续时长、样本数、最大 gap 与 stale 状态。单 installation window
+仍不得冒充完整 population stable completion。

@@ -1001,6 +1001,13 @@ if TYPE_CHECKING:
         SignStableInstallationChallenge,
         build_stable_installation_proof,
     )
+    from naumi_agent.evolution.revalidation_stable_observation_windows import (
+        EVOLUTION_REVALIDATION_STABLE_OBSERVATION_WINDOW_POLICY,
+        EvolutionRevalidationStableObservationWindow,
+        EvolutionRevalidationStableObservationWindowError,
+        EvolutionRevalidationStableObservationWindowStatus,
+        build_stable_observation_window,
+    )
     from naumi_agent.evolution.revalidation_stable_runtime_exposures import (
         EVOLUTION_REVALIDATION_STABLE_RUNTIME_EXPOSURE_POLICY,
         EvolutionRevalidationStableRuntimeExposureError,
@@ -1433,6 +1440,11 @@ __all__ = [
     "EvolutionRevalidationStableInstallationProofPayload",
     "SignStableInstallationChallenge",
     "build_stable_installation_proof",
+    "EVOLUTION_REVALIDATION_STABLE_OBSERVATION_WINDOW_POLICY",
+    "EvolutionRevalidationStableObservationWindow",
+    "EvolutionRevalidationStableObservationWindowError",
+    "EvolutionRevalidationStableObservationWindowStatus",
+    "build_stable_observation_window",
     "EVOLUTION_REVALIDATION_PERCENTAGE_DEPLOYMENT_POLICY",
     "EvolutionRevalidationPercentageDeploymentError",
     "EvolutionRevalidationPercentageDeploymentReceipt",
@@ -2580,6 +2592,13 @@ def __getattr__(name: str) -> object:
         "SignStableInstallationChallenge",
         "build_stable_installation_proof",
     }
+    revalidation_stable_observation_window_exports = {
+        "EVOLUTION_REVALIDATION_STABLE_OBSERVATION_WINDOW_POLICY",
+        "EvolutionRevalidationStableObservationWindow",
+        "EvolutionRevalidationStableObservationWindowError",
+        "EvolutionRevalidationStableObservationWindowStatus",
+        "build_stable_observation_window",
+    }
     revalidation_percentage_stage_completion_exports = {
         "EVOLUTION_REVALIDATION_PERCENTAGE_STAGE_COMPLETION_POLICY",
         "EvolutionRevalidationPercentageStageCompletion",
@@ -3234,6 +3253,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_stable_runtime_exposures"
     elif name in revalidation_stable_installation_proof_exports:
         module_name = "revalidation_stable_installation_proofs"
+    elif name in revalidation_stable_observation_window_exports:
+        module_name = "revalidation_stable_observation_windows"
     elif name in revalidation_percentage_stage_completion_exports:
         module_name = "revalidation_percentage_stage_completions"
     elif name in revalidation_opt_in_observation_assessment_exports:
