@@ -75,6 +75,10 @@ Entry 必须与 Build Attestation 的 target/version/archive/manifest projection
 
 ## 后续切片
 
+[ARC-07.5d1a Channel Trust Policy Loader](ARC-07-5d1a-channel-trust-policy-loader.md) 已补齐安装级
+`trusted-channels.json` 的 bounded、no-symlink、identity-stable 加载入口，为 Production Engine 组合真实 Catalog
+Store 提供公开信任根。它不改变 Catalog 内容、下载或部署权限。
+
 [ARC-07.5d2 Verified Artifact Fetch](ARC-07-5d2-verified-artifact-fetch.md) 已消费 current Resolution，以受限 HTTPS
 transport、有界 raw stream、claim fencing、同文件系统 staging、fsync 和 atomic rename 形成动态撤权 Download Receipt。
 
