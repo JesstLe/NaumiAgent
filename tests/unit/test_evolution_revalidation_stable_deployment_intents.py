@@ -36,7 +36,12 @@ def _b64(value: bytes) -> str:
     return base64.b64encode(value).decode("ascii")
 
 
-async def _context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+async def _context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    candidate_backend_content: bytes | None = None,
+):
     (
         lifecycle,
         passing,
@@ -108,6 +113,7 @@ async def _context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         source_commit=plan.target_head,
         source_tree_sha256=plan.target_tree_sha256,
         base_time=now,
+        backend_content=candidate_backend_content,
     )
     slots = release["slot_store"]
     baseline = slots.install(

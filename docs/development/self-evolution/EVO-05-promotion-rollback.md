@@ -159,6 +159,8 @@
 - [EVO-05.5f5k Stable Deployment Intent](EVO-05-5f5k-stable-deployment-intent.md)：已交付；
   以 current complete signed Population、逐安装 Ed25519 PoP、exact Admission、host target 与 previous pointer CAS 签发短期
   durable Intent；不执行 boot、activation、runtime 或声明 stable rollout；
+- [EVO-05.5f5l Stable Boot Preparation](EVO-05-5f5l-stable-boot-preparation.md)：已交付；
+  使用跨进程 claim/lease 真实探测 exact stable candidate，形成独立 Prepared Receipt；不切换 pointer 或启动用户进程；
 - [EVO-05.6a Automatic Pause and Rollback Request](EVO-05-6a-automatic-pause-rollback-request.md)：已交付；
   exact breach 会触发或复用 kill switch，并冻结只读 exact Rollback Request，不虚报执行完成。
 - [EVO-05.6b1 Immutable Rollback Source](EVO-05-6b1-immutable-rollback-source.md)：已交付；从 exact Git
@@ -185,6 +187,6 @@ Authority、版本化 Fresh Promotion Input、新 Approval Requirement/Response�
 已实现签名 result manifest、本地 H5a/pair prefix 摄取、remote cohort/Matrix 收口、immutable rollout plan、fenced local-canary entry、
 真实 local-canary executor、可信 monitor baseline、runtime observation、显式本机 opt-in Intent、authority-bound pointer
 activation/crash reconcile、percentage assignment/runtime/window/outcome aggregation、stable entry authorization、逐安装 stable
-Deployment Intent 与 automatic pause/rollback request，但尚未实现 stable boot/activation/runtime execution、version-slot rollback
+Deployment Intent/Boot Preparation 与 automatic pause/rollback request，但尚未实现 stable activation/runtime execution、version-slot rollback
 executor 或最终 Outcome 回注。任何界面不得把 stable entry 或 Deployment Intent authority 宣称为已进入 stable rollout，
 也不得把 rollback source 冻结宣称为已回滚。

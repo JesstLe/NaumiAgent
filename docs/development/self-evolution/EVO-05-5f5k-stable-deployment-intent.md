@@ -106,5 +106,6 @@ import 与 YAML 通过；未运行全量测试。
 
 ## 后续切片
 
-5f5k 实现后，下一切片是 Stable Boot Preparation。它应复用 percentage boot executor 的隔离 probe/claim/lease 核心，但使用独立
-typed Receipt 和 stable authority source，不能通过改字段把 Percentage Prepared Receipt 冒充 Stable Prepared Receipt。
+[EVO-05.5f5l](EVO-05-5f5l-stable-boot-preparation.md) 已复用 percentage boot executor 的隔离 probe/claim/lease 语义，但使用
+独立 typed Receipt、SQLite 表和 stable authority source，没有把 Percentage Prepared Receipt 改字段冒充 Stable Receipt。下一
+切片进入 Stable Activation/Reconciliation，仍须保持 pointer CAS、崩溃对账与 rollout claim 分离。
