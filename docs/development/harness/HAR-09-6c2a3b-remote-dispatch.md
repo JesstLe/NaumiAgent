@@ -104,7 +104,8 @@ capacity、trust 或 durable authority。
 
 `HAR-09.6c2a3c` 已在本 Dispatch 上实现 authenticated Worker claim 与 fenced lease，且继续保持
 `transport_delivered=false`。`HAR-09.6c2a3d` 又通过加密 descriptor 与 exact Worker ACK 建立 current baseline
-delivery；下一步独立实现 retry attempt、execution authorization、签名结果摄取和矩阵聚合。
+delivery；`HAR-09.6c2a3e` 已补 exact Start challenge、父权限、Run Grant、Runtime lease 与执行预算授权。下一步
+独立实现签名结果摄取、retry attempt 和矩阵聚合。
 
 `ARC-04.1d` 提供 supervisor-attested Ed25519 Worker Identity，6c2a3c 已消费该 authority，拒绝仅凭公开
 worker/instance/epoch 字段的冒名 claim。

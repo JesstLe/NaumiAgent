@@ -167,7 +167,9 @@ ARC-04.1d 已补齐通用 supervisor-attested Ed25519 Worker Identity，为 clai
 renewal 与动态 fencing。ARC-04.1e 又补齐独立 X25519 Transport Key、连续 generation rotation、同库 Identity
 绑定和动态 fencing。HAR-09.6c2a3d 已进一步完成 signed Catalog artifact 的控制面流式验证、X25519+HKDF+
 AES-GCM descriptor、exact Worker Ed25519 ACK 与 durable delivery receipt；它只授予 transport delivery，自动
-远端 push、execution authorization 和 result ingestion 仍未完成。
+远端 push 仍未完成。HAR-09.6c2a3e 又以 Worker-signed Start challenge、持久父权限、Runtime lease、bash_run-only
+Run Grant、exact Eval budget 与跨 Store 补偿 Saga 建立短期 installation/execution authority；真实进程 start receipt、
+result ingestion 和矩阵收口仍未完成。
 HAR-07.5b 已为 New UI 增加 `v` Evidence 焦点和 `/harness evidence`，并让 CLI/Textual TUI 复用相同
 Explain authority；HAR-07.4b1 已补齐空闲 Bridge 有界重启、重新协商和精确 session 回执恢复。
 ARC-02.5a 又补齐两类安全回执的持久事件身份与 session cursor；ARC-02.5b 已补齐 New UI 持久 ACK、

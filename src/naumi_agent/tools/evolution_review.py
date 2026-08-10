@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from naumi_agent.daemons.permission_context import current_permission_receipt
 from naumi_agent.evolution.adversarial_batch_requests import (
     EvolutionAdversarialBatchRequest,
 )
@@ -90,6 +91,11 @@ from naumi_agent.evolution.post_rollback_remote_deliveries import (
 from naumi_agent.evolution.post_rollback_remote_dispatches import (
     EvolutionPostRollbackRemoteDispatchError,
     render_post_rollback_remote_dispatch,
+)
+from naumi_agent.evolution.post_rollback_remote_execution_authorizations import (
+    EvolutionPostRollbackRemoteExecutionAuthorizationError,
+    render_post_rollback_remote_execution_authorization,
+    render_post_rollback_remote_start_challenge,
 )
 from naumi_agent.evolution.post_rollback_remote_lane_placements import (
     EvolutionPostRollbackRemoteLanePlacementError,
@@ -3303,6 +3309,122 @@ class EvolutionPostRollbackRemoteDeliveryTool(Tool):
             return f"回滚后远端交付未完成（`{code}`）：{exc}"
 
 
+class EvolutionPostRollbackRemoteExecutionAuthorizationTool(Tool):
+    """Prepare, sign or inspect one exact remote evaluation start authority."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_post_rollback_remote_execution"
+
+    @property
+    def description(self) -> str:
+        return (
+            "为 current Delivery 生成 Worker Ed25519 Start challenge，或在签名后"
+            "获取 exact Runtime lease 与 bash_run Run Grant；不接收结果。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["prepare", "submit", "inspect"]},
+                "delivery_id": {
+                    "type": "string",
+                    "pattern": "^evpostdelivery_[0-9a-f]{24}$",
+                },
+                "challenge_id": {
+                    "type": "string",
+                    "pattern": "^evpoststart_[0-9a-f]{24}$",
+                },
+                "reference_id": {
+                    "type": "string",
+                    "pattern": "^evpost(?:attempt|start|execauth)_[0-9a-f]{24}$",
+                },
+                "worker_signature_base64": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9+/]{86}==$",
+                },
+            },
+            "required": ["action"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="回滚后远端执行授权",
+            search_hint=(
+                "evolution post rollback remote execution start authorization "
+                "worker signature run grant lease 自进化 回滚 远端 执行 授权"
+            ),
+            delegated_tool_names=("bash_run",),
+            requires_persistent_authorization=True,
+        )
+
+    async def execute(
+        self,
+        action: str,
+        delivery_id: str = "",
+        challenge_id: str = "",
+        reference_id: str = "",
+        worker_signature_base64: str = "",
+    ) -> str:
+        normalized = str(action or "").strip().lower()
+        try:
+            service = (
+                self._engine.evolution_post_rollback_remote_execution_authorization_service
+            )
+            if normalized == "prepare":
+                if challenge_id or reference_id or worker_signature_base64:
+                    raise ValueError("prepare 只接受 delivery_id。")
+                permission = current_permission_receipt()
+                if permission is None:
+                    raise ValueError("prepare 缺少本次调用的持久父权限回执。")
+                view = await service.prepare(
+                    delivery_id=str(delivery_id or "").strip(),
+                    parent_permission_receipt_id=permission.receipt_id,
+                )
+                return render_post_rollback_remote_start_challenge(view)
+            if normalized == "submit":
+                if delivery_id or reference_id:
+                    raise ValueError("submit 只接受 challenge_id 与 Worker signature。")
+                view = await service.submit(
+                    challenge_id=str(challenge_id or "").strip(),
+                    worker_signature_base64=str(
+                        worker_signature_base64 or ""
+                    ).strip(),
+                )
+                return render_post_rollback_remote_execution_authorization(view)
+            if normalized == "inspect":
+                if delivery_id or challenge_id or worker_signature_base64:
+                    raise ValueError("inspect 只接受 reference_id。")
+                view = await service.inspect(
+                    reference_id=str(reference_id or "").strip()
+                )
+                return render_post_rollback_remote_execution_authorization(view)
+            raise ValueError("action 仅支持 prepare、submit 或 inspect。")
+        except (
+            AttributeError,
+            EvolutionPostRollbackRemoteExecutionAuthorizationError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "post_rollback_remote_execution_failed")
+            return f"回滚后远端执行授权未完成（`{code}`）：{exc}"
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -3353,6 +3475,7 @@ def create_evolution_review_tools(
         EvolutionPostRollbackRemoteDispatchTool(engine),
         EvolutionPostRollbackRemoteClaimTool(engine),
         EvolutionPostRollbackRemoteDeliveryTool(engine),
+        EvolutionPostRollbackRemoteExecutionAuthorizationTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -3386,6 +3509,7 @@ __all__ = [
     "EvolutionPostRollbackRemoteDispatchTool",
     "EvolutionPostRollbackRemoteClaimTool",
     "EvolutionPostRollbackRemoteDeliveryTool",
+    "EvolutionPostRollbackRemoteExecutionAuthorizationTool",
     "EvolutionPostRollbackTargetBaselineTool",
     "EvolutionPostRollbackRuntimeVerificationTool",
     "EvolutionProposalBeforeAfterEvidenceTool",

@@ -222,6 +222,10 @@ from naumi_agent.evolution.post_rollback_remote_dispatches import (
     EvolutionPostRollbackRemoteDispatchService,
     EvolutionPostRollbackRemoteDispatchStore,
 )
+from naumi_agent.evolution.post_rollback_remote_execution_authorizations import (
+    EvolutionPostRollbackRemoteExecutionAuthorizationService,
+    EvolutionPostRollbackRemoteExecutionAuthorizationStore,
+)
 from naumi_agent.evolution.post_rollback_remote_lane_placements import (
     EvolutionPostRollbackRemoteLanePlacementService,
     EvolutionPostRollbackRemoteLanePlacementStore,
@@ -2724,6 +2728,29 @@ class AgentEngine:
                 ),
                 artifact_fetch_service=self.evolution_release_artifact_fetch_service,
                 store=self.evolution_post_rollback_remote_delivery_store,
+            )
+        )
+        self.evolution_post_rollback_remote_execution_authorization_store = (
+            EvolutionPostRollbackRemoteExecutionAuthorizationStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_post_rollback_remote_execution_authorization_service = (
+            EvolutionPostRollbackRemoteExecutionAuthorizationService(
+                workspace_root=paths.workspace_root,
+                delivery_service=self.evolution_post_rollback_remote_delivery_service,
+                delivery_store=self.evolution_post_rollback_remote_delivery_store,
+                claim_service=self.evolution_post_rollback_remote_claim_service,
+                claim_store=self.evolution_post_rollback_remote_claim_store,
+                dispatch_service=self.evolution_post_rollback_remote_dispatch_service,
+                dispatch_store=self.evolution_post_rollback_remote_dispatch_store,
+                identity_authority=self.authenticated_worker_identity_authority,
+                permission_store=resources.permission_decision_store,
+                harness_store=self._harness_store,
+                run_grant_authority=self.run_delegation_grant_authority,
+                store=(
+                    self.evolution_post_rollback_remote_execution_authorization_store
+                ),
             )
         )
         self.evolution_proposal_outcome_projection_service = (

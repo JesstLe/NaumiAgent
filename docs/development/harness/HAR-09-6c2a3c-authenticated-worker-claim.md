@@ -115,4 +115,5 @@ private/public key 与 SQLite 验证：
 
 `ARC-04.1e` 已先建立独立 X25519 Transport Key authority，避免错误复用 Ed25519 claim key 或同机 Runtime secret。
 `HAR-09.6c2a3d` 已进一步建立加密 descriptor、真实 archive download verification、Worker ACK 与 durable delivery
-receipt。下一步只有 current delivery 才能进入 execution authorization；claim receipt 本身永远不能直接启动 Eval。
+receipt。`HAR-09.6c2a3e` 又让只有 current delivery 在 Worker 签署 Start challenge、父权限/Run Grant/Runtime lease
+全部成立后才取得执行授权；claim receipt 本身仍永远不能直接启动 Eval。
