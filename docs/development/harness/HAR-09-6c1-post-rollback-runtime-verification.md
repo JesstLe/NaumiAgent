@@ -109,9 +109,9 @@ Evolution/session DB 与 Release Slot DB 是不同 SQLite authority store，不�
 
 HAR-09.6 仍为 partial：
 
-1. `ARC-07.5f/5g` 已提供 exact installed backend 的受限 `protocol_hello@1` Eval channel 与 runtime-side
-   platform/version identity；下一步 `HAR-09.6c2a` 将它绑定到 6c1、原 H5c lane 与 fresh post-rollback
-   comparison，且 unsupported runner 失败关闭；
+1. `HAR-09.6c2a` 已把 ARC-07.5f/5g transport 绑定到 6c1、原 H5c lane、原 baseline cohort 与 fresh
+   installed-runtime H5a/H5c；单个平台 lane 仍固定 `behavioral_evaluation_recorded=false`。下一步 6c2b
+   聚合原 Final Evaluation 的完整平台/lane 集合；
 2. `HAR-09.6d Long-Term Outcome Window`：窗口、样本覆盖、censoring 和持续健康指标；
 3. promoted Outcome、supersede ledger；
 4. ARC-07.6 配置/数据 snapshot 恢复路径；

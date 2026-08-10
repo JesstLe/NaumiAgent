@@ -69,7 +69,7 @@ capability，避免源码协议扩展后旧期望把健康 runtime 误报为失�
 ## 下一步
 
 `ARC-07.5g` 已进一步让 exact binary 自报受限 runtime platform/version，并由 slot target/manifest 交叉验证，补齐
-原生 H5c identity 的最后一个 transport 缺口。`HAR-09.6c2a` 继续把此 transport 绑定到 6c1 Verification、
-Proposal Before/After 的 exact H5c lane 与 fresh
-post-rollback Result/Comparison。只有 lane 覆盖满足原 Final Evaluation contract 后，才能把
+原生 H5c identity 的最后一个 transport 缺口。`HAR-09.6c2a` 已把此 transport 绑定到 6c1 Verification、
+Proposal Before/After 的 exact H5c lane 与 fresh post-rollback Result/Comparison。只有后续 6c2b 的 lane 覆盖
+满足原 Final Evaluation contract 后，才能把
 `behavioral_evaluation_recorded` 置为 true；unsupported runner 必须明确等待适配，不能降级为 workspace import。

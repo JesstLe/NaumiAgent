@@ -96,8 +96,11 @@
   长期指标、promoted Outcome 和 supersede ledger 仍未完成。
 - ARC-07.5f/5g 已补齐 exact installed backend 的 bounded JSON Eval channel 与 runtime-side platform/version
   identity：首个 runner 为 `protocol_hello@1`，Receipt 绑定 Suite/fixture、slot/manifest/backend bytes、真实子进程
-  和经 target/version 复核的运行时身份。它是 HAR-09.6c2a 的必要 transport，但尚未绑定 Outcome/H5c lane，因此
-  Workbench 仍必须显示“行为级 Eval 尚未记录”。
+  和经 target/version 复核的运行时身份。
+- HAR-09.6c2a 已在上述 transport 上完成首个 Proposal/Outcome/6c1/BeforeAfter/original-H5c-bound 的单平台
+  Behavioral Lane：exact installed baseline 按原 repetitions 生成 fresh H5a/H5c，unsupported runner 失败关闭，
+  Agent Tool 与共享 Slash 同源。单 lane 不是完整矩阵，仍固定 `behavioral_evaluation_recorded=false`；详见
+  `HAR-09-6c2a-post-rollback-behavioral-lane.md`。
 
 EVO-02.1b 已把不可执行 Contract 包装为 workspace-bound durable Authority；HAR-09.5c 在其上补齐产品动作、
 Proposal 单飞键和历史 projection 迁移。Contract 仍不是执行或 promotion 许可。
