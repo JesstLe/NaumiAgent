@@ -101,6 +101,9 @@
   Behavioral Lane：exact installed baseline 按原 repetitions 生成 fresh H5a/H5c，unsupported runner 失败关闭，
   Agent Tool 与共享 Slash 同源。单 lane 不是完整矩阵，仍固定 `behavioral_evaluation_recorded=false`；详见
   `HAR-09-6c2a-post-rollback-behavioral-lane.md`。
+- HAR-09.6c2a1 已把完整 Final Evaluation lane 集冻结为 Coverage Contract，动态区分 recorded/missing/stale，
+  并显式标记本机可执行与必须由目标主机执行的 lane。该 Contract 固定无 execution/learning/promotion authority；
+  详见 `HAR-09-6c2a1-post-rollback-behavioral-coverage.md`。
 
 EVO-02.1b 已把不可执行 Contract 包装为 workspace-bound durable Authority；HAR-09.5c 在其上补齐产品动作、
 Proposal 单飞键和历史 projection 迁移。Contract 仍不是执行或 promotion 许可。
