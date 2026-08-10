@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import sqlite3
 from pathlib import Path
@@ -482,6 +483,199 @@ async def test_pending_interactions_use_weighted_priority_and_fifo_lanes(
     assert [item.interaction_id for item in pending if item.priority == "critical"] == [
         "ask-priority-3", "ask-priority-4", "ask-priority-6", "ask-priority-7",
     ]
+
+
+@pytest.mark.asyncio
+async def test_pending_recovery_cursor_preserves_snapshot_and_priority_cycle(
+    tmp_path: Path,
+) -> None:
+    store = HarnessStore(tmp_path / "harness.db")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    priorities = (
+        "low", "normal", "high", "critical",
+        "critical", "high", "critical", "critical",
+        "low", "normal", "high", "critical",
+    )
+    expected_ids = {f"ask-recovery-page-{index}" for index in range(len(priorities))}
+    for index, priority in enumerate(priorities):
+        await store.create_interaction(
+            workspace_root=workspace,
+            record=_record(
+                interaction_id=f"ask-recovery-page-{index}",
+                priority=priority,
+            ),
+        )
+
+    first = await store.list_pending_interactions_page(
+        workspace_root=workspace,
+        limit=5,
+    )
+    assert first.has_more
+    assert [item.priority for item in first.items] == [
+        "critical", "high", "critical", "normal", "critical",
+    ]
+    assert "ask-recovery-page" not in first.next_cursor
+
+    await store.create_interaction(
+        workspace_root=workspace,
+        record=_record(
+            interaction_id="ask-recovery-created-after-snapshot",
+            priority="critical",
+        ),
+    )
+    recovered = list(first.items)
+    cursor = first.next_cursor
+    while cursor:
+        page = await store.list_pending_interactions_page(
+            workspace_root=workspace,
+            limit=5,
+            cursor=cursor,
+        )
+        recovered.extend(page.items)
+        cursor = page.next_cursor
+
+    assert {item.interaction_id for item in recovered} == expected_ids
+    assert len(recovered) == len(expected_ids)
+    assert "ask-recovery-created-after-snapshot" not in {
+        item.interaction_id for item in recovered
+    }
+
+
+@pytest.mark.asyncio
+async def test_pending_recovery_cursor_is_query_bound_and_tamper_evident(
+    tmp_path: Path,
+) -> None:
+    store = HarnessStore(tmp_path / "harness.db")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    for index in range(3):
+        await store.create_interaction(
+            workspace_root=workspace,
+            record=_record(interaction_id=f"ask-recovery-bound-{index}"),
+        )
+    first = await store.list_pending_interactions_page(
+        workspace_root=workspace,
+        subject_kind="pursuit",
+        subject_id="pursuit-1",
+        limit=1,
+    )
+    assert first.next_cursor
+    decoded_cursor = base64.urlsafe_b64decode(
+        first.next_cursor + "=" * (-len(first.next_cursor) % 4)
+    ).decode("utf-8")
+    assert "pursuit-1" not in decoded_cursor
+
+    other_workspace = tmp_path / "other-workspace"
+    other_workspace.mkdir()
+    with pytest.raises(ValueError, match="当前查询"):
+        await store.list_pending_interactions_page(
+            workspace_root=other_workspace,
+            subject_kind="pursuit",
+            subject_id="pursuit-1",
+            limit=1,
+            cursor=first.next_cursor,
+        )
+    with pytest.raises(ValueError, match="当前查询"):
+        await store.list_pending_interactions_page(
+            workspace_root=workspace,
+            subject_kind="pursuit",
+            subject_id="pursuit-other",
+            limit=1,
+            cursor=first.next_cursor,
+        )
+    replacement = "A" if first.next_cursor[-1] != "A" else "B"
+    with pytest.raises(ValueError, match="cursor"):
+        await store.list_pending_interactions_page(
+            workspace_root=workspace,
+            subject_kind="pursuit",
+            subject_id="pursuit-1",
+            limit=1,
+            cursor=f"{first.next_cursor[:-1]}{replacement}",
+        )
+
+
+@pytest.mark.asyncio
+async def test_runtime_recovery_cursor_reads_more_than_one_bounded_batch(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(tmp_path / "harness.db")
+    for index in range(23):
+        await store.create_interaction(
+            workspace_root=workspace,
+            record=_record(interaction_id=f"ask-runtime-page-{index}"),
+        )
+    client = DurableInteractionAuthorityClient(
+        store=store,
+        workspace_root=workspace,
+        owner_id="bridge-a",
+        owner_lease_seconds=10,
+    )
+
+    recovered: list[str] = []
+    cursor = ""
+    while True:
+        batch = await client.recover_pending(now=T11, limit=7, cursor=cursor)
+        recovered.extend(item.interaction_id for item in batch.claimed)
+        cursor = batch.next_cursor
+        if not cursor:
+            break
+
+    assert len(recovered) == 23
+    assert len(set(recovered)) == 23
+
+
+@pytest.mark.asyncio
+async def test_runtime_recovery_retries_same_cursor_after_transition_conflict(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(tmp_path / "harness.db")
+    for index in range(3):
+        await store.create_interaction(
+            workspace_root=workspace,
+            record=_record(interaction_id=f"ask-runtime-conflict-{index}"),
+        )
+    client = DurableInteractionAuthorityClient(
+        store=store,
+        workspace_root=workspace,
+        owner_id="bridge-b",
+        owner_lease_seconds=10,
+    )
+    first = await client.recover_pending(now=T11, limit=1)
+    assert first.next_cursor
+    original_takeover = store.takeover_interaction
+    attempts = 0
+
+    async def conflict_once(**kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise HarnessStoreConflictError("simulated transition race")
+        return await original_takeover(**kwargs)
+
+    monkeypatch.setattr(store, "takeover_interaction", conflict_once)
+    conflicted = await client.recover_pending(
+        now=T11,
+        limit=1,
+        cursor=first.next_cursor,
+    )
+    assert conflicted.claimed == ()
+    assert conflicted.next_cursor == first.next_cursor
+    assert conflicted.retry_after_seconds == 0.5
+
+    retried = await client.recover_pending(
+        now=T11,
+        limit=1,
+        cursor=conflicted.next_cursor,
+    )
+    assert len(retried.claimed) == 1
+    assert retried.claimed[0].interaction_id == "ask-runtime-conflict-1"
+    assert retried.next_cursor != conflicted.next_cursor
 
 
 @pytest.mark.asyncio

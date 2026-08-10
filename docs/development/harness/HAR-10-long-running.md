@@ -100,7 +100,10 @@
     以及 TUI 共享 Tool 的状态筛选和命令式后续页；
   - HAR-10.6c 已交付 schema 2 不可变四级优先级、Store v24 的 v1 哈希兼容迁移、4:2:1:1
     公平轮转，以及 New UI/TUI/Goal 同源投影；
-  - 未完成：pending recovery cursor、跨 Goal 搜索与跨 Store 原子提交。
+  - HAR-10.6d 已交付 snapshot-bound pending recovery cursor、跨页 4:2:1:1 公平轮转、同页冲突重试，
+    以及 New UI 50 卡有界补位和 TUI 后续页恢复；见
+    [设计](HAR-10-6d-pending-interaction-recovery-cursor.md)；
+  - 未完成：跨 Goal 搜索、跨 Store 原子提交与多实例 push notification。
 - HAR-10.7 Cluster scheduling（partial）：
   - HAR-10.7a 已让所有公开 Agent `delegate()` 与批量/DAG 入口共用 `max_parallel_agents` semaphore，
     直接委派等待也进入 Runtime queue 计数；取消会清理计数，饱和嵌套委派 fail closed 而不自锁。见

@@ -20,13 +20,15 @@
   fencing 与 takeover 资格的共享只读详情命令；UI-18.4d2 已将 exact claim 绑定到
   当前 New UI Future/卡片或 TUI Modal/续租，并拒绝 live owner、超时问题和重复展示；UI-18.4d3
   已提供状态筛选、不透明 cursor、New UI 页内选择/详情与 TUI 命令式后续页；HAR-10.6c 已补齐
-  四级不可变优先级与公平排队。pending recovery cursor 仍未完成；见
+  四级不可变优先级与公平排队；HAR-10.6d 已补齐 snapshot-bound pending recovery cursor、New UI
+  50 卡有界补位与 TUI 跨页恢复；见
   [UI-18.4b](UI-18-4b-tui-durable-interaction.md) 与
   [UI-18.4c](UI-18-4c-goal-interaction-ledger-cancel.md) 以及
   [UI-18.4d1](UI-18-4d1-interaction-detail-authority.md) 与
   [UI-18.4d2](UI-18-4d2-host-bound-interaction-takeover.md) 以及
   [UI-18.4d3](UI-18-4d3-interaction-ledger-navigation.md) 与
-  [HAR-10.6c](../harness/HAR-10-6c-interaction-priority-scheduling.md)。
+  [HAR-10.6c](../harness/HAR-10-6c-interaction-priority-scheduling.md) 以及
+  [HAR-10.6d](../harness/HAR-10-6d-pending-interaction-recovery-cursor.md)。
 - UI-18.5 Recovery UX（partial）：
   - UI-18.5a 已实现：展示 typed heartbeat、lease owner/epoch、checkpoint、reconcile reason、orphaned 与
     inconsistent 状态；新 UI 与 CLI/TUI fallback 同源，Doctor health 复用相同 snapshot；见
@@ -90,7 +92,7 @@ implemented。
 
 UI-18.1/18.4a/18.4b/18.4c/18.4d1/18.4d2/18.4d3/18.5a/18.5b1 已提供类型化 Goal 快照、New UI/TUI durable
 interaction、显式取消、共享 interaction 详情、宿主绑定手动 takeover、交互账本分页/筛选和只读恢复事实，
-公平交互优先级，以及受控 resume 动作，但不包含 Goal/Pursuit 其余写按钮、可展开完整证据时间线、
+公平交互优先级、跨页 pending 恢复，以及受控 resume 动作，但不包含 Goal/Pursuit 其余写按钮、可展开完整证据时间线、
 takeover/cleanup 或恢复历史 cursor；这些分别属于 UI-18.2/18.3/后续 Interaction UX/后续 Recovery UX。
 Pursuit wait/evidence 当前仍按最近有界集合显示。页面不会自动恢复。UI-18 因此保持 partial。
 

@@ -9205,6 +9205,94 @@ async def test_bridge_replays_expired_foreign_interaction_owner(
 
 
 @pytest.mark.asyncio
+async def test_bridge_recovery_cursor_refills_bounded_card_window(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(tmp_path / "harness.db")
+    created_at = datetime.fromtimestamp(
+        datetime.now(UTC).timestamp() - 10,
+        tz=UTC,
+    ).isoformat()
+    for index in range(51):
+        record = new_interaction_record(
+            request=normalize_interaction_request(_interaction_payload()),
+            subject_kind="pursuit",
+            subject_id=f"pursuit-recovery-page-{index}",
+            session_id="session-recovery-page",
+            agent_name="main",
+            owner_id="bridge-dead",
+            created_at=created_at,
+            owner_lease_seconds=3,
+            interaction_id=f"ask-bridge-recovery-page-{index}",
+        )
+        await store.create_interaction(workspace_root=workspace, record=record)
+    engine = _FakeEngine()
+    engine.workspace_root = workspace
+    engine.harness_service = SimpleNamespace(store=store)
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge._replay_durable_interactions()
+
+    assert len(bridge._pending_interactions) == 50
+    assert bridge._interaction_recovery_cursor
+    first_id = next(iter(bridge._pending_interactions))
+    await bridge.resolve_user_interaction(
+        {
+            "request_id": first_id,
+            "kind": "option",
+            "value": "session",
+        },
+        request_id="answer-recovery-page",
+    )
+    for _ in range(100):
+        if "ask-bridge-recovery-page-50" in bridge._pending_interactions:
+            break
+        await asyncio.sleep(0.01)
+
+    assert len(bridge._pending_interactions) == 50
+    assert "ask-bridge-recovery-page-50" in bridge._pending_interactions
+    assert bridge._interaction_recovery_cursor == ""
+    late_record = new_interaction_record(
+        request=normalize_interaction_request(_interaction_payload()),
+        subject_kind="pursuit",
+        subject_id="pursuit-recovery-page-late",
+        session_id="session-recovery-page",
+        agent_name="main",
+        owner_id="bridge-dead",
+        created_at=created_at,
+        owner_lease_seconds=3,
+        interaction_id="ask-bridge-recovery-page-late",
+    )
+    await store.create_interaction(workspace_root=workspace, record=late_record)
+    bridge._interaction_recovery_rescan_pending = True
+    await bridge._replay_durable_interactions()
+    assert bridge._interaction_recovery_rescan_pending
+
+    second_id = next(iter(bridge._pending_interactions))
+    await bridge.resolve_user_interaction(
+        {
+            "request_id": second_id,
+            "kind": "option",
+            "value": "session",
+        },
+        request_id="answer-recovery-rescan",
+    )
+    for _ in range(100):
+        if "ask-bridge-recovery-page-late" in bridge._pending_interactions:
+            break
+        await asyncio.sleep(0.01)
+
+    assert len(bridge._pending_interactions) == 50
+    assert "ask-bridge-recovery-page-late" in bridge._pending_interactions
+    assert not bridge._interaction_recovery_rescan_pending
+    await bridge.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_bridge_manual_takeover_claims_exact_goal_interaction_and_displays(
     tmp_path: Path,
 ) -> None:

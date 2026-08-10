@@ -2408,10 +2408,15 @@ class NaumiApp(App):
         if authority is None:
             return
         recovery_failures = 0
+        recovery_cursor = ""
+        retry_after_seconds: float | None = None
         while self.is_running:
             try:
                 async with self._interaction_claim_lock:
-                    recovery = await authority.recover_pending(limit=50)
+                    recovery = await authority.recover_pending(
+                        limit=50,
+                        cursor=recovery_cursor,
+                    )
                     claimed = tuple(
                         record for record in recovery.claimed
                         if record.interaction_id not in self._active_interaction_ids
@@ -2430,11 +2435,29 @@ class NaumiApp(App):
                 await asyncio.sleep(float(2 ** (recovery_failures - 1)))
                 continue
             recovery_failures = 0
+            if recovery.retry_after_seconds is not None:
+                retry_after_seconds = min(
+                    retry_after_seconds or recovery.retry_after_seconds,
+                    recovery.retry_after_seconds,
+                )
             for record in claimed:
                 await self._complete_claimed_interaction(record)
-            if recovery.retry_after_seconds is None:
+            if recovery.next_cursor:
+                if (
+                    recovery.next_cursor == recovery_cursor
+                    and recovery.retry_after_seconds is not None
+                ):
+                    await asyncio.sleep(
+                        max(0.05, recovery.retry_after_seconds + 0.05)
+                    )
+                recovery_cursor = recovery.next_cursor
+                continue
+            recovery_cursor = ""
+            if retry_after_seconds is None:
                 return
-            await asyncio.sleep(max(0.05, recovery.retry_after_seconds + 0.05))
+            delay = retry_after_seconds
+            retry_after_seconds = None
+            await asyncio.sleep(max(0.05, delay + 0.05))
 
     async def takeover_goal_interaction(self, interaction_id: str) -> str:
         """Claim one Goal-linked interaction and immediately open this host modal."""

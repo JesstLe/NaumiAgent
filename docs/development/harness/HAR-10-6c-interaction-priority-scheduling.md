@@ -50,7 +50,7 @@ Harness recovery 对每个 lane 做有界 oldest-first 查询，再以相同周�
 
 ## 明确不足
 
-- recovery 仍是最多 50 项的有界批次，没有独立 pending cursor；历史账本 cursor 不等于 recovery cursor。
+- HAR-10.6d 已补齐独立 pending recovery cursor；历史账本 cursor 与 recovery cursor 仍是两个不可互换协议。
 - 多主机只有 SQLite authority 排序，没有 ARC-06 push notification；新 host 仍通过启动/租约复查发现问题。
 - 用户暂不能在运行中手动修改一个已创建问题的 priority；priority 是不可变提案事实。
 - 本切片不是跨域统一 scheduler。普通对话、Agent Job、Browser 与 Sandbox 继续使用各自 admission authority。
