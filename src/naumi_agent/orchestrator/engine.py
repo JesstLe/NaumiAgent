@@ -3017,6 +3017,7 @@ class AgentEngine:
                 ),
                 retry_base_seconds=terminal_outbox_config.retry_base_seconds,
                 retry_max_seconds=terminal_outbox_config.retry_max_seconds,
+                max_attempts=terminal_outbox_config.max_attempts,
                 jitter_ratio=terminal_outbox_config.jitter_ratio,
             ),
         )

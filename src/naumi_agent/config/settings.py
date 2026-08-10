@@ -418,6 +418,7 @@ class PursuitTerminalOutboxConfig(BaseSettings):
     reconcile_grace_seconds: float = Field(default=30.0, ge=1, le=86_400)
     retry_base_seconds: float = Field(default=5.0, ge=1, le=3600)
     retry_max_seconds: float = Field(default=300.0, ge=1, le=3600)
+    max_attempts: int = Field(default=8, ge=1, le=1000)
     jitter_ratio: float = Field(default=0.1, ge=0, le=0.5)
 
     @model_validator(mode="after")

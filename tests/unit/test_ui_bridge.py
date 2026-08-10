@@ -7643,6 +7643,7 @@ async def test_bridge_goal_snapshot_contains_real_recovery_authorities(tmp_path)
             claimed_count=0,
             delivered_count=0,
             retry_scheduled_count=0,
+            dead_lettered_count=0,
             failure_count=0,
             consecutive_empty_passes=1,
             next_delay_seconds=60,

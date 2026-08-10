@@ -6075,7 +6075,8 @@ function normalizeGoalSnapshot(payload) {
 
 function normalizeGoalTerminalOutbox(value) {
   const item = harnessObject(value, "goals/snapshot terminal_outbox");
-  if (Number(item.schema_version) !== 1) {
+  const schemaVersion = Number(item.schema_version);
+  if (![1, 2].includes(schemaVersion)) {
     throw new Error("goals/snapshot terminal_outbox schema_version 不兼容");
   }
   const counts = harnessObject(
@@ -6103,11 +6104,18 @@ function normalizeGoalTerminalOutbox(value) {
       counts.expired_claimed,
       "goals/snapshot terminal_outbox.counts.expired_claimed",
     ),
+    dead_letter: schemaVersion === 1
+      ? 0
+      : harnessNonnegativeInteger(
+        counts.dead_letter,
+        "goals/snapshot terminal_outbox.counts.dead_letter",
+      ),
   };
   const classified = normalizedCounts.due
     + normalizedCounts.backoff
     + normalizedCounts.live_claimed
-    + normalizedCounts.expired_claimed;
+    + normalizedCounts.expired_claimed
+    + normalizedCounts.dead_letter;
   if (classified !== normalizedCounts.total_pending) {
     throw new Error("goals/snapshot terminal_outbox 分类计数与总数不一致");
   }
@@ -6157,7 +6165,7 @@ function normalizeGoalTerminalOutbox(value) {
     throw new Error("goals/snapshot terminal_outbox degraded 必须包含 failure_code");
   }
   return {
-    schema_version: 1,
+    schema_version: 2,
     enabled,
     status,
     worker_state: workerState,
@@ -6178,6 +6186,12 @@ function normalizeGoalTerminalOutbox(value) {
       item.retry_scheduled_count,
       "goals/snapshot terminal_outbox.retry_scheduled_count",
     ),
+    dead_lettered_count: schemaVersion === 1
+      ? 0
+      : harnessNonnegativeInteger(
+        item.dead_lettered_count,
+        "goals/snapshot terminal_outbox.dead_lettered_count",
+      ),
     failure_count: harnessNonnegativeInteger(
       item.failure_count,
       "goals/snapshot terminal_outbox.failure_count",

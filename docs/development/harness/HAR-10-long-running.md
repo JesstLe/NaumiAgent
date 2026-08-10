@@ -209,7 +209,10 @@
   - HAR-10.8f2c 已实现：显式 due-only 恢复通过 Agent Tool/权限链进入 New UI `o` 键与
     `/pursue outbox run-now`，并持久化 identity-free 不可变 pass 回执；详见
     `HAR-10-8f2c-pursuit-terminal-outbox-run-now.md`。
-  - 未完成：恢复控制动作、push stream、dead-letter/retention、跨 Store 原子 terminal commit 与 A5
+  - HAR-10.8f2d 已实现：safe-wait/可重试/永久故障机械分类、独立失败预算、append-only dead-letter
+    authority、自动领取排除，以及 New UI/TUI schema v2 投影；详见
+    `HAR-10-8f2d-pursuit-terminal-outbox-dead-letter.md`。
+  - 未完成：权限化 dead-letter 人工处置、retention、push stream、跨 Store 原子 terminal commit 与 A5
     故障/soak。
 
 ## 与 Pursuit 的合并原则

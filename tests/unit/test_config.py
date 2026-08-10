@@ -27,6 +27,7 @@ class TestAppConfig:
         assert config.harness.runtime_heartbeat_retention.retention_days == 7
         assert config.harness.pursuit_terminal_outbox.enabled is True
         assert config.harness.pursuit_terminal_outbox.scan_limit == 20
+        assert config.harness.pursuit_terminal_outbox.max_attempts == 8
         assert config.harness.agent_publication_recovery.enabled is True
         assert config.harness.agent_publication_recovery.scan_limit == 100
         assert config.harness.agent_publication_recovery.max_attempts == 5
@@ -82,6 +83,11 @@ class TestAppConfig:
                     "retry_base_seconds": 20,
                     "retry_max_seconds": 10,
                 }
+            })
+
+        with pytest.raises(ValueError, match="max_attempts"):
+            AppConfig(harness={
+                "pursuit_terminal_outbox": {"max_attempts": 0},
             })
 
     def test_agent_publication_recovery_config_is_bounded(self) -> None:

@@ -36,6 +36,11 @@ from naumi_agent.orchestrator.pursuit_recovery_reconcile import (
     new_pursuit_reconciliation_receipt,
 )
 from naumi_agent.orchestrator.pursuit_terminal import PursuitBoundaryDecision
+from naumi_agent.orchestrator.pursuit_terminal_dead_letter import (
+    PursuitTerminalOutboxFailureDisposition,
+    PursuitTerminalOutboxFailureEvent,
+    new_pursuit_terminal_outbox_failure_event,
+)
 from naumi_agent.orchestrator.pursuit_terminal_outbox import (
     PursuitTerminalDispatchState,
     PursuitTerminalOutboxDispatch,
@@ -59,6 +64,7 @@ class PursuitTerminalOutboxBacklog:
     backoff: int
     live_claimed: int
     expired_claimed: int
+    dead_letter: int
     assessed_at: float
 
 
@@ -931,6 +937,12 @@ class PursuitStore:
                     JOIN pursuit_terminal_outbox_dispatch AS d
                       ON d.outbox_id = o.outbox_id
                     WHERE o.state = 'pending'
+                      AND NOT EXISTS (
+                        SELECT 1
+                        FROM pursuit_terminal_outbox_failure_heads AS h
+                        WHERE h.outbox_id = o.outbox_id
+                          AND h.dead_letter = 1
+                      )
                       AND (
                         (d.state = 'idle' AND d.next_attempt_at <= ?)
                         OR (d.state = 'claimed' AND d.claim_expires_at <= ?)
@@ -950,6 +962,15 @@ class PursuitStore:
                 )
                 if outbox is None or current is None:
                     raise PursuitStoreError("terminal dispatch 候选权威缺失。")
+                failures = self._verify_terminal_outbox_failures(
+                    conn,
+                    outbox_id,
+                    limit=1000,
+                )
+                if failures and failures[-1].dead_letter_authority:
+                    raise PursuitStoreError(
+                        "terminal dispatch 候选已进入 dead-letter，拒绝认领。"
+                    )
                 candidate = PursuitTerminalOutboxDispatch.model_validate(
                     current.model_copy(update={
                         "sequence": current.sequence + 1,
@@ -977,6 +998,198 @@ class PursuitStore:
             raise PursuitStoreError(f"认领 terminal outbox 失败：{exc}") from exc
         except sqlite3.Error as exc:
             raise PursuitStoreError(f"认领 terminal outbox 失败：{exc}") from exc
+
+    def list_terminal_outbox_failures(
+        self,
+        outbox_id: str,
+        *,
+        limit: int = 1000,
+    ) -> list[PursuitTerminalOutboxFailureEvent]:
+        """Read and authenticate the bounded failure chain for one outbox."""
+        if isinstance(limit, bool) or not 1 <= limit <= 1000:
+            raise ValueError("terminal outbox failure limit 无效。")
+        if not self._db_path.exists():
+            return []
+        try:
+            with self._connect() as conn:
+                return self._verify_terminal_outbox_failures(
+                    conn,
+                    outbox_id,
+                    limit=limit,
+                )
+        except PursuitStoreError:
+            raise
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise PursuitStoreError(
+                f"terminal outbox failure 校验失败：{exc}"
+            ) from exc
+        except sqlite3.Error as exc:
+            raise PursuitStoreError(
+                f"读取 terminal outbox failure 失败：{exc}"
+            ) from exc
+
+    def record_terminal_outbox_failure(
+        self,
+        outbox_id: str,
+        *,
+        owner_id: str,
+        claim_epoch: int,
+        now: float,
+        retry_delay_seconds: float,
+        failure_code: str,
+        max_failures: int,
+        permanent: bool = False,
+    ) -> tuple[PursuitTerminalOutboxFailureEvent, PursuitTerminalOutboxDispatch]:
+        """Append a failure and atomically grant retry or dead-letter authority."""
+        owner_sha256 = _terminal_dispatch_owner_sha256(owner_id)
+        normalized_code = str(failure_code or "").strip()
+        if (
+            not math.isfinite(now)
+            or now <= 0
+            or not math.isfinite(retry_delay_seconds)
+            or not 1 <= retry_delay_seconds <= 3600
+            or isinstance(claim_epoch, bool)
+            or claim_epoch <= 0
+            or isinstance(max_failures, bool)
+            or not 1 <= max_failures <= 1000
+            or not isinstance(permanent, bool)
+        ):
+            raise ValueError("terminal outbox failure 策略无效。")
+        try:
+            with self._connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                outbox = self._get_terminal_outbox_with_connection(conn, outbox_id)
+                current = self._get_terminal_dispatch_with_connection(conn, outbox_id)
+                if outbox is None or current is None:
+                    raise PursuitStoreConflictError("terminal outbox failure 权威缺失。")
+                if outbox.state is not PursuitTerminalOutboxState.PENDING:
+                    raise PursuitStoreConflictError("delivered outbox 不得记录 failure。")
+                if (
+                    current.state is not PursuitTerminalDispatchState.CLAIMED
+                    or current.claim_epoch != claim_epoch
+                    or not hmac.compare_digest(current.claim_owner_sha256, owner_sha256)
+                    or current.claim_expires_at <= now
+                ):
+                    raise PursuitStoreConflictError(
+                        "terminal outbox failure claim 已失效或不属于当前 owner。"
+                    )
+                failures = self._verify_terminal_outbox_failures(
+                    conn,
+                    outbox_id,
+                    limit=1000,
+                )
+                if failures and failures[-1].dead_letter_authority:
+                    raise PursuitStoreConflictError("terminal outbox 已进入 dead-letter。")
+                sequence = len(failures) + 1
+                if permanent:
+                    disposition = PursuitTerminalOutboxFailureDisposition.PERMANENT
+                elif sequence >= max_failures:
+                    disposition = (
+                        PursuitTerminalOutboxFailureDisposition.RETRY_EXHAUSTED
+                    )
+                else:
+                    disposition = PursuitTerminalOutboxFailureDisposition.RETRYABLE
+                retry_at = (
+                    now + retry_delay_seconds
+                    if disposition is PursuitTerminalOutboxFailureDisposition.RETRYABLE
+                    else 0
+                )
+                event = new_pursuit_terminal_outbox_failure_event(
+                    outbox_id=outbox_id,
+                    pending_outbox_sha256=outbox.digest(),
+                    claimed_dispatch_sha256=current.digest(),
+                    sequence=sequence,
+                    attempt_count=current.attempt_count,
+                    failure_code=normalized_code,
+                    disposition=disposition,
+                    previous_failure_sha256=(failures[-1].digest() if failures else ""),
+                    occurred_at=now,
+                    retry_at=retry_at,
+                )
+                conn.execute(
+                    """
+                    INSERT INTO pursuit_terminal_outbox_failures (
+                        outbox_id, sequence, event_id, disposition, payload_json,
+                        payload_sha256, previous_payload_sha256, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        event.outbox_id,
+                        event.sequence,
+                        event.event_id,
+                        event.disposition.value,
+                        event.canonical_json(),
+                        event.digest(),
+                        event.previous_failure_sha256,
+                        event.occurred_at,
+                    ),
+                )
+                if failures:
+                    cursor = conn.execute(
+                        """
+                        UPDATE pursuit_terminal_outbox_failure_heads
+                        SET latest_sequence = ?, latest_failure_sha256 = ?,
+                            dead_letter = ?, updated_at = ?
+                        WHERE outbox_id = ? AND latest_sequence = ?
+                          AND latest_failure_sha256 = ?
+                        """,
+                        (
+                            event.sequence,
+                            event.digest(),
+                            int(event.dead_letter_authority),
+                            event.occurred_at,
+                            event.outbox_id,
+                            failures[-1].sequence,
+                            failures[-1].digest(),
+                        ),
+                    )
+                    if cursor.rowcount != 1:
+                        raise PursuitStoreConflictError(
+                            "terminal outbox failure head 被并发更新。"
+                        )
+                else:
+                    conn.execute(
+                        """
+                        INSERT INTO pursuit_terminal_outbox_failure_heads (
+                            outbox_id, latest_sequence, latest_failure_sha256,
+                            dead_letter, updated_at
+                        ) VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (
+                            event.outbox_id,
+                            event.sequence,
+                            event.digest(),
+                            int(event.dead_letter_authority),
+                            event.occurred_at,
+                        ),
+                    )
+                candidate = PursuitTerminalOutboxDispatch.model_validate(
+                    current.model_copy(update={
+                        "sequence": current.sequence + 1,
+                        "state": PursuitTerminalDispatchState.IDLE,
+                        "claim_owner_sha256": "",
+                        "claim_expires_at": 0,
+                        "next_attempt_at": retry_at or now,
+                        "last_failure_code": normalized_code,
+                        "updated_at": now,
+                    }).model_dump(mode="json")
+                )
+                self._update_terminal_dispatch_with_connection(
+                    conn,
+                    current=current,
+                    candidate=candidate,
+                )
+                return event, candidate
+        except PursuitStoreError:
+            raise
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise PursuitStoreError(
+                f"记录 terminal outbox failure 失败：{exc}"
+            ) from exc
+        except sqlite3.Error as exc:
+            raise PursuitStoreError(
+                f"记录 terminal outbox failure 失败：{exc}"
+            ) from exc
 
     def release_terminal_outbox_claim(
         self,
@@ -1075,10 +1288,18 @@ class PursuitStore:
             ).fetchall()
             if len(rows) > scan_limit:
                 raise PursuitStoreError("terminal outbox backlog 超过有界扫描上限。")
-            due = backoff = live_claimed = expired_claimed = 0
+            due = backoff = live_claimed = expired_claimed = dead_letter = 0
             for row in rows:
                 outbox_id = str(row["outbox_id"])
                 self._get_terminal_outbox_with_connection(conn, outbox_id)
+                failures = self._verify_terminal_outbox_failures(
+                    conn,
+                    outbox_id,
+                    limit=1000,
+                )
+                if failures and failures[-1].dead_letter_authority:
+                    dead_letter += 1
+                    continue
                 dispatch = self._get_terminal_dispatch_with_connection(
                     conn,
                     outbox_id,
@@ -1100,6 +1321,7 @@ class PursuitStore:
             backoff=backoff,
             live_claimed=live_claimed,
             expired_claimed=expired_claimed,
+            dead_letter=dead_letter,
             assessed_at=now,
         )
 
@@ -2191,6 +2413,98 @@ class PursuitStore:
             previous_digest = actual_digest
         return records
 
+    @staticmethod
+    def _verify_terminal_outbox_failures(
+        conn: sqlite3.Connection,
+        outbox_id: str,
+        *,
+        limit: int,
+    ) -> list[PursuitTerminalOutboxFailureEvent]:
+        rows = conn.execute(
+            """
+            SELECT * FROM pursuit_terminal_outbox_failures
+            WHERE outbox_id = ? ORDER BY sequence ASC
+            LIMIT ?
+            """,
+            (outbox_id, limit + 1),
+        ).fetchall()
+        head = conn.execute(
+            "SELECT * FROM pursuit_terminal_outbox_failure_heads "
+            "WHERE outbox_id = ?",
+            (outbox_id,),
+        ).fetchone()
+        if len(rows) > limit:
+            raise PursuitStoreError("terminal outbox failure 链超过有界读取上限。")
+        if not rows:
+            if head is not None:
+                raise PursuitStoreError("terminal outbox failure head 缺少事件链。")
+            return []
+        if head is None:
+            raise PursuitStoreError("terminal outbox failure 事件链缺少 head。")
+        dispatch_events = PursuitStore._verify_terminal_dispatch_events(
+            conn,
+            outbox_id,
+        )
+        claimed_digests = {
+            event.digest(): event
+            for event in dispatch_events
+            if event.state is PursuitTerminalDispatchState.CLAIMED
+        }
+        outbox_events = PursuitStore._verify_terminal_outbox_events(conn, outbox_id)
+        pending_digest = outbox_events[0].digest() if outbox_events else ""
+        records: list[PursuitTerminalOutboxFailureEvent] = []
+        previous_digest = ""
+        dead_letter_seen = False
+        for expected_sequence, row in enumerate(rows, start=1):
+            payload = str(row["payload_json"])
+            actual_digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+            if int(row["sequence"]) != expected_sequence:
+                raise PursuitStoreError("terminal outbox failure 事件序号不连续。")
+            if not hmac.compare_digest(actual_digest, str(row["payload_sha256"])):
+                raise PursuitStoreError("terminal outbox failure 事件摘要校验失败。")
+            if not hmac.compare_digest(
+                previous_digest,
+                str(row["previous_payload_sha256"]),
+            ):
+                raise PursuitStoreError("terminal outbox failure 事件哈希链断裂。")
+            event = PursuitTerminalOutboxFailureEvent.model_validate_json(payload)
+            claimed = claimed_digests.get(event.claimed_dispatch_sha256)
+            if (
+                event.outbox_id != outbox_id
+                or event.sequence != expected_sequence
+                or event.event_id != str(row["event_id"])
+                or event.disposition.value != str(row["disposition"])
+                or not hmac.compare_digest(
+                    event.previous_failure_sha256,
+                    previous_digest,
+                )
+                or not hmac.compare_digest(
+                    event.pending_outbox_sha256,
+                    pending_digest,
+                )
+                or claimed is None
+                or event.attempt_count != claimed.attempt_count
+                or event.occurred_at < claimed.updated_at
+                or event.occurred_at >= claimed.claim_expires_at
+                or dead_letter_seen
+            ):
+                raise PursuitStoreError("terminal outbox failure 事件权威不一致。")
+            records.append(event)
+            previous_digest = actual_digest
+            dead_letter_seen = event.dead_letter_authority
+        latest = records[-1]
+        if (
+            int(head["latest_sequence"]) != latest.sequence
+            or not hmac.compare_digest(
+                str(head["latest_failure_sha256"]),
+                latest.digest(),
+            )
+            or bool(int(head["dead_letter"])) != latest.dead_letter_authority
+            or float(head["updated_at"]) != latest.occurred_at
+        ):
+            raise PursuitStoreError("terminal outbox failure head 与事件链末端不一致。")
+        return records
+
     def _backfill_terminal_dispatches_with_connection(
         self,
         conn: sqlite3.Connection,
@@ -2855,6 +3169,50 @@ class PursuitStore:
                         previous_payload_sha256 TEXT NOT NULL,
                         created_at REAL NOT NULL,
                         PRIMARY KEY(outbox_id, sequence),
+                        FOREIGN KEY(outbox_id)
+                            REFERENCES pursuit_terminal_outbox(outbox_id)
+                            ON DELETE CASCADE
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS pursuit_terminal_outbox_failures (
+                        outbox_id TEXT NOT NULL,
+                        sequence INTEGER NOT NULL CHECK(sequence >= 1),
+                        event_id TEXT NOT NULL UNIQUE,
+                        disposition TEXT NOT NULL CHECK(disposition IN (
+                            'retryable', 'retry_exhausted', 'permanent'
+                        )),
+                        payload_json TEXT NOT NULL,
+                        payload_sha256 TEXT NOT NULL,
+                        previous_payload_sha256 TEXT NOT NULL,
+                        created_at REAL NOT NULL,
+                        PRIMARY KEY(outbox_id, sequence),
+                        FOREIGN KEY(outbox_id)
+                            REFERENCES pursuit_terminal_outbox(outbox_id)
+                            ON DELETE CASCADE
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS
+                    idx_pursuit_terminal_outbox_failures_authority
+                    ON pursuit_terminal_outbox_failures(
+                        disposition, created_at, outbox_id
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS
+                    pursuit_terminal_outbox_failure_heads (
+                        outbox_id TEXT PRIMARY KEY,
+                        latest_sequence INTEGER NOT NULL CHECK(latest_sequence >= 1),
+                        latest_failure_sha256 TEXT NOT NULL,
+                        dead_letter INTEGER NOT NULL CHECK(dead_letter IN (0, 1)),
+                        updated_at REAL NOT NULL,
                         FOREIGN KEY(outbox_id)
                             REFERENCES pursuit_terminal_outbox(outbox_id)
                             ON DELETE CASCADE

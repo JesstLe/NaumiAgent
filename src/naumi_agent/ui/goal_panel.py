@@ -42,6 +42,7 @@ class TerminalOutboxCounts(BaseModel):
     backoff: int = Field(ge=0, le=10_000)
     live_claimed: int = Field(ge=0, le=10_000)
     expired_claimed: int = Field(ge=0, le=10_000)
+    dead_letter: int = Field(ge=0, le=10_000)
 
     @model_validator(mode="after")
     def _sum_matches_total(self) -> TerminalOutboxCounts:
@@ -50,6 +51,7 @@ class TerminalOutboxCounts(BaseModel):
             + self.backoff
             + self.live_claimed
             + self.expired_claimed
+            + self.dead_letter
         )
         if classified != self.total_pending:
             raise ValueError("terminal outbox 分类计数与总数不一致。")
@@ -61,7 +63,7 @@ class TerminalOutboxProjection(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     enabled: bool
     status: Literal[
         "idle", "recovering", "backoff", "degraded", "disabled", "unavailable"
@@ -74,6 +76,7 @@ class TerminalOutboxProjection(BaseModel):
     pass_count: int = Field(ge=0)
     delivered_count: int = Field(ge=0)
     retry_scheduled_count: int = Field(ge=0)
+    dead_lettered_count: int = Field(ge=0)
     failure_count: int = Field(ge=0)
     next_delay_seconds: float = Field(ge=0, le=604_800)
     failure_codes: tuple[str, ...] = Field(max_length=8)
@@ -361,6 +364,7 @@ def _build_terminal_outbox_projection(
         backoff=0,
         live_claimed=0,
         expired_claimed=0,
+        dead_letter=0,
     )
     warnings: list[str] = []
     if pursuit_store.db_path.is_file():
@@ -375,6 +379,7 @@ def _build_terminal_outbox_projection(
                 backoff=backlog.backoff,
                 live_claimed=backlog.live_claimed,
                 expired_claimed=backlog.expired_claimed,
+                dead_letter=backlog.dead_letter,
             )
         except Exception:
             warnings.append(
@@ -393,7 +398,7 @@ def _build_terminal_outbox_projection(
     elif enabled:
         warnings.append("终态恢复 Worker 状态 authority 未接入。")
 
-    warning = _bounded_text("；".join(warnings), 500)
+    authority_unavailable = bool(warnings)
 
     raw_failure_codes = list(
         snapshot.last_failure_codes if snapshot is not None else ()
@@ -405,12 +410,18 @@ def _build_terminal_outbox_projection(
         and "worker_stopped" not in raw_failure_codes
     ):
         raw_failure_codes.append("worker_stopped")
+    if counts.dead_letter:
+        raw_failure_codes.insert(0, "dead_letter_present")
+        warnings.append(
+            f"存在 {counts.dead_letter} 条终态恢复死信，自动重试已停止，请人工审查。"
+        )
+    warning = _bounded_text("；".join(warnings), 500)
     failure_codes = tuple(dict.fromkeys(
         _bounded_text(item, 64) for item in raw_failure_codes
     ))[:8]
     if not enabled:
         status = "disabled"
-    elif warning:
+    elif authority_unavailable:
         status = "unavailable"
     elif failure_codes:
         status = "degraded"
@@ -434,6 +445,9 @@ def _build_terminal_outbox_projection(
         delivered_count=snapshot.delivered_count if snapshot is not None else 0,
         retry_scheduled_count=(
             snapshot.retry_scheduled_count if snapshot is not None else 0
+        ),
+        dead_lettered_count=(
+            snapshot.dead_lettered_count if snapshot is not None else 0
         ),
         failure_count=snapshot.failure_count if snapshot is not None else 0,
         next_delay_seconds=(
@@ -564,9 +578,10 @@ def _render_terminal_outbox(value: TerminalOutboxProjection) -> list[str]:
         f"- 状态：{status} · Worker {worker}",
         f"- 队列：{counts.total_pending} · 到期 {counts.due} · "
         f"退避 {counts.backoff} · 认领 {counts.live_claimed} · "
-        f"过期认领 {counts.expired_claimed}",
+        f"过期认领 {counts.expired_claimed} · 死信 {counts.dead_letter}",
         f"- 累计：轮次 {value.pass_count} · 已收口 {value.delivered_count} · "
-        f"已退避 {value.retry_scheduled_count} · 失败 {value.failure_count}",
+        f"已退避 {value.retry_scheduled_count} · 死信 {value.dead_lettered_count} · "
+        f"失败 {value.failure_count}",
     ]
     if value.enabled and value.worker_state in {"running", "waiting"}:
         lines.append(f"- 下次检查：约 {value.next_delay_seconds:.1f}s")

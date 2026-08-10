@@ -19,10 +19,12 @@ test("Goal page renders typed terminal outbox health without a Goal", () => {
           backoff: 1,
           live_claimed: 0,
           expired_claimed: 1,
+          dead_letter: 0,
         },
         pass_count: 9,
         delivered_count: 4,
         retry_scheduled_count: 2,
+        dead_lettered_count: 0,
         failure_count: 1,
         next_delay_seconds: 12.5,
         failure_codes: ["dispatch_claim_failed"],
@@ -33,10 +35,44 @@ test("Goal page renders typed terminal outbox health without a Goal", () => {
 
   assert.match(lines, /终态自动恢复/);
   assert.match(lines, /部分失败 · Worker 等待中/);
-  assert.match(lines, /队列 3 · 到期 1 · 退避 1 · 认领 0 · 过期认领 1/);
-  assert.match(lines, /累计 · 轮次 9 · 已收口 4 · 已退避 2 · 失败 1/);
+  assert.match(lines, /队列 3 · 到期 1 · 退避 1 · 认领 0 · 过期认领 1 · 死信 0/);
+  assert.match(lines, /累计 · 轮次 9 · 已收口 4 · 已退避 2 · 死信 0 · 失败 1/);
   assert.match(lines, /最近失败 · dispatch_claim_failed/);
   assert.match(lines, /下次检查 · 约 12\.5s/);
+});
+
+test("Goal page renders dead-letter authority as an actionable degraded state", () => {
+  const lines = renderGoalPursuitPage({
+    snapshot: {
+      include_finished: true,
+      goals: [],
+      terminal_outbox: {
+        enabled: true,
+        status: "degraded",
+        worker_state: "waiting",
+        counts: {
+          total_pending: 1,
+          due: 0,
+          backoff: 0,
+          live_claimed: 0,
+          expired_claimed: 0,
+          dead_letter: 1,
+        },
+        pass_count: 1,
+        delivered_count: 0,
+        retry_scheduled_count: 0,
+        dead_lettered_count: 1,
+        failure_count: 1,
+        next_delay_seconds: 30,
+        failure_codes: ["dead_letter_present", "lease_missing"],
+        warning: "存在 1 条终态恢复死信，自动重试已停止，请人工审查。",
+      },
+    },
+  }, 160, 20).map(stripAnsi).join("\n");
+
+  assert.match(lines, /队列 1 .* 死信 1/);
+  assert.match(lines, /累计 .* 死信 1 .* 失败 1/);
+  assert.match(lines, /自动重试已停止，请人工审查/);
 });
 
 test("Goal page exposes shared interaction detail command for every state", () => {

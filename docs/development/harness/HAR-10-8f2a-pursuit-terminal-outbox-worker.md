@@ -96,6 +96,7 @@ harness:
     reconcile_grace_seconds: 30
     retry_base_seconds: 5
     retry_max_seconds: 300
+    max_attempts: 8
     jitter_ratio: 0.1
 ```
 
@@ -115,8 +116,8 @@ harness:
 
 ## 自我审视与未完成项
 
-- 本切片没有 dead-letter。持续不可恢复记录以 capped backoff 保留并继续可见，不会静默丢弃；人工隔离和
-  retention 需要独立权限/回执设计。
+- 本切片交付时没有 dead-letter；后续 HAR-10.8f2d 已增加独立失败预算、追加式死信权威与领取排除，
+  但人工处置和 retention 仍需要独立权限/回执设计。
 - HAR-10.8f2b 已把 bounded backlog 和 worker snapshot 投影到 Bridge/Goal/New UI/TUI，前端不扫描
   SQLite；控制动作和 push stream 仍未实现。
 - HarnessStore fencing 与 PursuitStore dispatch 仍非跨库事务，因此语义是 at-least-once 收敛；
