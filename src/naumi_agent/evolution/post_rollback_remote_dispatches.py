@@ -239,6 +239,33 @@ class EvolutionPostRollbackRemoteDispatchStore:
                 "Remote Dispatch 损坏或无法读取。",
             ) from exc
 
+    async def get_by_id(
+        self,
+        dispatch_id: str,
+    ) -> EvolutionPostRollbackRemoteDispatch | None:
+        normalized = _dispatch_id(dispatch_id)
+        if not self.db_path.is_file():
+            return None
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                db.row_factory = aiosqlite.Row
+                await _ensure_schema(db)
+                row = await (
+                    await db.execute(
+                        "SELECT dispatch_json FROM evolution_post_rollback_remote_dispatches "
+                        "WHERE dispatch_id = ?",
+                        (normalized,),
+                    )
+                ).fetchone()
+            return None if row is None else _restore(row["dispatch_json"])
+        except EvolutionPostRollbackRemoteDispatchError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise EvolutionPostRollbackRemoteDispatchError(
+                "post_rollback_remote_dispatch_store_corrupt",
+                "Remote Dispatch 损坏或无法读取。",
+            ) from exc
+
     async def record(
         self,
         dispatch: EvolutionPostRollbackRemoteDispatch,
@@ -915,6 +942,16 @@ def _baseline_id(value: str) -> str:
         raise EvolutionPostRollbackRemoteDispatchError(
             "post_rollback_remote_dispatch_baseline_id_invalid",
             "Target Baseline Resolution ID 格式无效。",
+        )
+    return text
+
+
+def _dispatch_id(value: str) -> str:
+    text = str(value or "").strip()
+    if re.fullmatch(r"evpostdispatch_[0-9a-f]{24}", text) is None:
+        raise EvolutionPostRollbackRemoteDispatchError(
+            "post_rollback_remote_dispatch_id_invalid",
+            "Remote Dispatch ID 格式无效。",
         )
     return text
 

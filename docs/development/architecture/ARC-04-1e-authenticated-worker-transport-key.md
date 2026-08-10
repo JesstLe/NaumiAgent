@@ -80,6 +80,6 @@ SQLite 验证：
 
 ## 下一切片
 
-`HAR-09.6c2a3d` 消费 current Claim 与 current Transport Key，使用 ephemeral X25519 + HKDF-SHA256 派生一次性
-AES-256-GCM key，AAD 绑定 Dispatch/Claim/Build Attestation/archive/manifest/envelope。只有 exact Worker 使用其
-private key 解密并签署 ACK 后，才写 durable delivery receipt；本 key artifact 永远不等于 transport delivery。
+`HAR-09.6c2a3d` 已消费 current Claim 与 current Transport Key，使用 ephemeral X25519 + HKDF-SHA256 派生
+一次性 AES-256-GCM key，并在 exact Worker 解密、下载、验摘要和签署 ACK 后写 durable delivery receipt。本 key
+artifact 仍永远不等于 transport delivery；下一步由 execution authorization 消费 current delivery。
