@@ -46,5 +46,6 @@ SHA-256 证明 durable 内容完整性，不证明远端来源身份。跨主机
 
 ## 后续
 
-HAR-09.6c2a3b 将把 current Target Baseline Resolution、Placement、durable latest health 与 atomic capacity
-reservation 组合成 post-rollback remote dispatch；随后才允许 authenticated Worker claim/lease。
+HAR-09.6c2a3b 已把 current Target Baseline Resolution、Placement、durable latest health 与 atomic capacity
+reservation 组合成 post-rollback queued Dispatch。下一权威边界是 authenticated Worker claim/lease，当前仍没有
+执行或结果权威。

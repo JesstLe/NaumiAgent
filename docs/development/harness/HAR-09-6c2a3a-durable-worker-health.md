@@ -29,3 +29,6 @@ reported active jobs 与 Registry reservations 是不同事实：前者来自 Wo
 
 本前置不建立 Dispatch artifact、不 reserve capacity、不生成 challenge、不领取 lease、不传输 baseline、不执行测试，
 也不授予 result/learning/promotion authority。
+
+后续 `HAR-09.6c2a3b` 现已消费本 durable authority 建立 queued Dispatch 与 atomic capacity reservation；
+authenticated claim/lease、传输和执行授权仍未完成。

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
+import shutil
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -17,13 +19,23 @@ from naumi_agent.daemons.worker_contract import (
     WorkerPlatform,
     WorkerResourceEnvelope,
     issue_worker_contract,
+    issue_worker_health_report,
 )
-from naumi_agent.daemons.worker_registry import WorkerRegistryStore
+from naumi_agent.daemons.worker_registry import (
+    WorkerCapacityReservationState,
+    WorkerRegistryStore,
+)
 from naumi_agent.evolution.post_rollback_behavioral_coverage import (
     EvolutionPostRollbackBehavioralCoverageLaneView,
     EvolutionPostRollbackBehavioralCoverageStore,
     EvolutionPostRollbackBehavioralCoverageView,
     _build_contract,
+)
+from naumi_agent.evolution.post_rollback_remote_dispatches import (
+    EvolutionPostRollbackRemoteDispatchError,
+    EvolutionPostRollbackRemoteDispatchService,
+    EvolutionPostRollbackRemoteDispatchStore,
+    render_post_rollback_remote_dispatch,
 )
 from naumi_agent.evolution.post_rollback_remote_lane_placements import (
     EvolutionPostRollbackRemoteLanePlacementError,
@@ -41,6 +53,8 @@ from naumi_agent.evolution.proposal_before_after_evidence import (
     EvolutionProposalBeforeAfterCohort,
     EvolutionProposalBeforeAfterLane,
 )
+from naumi_agent.harness.heartbeat import HarnessHeartbeat, HarnessHeartbeatPhase
+from naumi_agent.harness.run_lease import HarnessRunKind
 from naumi_agent.release.build_attestations import (
     ReleaseBuildContext,
     ReleaseBuildSigner,
@@ -58,6 +72,7 @@ from naumi_agent.release.channel_catalog import (
 from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
 from naumi_agent.tools.base import ToolCall, ToolRegistry, ToolResult
 from naumi_agent.tools.evolution_review import (
+    EvolutionPostRollbackRemoteDispatchTool,
     EvolutionPostRollbackRemoteLanePlacementTool,
     EvolutionPostRollbackTargetBaselineTool,
 )
@@ -661,3 +676,319 @@ async def test_target_baseline_rejects_same_version_with_different_source(
             channel="stable",
         )
     assert mismatch.value.code == "post_rollback_target_baseline_not_equivalent"
+
+
+class _EvidenceStore:
+    def __init__(self, evidence) -> None:
+        self.evidence = evidence
+
+    async def get_by_outcome(self, outcome_id: str):
+        return self.evidence if outcome_id == self.evidence.outcome_id else None
+
+
+class _FailingRemoteDispatchStore(EvolutionPostRollbackRemoteDispatchStore):
+    async def record(self, dispatch):
+        del dispatch
+        raise EvolutionPostRollbackRemoteDispatchError(
+            "post_rollback_remote_dispatch_test_store_failure",
+            "测试注入的 durable store failure。",
+        )
+
+
+async def _dispatch_fixture(tmp_path: Path, *, failing_store: bool = False):
+    placement_service, registry, contract, coverage, worker = await _fixture(tmp_path)
+    shutil.copytree(
+        Path("docs/harness/evals").resolve(),
+        Path(contract.workspace_root) / "docs" / "harness" / "evals",
+    )
+    remote = coverage.contract.lanes[1]
+    placement = await placement_service.place(
+        request_id=contract.request_id,
+        comparison_id=remote.original_comparison_id,
+        worker_id=worker.worker_id,
+        placed_at="2026-08-10T08:01:00+00:00",
+    )
+    catalog_store, _, _, _ = await _catalog(tmp_path)
+    target_service = EvolutionPostRollbackTargetBaselineService(
+        workspace_root=Path(contract.workspace_root),
+        coverage_service=placement_service.coverage_service,
+        placement_store=placement_service.store,
+        placement_service=placement_service,
+        catalog_store=catalog_store,
+        store=EvolutionPostRollbackTargetBaselineStore(placement_service.store.db_path),
+    )
+    baseline = await target_service.resolve(
+        request_id=contract.request_id,
+        comparison_id=remote.original_comparison_id,
+        channel="stable",
+        resolved_at="2026-08-10T08:03:00+00:00",
+    )
+    evidence = SimpleNamespace(
+        evidence_id=contract.before_after_evidence_id,
+        evidence_sha256=contract.before_after_evidence_sha256,
+        workspace_root=contract.workspace_root,
+        outcome_id=contract.outcome_id,
+        outcome_sha256=contract.outcome_sha256,
+        request_id=contract.request_id,
+        final_evaluation_id=contract.final_evaluation_id,
+        final_evaluation_sha256=contract.final_evaluation_sha256,
+        lanes=(
+            _lane(1, "interventional", "macos", "1"),
+            _lane(2, "adversarial", "windows", "2"),
+        ),
+    )
+    heartbeat = HarnessHeartbeat(
+        workspace_root=contract.workspace_root,
+        subject_kind=HarnessRunKind.TOOL,
+        subject_id=worker.worker_id,
+        instance_id=worker.instance_id,
+        epoch=worker.epoch,
+        sequence=1,
+        phase=HarnessHeartbeatPhase.RUNNING,
+        observed_at="2026-08-10T08:03:01+00:00",
+        timeout_seconds=60,
+        detail_code="ready",
+    )
+    health = issue_worker_health_report(
+        contract=worker,
+        heartbeat=heartbeat,
+        active_jobs=0,
+        accepting_jobs=True,
+    )
+    await registry.record_health_report(
+        health,
+        recorded_at="2026-08-10T08:03:01+00:00",
+    )
+    store_type = (
+        _FailingRemoteDispatchStore
+        if failing_store
+        else EvolutionPostRollbackRemoteDispatchStore
+    )
+    service = EvolutionPostRollbackRemoteDispatchService(
+        workspace_root=Path(contract.workspace_root),
+        target_baseline_service=target_service,
+        evidence_store=_EvidenceStore(evidence),  # type: ignore[arg-type]
+        worker_registry=registry,
+        store=store_type(placement_service.store.db_path),
+    )
+    return service, registry, contract, remote, worker, placement, baseline
+
+
+@pytest.mark.asyncio
+async def test_remote_dispatch_reserves_exact_capacity_and_revokes_dynamically(
+    tmp_path: Path,
+) -> None:
+    service, registry, contract, remote, worker, placement, baseline = (
+        await _dispatch_fixture(tmp_path)
+    )
+    queued_at = "2026-08-10T08:03:02+00:00"
+
+    peer = EvolutionPostRollbackRemoteDispatchService(
+        workspace_root=Path(contract.workspace_root),
+        target_baseline_service=service.target_baseline_service,
+        evidence_store=service.evidence_store,
+        worker_registry=registry,
+        store=EvolutionPostRollbackRemoteDispatchStore(service.store.db_path),
+    )
+    first, repeated = await asyncio.gather(
+        service.queue(
+            request_id=contract.request_id,
+            comparison_id=remote.original_comparison_id,
+            channel="stable",
+            queued_at=queued_at,
+        ),
+        peer.queue(
+            request_id=contract.request_id,
+            comparison_id=remote.original_comparison_id,
+            channel="stable",
+            queued_at=queued_at,
+        ),
+    )
+
+    assert repeated == first
+    assert first.dispatch_authority
+    assert first.dispatch.placement_id == placement.placement.placement_id
+    assert first.dispatch.baseline_resolution_id == baseline.baseline.baseline_resolution_id
+    assert first.dispatch.suite_id == "protocol-hello-core"
+    assert first.dispatch.repetitions == 5
+    assert first.dispatch.case_execution_budget_ms == 600
+    assert first.dispatch.total_execution_budget_ms == 3_000
+    assert first.dispatch.reservation_ttl_seconds == 13
+    assert first.dispatch.attempt == 1
+    assert not first.claim_authority
+    assert not first.execution_authority
+    assert not first.result_authority
+    reservation = await registry.get_capacity_reservation(
+        first.dispatch.reservation_id,
+        assessed_at=queued_at,
+    )
+    assert reservation is not None
+    assert reservation.state is WorkerCapacityReservationState.ACTIVE
+    assert reservation.worker_id == worker.worker_id
+    rendered = render_post_rollback_remote_dispatch(first)
+    assert "尚未被 Worker claim" in rendered
+
+    class _DispatchService:
+        async def queue(self, **arguments):
+            assert arguments == {
+                "request_id": contract.request_id,
+                "comparison_id": remote.original_comparison_id,
+                "channel": "stable",
+            }
+            return first
+
+    tool = EvolutionPostRollbackRemoteDispatchTool(
+        SimpleNamespace(
+            evolution_post_rollback_remote_dispatch_service=_DispatchService()
+        )
+    )
+    arguments = {
+        "request_id": contract.request_id,
+        "comparison_id": remote.original_comparison_id,
+        "channel": "stable",
+    }
+    for mode in (PermissionMode.MODERATE, PermissionMode.BYPASS):
+        decision = PermissionChecker(mode).check(tool.name, arguments, tool=tool)
+        assert decision.allowed
+        assert not decision.requires_confirmation
+    assert await tool.execute(**arguments) == rendered
+    tool_registry = ToolRegistry()
+    tool_registry.register(tool)
+
+    class _SlashEngine:
+        def __init__(self) -> None:
+            self.tool_registry = tool_registry
+
+        async def execute_tool(self, call: ToolCall, *, agent_name=None):
+            registered = self.tool_registry.get(call.name)
+            assert registered is not None and agent_name == "cli"
+            parsed = registered.parse_arguments(call.arguments)
+            return ToolResult(
+                call_id=call.id,
+                status="success",
+                content=await registered.execute(**parsed),
+            )
+
+    slash = await execute_slash_command(
+        _SlashEngine(),
+        f"/evolution outcome-dispatch-behavior {contract.request_id} "
+        f"{remote.original_comparison_id} stable",
+    )
+    assert first.dispatch.dispatch_id in slash
+    with pytest.raises(EvolutionPostRollbackRemoteDispatchError) as regression:
+        await service.inspect(
+            dispatch=first.dispatch,
+            assessed_at="2026-08-10T08:03:01+00:00",
+        )
+    assert (
+        regression.value.code
+        == "post_rollback_remote_dispatch_assessment_before_queue"
+    )
+
+    draining_heartbeat = HarnessHeartbeat(
+        workspace_root=contract.workspace_root,
+        subject_kind=HarnessRunKind.TOOL,
+        subject_id=worker.worker_id,
+        instance_id=worker.instance_id,
+        epoch=worker.epoch,
+        sequence=2,
+        phase=HarnessHeartbeatPhase.DRAINING,
+        observed_at="2026-08-10T08:03:03+00:00",
+        timeout_seconds=60,
+        detail_code="draining",
+    )
+    await registry.record_health_report(
+        issue_worker_health_report(
+            contract=worker,
+            heartbeat=draining_heartbeat,
+            active_jobs=1,
+            accepting_jobs=False,
+        ),
+        recorded_at="2026-08-10T08:03:03+00:00",
+    )
+    stale = await service.inspect(
+        dispatch=first.dispatch,
+        assessed_at="2026-08-10T08:03:04+00:00",
+    )
+    assert not stale.health_authority
+    assert not stale.dispatch_authority
+
+
+@pytest.mark.asyncio
+async def test_remote_dispatch_rejects_capacity_exhaustion_without_artifact(
+    tmp_path: Path,
+) -> None:
+    service, registry, contract, remote, worker, _, baseline = await _dispatch_fixture(
+        tmp_path
+    )
+    for index in range(2):
+        await registry.reserve_capacity(
+            reservation_id=f"occupied-{index}",
+            worker_id=worker.worker_id,
+            instance_id=worker.instance_id,
+            epoch=worker.epoch,
+            job_id=f"occupied-job-{index}",
+            reserved_at="2026-08-10T08:03:02+00:00",
+            ttl_seconds=20,
+        )
+
+    with pytest.raises(EvolutionPostRollbackRemoteDispatchError) as exhausted:
+        await service.queue(
+            request_id=contract.request_id,
+            comparison_id=remote.original_comparison_id,
+            channel="stable",
+            queued_at="2026-08-10T08:03:02+00:00",
+        )
+    assert exhausted.value.code == "post_rollback_remote_dispatch_capacity_exhausted"
+    assert await service.store.get(baseline.baseline.baseline_resolution_id) is None
+
+
+@pytest.mark.asyncio
+async def test_remote_dispatch_compensates_reservation_when_durable_write_fails(
+    tmp_path: Path,
+) -> None:
+    service, registry, contract, remote, _, _, _ = await _dispatch_fixture(
+        tmp_path,
+        failing_store=True,
+    )
+
+    with pytest.raises(EvolutionPostRollbackRemoteDispatchError) as failed:
+        await service.queue(
+            request_id=contract.request_id,
+            comparison_id=remote.original_comparison_id,
+            channel="stable",
+            queued_at="2026-08-10T08:03:02+00:00",
+        )
+    assert failed.value.code == "post_rollback_remote_dispatch_test_store_failure"
+    capacity = await registry.capacity_snapshot(
+        worker_id="worker-windows",
+        assessed_at="2026-08-10T08:03:02+00:00",
+    )
+    assert capacity is not None
+    assert capacity.reserved == 0
+    assert capacity.available == capacity.maximum
+
+
+@pytest.mark.asyncio
+async def test_remote_dispatch_rejects_tampered_before_after_lineage(
+    tmp_path: Path,
+) -> None:
+    service, registry, contract, remote, worker, _, baseline = await _dispatch_fixture(
+        tmp_path
+    )
+    service.evidence_store.evidence.evidence_sha256 = "f" * 64  # type: ignore[attr-defined]
+
+    with pytest.raises(EvolutionPostRollbackRemoteDispatchError) as stale:
+        await service.queue(
+            request_id=contract.request_id,
+            comparison_id=remote.original_comparison_id,
+            channel="stable",
+            queued_at="2026-08-10T08:03:02+00:00",
+        )
+    assert stale.value.code == "post_rollback_remote_dispatch_evidence_stale"
+    assert await service.store.get(baseline.baseline.baseline_resolution_id) is None
+    capacity = await registry.capacity_snapshot(
+        worker_id=worker.worker_id,
+        assessed_at="2026-08-10T08:03:02+00:00",
+    )
+    assert capacity is not None and capacity.reserved == 0

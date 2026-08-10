@@ -383,7 +383,10 @@ class EvolutionPostRollbackBehavioralLaneService:
                     )
                 return view
             lane = sources["selected_lane"]
-            request_artifact = _load_suite_request(self.workspace_root, lane.suite_id)
+            request_artifact = load_post_rollback_runtime_eval_request(
+                self.workspace_root,
+                lane.suite_id,
+            )
             original, baseline, baseline_records = await self._original_h5c(lane)
             _validate_original_suite(request_artifact, original, baseline_records)
             receipts, fresh_records, fresh_comparison = await self._execute_fresh_h5c(
@@ -1055,7 +1058,10 @@ def _validate_original_suite(
                 )
 
 
-def _load_suite_request(workspace: Path, suite_id: str) -> ReleaseRuntimeEvalRequest:
+def load_post_rollback_runtime_eval_request(
+    workspace: Path,
+    suite_id: str,
+) -> ReleaseRuntimeEvalRequest:
     root = workspace / "docs" / "harness" / "evals"
     if not root.is_dir():
         raise EvolutionPostRollbackBehavioralLaneError(
@@ -1244,5 +1250,6 @@ __all__ = [
     "EvolutionPostRollbackBehavioralLaneService",
     "EvolutionPostRollbackBehavioralLaneStore",
     "EvolutionPostRollbackBehavioralLaneView",
+    "load_post_rollback_runtime_eval_request",
     "render_post_rollback_behavioral_lane",
 ]
