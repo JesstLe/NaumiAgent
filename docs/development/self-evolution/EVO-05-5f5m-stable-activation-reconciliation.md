@@ -85,6 +85,7 @@ Windows runner 验收。
 
 ## 当前边界与下一步
 
-5f5m 已完成 exact stable installation 的可对账 activation。下一最小切片是 Stable Runtime Exposure：只消费 current
+5f5m 已完成 exact stable installation 的可对账 activation。
+[EVO-05.5f5n](EVO-05-5f5n-stable-runtime-exposure.md) 已继续消费 current
 `stable_runtime_launch_input_authority`，绑定 ARC-07.5e Runtime Identity 与 HAR starting/running observation，记录单 installation
 startup exposure；它仍不能凭单机启动声明完整 population stable rollout 或 promotion。

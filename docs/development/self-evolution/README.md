@@ -199,6 +199,9 @@ Admission、host target 与 previous pointer CAS，仍不执行 boot 或声明 s
 `--version` probe，形成独立 Stable Prepared Receipt 和 activation input；仍不切换 pointer、不启动用户进程或声明 stable rollout。
 [EVO-05.5f5m](EVO-05-5f5m-stable-activation-reconciliation.md) 已交付：以 Stable Prepared authority 和 frozen previous pointer
 执行原子 CAS，并可在 Receipt 落盘崩溃后从 activation history 恢复；仍不启动 runtime、不记录 exposure 或声明 stable rollout。
+[EVO-05.5f5n](EVO-05-5f5n-stable-runtime-exposure.md) 已交付：将 current Stable Deployment 与 ARC-07.5e managed runtime
+identity、HAR starting/running ledger exact 绑定，形成单 installation startup exposure；runtime stopped 后保留历史 fact 并动态
+撤销 observation input，仍不声明持续健康、完整 population rollout 或 promotion。
 [EVO-05.6a](EVO-05-6a-automatic-pause-rollback-request.md) 已让 exact breach 幂等触发或复用 HMAC kill switch，并冻结
 绑定 exact prior Rollback Plan 的只读 Request；它不写 workspace/Git，也不把请求虚报成已回滚。
 [EVO-05.6b1](EVO-05-6b1-immutable-rollback-source.md) 已从 exact Git commit/tree 读取 baseline blob，验证每个

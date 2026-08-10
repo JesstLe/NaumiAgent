@@ -1001,6 +1001,14 @@ if TYPE_CHECKING:
         SignStableInstallationChallenge,
         build_stable_installation_proof,
     )
+    from naumi_agent.evolution.revalidation_stable_runtime_exposures import (
+        EVOLUTION_REVALIDATION_STABLE_RUNTIME_EXPOSURE_POLICY,
+        EvolutionRevalidationStableRuntimeExposureError,
+        EvolutionRevalidationStableRuntimeExposureReceipt,
+        EvolutionRevalidationStableRuntimeExposureService,
+        EvolutionRevalidationStableRuntimeExposureStore,
+        EvolutionRevalidationStableRuntimeExposureView,
+    )
     from naumi_agent.evolution.revalidation_stage_completion_metrics import (
         EvolutionRevalidationStageCompletionMetrics,
         EvolutionRevalidationStageCompletionStatus,
@@ -1413,6 +1421,12 @@ __all__ = [
     "EvolutionRevalidationStableDeploymentService",
     "EvolutionRevalidationStableDeploymentStore",
     "EvolutionRevalidationStableDeploymentView",
+    "EVOLUTION_REVALIDATION_STABLE_RUNTIME_EXPOSURE_POLICY",
+    "EvolutionRevalidationStableRuntimeExposureError",
+    "EvolutionRevalidationStableRuntimeExposureReceipt",
+    "EvolutionRevalidationStableRuntimeExposureService",
+    "EvolutionRevalidationStableRuntimeExposureStore",
+    "EvolutionRevalidationStableRuntimeExposureView",
     "EVOLUTION_REVALIDATION_STABLE_INSTALLATION_PROOF_DOMAIN",
     "EvolutionRevalidationStableInstallationProof",
     "EvolutionRevalidationStableInstallationProofError",
@@ -2550,6 +2564,14 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationStableDeploymentStore",
         "EvolutionRevalidationStableDeploymentView",
     }
+    revalidation_stable_runtime_exposure_exports = {
+        "EVOLUTION_REVALIDATION_STABLE_RUNTIME_EXPOSURE_POLICY",
+        "EvolutionRevalidationStableRuntimeExposureError",
+        "EvolutionRevalidationStableRuntimeExposureReceipt",
+        "EvolutionRevalidationStableRuntimeExposureService",
+        "EvolutionRevalidationStableRuntimeExposureStore",
+        "EvolutionRevalidationStableRuntimeExposureView",
+    }
     revalidation_stable_installation_proof_exports = {
         "EVOLUTION_REVALIDATION_STABLE_INSTALLATION_PROOF_DOMAIN",
         "EvolutionRevalidationStableInstallationProof",
@@ -3208,6 +3230,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_stable_deployment_intents"
     elif name in revalidation_stable_deployment_exports:
         module_name = "revalidation_stable_deployments"
+    elif name in revalidation_stable_runtime_exposure_exports:
+        module_name = "revalidation_stable_runtime_exposures"
     elif name in revalidation_stable_installation_proof_exports:
         module_name = "revalidation_stable_installation_proofs"
     elif name in revalidation_percentage_stage_completion_exports:
