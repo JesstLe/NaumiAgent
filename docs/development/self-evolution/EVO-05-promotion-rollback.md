@@ -169,6 +169,9 @@
 - [EVO-05.5f5o Stable Runtime Observation Window](EVO-05-5f5o-stable-observation-window.md)：已交付；
   按 stable Plan 门槛验证单 installation heartbeat chain、duration、sample、gap 与 stale；不授予 population、completed-run、
   stable-stage 或 promotion authority；
+- [EVO-05.5f5p Durable Stable Observation Assessment](EVO-05-5f5p-durable-stable-observation-assessment.md)：已交付；
+  以 active Deployment 和 bounded HAR ledger 持久化并动态重验单 installation stable window；Intent 过期只禁止新启动，
+  不截断已启动 runtime 的观察；仍不授予 Population、completed-run、stable-stage、rollout 或 promotion authority；
 - [EVO-05.6a Automatic Pause and Rollback Request](EVO-05-6a-automatic-pause-rollback-request.md)：已交付；
   exact breach 会触发或复用 kill switch，并冻结只读 exact Rollback Request，不虚报执行完成。
 - [EVO-05.6b1 Immutable Rollback Source](EVO-05-6b1-immutable-rollback-source.md)：已交付；从 exact Git
@@ -203,6 +206,6 @@ Authority、版本化 Fresh Promotion Input、新 Approval Requirement/Response�
 已实现签名 result manifest、本地 H5a/pair prefix 摄取、remote cohort/Matrix 收口、immutable rollout plan、fenced local-canary entry、
 真实 local-canary executor、可信 monitor baseline、runtime observation、显式本机 opt-in Intent、authority-bound pointer
 activation/crash reconcile、percentage assignment/runtime/window/outcome aggregation、stable entry authorization、逐安装 stable
-Deployment Intent/Boot Preparation/Activation/Runtime Exposure/Observation Window 与 automatic pause/rollback request；无数据迁移的 version-slot rollback 已能
+Deployment Intent/Boot Preparation/Activation/Runtime Exposure/Observation Window/Durable Assessment 与 automatic pause/rollback request；无数据迁移的 version-slot rollback 已能
 authority-bound 执行和崩溃对账，真实 rollback 也已形成 Proposal-bound `rolled_back` Outcome；但尚未实现 stable runtime execution、配置/数据 rollback、promoted/superseded Outcome 或长期指标回注。任何界面不得把 stable entry 或 Deployment Intent authority 宣称为已进入 stable rollout，
 也不得把 rollback source 冻结宣称为已回滚。
