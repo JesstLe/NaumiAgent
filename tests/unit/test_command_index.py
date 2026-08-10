@@ -56,10 +56,15 @@ def test_new_ui_command_index_is_complete_deterministic_and_unique() -> None:
     assert by_name["/write"].arguments.required is True
     assert by_name["/models"].arguments.required is False
     assert by_name["/doctor"].arguments.syntax == (
-        "[probe [timeout-ms|cancel]|export [snapshot-sha256]]"
+        "[trace [筛选]|probe [timeout-ms|cancel]|export [snapshot-sha256]]"
     )
     assert by_name["/doctor"].arguments.required is False
     assert by_name["/doctor"].permission_risk == "tool_execution"
+    assert by_name["/evolution"].arguments.syntax == (
+        "[list|detail|evaluation|decision-*|reflection-*|promotion-*|approval-*|"
+        "revalidation-*|outcome-*|enqueue] [arguments]"
+    )
+    assert len(by_name["/evolution"].arguments.syntax) <= 300
 
 
 def test_tui_index_uses_same_runtime_metadata_with_only_real_local_commands() -> None:
