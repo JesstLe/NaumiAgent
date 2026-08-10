@@ -82,4 +82,5 @@ SQLite 验证：
 
 `HAR-09.6c2a3d` 已消费 current Claim 与 current Transport Key，使用 ephemeral X25519 + HKDF-SHA256 派生
 一次性 AES-256-GCM key，并在 exact Worker 解密、下载、验摘要和签署 ACK 后写 durable delivery receipt。本 key
-artifact 仍永远不等于 transport delivery；下一步由 execution authorization 消费 current delivery。
+artifact 仍永远不等于 transport delivery。`HAR-09.6c2a3e` 已由 Worker-signed Start challenge、父权限、Run Grant
+与 Runtime lease 消费 current delivery；下一步接收该 exact authorization 下的签名结果。
