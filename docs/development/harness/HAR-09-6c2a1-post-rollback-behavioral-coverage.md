@@ -127,12 +127,14 @@ authority：
 
 ## 后续切片
 
-1. `HAR-09.6c2a2 Target Baseline Resolution`：从受信任 Release Channel Catalog 解析与本机 baseline
-   source/version 等价的目标平台 artifact，不能只按版本字符串匹配；
-2. `HAR-09.6c2a3 Remote Lane Dispatch + Claim`：绑定 exact worker incarnation、容量、健康、身份和 lease；
-3. `HAR-09.6c2a4 Remote Execution Authorization + Signed Result Ingestion`：复用远程 revalidation 的
+1. `HAR-09.6c2a2a Remote Lane Placement` 已绑定 exact active Worker incarnation，并从其 OS/CPU 合同导出
+   exact release target；该 artifact 不验证健康、不预留容量、不授予执行权；
+2. `HAR-09.6c2a2b / ARC-07.5h Target Baseline Resolution`：从受信任 Release Channel Catalog 解析与本机
+   baseline source/version 等价的目标平台 artifact，不能只按版本字符串匹配；
+3. `HAR-09.6c2a3 Remote Lane Dispatch + Claim`：绑定容量、健康、身份和 lease；
+4. `HAR-09.6c2a4 Remote Execution Authorization + Signed Result Ingestion`：复用远程 revalidation 的
    permission/run-grant/Ed25519 模式，但使用独立 post-rollback domain；
-4. `HAR-09.6c2b Post-Rollback Behavioral Matrix`：集合完整性、跨 lane verdict 与
+5. `HAR-09.6c2b Post-Rollback Behavioral Matrix`：集合完整性、跨 lane verdict 与
    `behavioral_evaluation_recorded=true`；
-5. Workbench/New UI/TUI typed coverage 详情投影；
-6. `HAR-09.6d Long-Term Outcome Window`。
+6. Workbench/New UI/TUI typed coverage 详情投影；
+7. `HAR-09.6d Long-Term Outcome Window`。
