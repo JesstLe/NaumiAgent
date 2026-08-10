@@ -157,7 +157,7 @@ Evolution、Harness、Release 分属三个 SQLite authority store，不宣称跨
    区分本机 installed baseline 与必须由目标主机执行的 lane；它不授予远程执行或总体评测权限；
 2. `HAR-09.6c2a2-6c2a4`：目标平台等价 baseline 解析、远程调度/认领、执行授权与签名结果摄入；
 3. `HAR-09.6c2b1 Post-Rollback Behavioral Matrix Core` 已验证集合完整性、聚合总体 verdict 并令
-   `behavioral_evaluation_recorded=true`；下一步 6c2b2 完成 typed 双端详情；
+   `behavioral_evaluation_recorded=true`；6c2b2 已完成 typed 双端详情；
 4. `HAR-09.6d Long-Term Outcome Window`：定义窗口、覆盖率、censoring、持续健康和撤权；
 5. Workbench typed projection：在 Reviews 详情展示各 lane 与总体矩阵，但继续复用本 authority；
 6. promoted Outcome、supersede ledger 与 ARC-07.6 配置/数据恢复；

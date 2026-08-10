@@ -1015,6 +1015,42 @@ class WorkbenchService:
                             and verification.candidate_revision
                             == payload.get("candidate_revision")
                         )
+                behavioral_matrix = payload.get("post_rollback_behavioral_matrix")
+                behavioral_recorded = payload.get(
+                    "post_rollback_behavioral_evaluation_recorded"
+                )
+                behavioral_matrix_valid = behavioral_matrix is None
+                if isinstance(behavioral_matrix, dict):
+                    from naumi_agent.evolution.post_rollback_behavioral_matrix import (
+                        EvolutionPostRollbackBehavioralMatrix,
+                    )
+
+                    try:
+                        matrix = EvolutionPostRollbackBehavioralMatrix.model_validate(
+                            behavioral_matrix
+                        )
+                    except ValueError:
+                        behavioral_matrix_valid = False
+                    else:
+                        behavioral_matrix_valid = bool(
+                            matrix.outcome_id == payload.get("outcome_id")
+                            and matrix.outcome_sha256 == payload.get("outcome_sha256")
+                            and isinstance(before_after, dict)
+                            and matrix.before_after_evidence_id
+                            == before_after.get("evidence_id")
+                            and matrix.before_after_evidence_sha256
+                            == before_after.get("evidence_sha256")
+                            and matrix.final_evaluation_id
+                            == before_after.get("final_evaluation_id")
+                            and matrix.final_evaluation_sha256
+                            == before_after.get("final_evaluation_sha256")
+                            and isinstance(post_rollback, dict)
+                            and matrix.runtime_verification_id
+                            == post_rollback.get("verification_id")
+                            and matrix.runtime_verification_sha256
+                            == post_rollback.get("verification_sha256")
+                            and matrix.behavioral_evaluation_recorded
+                        )
                 if not (
                     str(proposal_id) == str(payload.get("workbench_proposal_id") or "")
                     and session_id == str(payload.get("workbench_session_id") or "")
@@ -1033,8 +1069,9 @@ class WorkbenchService:
                     and post_rollback_evaluation_recorded
                     is (post_rollback is not None)
                     and post_rollback_valid
-                    and payload.get("post_rollback_behavioral_evaluation_recorded")
-                    is False
+                    and isinstance(behavioral_recorded, bool)
+                    and behavioral_recorded is (behavioral_matrix is not None)
+                    and behavioral_matrix_valid
                     and payload.get("long_term_metrics_recorded") is False
                     and payload.get("promoted") is False
                     and payload.get("learning_authority") is False

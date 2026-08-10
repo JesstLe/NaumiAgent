@@ -938,6 +938,9 @@ codex/terminal-completion-receipt
 - ✅ Workbench Worktrees tab：WorkbenchService 将真实 Git worktree 状态与 Task/lease/Agent 组合为单一
   权威快照；New UI 与 Textual TUI 共用 Overview/Worktrees 语义，支持键盘切换、精确选择、窄屏降级、
   0/1/100 条有界渲染和失败隔离，重复只读刷新不制造新 revision。
+- ✅ Workbench Behavioral Matrix detail：HAR-09.6c2b2 将动态重验后的完整 Matrix 作为 Proposal Outcome typed
+  projection 同步到 New UI 与 Textual TUI；两端显示总体 verdict、platform、lane kind、local/remote evidence
+  source 与长期/学习/推广未授权边界，前端不从单 lane 自行推导完成状态。
 - ✅ Cache message rendering：`ui.render_cache` 提供 bounded LRU 与统计；CLI renderer 按 `message_id` 缓存 ANSI 输出，TUI renderer 对重复 message id 做幂等跳过，renderer override 会清空缓存避免旧结果污染。
 - ✅ Terminal UI E2E scenarios：`tests/e2e/ui_scenarios/*.yaml` 覆盖大文件写入、权限确认、历史恢复、大 diff、subagent/team/recovery、终端 resize；`tests/e2e/test_ui_scenarios.py` 用真实 `EngineEventAdapter`、CLI/TUI renderer、virtualized history、structured diff viewer 和宽字符裁剪逻辑回放并断言关键文本/viewport 边界。
 

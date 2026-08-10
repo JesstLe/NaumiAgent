@@ -1427,6 +1427,11 @@ function normalizeWorkbenchBeforeAfterEvidence(value) {
       "workbench proposal before/after final_evaluation_id",
       128,
     ),
+    final_evaluation_sha256: workbenchText(
+      item.final_evaluation_sha256,
+      "workbench proposal before/after final_evaluation_sha256",
+      64,
+    ),
     candidate_id: workbenchText(
       item.candidate_id,
       "workbench proposal before/after candidate_id",
@@ -1480,6 +1485,7 @@ function normalizeWorkbenchBeforeAfterEvidence(value) {
     || !/^[0-9a-f]{64}$/.test(normalized.evidence_sha256)
     || !/^evx_[0-9a-f]{24}$/.test(normalized.experiment_contract_id)
     || !/^evfinal_[0-9a-f]{24}$/.test(normalized.final_evaluation_id)
+    || !/^[0-9a-f]{64}$/.test(normalized.final_evaluation_sha256)
     || !/^evc_[0-9a-f]{24}$/.test(normalized.candidate_id)
     || normalized.candidate_revision < 1
     || normalized.before_after_recorded !== true
@@ -1668,6 +1674,253 @@ function normalizeWorkbenchPostRollbackVerification(value) {
   return normalized;
 }
 
+function normalizeWorkbenchBehavioralMatrix(value) {
+  const item = harnessObject(value, "workbench Behavioral Matrix");
+  if (Number(item.schema_version) !== 1) {
+    throw new Error(`workbench Behavioral Matrix schema_version 不兼容: ${item.schema_version}`);
+  }
+  const policy = workbenchMatrixText(
+    item.policy_version,
+    "workbench Behavioral Matrix.policy_version",
+    80,
+  );
+  if (policy !== "evolution-post-rollback-behavioral-matrix-v1") {
+    throw new Error(`workbench Behavioral Matrix policy_version 不兼容: ${policy}`);
+  }
+  if (!Array.isArray(item.lanes) || item.lanes.length < 2 || item.lanes.length > 4) {
+    throw new Error("workbench Behavioral Matrix lanes 数量无效");
+  }
+  const lanes = item.lanes.map((raw, index) => {
+    const lane = harnessObject(raw, `workbench Behavioral Matrix lane ${index + 1}`);
+    const evidenceKind = workbenchMatrixChoice(
+      lane.evidence_kind,
+      `workbench Behavioral Matrix lane ${index + 1}.evidence_kind`,
+      new Set(["local_behavioral_lane", "remote_result_ingestion"]),
+    );
+    const normalized = {
+      order: harnessNonnegativeInteger(
+        lane.order,
+        `workbench Behavioral Matrix lane ${index + 1}.order`,
+      ),
+      lane_kind: workbenchMatrixChoice(
+        lane.lane_kind,
+        `workbench Behavioral Matrix lane ${index + 1}.lane_kind`,
+        new Set(["interventional", "adversarial"]),
+      ),
+      platform: workbenchMatrixChoice(
+        lane.platform,
+        `workbench Behavioral Matrix lane ${index + 1}.platform`,
+        new Set(["linux", "macos", "windows"]),
+      ),
+      suite_id: workbenchMatrixText(
+        lane.suite_id,
+        `workbench Behavioral Matrix lane ${index + 1}.suite_id`,
+        64,
+      ),
+      original_comparison_id: workbenchMatrixText(
+        lane.original_comparison_id,
+        `workbench Behavioral Matrix lane ${index + 1}.original_comparison_id`,
+        64,
+      ),
+      original_comparison_sha256: workbenchMatrixText(
+        lane.original_comparison_sha256,
+        `workbench Behavioral Matrix lane ${index + 1}.original_comparison_sha256`,
+        64,
+      ),
+      evidence_kind: evidenceKind,
+      evidence_id: workbenchMatrixText(
+        lane.evidence_id,
+        `workbench Behavioral Matrix lane ${index + 1}.evidence_id`,
+        128,
+      ),
+      evidence_sha256: workbenchMatrixText(
+        lane.evidence_sha256,
+        `workbench Behavioral Matrix lane ${index + 1}.evidence_sha256`,
+        64,
+      ),
+      fresh_comparison_id: workbenchMatrixText(
+        lane.fresh_comparison_id,
+        `workbench Behavioral Matrix lane ${index + 1}.fresh_comparison_id`,
+        64,
+      ),
+      fresh_comparison_sha256: workbenchMatrixText(
+        lane.fresh_comparison_sha256,
+        `workbench Behavioral Matrix lane ${index + 1}.fresh_comparison_sha256`,
+        64,
+      ),
+      recovery_status: workbenchMatrixChoice(
+        lane.recovery_status,
+        `workbench Behavioral Matrix lane ${index + 1}.recovery_status`,
+        new Set(["recovered", "changed", "inconclusive", "incompatible"]),
+      ),
+      evidence_authority_verified: harnessBoolean(
+        lane.evidence_authority_verified,
+        `workbench Behavioral Matrix lane ${index + 1}.evidence_authority_verified`,
+      ),
+      evaluated_at: workbenchMatrixTimestamp(
+        lane.evaluated_at,
+        `workbench Behavioral Matrix lane ${index + 1}.evaluated_at`,
+        100,
+      ),
+    };
+    const expectedPrefix = evidenceKind === "local_behavioral_lane"
+      ? "evpostbehavior_"
+      : "evpostresultreceipt_";
+    if (
+      normalized.order !== index + 1
+      || !normalized.evidence_id.startsWith(expectedPrefix)
+      || normalized.evidence_authority_verified !== true
+      || !/^[0-9a-f]{64}$/.test(normalized.original_comparison_id)
+      || !/^[0-9a-f]{64}$/.test(normalized.original_comparison_sha256)
+      || !/^[0-9a-f]{64}$/.test(normalized.evidence_sha256)
+      || !/^[0-9a-f]{64}$/.test(normalized.fresh_comparison_id)
+      || !/^[0-9a-f]{64}$/.test(normalized.fresh_comparison_sha256)
+      || !/^[a-z][a-z0-9_-]{0,63}$/.test(normalized.suite_id)
+    ) {
+      throw new Error(`workbench Behavioral Matrix lane ${index + 1} authority 无效`);
+    }
+    return normalized;
+  });
+  const recoveryStatuses = lanes.map((lane) => lane.recovery_status);
+  const expectedVerdict = recoveryStatuses.includes("incompatible")
+    ? "incompatible"
+    : recoveryStatuses.includes("inconclusive")
+      ? "inconclusive"
+      : recoveryStatuses.every((status) => status === "recovered")
+        ? "recovered"
+        : "changed";
+  const normalized = {
+    schema_version: 1,
+    policy_version: policy,
+    matrix_id: workbenchMatrixText(item.matrix_id, "workbench Behavioral Matrix.matrix_id", 128),
+    matrix_sha256: workbenchMatrixText(
+      item.matrix_sha256,
+      "workbench Behavioral Matrix.matrix_sha256",
+      64,
+    ),
+    workspace_root: workbenchMatrixText(
+      item.workspace_root,
+      "workbench Behavioral Matrix.workspace_root",
+      4_096,
+    ),
+    outcome_id: workbenchMatrixText(item.outcome_id, "workbench Behavioral Matrix.outcome_id", 128),
+    outcome_sha256: workbenchMatrixText(
+      item.outcome_sha256,
+      "workbench Behavioral Matrix.outcome_sha256",
+      64,
+    ),
+    request_id: workbenchMatrixText(item.request_id, "workbench Behavioral Matrix.request_id", 128),
+    coverage_contract_id: workbenchMatrixText(
+      item.coverage_contract_id,
+      "workbench Behavioral Matrix.coverage_contract_id",
+      128,
+    ),
+    coverage_contract_sha256: workbenchMatrixText(
+      item.coverage_contract_sha256,
+      "workbench Behavioral Matrix.coverage_contract_sha256",
+      64,
+    ),
+    runtime_verification_id: workbenchMatrixText(
+      item.runtime_verification_id,
+      "workbench Behavioral Matrix.runtime_verification_id",
+      128,
+    ),
+    runtime_verification_sha256: workbenchMatrixText(
+      item.runtime_verification_sha256,
+      "workbench Behavioral Matrix.runtime_verification_sha256",
+      64,
+    ),
+    before_after_evidence_id: workbenchMatrixText(
+      item.before_after_evidence_id,
+      "workbench Behavioral Matrix.before_after_evidence_id",
+      128,
+    ),
+    before_after_evidence_sha256: workbenchMatrixText(
+      item.before_after_evidence_sha256,
+      "workbench Behavioral Matrix.before_after_evidence_sha256",
+      64,
+    ),
+    final_evaluation_id: workbenchMatrixText(
+      item.final_evaluation_id,
+      "workbench Behavioral Matrix.final_evaluation_id",
+      128,
+    ),
+    final_evaluation_sha256: workbenchMatrixText(
+      item.final_evaluation_sha256,
+      "workbench Behavioral Matrix.final_evaluation_sha256",
+      64,
+    ),
+    lane_count: harnessNonnegativeInteger(
+      item.lane_count,
+      "workbench Behavioral Matrix.lane_count",
+    ),
+    local_lane_count: harnessNonnegativeInteger(
+      item.local_lane_count,
+      "workbench Behavioral Matrix.local_lane_count",
+    ),
+    remote_lane_count: harnessNonnegativeInteger(
+      item.remote_lane_count,
+      "workbench Behavioral Matrix.remote_lane_count",
+    ),
+    lanes,
+    recovery_verdict: workbenchMatrixChoice(
+      item.recovery_verdict,
+      "workbench Behavioral Matrix.recovery_verdict",
+      new Set(["recovered", "changed", "inconclusive", "incompatible"]),
+    ),
+    behavioral_evaluation_recorded: harnessBoolean(
+      item.behavioral_evaluation_recorded,
+      "workbench Behavioral Matrix.behavioral_evaluation_recorded",
+    ),
+    long_term_metrics_recorded: harnessBoolean(
+      item.long_term_metrics_recorded,
+      "workbench Behavioral Matrix.long_term_metrics_recorded",
+    ),
+    learning_authority: harnessBoolean(
+      item.learning_authority,
+      "workbench Behavioral Matrix.learning_authority",
+    ),
+    promotion_authority: harnessBoolean(
+      item.promotion_authority,
+      "workbench Behavioral Matrix.promotion_authority",
+    ),
+    recorded_at: workbenchMatrixTimestamp(
+      item.recorded_at,
+      "workbench Behavioral Matrix.recorded_at",
+      100,
+    ),
+  };
+  const localCount = lanes.filter((lane) => lane.evidence_kind === "local_behavioral_lane").length;
+  if (
+    !/^evpostmatrix_[0-9a-f]{24}$/.test(normalized.matrix_id)
+    || !/^[0-9a-f]{64}$/.test(normalized.matrix_sha256)
+    || !/^evrerollbackout_[0-9a-f]{24}$/.test(normalized.outcome_id)
+    || !/^[0-9a-f]{64}$/.test(normalized.outcome_sha256)
+    || !/^evrerollbackreq_[0-9a-f]{24}$/.test(normalized.request_id)
+    || !/^evpostcoverage_[0-9a-f]{24}$/.test(normalized.coverage_contract_id)
+    || !/^[0-9a-f]{64}$/.test(normalized.coverage_contract_sha256)
+    || !/^evpostrollback_[0-9a-f]{24}$/.test(normalized.runtime_verification_id)
+    || !/^[0-9a-f]{64}$/.test(normalized.runtime_verification_sha256)
+    || !/^evbeforeafter_[0-9a-f]{24}$/.test(normalized.before_after_evidence_id)
+    || !/^[0-9a-f]{64}$/.test(normalized.before_after_evidence_sha256)
+    || !/^evfinal_[0-9a-f]{24}$/.test(normalized.final_evaluation_id)
+    || !/^[0-9a-f]{64}$/.test(normalized.final_evaluation_sha256)
+    || normalized.lane_count !== lanes.length
+    || normalized.local_lane_count !== localCount
+    || normalized.remote_lane_count !== lanes.length - localCount
+    || normalized.recovery_verdict !== expectedVerdict
+    || normalized.behavioral_evaluation_recorded !== true
+    || normalized.long_term_metrics_recorded !== false
+    || normalized.learning_authority !== false
+    || normalized.promotion_authority !== false
+    || new Set(lanes.map((lane) => lane.original_comparison_id)).size !== lanes.length
+    || new Set(lanes.map((lane) => lane.evidence_id)).size !== lanes.length
+  ) {
+    throw new Error("workbench Behavioral Matrix authority 字段无效");
+  }
+  return normalized;
+}
+
 function normalizeWorkbenchProposalOutcome(value) {
   const item = harnessObject(value, "workbench proposal outcome");
   if (Number(item.schema_version) !== 1) {
@@ -1687,6 +1940,9 @@ function normalizeWorkbenchProposalOutcome(value) {
   const postRollback = item.post_rollback_verification == null
     ? null
     : normalizeWorkbenchPostRollbackVerification(item.post_rollback_verification);
+  const behavioralMatrix = item.post_rollback_behavioral_matrix == null
+    ? null
+    : normalizeWorkbenchBehavioralMatrix(item.post_rollback_behavioral_matrix);
   const normalized = {
     schema_version: 1,
     policy_version: policy,
@@ -1748,6 +2004,7 @@ function normalizeWorkbenchProposalOutcome(value) {
     ),
     before_after_evidence: beforeAfter,
     post_rollback_verification: postRollback,
+    post_rollback_behavioral_matrix: behavioralMatrix,
     post_rollback_verification_recorded: harnessBoolean(
       item.post_rollback_verification_recorded,
       "workbench proposal outcome.post_rollback_verification_recorded",
@@ -1780,7 +2037,7 @@ function normalizeWorkbenchProposalOutcome(value) {
     || normalized.before_after_recorded !== (beforeAfter !== null)
     || normalized.post_rollback_verification_recorded !== (postRollback !== null)
     || normalized.post_rollback_evaluation_recorded !== (postRollback !== null)
-    || normalized.post_rollback_behavioral_evaluation_recorded !== false
+    || normalized.post_rollback_behavioral_evaluation_recorded !== (behavioralMatrix !== null)
     || normalized.long_term_metrics_recorded !== false
     || normalized.promoted !== false
     || normalized.learning_authority !== false
@@ -1818,6 +2075,23 @@ function normalizeWorkbenchProposalOutcome(value) {
     )
   ) {
     throw new Error("workbench post-rollback 外层绑定无效");
+  }
+  if (
+    behavioralMatrix
+    && (
+      beforeAfter == null
+      || postRollback == null
+      || behavioralMatrix.outcome_id !== normalized.outcome_id
+      || behavioralMatrix.outcome_sha256 !== normalized.outcome_sha256
+      || behavioralMatrix.before_after_evidence_id !== beforeAfter.evidence_id
+      || behavioralMatrix.before_after_evidence_sha256 !== beforeAfter.evidence_sha256
+      || behavioralMatrix.final_evaluation_id !== beforeAfter.final_evaluation_id
+      || behavioralMatrix.final_evaluation_sha256 !== beforeAfter.final_evaluation_sha256
+      || behavioralMatrix.runtime_verification_id !== postRollback.verification_id
+      || behavioralMatrix.runtime_verification_sha256 !== postRollback.verification_sha256
+    )
+  ) {
+    throw new Error("workbench Behavioral Matrix 外层绑定无效");
   }
   const identities = [
     [normalized.outcome_id, /^evrerollbackout_[0-9a-f]{24}$/, "outcome_id"],
@@ -2247,6 +2521,36 @@ function normalizeWorkbenchReview(payload) {
 
 function workbenchText(value, name, limit) {
   return harnessText(value, name).slice(0, limit);
+}
+
+function workbenchMatrixText(value, name, limit) {
+  if (
+    typeof value !== "string"
+    || value.length < 1
+    || value.length > limit
+    || value.trim() !== value
+    || /[\x00\r\n]/u.test(value)
+  ) {
+    throw new Error(`${name} 必须是不超过 ${limit} 字符的精确文本`);
+  }
+  return value;
+}
+
+function workbenchMatrixChoice(value, name, allowed) {
+  const normalized = workbenchMatrixText(value, name, 64);
+  if (!allowed.has(normalized)) throw new Error(`${name} 无效: ${normalized}`);
+  return normalized;
+}
+
+function workbenchMatrixTimestamp(value, name, limit) {
+  const normalized = workbenchMatrixText(value, name, limit);
+  if (
+    !/(?:Z|[+-]\d{2}:\d{2})$/.test(normalized)
+    || !Number.isFinite(Date.parse(normalized))
+  ) {
+    throw new Error(`${name} 必须是带时区的 ISO 8601 时间`);
+  }
+  return normalized;
 }
 
 function workbenchIdArray(value, name, limit) {

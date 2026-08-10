@@ -9,6 +9,13 @@ from types import SimpleNamespace
 import aiosqlite
 import pytest
 
+from naumi_agent.evolution.post_rollback_behavioral_matrix import (
+    EvolutionPostRollbackBehavioralMatrix,
+    EvolutionPostRollbackBehavioralMatrixView,
+)
+from naumi_agent.evolution.post_rollback_behavioral_matrix import (
+    _digest as _behavioral_matrix_digest,
+)
 from naumi_agent.evolution.post_rollback_runtime_verifications import (
     EvolutionPostRollbackRuntimeVerification,
     _runtime_identity,
@@ -260,6 +267,81 @@ def _post_rollback_verification(
     })
 
 
+def _behavioral_matrix(
+    *,
+    outcome_id: str,
+    outcome_sha256: str,
+    before_after: EvolutionProposalBeforeAfterEvidence,
+    post_rollback: EvolutionPostRollbackRuntimeVerification,
+) -> EvolutionPostRollbackBehavioralMatrix:
+    lanes = [
+        {
+            "order": 1,
+            "lane_kind": "interventional",
+            "platform": "macos",
+            "suite_id": "protocol-hello-core",
+            "original_comparison_id": "1" * 64,
+            "original_comparison_sha256": "2" * 64,
+            "evidence_kind": "local_behavioral_lane",
+            "evidence_id": f"evpostbehavior_{'3' * 24}",
+            "evidence_sha256": "3" * 64,
+            "fresh_comparison_id": "4" * 64,
+            "fresh_comparison_sha256": "5" * 64,
+            "recovery_status": "recovered",
+            "evidence_authority_verified": True,
+            "evaluated_at": "2026-08-10T00:03:00+00:00",
+        },
+        {
+            "order": 2,
+            "lane_kind": "adversarial",
+            "platform": "windows",
+            "suite_id": "protocol-hello-core",
+            "original_comparison_id": "6" * 64,
+            "original_comparison_sha256": "7" * 64,
+            "evidence_kind": "remote_result_ingestion",
+            "evidence_id": f"evpostresultreceipt_{'8' * 24}",
+            "evidence_sha256": "8" * 64,
+            "fresh_comparison_id": "9" * 64,
+            "fresh_comparison_sha256": "a" * 64,
+            "recovery_status": "recovered",
+            "evidence_authority_verified": True,
+            "evaluated_at": "2026-08-10T00:04:00+00:00",
+        },
+    ]
+    payload = {
+        "schema_version": 1,
+        "policy_version": "evolution-post-rollback-behavioral-matrix-v1",
+        "workspace_root": str(Path("/tmp/workbench-behavioral-matrix").resolve()),
+        "outcome_id": outcome_id,
+        "outcome_sha256": outcome_sha256,
+        "request_id": f"evrerollbackreq_{'8' * 24}",
+        "coverage_contract_id": f"evpostcoverage_{'b' * 24}",
+        "coverage_contract_sha256": "b" * 64,
+        "runtime_verification_id": post_rollback.verification_id,
+        "runtime_verification_sha256": post_rollback.verification_sha256,
+        "before_after_evidence_id": before_after.evidence_id,
+        "before_after_evidence_sha256": before_after.evidence_sha256,
+        "final_evaluation_id": before_after.final_evaluation_id,
+        "final_evaluation_sha256": before_after.final_evaluation_sha256,
+        "lane_count": 2,
+        "local_lane_count": 1,
+        "remote_lane_count": 1,
+        "lanes": lanes,
+        "recovery_verdict": "recovered",
+        "behavioral_evaluation_recorded": True,
+        "long_term_metrics_recorded": False,
+        "learning_authority": False,
+        "promotion_authority": False,
+        "recorded_at": "2026-08-10T00:04:00+00:00",
+    }
+    digest = _behavioral_matrix_digest(payload)
+    return EvolutionPostRollbackBehavioralMatrix.model_validate({
+        **payload,
+        "matrix_id": f"evpostmatrix_{digest[:24]}",
+        "matrix_sha256": digest,
+    })
+
+
 @pytest.mark.asyncio
 async def test_proposal_outcome_projection_revalidates_before_after_authority() -> None:
     outcome = SimpleNamespace(
@@ -285,6 +367,12 @@ async def test_proposal_outcome_projection_revalidates_before_after_authority() 
         outcome_id=outcome.outcome_id,
         outcome_sha256=outcome.outcome_sha256,
         proposal_id=outcome.workbench_proposal_id,
+    )
+    matrix = _behavioral_matrix(
+        outcome_id=outcome.outcome_id,
+        outcome_sha256=outcome.outcome_sha256,
+        before_after=evidence,
+        post_rollback=post_rollback,
     )
 
     class _OutcomeStore:
@@ -328,6 +416,25 @@ async def test_proposal_outcome_projection_revalidates_before_after_authority() 
             )
 
     post_rollback_service = _PostRollbackService()
+
+    class _BehavioralMatrixStore:
+        async def get_by_outcome(self, outcome_id):
+            return matrix
+
+    class _BehavioralMatrixService:
+        behavioral_authority = True
+
+        async def inspect(self, *, matrix):
+            return EvolutionPostRollbackBehavioralMatrixView(
+                matrix=matrix,
+                status="recorded" if self.behavioral_authority else "stale",
+                durable_matrix_valid=True,
+                coverage_authority=True,
+                complete_lane_authority=self.behavioral_authority,
+                behavioral_evaluation_authority=self.behavioral_authority,
+            )
+
+    behavioral_matrix_service = _BehavioralMatrixService()
     service = EvolutionProposalOutcomeProjectionService(
         rollback_outcome_store=_OutcomeStore(),  # type: ignore[arg-type]
         rollback_outcome_service=_OutcomeService(),  # type: ignore[arg-type]
@@ -335,13 +442,16 @@ async def test_proposal_outcome_projection_revalidates_before_after_authority() 
         before_after_service=evidence_service,  # type: ignore[arg-type]
         post_rollback_store=_PostRollbackStore(),  # type: ignore[arg-type]
         post_rollback_service=post_rollback_service,  # type: ignore[arg-type]
+        behavioral_matrix_store=_BehavioralMatrixStore(),  # type: ignore[arg-type]
+        behavioral_matrix_service=behavioral_matrix_service,  # type: ignore[arg-type]
     )
     projected = await service.project_session("s")
     assert projected["proposal-1"].before_after_recorded
     assert projected["proposal-1"].before_after_evidence == evidence
     assert projected["proposal-1"].post_rollback_verification == post_rollback
     assert projected["proposal-1"].post_rollback_evaluation_recorded
-    assert not projected["proposal-1"].post_rollback_behavioral_evaluation_recorded
+    assert projected["proposal-1"].post_rollback_behavioral_matrix == matrix
+    assert projected["proposal-1"].post_rollback_behavioral_evaluation_recorded
     assert not projected["proposal-1"].learning_authority
 
     evidence_service.before_after_authority = False
@@ -354,6 +464,12 @@ async def test_proposal_outcome_projection_revalidates_before_after_authority() 
     with pytest.raises(EvolutionProposalOutcomeProjectionError) as stale_verification:
         await service.project_session("s")
     assert stale_verification.value.code == "proposal_outcome_post_rollback_stale"
+
+    post_rollback_service.verification_authority = True
+    behavioral_matrix_service.behavioral_authority = False
+    with pytest.raises(EvolutionProposalOutcomeProjectionError) as stale_matrix:
+        await service.project_session("s")
+    assert stale_matrix.value.code == "proposal_outcome_behavioral_matrix_stale"
 
 
 @pytest.mark.asyncio
@@ -606,6 +722,63 @@ async def test_dashboard_keeps_approved_evolution_proposal_actionable(tmp_path) 
     assert (
         projected_verification["post_rollback_behavioral_evaluation_recorded"]
         is False
+    )
+
+    matrix = _behavioral_matrix(
+        outcome_id=projection.outcome_id,
+        outcome_sha256=projection.outcome_sha256,
+        before_after=before_after,
+        post_rollback=post_rollback,
+    )
+    matrix_evidenced = EvolutionProposalOutcomeProjection.model_validate({
+        **fully_evidenced.model_dump(mode="json"),
+        "post_rollback_behavioral_matrix": matrix.model_dump(mode="json"),
+        "post_rollback_behavioral_evaluation_recorded": True,
+    })
+    mismatched_matrix_payload = matrix.model_dump(
+        mode="json",
+        exclude={"matrix_id", "matrix_sha256"},
+    )
+    mismatched_matrix_payload["final_evaluation_id"] = f"evfinal_{'f' * 24}"
+    mismatched_matrix_digest = _behavioral_matrix_digest(mismatched_matrix_payload)
+    mismatched_matrix = EvolutionPostRollbackBehavioralMatrix.model_validate({
+        **mismatched_matrix_payload,
+        "matrix_id": f"evpostmatrix_{mismatched_matrix_digest[:24]}",
+        "matrix_sha256": mismatched_matrix_digest,
+    })
+    with pytest.raises(ValueError, match="Behavioral Matrix 绑定无效"):
+        EvolutionProposalOutcomeProjection.model_validate({
+            **fully_evidenced.model_dump(mode="json"),
+            "post_rollback_behavioral_matrix": mismatched_matrix.model_dump(
+                mode="json"
+            ),
+            "post_rollback_behavioral_evaluation_recorded": True,
+        })
+
+    class _BehavioralMatrixReader:
+        async def project_session(self, session_id: str):
+            return {proposal["id"]: matrix_evidenced}
+
+    service.bind_proposal_outcome_reader(_BehavioralMatrixReader())
+    matrix_snapshot = await service.dashboard_snapshot("s")
+    projected_matrix = matrix_snapshot["proposals"][0]["outcome"]
+    assert projected_matrix["post_rollback_behavioral_evaluation_recorded"] is True
+    assert projected_matrix["post_rollback_behavioral_matrix"]["matrix_id"] == (
+        matrix.matrix_id
+    )
+    assert projected_matrix["post_rollback_behavioral_matrix"]["lane_count"] == 2
+
+    class _TamperedBehavioralMatrixReader:
+        async def project_session(self, session_id: str):
+            payload = matrix_evidenced.model_dump(mode="json")
+            payload["post_rollback_behavioral_matrix"]["recovery_verdict"] = "changed"
+            return {proposal["id"]: payload}
+
+    service.bind_proposal_outcome_reader(_TamperedBehavioralMatrixReader())
+    tampered = await service.dashboard_snapshot("s")
+    assert tampered["proposals"][0]["outcome"] is None
+    assert tampered["proposals"][0]["outcome_error"] == (
+        "proposal_outcome_unavailable"
     )
 
     class _UnavailableOutcomeReader:

@@ -374,6 +374,16 @@ def _append_proposal_review(
             and post_rollback
             else "尚未记录"
         )
+        behavioral_matrix = _mapping(
+            outcome.get("post_rollback_behavioral_matrix")
+        )
+        behavioral_matrix_label = (
+            f"已记录 · {len(behavioral_matrix.get('lanes') or [])} lanes · "
+            f"{_normalized(behavioral_matrix.get('recovery_verdict'))}"
+            if outcome.get("post_rollback_behavioral_evaluation_recorded") is True
+            and behavioral_matrix
+            else "尚未记录"
+        )
         lines.extend(
             [
                 "",
@@ -403,9 +413,29 @@ def _append_proposal_review(
                     f"`{_code(post_rollback.get('baseline_slot_id'))}` · "
                     f"{_normalized(post_rollback.get('baseline_version'))}",
                     "- 口径：installed-runtime mechanical verification；"
-                    "行为级 Eval 尚未记录",
+                    "行为矩阵由独立 Matrix authority 判定",
                 ]
             )
+        lines.append(f"- 回滚后行为矩阵：{behavioral_matrix_label}")
+        if behavioral_matrix:
+            lines.extend(
+                [
+                    "- Behavioral Matrix："
+                    f"`{_code(behavioral_matrix.get('matrix_id'))}`",
+                    "- 总体判定："
+                    f"{_normalized(behavioral_matrix.get('recovery_verdict'))}；"
+                    "长期指标 / Learning / Promotion：未授权",
+                ]
+            )
+            for lane in list(behavioral_matrix.get("lanes") or [])[:4]:
+                item = _mapping(lane)
+                lines.append(
+                    f"  - Lane #{_integer(item.get('order'))}："
+                    f"{_normalized(item.get('lane_kind'))} · "
+                    f"{_normalized(item.get('platform'))} · "
+                    f"{_normalized(item.get('recovery_status'))} · "
+                    f"{_normalized(item.get('evidence_kind'))}"
+                )
     elif proposal.get("outcome_error"):
         lines.extend(
             [
