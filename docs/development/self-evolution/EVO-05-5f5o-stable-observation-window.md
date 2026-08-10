@@ -53,6 +53,6 @@ population、completed-run、stable-stage、stable-rollout 与 promotion authori
 本切片是纯 artifact builder，不读取 durable Store。调用者传入旧 Exposure 或截断 suffix 时，构建器只能验证局部 artifact/chain，
 不能证明它们仍是当前 authoritative head。
 
-下一切片应建立 Durable Stable Observation Assessment：由 Service 从 HAR origin/suffix 有界分页重建 Window，持久化 assessment，
-并在 inspect 时重验 Exposure、Deployment、Binding、当前 ledger head、pointer 与新增 failure/stale。只有该动态 assessment 才能作为
-stable completed-run ledger 的 liveness 前置。
+[EVO-05.5f5p](EVO-05-5f5p-durable-stable-observation-assessment.md) 已建立 Durable Stable Observation Assessment：Service 从
+HAR origin/suffix 有界分页重建并持久化 Window，inspect 时重验 Exposure、active Deployment、Binding、当前 ledger head、pointer 与
+新增 failure/stale。只有该动态 assessment 才可作为后续 stable release-bound run evidence 的 liveness 前置。

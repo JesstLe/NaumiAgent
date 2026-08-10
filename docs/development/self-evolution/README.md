@@ -205,6 +205,9 @@ identity、HAR starting/running ledger exact 绑定，形成单 installation sta
 [EVO-05.5f5o](EVO-05-5f5o-stable-observation-window.md) 已交付：从 exact Exposure 与 HAR sample chain 机械计算 stable 阶段
 持续时长、样本、gap 和 stale，区分 insufficient/passing/breached；它仍是单 installation artifact，不授予 completed-run、
 population、stable completion 或 promotion authority。
+[EVO-05.5f5p](EVO-05-5f5p-durable-stable-observation-assessment.md) 已交付：从 HAR Store 有界重建 current stable window，
+append-only 持久化并在 inspect 时动态复核 active Deployment、Binding、ledger head 与 pointer；Intent TTL 只限制新启动，不截断
+已启动 exact runtime 的观察能力。它仍不授予 Population、completed-run、stable-stage、rollout 或 promotion authority。
 [EVO-05.6a](EVO-05-6a-automatic-pause-rollback-request.md) 已让 exact breach 幂等触发或复用 HMAC kill switch，并冻结
 绑定 exact prior Rollback Plan 的只读 Request；它不写 workspace/Git，也不把请求虚报成已回滚。
 [EVO-05.6b1](EVO-05-6b1-immutable-rollback-source.md) 已从 exact Git commit/tree 读取 baseline blob，验证每个
