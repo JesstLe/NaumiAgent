@@ -37,6 +37,16 @@ from naumi_agent.daemons.agent_worker_supervisor import (
     AgentWorkerSupervisorOutcome,
     AgentWorkerSupervisorResult,
 )
+from naumi_agent.daemons.authenticated_worker_identity import (
+    AUTHENTICATED_WORKER_IDENTITY_POLICY,
+    AuthenticatedWorkerIdentity,
+    AuthenticatedWorkerIdentityAuthority,
+    AuthenticatedWorkerIdentityError,
+    AuthenticatedWorkerIdentityStore,
+    AuthenticatedWorkerIdentityView,
+    issue_authenticated_worker_identity,
+    verify_authenticated_worker_identity,
+)
 from naumi_agent.daemons.worker_contract import (
     WorkerAdmissionDecision,
     WorkerAdmissionReason,
@@ -75,6 +85,7 @@ from naumi_agent.daemons.worker_registry import (
 
 __all__ = [
     "AGENT_JOB_SCHEMA_VERSION",
+    "AUTHENTICATED_WORKER_IDENTITY_POLICY",
     "AgentJobCapacityExhaustedError",
     "AgentJobCapacityPolicy",
     "AgentJobCapacitySnapshot",
@@ -101,6 +112,11 @@ __all__ = [
     "AgentWorkerSupervisorFactory",
     "AgentWorkerSupervisorOutcome",
     "AgentWorkerSupervisorResult",
+    "AuthenticatedWorkerIdentity",
+    "AuthenticatedWorkerIdentityAuthority",
+    "AuthenticatedWorkerIdentityError",
+    "AuthenticatedWorkerIdentityStore",
+    "AuthenticatedWorkerIdentityView",
     "StoredAgentJob",
     "StoredAgentJobPublication",
     "StoredAgentJobPublicationDelivery",
@@ -135,7 +151,9 @@ __all__ = [
     "detect_worker_platform",
     "issue_worker_contract",
     "issue_worker_health_report",
+    "issue_authenticated_worker_identity",
     "normalize_worker_timestamp",
     "verify_worker_contract",
     "verify_worker_health_report",
+    "verify_authenticated_worker_identity",
 ]

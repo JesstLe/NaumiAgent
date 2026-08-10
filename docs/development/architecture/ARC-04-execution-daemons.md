@@ -9,6 +9,8 @@
 
 - ARC-04.1 Worker contract：capabilities、platform、resource、version、health。
 - ARC-04.2 Tool job：immutable request、permission grant id、workspace lease、idempotency key。
+- ARC-04.1d 已增加通用 Authenticated Worker Identity：以 supervisor-attested Ed25519 public key 绑定 exact
+  Worker incarnation，为远端 one-time claim challenge 提供签名身份；identity 本身没有 claim lease 或执行权。
 - ARC-04.3 Shell worker：PTY/非 PTY、cwd/env allowlist、process tree cancel、artifact log。
 - ARC-04.4 Browser worker：profile isolation、tab/run ownership、human takeover、cleanup。
 - ARC-04.5 Agent worker：context bundle、tool scope、budget、message channel、terminal result。
