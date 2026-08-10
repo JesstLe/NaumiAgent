@@ -158,6 +158,9 @@
   执行预算、fresh Health sequence 与原子 capacity reservation；回执必须保留“未 claim、未传输、无执行权”。
 - HAR-09.6c2a3c 已通过 `/evolution outcome-claim-behavior` 在三端共享 prepare/submit/renew：challenge 显示
   canonical payload 与 signable digest，receipt 显示 exact Identity 和 lease epoch；始终保留“未传输、无执行权”。
+- HAR-09.6c2a3d 已通过 `/evolution outcome-deliver-behavior` 在三端共享 prepare/submit/inspect：offer 显示
+  envelope、archive/manifest 与 ACK digest，receipt 明确“已交付但未安装、无执行权”；专用 typed delivery
+  panel 和自动 remote push 仍是后续切片。
 - 完整行为矩阵、长期指标、promoted Outcome 和 policy learning 仍未完成。完整边界见
   `../harness/HAR-09-6a-proposal-outcome-projection.md` 与
   `../harness/HAR-09-6b-before-after-outcome-evidence.md`、

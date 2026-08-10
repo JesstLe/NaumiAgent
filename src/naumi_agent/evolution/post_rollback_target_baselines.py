@@ -198,6 +198,33 @@ class EvolutionPostRollbackTargetBaselineStore:
                 "Target Baseline Resolution 损坏或无法读取。",
             ) from exc
 
+    async def get_by_id(
+        self,
+        baseline_resolution_id: str,
+    ) -> EvolutionPostRollbackTargetBaseline | None:
+        baseline_id = _baseline_resolution_id(baseline_resolution_id)
+        if not self.db_path.is_file():
+            return None
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                db.row_factory = aiosqlite.Row
+                await _ensure_schema(db)
+                row = await (
+                    await db.execute(
+                        "SELECT baseline_json FROM evolution_post_rollback_target_baselines "
+                        "WHERE baseline_resolution_id = ?",
+                        (baseline_id,),
+                    )
+                ).fetchone()
+            return None if row is None else _restore(row["baseline_json"])
+        except EvolutionPostRollbackTargetBaselineError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise EvolutionPostRollbackTargetBaselineError(
+                "post_rollback_target_baseline_store_corrupt",
+                "Target Baseline Resolution 损坏或无法读取。",
+            ) from exc
+
     async def record(
         self,
         baseline: EvolutionPostRollbackTargetBaseline,
@@ -639,6 +666,16 @@ def _placement_id(value: str) -> str:
         raise EvolutionPostRollbackTargetBaselineError(
             "post_rollback_target_baseline_placement_id_invalid",
             "Placement ID 格式无效。",
+        )
+    return text
+
+
+def _baseline_resolution_id(value: str) -> str:
+    text = str(value or "").strip()
+    if re.fullmatch(r"evpostbaseline_[0-9a-f]{24}", text) is None:
+        raise EvolutionPostRollbackTargetBaselineError(
+            "post_rollback_target_baseline_id_invalid",
+            "Target Baseline Resolution ID 格式无效。",
         )
     return text
 

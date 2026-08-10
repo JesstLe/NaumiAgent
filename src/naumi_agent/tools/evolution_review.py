@@ -82,6 +82,11 @@ from naumi_agent.evolution.post_rollback_remote_claims import (
     render_post_rollback_remote_claim,
     render_post_rollback_remote_claim_challenge,
 )
+from naumi_agent.evolution.post_rollback_remote_deliveries import (
+    EvolutionPostRollbackRemoteDeliveryError,
+    render_post_rollback_remote_delivery,
+    render_post_rollback_remote_delivery_offer,
+)
 from naumi_agent.evolution.post_rollback_remote_dispatches import (
     EvolutionPostRollbackRemoteDispatchError,
     render_post_rollback_remote_dispatch,
@@ -3193,6 +3198,111 @@ class EvolutionPostRollbackRemoteClaimTool(Tool):
             return f"回滚后远端 Claim 未完成（`{code}`）：{exc}"
 
 
+class EvolutionPostRollbackRemoteDeliveryTool(Tool):
+    """Prepare, inspect or acknowledge one encrypted remote baseline delivery."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_post_rollback_remote_delivery"
+
+    @property
+    def description(self) -> str:
+        return (
+            "为 current Remote Claim 生成 X25519+HKDF+AES-GCM baseline descriptor，"
+            "或验证 exact Worker Ed25519 ACK；不安装、不执行评测。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["prepare", "submit", "inspect"]},
+                "claim_id": {
+                    "type": "string",
+                    "pattern": "^evpostclaim_[0-9a-f]{24}$",
+                },
+                "delivery_id": {
+                    "type": "string",
+                    "pattern": "^evpostdelivery_[0-9a-f]{24}$",
+                },
+                "worker_signature_base64": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9+/]{86}==$",
+                },
+            },
+            "required": ["action"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="回滚后远端 Baseline 加密交付",
+            search_hint=(
+                "evolution post rollback remote baseline encrypted delivery "
+                "x25519 hkdf aes ack 自进化 回滚 远端 加密 交付"
+            ),
+        )
+
+    async def execute(
+        self,
+        action: str,
+        claim_id: str = "",
+        delivery_id: str = "",
+        worker_signature_base64: str = "",
+    ) -> str:
+        normalized = str(action or "").strip().lower()
+        try:
+            service = self._engine.evolution_post_rollback_remote_delivery_service
+            if normalized == "prepare":
+                if delivery_id or worker_signature_base64:
+                    raise ValueError("prepare 只接受 claim_id。")
+                view = await service.prepare(claim_id=str(claim_id or "").strip())
+                return render_post_rollback_remote_delivery_offer(view)
+            if normalized == "submit":
+                if claim_id:
+                    raise ValueError("submit 只接受 delivery_id 与 Worker signature。")
+                view = await service.submit_ack(
+                    delivery_id=str(delivery_id or "").strip(),
+                    worker_signature_base64=str(
+                        worker_signature_base64 or ""
+                    ).strip(),
+                )
+                return render_post_rollback_remote_delivery(view)
+            if normalized == "inspect":
+                if claim_id or worker_signature_base64:
+                    raise ValueError("inspect 只接受 delivery_id。")
+                view = await service.inspect(
+                    delivery_id=str(delivery_id or "").strip()
+                )
+                return (
+                    render_post_rollback_remote_delivery(view)
+                    if view.receipt is not None
+                    else render_post_rollback_remote_delivery_offer(view)
+                )
+            raise ValueError("action 仅支持 prepare、submit 或 inspect。")
+        except (
+            AttributeError,
+            EvolutionPostRollbackRemoteDeliveryError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "post_rollback_remote_delivery_failed")
+            return f"回滚后远端交付未完成（`{code}`）：{exc}"
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -3242,6 +3352,7 @@ def create_evolution_review_tools(
         EvolutionPostRollbackTargetBaselineTool(engine),
         EvolutionPostRollbackRemoteDispatchTool(engine),
         EvolutionPostRollbackRemoteClaimTool(engine),
+        EvolutionPostRollbackRemoteDeliveryTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -3274,6 +3385,7 @@ __all__ = [
     "EvolutionPostRollbackRemoteLanePlacementTool",
     "EvolutionPostRollbackRemoteDispatchTool",
     "EvolutionPostRollbackRemoteClaimTool",
+    "EvolutionPostRollbackRemoteDeliveryTool",
     "EvolutionPostRollbackTargetBaselineTool",
     "EvolutionPostRollbackRuntimeVerificationTool",
     "EvolutionProposalBeforeAfterEvidenceTool",

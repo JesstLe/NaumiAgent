@@ -2920,7 +2920,8 @@ def _print_help() -> None:
             "outcome-before-after|outcome-verify-runtime|"
             "outcome-verify-behavior|outcome-behavior-coverage|"
             "outcome-place-behavior|outcome-resolve-behavior|"
-            "outcome-dispatch-behavior|outcome-claim-behavior|enqueue]",
+            "outcome-dispatch-behavior|outcome-claim-behavior|"
+            "outcome-deliver-behavior|enqueue]",
             "审查 Candidate、执行回滚，并记录 Outcome、实施前后、Runtime 与行为证据",
         ),
         (
@@ -3870,6 +3871,33 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 arg="",
             )
             return
+        if action == "outcome-deliver-behavior":
+            if len(parts) < 3 or parts[1] not in {"prepare", "submit", "inspect"}:
+                raise ValueError(
+                    "outcome-deliver-behavior 需要 prepare、submit 或 inspect 子命令。"
+                )
+            operation = parts[1]
+            if operation in {"prepare", "inspect"} and len(parts) != 3:
+                raise ValueError(f"outcome-deliver-behavior {operation} 需要一个 ID。")
+            if operation == "submit" and len(parts) != 4:
+                raise ValueError(
+                    "outcome-deliver-behavior submit 需要 Delivery ID 与 Worker signature。"
+                )
+            arguments = {"action": operation}
+            if operation == "prepare":
+                arguments["claim_id"] = parts[2]
+            else:
+                arguments["delivery_id"] = parts[2]
+                if operation == "submit":
+                    arguments["worker_signature_base64"] = parts[3]
+            await _run_tool_slash_command(
+                engine,
+                slash_command="/evolution",
+                tool_name="evolution_post_rollback_remote_delivery",
+                parse_args=lambda _arg: arguments,
+                arg="",
+            )
+            return
         service = engine.evolution_review_service
         if action == "detail":
             if len(parts) != 2:
@@ -3907,7 +3935,8 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "outcome-before-after、outcome-verify-runtime、"
                 "outcome-verify-behavior、outcome-behavior-coverage、"
                 "outcome-place-behavior、outcome-resolve-behavior、"
-                "outcome-dispatch-behavior、outcome-claim-behavior 或 enqueue。"
+                "outcome-dispatch-behavior、outcome-claim-behavior、"
+                "outcome-deliver-behavior 或 enqueue。"
             )
     except ValueError as exc:
         if action == "enqueue":
@@ -4107,6 +4136,10 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution outcome-claim-behavior prepare <dispatch-id>；"
             "/evolution outcome-claim-behavior submit <challenge-id> <signature-base64>；"
             "/evolution outcome-claim-behavior renew <claim-id>；"
+            "/evolution outcome-deliver-behavior prepare <claim-id>；"
+            "/evolution outcome-deliver-behavior submit <delivery-id> "
+            "<worker-signature-base64>；"
+            "/evolution outcome-deliver-behavior inspect <delivery-id>；"
             "/evolution enqueue <candidate-id> --mission <id> --task <id> "
             "[--agent <name>]",
             style="yellow",

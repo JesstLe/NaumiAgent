@@ -214,6 +214,10 @@ from naumi_agent.evolution.post_rollback_remote_claims import (
     EvolutionPostRollbackRemoteClaimService,
     EvolutionPostRollbackRemoteClaimStore,
 )
+from naumi_agent.evolution.post_rollback_remote_deliveries import (
+    EvolutionPostRollbackRemoteDeliveryService,
+    EvolutionPostRollbackRemoteDeliveryStore,
+)
 from naumi_agent.evolution.post_rollback_remote_dispatches import (
     EvolutionPostRollbackRemoteDispatchService,
     EvolutionPostRollbackRemoteDispatchStore,
@@ -550,6 +554,8 @@ from naumi_agent.orchestrator.tool_batches import (
     execute_tool_batch,
 )
 from naumi_agent.release import (
+    ReleaseArtifactDownloadStore,
+    ReleaseArtifactFetchService,
     ReleaseChannelCatalogStore,
     ReleaseSlotStore,
     default_release_root,
@@ -2369,6 +2375,17 @@ class AgentEngine:
                 self.evolution_release_build_trust_policy_path
             ),
         )
+        self.evolution_release_artifact_download_store = (
+            ReleaseArtifactDownloadStore(
+                self.evolution_release_channel_catalog_store.db_path,
+                catalog_store=self.evolution_release_channel_catalog_store,
+            )
+        )
+        self.evolution_release_artifact_fetch_service = ReleaseArtifactFetchService(
+            download_root=release_root / "downloads",
+            catalog_store=self.evolution_release_channel_catalog_store,
+            store=self.evolution_release_artifact_download_store,
+        )
         self.evolution_revalidation_candidate_bundle_admission_service = (
             EvolutionRevalidationCandidateBundleAdmissionService(
                 workspace_root=paths.workspace_root,
@@ -2688,6 +2705,25 @@ class AgentEngine:
                 worker_registry=resources.worker_registry_store,
                 identity_authority=self.authenticated_worker_identity_authority,
                 store=self.evolution_post_rollback_remote_claim_store,
+            )
+        )
+        self.evolution_post_rollback_remote_delivery_store = (
+            EvolutionPostRollbackRemoteDeliveryStore(config.memory.session_db_path)
+        )
+        self.evolution_post_rollback_remote_delivery_service = (
+            EvolutionPostRollbackRemoteDeliveryService(
+                claim_service=self.evolution_post_rollback_remote_claim_service,
+                claim_store=self.evolution_post_rollback_remote_claim_store,
+                dispatch_service=self.evolution_post_rollback_remote_dispatch_service,
+                dispatch_store=self.evolution_post_rollback_remote_dispatch_store,
+                baseline_service=self.evolution_post_rollback_target_baseline_service,
+                baseline_store=self.evolution_post_rollback_target_baseline_store,
+                identity_authority=self.authenticated_worker_identity_authority,
+                transport_key_authority=(
+                    self.authenticated_worker_transport_key_authority
+                ),
+                artifact_fetch_service=self.evolution_release_artifact_fetch_service,
+                store=self.evolution_post_rollback_remote_delivery_store,
             )
         )
         self.evolution_proposal_outcome_projection_service = (
