@@ -152,6 +152,8 @@
   目标主机调度数；typed Reviews coverage panel 仍是后续切片，当前不得把 Contract 显示为 matrix completion。
 - HAR-09.6c2a2a 已通过 `/evolution outcome-place-behavior` 在三端显示 exact Worker incarnation 与 release
   target；回执必须保留“健康/容量未验证、无执行权”，不得显示为 queued 或 running。
+- HAR-09.6c2a2b 已通过 `/evolution outcome-resolve-behavior` 在三端显示受信 channel/target、source
+  commit/tree 与 Build Attestation；回执必须保留“未下载、未安装、未下发、无执行权”。
 - 完整行为矩阵、长期指标、promoted Outcome 和 policy learning 仍未完成。完整边界见
   `../harness/HAR-09-6a-proposal-outcome-projection.md` 与
   `../harness/HAR-09-6b-before-after-outcome-evidence.md`、

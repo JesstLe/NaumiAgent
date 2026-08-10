@@ -111,8 +111,9 @@ Worker revoke、更高 epoch takeover、Coverage lane 已被填充、active base
 
 ## 后续切片
 
-1. `HAR-09.6c2a2b / ARC-07.5h Target Baseline Resolution`：用 Placement 的 exact target 从受信任 Catalog
-   解析与本机 baseline 同 version/source commit/source tree 的 target-specific Build Attestation；
+1. [HAR-09.6c2a2b / ARC-07.5h Target Baseline Resolution](HAR-09-6c2a2b-target-baseline-resolution.md) 已用
+   Placement 的 exact target 从受信任 Catalog 解析与本机 baseline 同 version/source commit/source tree 的
+   target-specific Build Attestation，并保持未下载、未安装、无执行权；
 2. `HAR-09.6c2a3 Remote Dispatch/Claim`：验证 fresh health、容量与 lease；
 3. `HAR-09.6c2a4 Execution Authorization + Signed Result Ingestion`；
 4. `HAR-09.6c2b Post-Rollback Behavioral Matrix`。

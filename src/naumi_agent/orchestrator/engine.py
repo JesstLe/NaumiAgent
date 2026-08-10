@@ -210,6 +210,10 @@ from naumi_agent.evolution.post_rollback_runtime_verifications import (
     EvolutionPostRollbackRuntimeVerificationService,
     EvolutionPostRollbackRuntimeVerificationStore,
 )
+from naumi_agent.evolution.post_rollback_target_baselines import (
+    EvolutionPostRollbackTargetBaselineService,
+    EvolutionPostRollbackTargetBaselineStore,
+)
 from naumi_agent.evolution.promotion_package_inputs import (
     EvolutionPromotionPackageInputBuilder,
     EvolutionPromotionPackageInputExecutor,
@@ -530,9 +534,11 @@ from naumi_agent.orchestrator.tool_batches import (
     execute_tool_batch,
 )
 from naumi_agent.release import (
+    ReleaseChannelCatalogStore,
     ReleaseSlotStore,
     default_release_root,
     load_release_build_trust_policy,
+    load_release_channel_trust_policy,
 )
 from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.runs.recorder import ChatRunRecorder, ChatRunRecorderEventSink
@@ -2335,6 +2341,18 @@ class AgentEngine:
         self.evolution_release_build_trust_policy_path = (
             release_root / "trust" / "trusted-builders.json"
         )
+        self.evolution_release_channel_trust_policy_path = (
+            release_root / "trust" / "trusted-channels.json"
+        )
+        self.evolution_release_channel_catalog_store = ReleaseChannelCatalogStore(
+            release_root / "state" / "release-channel-catalog.db",
+            channel_trust_policy_provider=lambda: load_release_channel_trust_policy(
+                self.evolution_release_channel_trust_policy_path
+            ),
+            build_trust_policy_provider=lambda: load_release_build_trust_policy(
+                self.evolution_release_build_trust_policy_path
+            ),
+        )
         self.evolution_revalidation_candidate_bundle_admission_service = (
             EvolutionRevalidationCandidateBundleAdmissionService(
                 workspace_root=paths.workspace_root,
@@ -2583,6 +2601,27 @@ class AgentEngine:
                 ),
                 worker_registry=resources.worker_registry_store,
                 store=self.evolution_post_rollback_remote_lane_placement_store,
+            )
+        )
+        self.evolution_post_rollback_target_baseline_store = (
+            EvolutionPostRollbackTargetBaselineStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_post_rollback_target_baseline_service = (
+            EvolutionPostRollbackTargetBaselineService(
+                workspace_root=paths.workspace_root,
+                coverage_service=(
+                    self.evolution_post_rollback_behavioral_coverage_service
+                ),
+                placement_store=(
+                    self.evolution_post_rollback_remote_lane_placement_store
+                ),
+                placement_service=(
+                    self.evolution_post_rollback_remote_lane_placement_service
+                ),
+                catalog_store=self.evolution_release_channel_catalog_store,
+                store=self.evolution_post_rollback_target_baseline_store,
             )
         )
         self.evolution_proposal_outcome_projection_service = (

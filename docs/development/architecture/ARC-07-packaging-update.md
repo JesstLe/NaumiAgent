@@ -37,6 +37,9 @@
     session 的进程内 active-chain/environment/binary 自校验与 content-addressed identity；HAR-10.2i 已完成
     New UI/TUI runtime heartbeat exact binding，HAR-10.2j 已完成 append-only observation history；持续 window、
     exposure 与 Stage Completion 仍由 EVO-05 后续切片实现。
+  - [ARC-07.5h Target Baseline Resolution](ARC-07-5h-target-baseline-resolution.md)：已把 HAR-09 remote
+    Placement 的 exact target 绑定到 current signed Catalog，并要求目标构建与本机 baseline 的 version/source
+    commit/source tree 全等；仅提供可撤权下载输入，不下载、不安装、不执行。
 - ARC-07.6 Config/data compatibility：用户 `.naumi` 与 state 不被覆盖，迁移前备份。
 - ARC-07.7 Offline/enterprise：离线包、代理、镜像、禁用自动更新。
 - ARC-07.8 Crash/diagnostic symbols：保护源码与可诊断性的平衡。
