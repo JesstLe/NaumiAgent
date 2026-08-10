@@ -66,6 +66,8 @@ Harness DB v13 新增：
   pending/takeover 状态仍未完成；
 - EVO-04.6b 已把 escalated Decision State 真正 create 为 Harness pending authority，并把 fenced answer 绑定为
   不可变、非 promotion 的 Resolution；
+- EVO-05.5f5j 已将 `percentage → stable` mandatory manual gate 绑定到 exact Stage Completion subject，复用 owner/epoch/sequence
+  fencing、terminal user option 与 request digest；bypass 不会把工具权限冒充发布决定；
 - cancelled 已保留为合法终态，但显式 cancel authority 尚未开放；
 - 当前正文是脱敏明文而非加密存储；密钥管理与 at-rest encryption 属于 ARC-08/打包安全路线。
 

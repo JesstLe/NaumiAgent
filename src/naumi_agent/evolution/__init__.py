@@ -723,6 +723,14 @@ if TYPE_CHECKING:
         EvolutionRevalidationPercentageRuntimeExposureStore,
         EvolutionRevalidationPercentageRuntimeExposureView,
     )
+    from naumi_agent.evolution.revalidation_percentage_stage_advances import (
+        EVOLUTION_REVALIDATION_PERCENTAGE_STAGE_ADVANCE_POLICY,
+        EvolutionRevalidationPercentageStageAdvanceError,
+        EvolutionRevalidationPercentageStageAdvanceReceipt,
+        EvolutionRevalidationPercentageStageAdvanceService,
+        EvolutionRevalidationPercentageStageAdvanceStore,
+        EvolutionRevalidationPercentageStageAdvanceView,
+    )
     from naumi_agent.evolution.revalidation_percentage_stage_completions import (
         EVOLUTION_REVALIDATION_PERCENTAGE_STAGE_COMPLETION_POLICY,
         EvolutionRevalidationPercentageStageCompletion,
@@ -1326,6 +1334,12 @@ __all__ = [
     "EvolutionRevalidationPercentageRuntimeExposureService",
     "EvolutionRevalidationPercentageRuntimeExposureStore",
     "EvolutionRevalidationPercentageRuntimeExposureView",
+    "EVOLUTION_REVALIDATION_PERCENTAGE_STAGE_ADVANCE_POLICY",
+    "EvolutionRevalidationPercentageStageAdvanceError",
+    "EvolutionRevalidationPercentageStageAdvanceReceipt",
+    "EvolutionRevalidationPercentageStageAdvanceService",
+    "EvolutionRevalidationPercentageStageAdvanceStore",
+    "EvolutionRevalidationPercentageStageAdvanceView",
     "EVOLUTION_REVALIDATION_PERCENTAGE_STAGE_COMPLETION_POLICY",
     "EvolutionRevalidationPercentageStageCompletion",
     "EvolutionRevalidationPercentageStageCompletionError",
@@ -2348,6 +2362,14 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationPercentageRuntimeExposureStore",
         "EvolutionRevalidationPercentageRuntimeExposureView",
     }
+    revalidation_percentage_stage_advance_exports = {
+        "EVOLUTION_REVALIDATION_PERCENTAGE_STAGE_ADVANCE_POLICY",
+        "EvolutionRevalidationPercentageStageAdvanceError",
+        "EvolutionRevalidationPercentageStageAdvanceReceipt",
+        "EvolutionRevalidationPercentageStageAdvanceService",
+        "EvolutionRevalidationPercentageStageAdvanceStore",
+        "EvolutionRevalidationPercentageStageAdvanceView",
+    }
     revalidation_percentage_stage_completion_exports = {
         "EVOLUTION_REVALIDATION_PERCENTAGE_STAGE_COMPLETION_POLICY",
         "EvolutionRevalidationPercentageStageCompletion",
@@ -2958,6 +2980,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_percentage_observation_windows"
     elif name in revalidation_percentage_runtime_exposure_exports:
         module_name = "revalidation_percentage_runtime_exposures"
+    elif name in revalidation_percentage_stage_advance_exports:
+        module_name = "revalidation_percentage_stage_advances"
     elif name in revalidation_percentage_stage_completion_exports:
         module_name = "revalidation_percentage_stage_completions"
     elif name in revalidation_opt_in_observation_assessment_exports:
