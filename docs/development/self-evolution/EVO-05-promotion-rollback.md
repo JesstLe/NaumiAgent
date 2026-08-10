@@ -178,6 +178,9 @@
 - [EVO-05.5f5s Stable Population Candidate Preview](EVO-05-5f5s-stable-population-candidate-preview.md)：已交付；
   有界校验 durable 5f5r receipts 并按 Snapshot/member 投影跨安装候选覆盖、缺失与冲突；生产动态重验尚未组合，固定不授予
   stable rollout 或 promotion authority；
+- [EVO-05.5f5t Current Population Trust Reconciliation](EVO-05-5f5t-current-population-trust-reconciliation.md)：已交付；
+  生产按需加载 Population Registry trust artifact，动态核对 Snapshot latest/trust/expiry 与 signed credential membership；仍不把
+  current Population 冒充逐成员 5f5r current 或 stable rollout；
 - [EVO-05.6a Automatic Pause and Rollback Request](EVO-05-6a-automatic-pause-rollback-request.md)：已交付；
   exact breach 会触发或复用 kill switch，并冻结只读 exact Rollback Request，不虚报执行完成。
 - [EVO-05.6b1 Immutable Rollback Source](EVO-05-6b1-immutable-rollback-source.md)：已交付；从 exact Git

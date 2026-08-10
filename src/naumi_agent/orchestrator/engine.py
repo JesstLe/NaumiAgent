@@ -599,10 +599,12 @@ from naumi_agent.release import (
     ReleaseArtifactDownloadStore,
     ReleaseArtifactFetchService,
     ReleaseChannelCatalogStore,
+    ReleasePopulationSnapshotStore,
     ReleaseSlotStore,
     default_release_root,
     load_release_build_trust_policy,
     load_release_channel_trust_policy,
+    load_release_population_trust_policy,
 )
 from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.runs.recorder import ChatRunRecorder, ChatRunRecorderEventSink
@@ -2408,6 +2410,9 @@ class AgentEngine:
         self.evolution_release_channel_trust_policy_path = (
             release_root / "trust" / "trusted-channels.json"
         )
+        self.evolution_release_population_trust_policy_path = (
+            release_root / "trust" / "trusted-population.json"
+        )
         self.evolution_release_channel_catalog_store = ReleaseChannelCatalogStore(
             release_root / "state" / "release-channel-catalog.db",
             channel_trust_policy_provider=lambda: load_release_channel_trust_policy(
@@ -2497,10 +2502,19 @@ class AgentEngine:
                 store=self.evolution_revalidation_opt_in_runtime_health_store,
             )
         )
+        self.evolution_release_population_snapshot_store = (
+            ReleasePopulationSnapshotStore(
+                release_root / "state" / "release-population.db",
+                trust_policy_provider=lambda: load_release_population_trust_policy(
+                    self.evolution_release_population_trust_policy_path
+                ),
+            )
+        )
         self.evolution_stable_population_candidate_preview_service = (
             EvolutionStablePopulationCandidatePreviewService(
                 workspace_root=paths.workspace_root,
                 db_path=config.memory.session_db_path,
+                population_store=self.evolution_release_population_snapshot_store,
             )
         )
         self.evolution_revalidation_rollback_request_store = (

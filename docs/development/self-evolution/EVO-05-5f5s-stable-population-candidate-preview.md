@@ -64,6 +64,7 @@ Evidence ID/SHA，而不仅是展开页。
 本切片已提供跨安装成员可观测性，但没有证明 Snapshot 仍是 current trusted Population，也没有逐 member 调用 5f5r
 `inspect()` 动态复验 Plan、Baseline、Window、Outcome、ChatRun 与 heartbeat source，因此刻意命名“候选预演”。
 
-下一独立切片必须补 percentage/stable evidence 的生产只读组合，加载 current Population trust policy，并逐 member 动态
-调用 5f5r；只有 exact current Population 全员通过时，才可设计 Stable Population Completion Authority。在此之前不得接
-promotion executor。
+[EVO-05.5f5t](EVO-05-5f5t-current-population-trust-reconciliation.md) 已补生产 Population trust loader、Snapshot Store 与
+current/latest/trust/expiry/member 对账。此后仍须补 percentage/stable evidence 的生产只读组合并逐 member 动态调用 5f5r；
+只有 exact current Population 全员通过时，才可设计 Stable Population Completion Authority。在此之前不得接 promotion
+executor。

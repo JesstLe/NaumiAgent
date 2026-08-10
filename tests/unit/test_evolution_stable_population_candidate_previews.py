@@ -27,6 +27,7 @@ from naumi_agent.evolution.stable_population_candidate_previews import (
     render_stable_population_candidate_preview,
 )
 from naumi_agent.orchestrator.engine import AgentEngine
+from naumi_agent.release.population_registry import ReleasePopulationSnapshotStore
 from naumi_agent.tools.base import ToolCall, ToolRegistry, ToolResult
 from naumi_agent.tools.evolution_review import (
     EvolutionStablePopulationCandidatePreviewTool,
@@ -38,9 +39,25 @@ from tests.unit.test_evolution_revalidation_stable_execution_outcome_ledger impo
 from tests.unit.test_evolution_revalidation_stable_stage_completions import (
     _services,
 )
+from tests.unit.test_release_population_registry import (
+    T0,
+    _credentials,
+    _policy,
+    _signer,
+)
 
 
-def _passing_receipt(tmp_path: Path, index: int, *, member: int | None = None):
+def _passing_receipt(
+    tmp_path: Path,
+    index: int,
+    *,
+    member: int | None = None,
+    member_id: str | None = None,
+    snapshot_id: str = "relpopsnapshot_" + "3" * 24,
+    snapshot_sha256: str = "3" * 64,
+    snapshot_sequence: int = 7,
+    population_denominator: int = 2,
+):
     member_index = index if member is None else member
     durations = (1_000,) * 10
     costs = (1_000,) * 10
@@ -76,11 +93,11 @@ def _passing_receipt(tmp_path: Path, index: int, *, member: int | None = None):
             "binding_sha256": f"{index + 5:x}" * 64,
             "candidate_version": "1.2.3",
             "candidate_target": "darwin-arm64",
-            "population_snapshot_id": "relpopsnapshot_" + "3" * 24,
-            "population_snapshot_sha256": "3" * 64,
-            "population_snapshot_sequence": 7,
-            "population_denominator": 2,
-            "installation_member_id": f"relpopmember_{member_hex}",
+            "population_snapshot_id": snapshot_id,
+            "population_snapshot_sha256": snapshot_sha256,
+            "population_snapshot_sequence": snapshot_sequence,
+            "population_denominator": population_denominator,
+            "installation_member_id": member_id or f"relpopmember_{member_hex}",
             "exposure_percent": 100,
             "outcome_ids": outcome_ids,
             "outcome_sha256": tuple(f"{item + index + 1:x}"[-1] * 64 for item in range(10)),
@@ -146,6 +163,10 @@ async def test_candidate_preview_groups_members_without_granting_authority(
     assert preview.observed_members == preview.passing_members == 2
     assert preview.hidden_items == 1
     assert not preview.dynamic_revalidation_authority
+    assert not preview.population_snapshot_authority
+    assert "population_store_not_configured" in (
+        preview.population_invalidation_reasons
+    )
     assert not preview.stable_rollout_authority
     assert not preview.promotion_authority
     assert EvolutionStablePopulationCandidatePreview.model_validate_json(
@@ -214,6 +235,122 @@ async def test_candidate_preview_groups_members_without_granting_authority(
     with pytest.raises(EvolutionStablePopulationCandidatePreviewError) as corrupt:
         await service.preview(snapshot_id=preview.population_snapshot_id)
     assert corrupt.value.code == "stable_population_candidate_receipt_invalid"
+
+
+@pytest.mark.asyncio
+async def test_candidate_preview_reconciles_current_signed_population(
+    tmp_path: Path,
+) -> None:
+    signer = _signer()
+    credentials = _credentials(signer, count=2)
+    snapshot = signer.issue_snapshot(
+        channel="stable",
+        credentials=credentials,
+        previous=None,
+        generated_at=T0.isoformat(),
+        valid_from=(T0 + timedelta(seconds=1)).isoformat(),
+        expires_at=(T0 + timedelta(days=7)).isoformat(),
+    )
+    current_policy = [_policy(signer)]
+    population_store = ReleasePopulationSnapshotStore(
+        tmp_path / "release-population.db",
+        trust_policy_provider=lambda: current_policy[0],
+        clock=lambda: T0 + timedelta(seconds=2),
+    )
+    await population_store.record(snapshot)
+    empty_candidate = await EvolutionStablePopulationCandidatePreviewService(
+        workspace_root=tmp_path,
+        db_path=tmp_path / "empty-evolution.db",
+        population_store=population_store,
+        clock=lambda: T0 + timedelta(seconds=3),
+    ).preview(snapshot_id=snapshot.snapshot_id)
+    assert empty_candidate.status is EvolutionStablePopulationCandidateStatus.EMPTY
+    assert empty_candidate.population_denominator == 2
+    assert empty_candidate.missing_members == 2
+    assert empty_candidate.population_snapshot_authority
+    assert not empty_candidate.candidate_complete
+
+    db_path = tmp_path / "evolution.db"
+    receipts = tuple(
+        _passing_receipt(
+            tmp_path,
+            index,
+            member_id=credential.payload.member_id,
+            snapshot_id=snapshot.snapshot_id,
+            snapshot_sha256=snapshot.snapshot_sha256,
+            snapshot_sequence=snapshot.payload.sequence,
+            population_denominator=snapshot.payload.population_denominator,
+        )
+        for index, credential in enumerate(credentials, start=1)
+    )
+    await _record(db_path, *receipts)
+    service = EvolutionStablePopulationCandidatePreviewService(
+        workspace_root=tmp_path,
+        db_path=db_path,
+        population_store=population_store,
+        clock=lambda: T0 + timedelta(seconds=3),
+    )
+    evolution_before = db_path.read_bytes()
+    population_before = population_store.db_path.read_bytes()
+    current = await service.preview(snapshot_id=snapshot.snapshot_id)
+    assert db_path.read_bytes() == evolution_before
+    assert population_store.db_path.read_bytes() == population_before
+    assert current.candidate_complete
+    assert current.population_source_configured
+    assert current.population_source_current
+    assert current.population_latest_for_channel
+    assert current.population_trust_current
+    assert not current.population_not_yet_valid
+    assert current.population_membership_consistent
+    assert current.population_snapshot_authority
+    assert current.population_invalidation_reasons == ()
+    assert not current.dynamic_revalidation_authority
+    assert not current.stable_rollout_authority
+    assert not current.promotion_authority
+
+    next_snapshot = signer.issue_snapshot(
+        channel="stable",
+        credentials=credentials,
+        previous=snapshot,
+        generated_at=(T0 + timedelta(days=1)).isoformat(),
+        valid_from=(T0 + timedelta(days=1, seconds=1)).isoformat(),
+        expires_at=(T0 + timedelta(days=8)).isoformat(),
+    )
+    await population_store.record(next_snapshot)
+    stale = await service.preview(snapshot_id=snapshot.snapshot_id)
+    assert not stale.population_latest_for_channel
+    assert not stale.population_snapshot_authority
+    assert "newer_snapshot_exists" in stale.population_invalidation_reasons
+
+    current_policy[0] = _policy(signer, state="revoked")
+    revoked = await service.preview(snapshot_id=snapshot.snapshot_id)
+    assert not revoked.population_trust_current
+    assert not revoked.population_snapshot_authority
+    assert "registry_trust_changed" in revoked.population_invalidation_reasons
+
+    mismatched_db = tmp_path / "mismatched-evolution.db"
+    nonmember = _passing_receipt(
+        tmp_path,
+        3,
+        member_id="relpopmember_" + "f" * 24,
+        snapshot_id=snapshot.snapshot_id,
+        snapshot_sha256=snapshot.snapshot_sha256,
+        snapshot_sequence=snapshot.payload.sequence,
+        population_denominator=snapshot.payload.population_denominator,
+    )
+    await _record(mismatched_db, receipts[0], nonmember)
+    current_policy[0] = _policy(signer)
+    mismatched = await EvolutionStablePopulationCandidatePreviewService(
+        workspace_root=tmp_path,
+        db_path=mismatched_db,
+        population_store=population_store,
+        clock=lambda: T0 + timedelta(seconds=3),
+    ).preview(snapshot_id=snapshot.snapshot_id)
+    assert not mismatched.population_membership_consistent
+    assert not mismatched.population_snapshot_authority
+    assert "population_lineage_or_membership_mismatch" in (
+        mismatched.population_invalidation_reasons
+    )
 
 
 @pytest.mark.asyncio
@@ -305,6 +442,9 @@ async def test_engine_composes_candidate_preview_service_and_tool(tmp_path: Path
         service = engine.evolution_stable_population_candidate_preview_service
         assert service.workspace_root == tmp_path.resolve()
         assert service.db_path == db_path.resolve()
+        assert service.population_store is (
+            engine.evolution_release_population_snapshot_store
+        )
         assert "evolution_stable_population_candidate_preview" in (
             engine.tool_registry.names
         )

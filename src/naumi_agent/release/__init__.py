@@ -81,6 +81,7 @@ from naumi_agent.release.population_registry import (
     ReleasePopulationTrustPolicyDocument,
     ReleaseTrustedPopulationRegistryKey,
     create_release_population_trust_policy,
+    load_release_population_trust_policy,
     verify_release_population_credential,
     verify_release_population_snapshot,
 )
@@ -191,6 +192,7 @@ __all__ = [
     "create_release_build_trust_policy",
     "create_release_channel_trust_policy",
     "create_release_population_trust_policy",
+    "load_release_population_trust_policy",
     "default_release_root",
     "discover_runtime_identity",
     "host_release_target",

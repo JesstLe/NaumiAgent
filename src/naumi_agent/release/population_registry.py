@@ -7,6 +7,8 @@ import base64
 import hashlib
 import hmac
 import json
+import os
+import stat
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -32,6 +34,7 @@ _IDENTIFIER_RE = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
 _CHANNEL_RE = r"^[a-z][a-z0-9._-]{0,63}$"
 _MAX_MEMBERS = 10_000
 _MAX_SNAPSHOT_BYTES = 16 * 1024 * 1024
+_MAX_TRUST_POLICY_BYTES = 512 * 1024
 
 
 class ReleasePopulationRegistryError(RuntimeError):
@@ -317,6 +320,7 @@ class ReleasePopulationSnapshotView(_StrictModel):
     source_current: bool
     latest_for_channel: bool
     trust_current: bool
+    not_yet_valid: bool
     expired: bool
     invalidation_reasons: tuple[str, ...] = Field(max_length=8)
     population_snapshot_authority: bool
@@ -329,6 +333,7 @@ class ReleasePopulationSnapshotView(_StrictModel):
             self.source_current
             and self.latest_for_channel
             and self.trust_current
+            and not self.not_yet_valid
             and not self.expired
         )
         if not (
@@ -486,6 +491,65 @@ def create_release_population_trust_policy(
             "policy_sha256": digest,
         }
     )
+
+
+def load_release_population_trust_policy(
+    path: str | Path,
+) -> ReleasePopulationTrustPolicyDocument:
+    """Load one bounded installer-owned Population Registry trust root."""
+    source = Path(path).expanduser()
+    try:
+        before = source.lstat()
+        if stat.S_ISLNK(before.st_mode) or not stat.S_ISREG(before.st_mode):
+            raise ReleasePopulationRegistryError(
+                "population_trust_policy_file_invalid",
+                "Population Trust Policy 必须是普通文件，不能是符号链接。",
+            )
+        if before.st_size <= 0 or before.st_size > _MAX_TRUST_POLICY_BYTES:
+            raise ReleasePopulationRegistryError(
+                "population_trust_policy_size_invalid",
+                "Population Trust Policy 为空或超过 512 KiB。",
+            )
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(source, flags)
+        try:
+            opened = os.fstat(descriptor)
+            if not stat.S_ISREG(opened.st_mode) or (
+                before.st_dev,
+                before.st_ino,
+            ) != (opened.st_dev, opened.st_ino):
+                raise ReleasePopulationRegistryError(
+                    "population_trust_policy_changed",
+                    "打开期间 Population Trust Policy identity 发生变化。",
+                )
+            with os.fdopen(descriptor, "rb", closefd=False) as stream:
+                encoded = stream.read(_MAX_TRUST_POLICY_BYTES + 1)
+            after = os.fstat(descriptor)
+        finally:
+            os.close(descriptor)
+        if len(encoded) != before.st_size or (
+            opened.st_size,
+            opened.st_mtime_ns,
+            opened.st_ctime_ns,
+        ) != (after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+            raise ReleasePopulationRegistryError(
+                "population_trust_policy_changed",
+                "读取期间 Population Trust Policy 内容发生变化。",
+            )
+    except ReleasePopulationRegistryError:
+        raise
+    except OSError as exc:
+        raise ReleasePopulationRegistryError(
+            "population_trust_policy_unreadable",
+            "无法读取 Population Trust Policy。",
+        ) from exc
+    try:
+        return ReleasePopulationTrustPolicyDocument.model_validate_json(encoded)
+    except ValueError as exc:
+        raise ReleasePopulationRegistryError(
+            "population_trust_policy_invalid",
+            "Population Trust Policy 不是受支持的 exact artifact。",
+        ) from exc
 
 
 class ReleasePopulationSnapshotStore:
@@ -650,17 +714,26 @@ class ReleasePopulationSnapshotStore:
             trust_current = False
         if not trust_current:
             reasons.append("registry_trust_changed")
-        expired = _aware(self.clock()) >= _aware(snapshot.payload.expires_at)
+        now = _aware(self.clock())
+        not_yet_valid = now < _aware(snapshot.payload.valid_from)
+        if not_yet_valid:
+            reasons.append("snapshot_not_yet_valid")
+        expired = now >= _aware(snapshot.payload.expires_at)
         if expired:
             reasons.append("snapshot_expired")
         authority = bool(
-            source_current and latest_for_channel and trust_current and not expired
+            source_current
+            and latest_for_channel
+            and trust_current
+            and not not_yet_valid
+            and not expired
         )
         return ReleasePopulationSnapshotView(
             snapshot=snapshot,
             source_current=source_current,
             latest_for_channel=latest_for_channel,
             trust_current=trust_current,
+            not_yet_valid=not_yet_valid,
             expired=expired,
             invalidation_reasons=tuple(sorted(set(reasons))),
             population_snapshot_authority=authority,
@@ -915,6 +988,7 @@ __all__ = [
     "ReleasePopulationTrustPolicyDocument",
     "ReleaseTrustedPopulationRegistryKey",
     "create_release_population_trust_policy",
+    "load_release_population_trust_policy",
     "verify_release_population_credential",
     "verify_release_population_snapshot",
 ]

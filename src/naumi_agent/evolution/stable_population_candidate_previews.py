@@ -17,9 +17,14 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from naumi_agent.evolution.revalidation_stable_stage_completions import (
     EvolutionRevalidationStableStageCompletion,
 )
+from naumi_agent.release.population_registry import (
+    ReleasePopulationRegistryError,
+    ReleasePopulationSnapshotStore,
+    ReleasePopulationSnapshotView,
+)
 
 EVOLUTION_STABLE_POPULATION_CANDIDATE_PREVIEW_POLICY = (
-    "evolution-stable-population-candidate-preview-v1"
+    "evolution-stable-population-candidate-preview-v2"
 )
 _SNAPSHOT_RE = re.compile(r"^relpopsnapshot_[0-9a-f]{24}$")
 _MAX_POPULATION = 10_000
@@ -68,9 +73,9 @@ class EvolutionStablePopulationCandidateItem(_StrictModel):
 
 
 class EvolutionStablePopulationCandidatePreview(_StrictModel):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     policy_version: Literal[
-        "evolution-stable-population-candidate-preview-v1"
+        "evolution-stable-population-candidate-preview-v2"
     ] = EVOLUTION_STABLE_POPULATION_CANDIDATE_PREVIEW_POLICY
     preview_id: str = Field(pattern=r"^evstablepoppreview_[0-9a-f]{24}$")
     preview_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -99,6 +104,15 @@ class EvolutionStablePopulationCandidatePreview(_StrictModel):
     missing_members: int = Field(ge=0, le=_MAX_POPULATION)
     hidden_items: int = Field(ge=0, le=_MAX_POPULATION)
     integrity_conflicts: tuple[str, ...] = Field(max_length=_MAX_CONFLICTS)
+    population_source_configured: bool
+    population_source_current: bool
+    population_latest_for_channel: bool
+    population_trust_current: bool
+    population_not_yet_valid: bool
+    population_expired: bool
+    population_membership_consistent: bool
+    population_invalidation_reasons: tuple[str, ...] = Field(max_length=16)
+    population_snapshot_authority: bool
     items: tuple[EvolutionStablePopulationCandidateItem, ...] = Field(
         max_length=_MAX_DISPLAY_ITEMS
     )
@@ -117,10 +131,28 @@ class EvolutionStablePopulationCandidatePreview(_StrictModel):
         if not (
             self.observed_members == counts + self.conflicting_members
             and self.durable_receipts >= self.observed_members
+            and self.missing_members
+            == max(0, self.population_denominator - self.observed_members)
             and self.hidden_items == max(0, self.observed_members - len(self.items))
             and self.integrity_conflicts == tuple(sorted(set(self.integrity_conflicts)))
         ):
             raise ValueError("Stable Population Preview count projection 不一致。")
+        population_authority = bool(
+            self.population_source_configured
+            and bool(self.population_snapshot_id)
+            and self.population_source_current
+            and self.population_latest_for_channel
+            and self.population_trust_current
+            and not self.population_not_yet_valid
+            and not self.population_expired
+            and self.population_membership_consistent
+        )
+        if not (
+            self.population_snapshot_authority is population_authority
+            and self.population_invalidation_reasons
+            == tuple(sorted(set(self.population_invalidation_reasons)))
+        ):
+            raise ValueError("Stable Population Preview trust projection 不一致。")
         complete = bool(
             self.population_denominator > 0
             and self.observed_members == self.population_denominator
@@ -161,10 +193,16 @@ class EvolutionStablePopulationCandidatePreviewService:
         *,
         workspace_root: str | Path,
         db_path: str | Path,
+        population_store: ReleasePopulationSnapshotStore | None = None,
         clock=None,
     ) -> None:
         self.workspace_root = Path(workspace_root).expanduser().resolve(strict=True)
         self.db_path = Path(db_path).expanduser().resolve()
+        if population_store is not None and not isinstance(
+            population_store, ReleasePopulationSnapshotStore
+        ):
+            raise TypeError("Stable Population Preview 需要 Population Snapshot Store。")
+        self.population_store = population_store
         self.clock = clock or (lambda: datetime.now(UTC))
 
     async def preview(
@@ -183,14 +221,31 @@ class EvolutionStablePopulationCandidatePreviewService:
         selected_receipts = tuple(
             item for item in receipts if item.population_snapshot_id == selected
         )
+        population_view, population_error = await self._inspect_population(selected)
         return _build_preview(
             workspace_root=self.workspace_root,
             requested_snapshot_id=requested,
             snapshot_id=selected,
             receipts=selected_receipts,
+            population_store_configured=self.population_store is not None,
+            population_view=population_view,
+            population_error=population_error,
             limit=bounded_limit,
             generated_at=_aware(self.clock()).isoformat(),
         )
+
+    async def _inspect_population(
+        self,
+        snapshot_id: str,
+    ) -> tuple[ReleasePopulationSnapshotView | None, str]:
+        if not snapshot_id or self.population_store is None:
+            return None, "" if not snapshot_id else "population_store_not_configured"
+        try:
+            return await self.population_store.inspect(snapshot_id=snapshot_id), ""
+        except ReleasePopulationRegistryError as exc:
+            return None, exc.code
+        except (OSError, TypeError, ValueError):
+            return None, "population_source_unavailable"
 
     async def _read_current_rows(self, requested_snapshot_id: str) -> tuple[tuple, ...]:
         if not self.db_path.is_file():
@@ -266,6 +321,9 @@ def _build_preview(
     requested_snapshot_id: str,
     snapshot_id: str,
     receipts: tuple[EvolutionRevalidationStableStageCompletion, ...],
+    population_store_configured: bool,
+    population_view: ReleasePopulationSnapshotView | None,
+    population_error: str,
     limit: int,
     generated_at: str,
 ) -> EvolutionStablePopulationCandidatePreview:
@@ -273,15 +331,37 @@ def _build_preview(
         sorted((item.evidence_id, item.evidence_sha256) for item in receipts)
     )
     if not receipts:
+        snapshot = None if population_view is None else population_view.snapshot
+        population_denominator = (
+            0 if snapshot is None else snapshot.payload.population_denominator
+        )
+        population_reasons = (
+            set() if population_view is None else set(population_view.invalidation_reasons)
+        )
+        if population_error:
+            population_reasons.add(population_error)
+        population_membership_consistent = bool(
+            snapshot is not None and snapshot.snapshot_id == snapshot_id
+        )
+        population_authority = bool(
+            population_store_configured
+            and population_view is not None
+            and population_view.population_snapshot_authority
+            and population_membership_consistent
+        )
         return _finalize_preview(
             {
                 "source_set_sha256": source_set_sha256,
                 "workspace_root": str(workspace_root),
                 "requested_snapshot_id": requested_snapshot_id,
                 "population_snapshot_id": snapshot_id,
-                "population_snapshot_sha256": "",
-                "population_snapshot_sequence": 0,
-                "population_denominator": 0,
+                "population_snapshot_sha256": (
+                    "" if snapshot is None else snapshot.snapshot_sha256
+                ),
+                "population_snapshot_sequence": (
+                    0 if snapshot is None else snapshot.payload.sequence
+                ),
+                "population_denominator": population_denominator,
                 "candidate_version": "",
                 "candidate_target": "",
                 "plan_id": "",
@@ -293,9 +373,30 @@ def _build_preview(
                 "breached_members": 0,
                 "insufficient_members": 0,
                 "conflicting_members": 0,
-                "missing_members": 0,
+                "missing_members": population_denominator,
                 "hidden_items": 0,
                 "integrity_conflicts": [],
+                "population_source_configured": population_store_configured,
+                "population_source_current": bool(
+                    population_view and population_view.source_current
+                ),
+                "population_latest_for_channel": bool(
+                    population_view and population_view.latest_for_channel
+                ),
+                "population_trust_current": bool(
+                    population_view and population_view.trust_current
+                ),
+                "population_not_yet_valid": bool(
+                    population_view and population_view.not_yet_valid
+                ),
+                "population_expired": bool(
+                    population_view and population_view.expired
+                ),
+                "population_membership_consistent": (
+                    population_membership_consistent
+                ),
+                "population_invalidation_reasons": sorted(population_reasons),
+                "population_snapshot_authority": population_authority,
                 "items": [],
                 "candidate_complete": False,
                 "dynamic_revalidation_authority": False,
@@ -324,6 +425,47 @@ def _build_preview(
     grouped: dict[str, list[EvolutionRevalidationStableStageCompletion]] = defaultdict(list)
     for receipt in receipts:
         grouped[receipt.installation_member_id].append(receipt)
+    population_reasons = set()
+    if population_error:
+        population_reasons.add(population_error)
+    population_source_current = False
+    population_latest = False
+    population_trust = False
+    population_not_yet_valid = False
+    population_expired = False
+    membership_consistent = False
+    if population_view is not None:
+        population_source_current = population_view.source_current
+        population_latest = population_view.latest_for_channel
+        population_trust = population_view.trust_current
+        population_not_yet_valid = population_view.not_yet_valid
+        population_expired = population_view.expired
+        population_reasons.update(population_view.invalidation_reasons)
+        snapshot = population_view.snapshot
+        population_members = {
+            item.payload.member_id for item in snapshot.payload.credentials
+        }
+        membership_consistent = bool(
+            snapshot.snapshot_id == anchor.population_snapshot_id
+            and snapshot.snapshot_sha256 == anchor.population_snapshot_sha256
+            and snapshot.payload.sequence == anchor.population_snapshot_sequence
+            and snapshot.payload.population_denominator == anchor.population_denominator
+            and set(grouped).issubset(population_members)
+        )
+        if not membership_consistent:
+            population_reasons.add("population_lineage_or_membership_mismatch")
+    elif population_store_configured and not population_error:
+        population_reasons.add("population_snapshot_unavailable")
+    population_authority = bool(
+        population_store_configured
+        and population_view is not None
+        and population_source_current
+        and population_latest
+        and population_trust
+        and not population_not_yet_valid
+        and not population_expired
+        and membership_consistent
+    )
     items: list[EvolutionStablePopulationCandidateItem] = []
     conflicting_members = 0
     counts: Counter[str] = Counter()
@@ -403,6 +545,15 @@ def _build_preview(
             "missing_members": missing,
             "hidden_items": max(0, observed - len(visible)),
             "integrity_conflicts": sorted(conflicts)[:_MAX_CONFLICTS],
+            "population_source_configured": population_store_configured,
+            "population_source_current": population_source_current,
+            "population_latest_for_channel": population_latest,
+            "population_trust_current": population_trust,
+            "population_not_yet_valid": population_not_yet_valid,
+            "population_expired": population_expired,
+            "population_membership_consistent": membership_consistent,
+            "population_invalidation_reasons": sorted(population_reasons),
+            "population_snapshot_authority": population_authority,
             "items": [item.model_dump(mode="json") for item in visible],
             "candidate_complete": candidate_complete,
             "dynamic_revalidation_authority": False,
@@ -436,6 +587,10 @@ def render_stable_population_candidate_preview(
             f"缺失 {preview.missing_members}"
         ),
         "- 动态重验：**尚未接入生产组合**",
+        (
+            "- Current Population："
+            f"`{'authoritative' if preview.population_snapshot_authority else 'unavailable'}`"
+        ),
         "- Stable rollout authority：`false`",
         "- Promotion authority：`false`",
         f"- Preview receipt：`{preview.preview_id}`",
@@ -443,6 +598,16 @@ def render_stable_population_candidate_preview(
     if preview.integrity_conflicts:
         lines.extend(
             ["", "### 冲突", *[f"- `{item}`" for item in preview.integrity_conflicts]]
+        )
+    if preview.population_invalidation_reasons:
+        lines.extend(
+            [
+                "",
+                "### Population 撤权原因",
+                *[
+                    f"- `{item}`" for item in preview.population_invalidation_reasons
+                ],
+            ]
         )
     if preview.items:
         lines.extend(["", "### 成员候选"])
@@ -493,7 +658,7 @@ def _restore_row(row: tuple) -> EvolutionRevalidationStableStageCompletion:
 
 def _finalize_preview(payload: dict) -> EvolutionStablePopulationCandidatePreview:
     core = {
-        "schema_version": 1,
+        "schema_version": 2,
         "policy_version": EVOLUTION_STABLE_POPULATION_CANDIDATE_PREVIEW_POLICY,
         **payload,
     }

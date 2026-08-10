@@ -2566,7 +2566,8 @@ class EvolutionStablePopulationCandidatePreviewTool(Tool):
     def description(self) -> str:
         return (
             "有界扫描 durable Stable Stage Completion receipts，按 Population Snapshot "
-            "与安装成员去重，显示 passing、breached、insufficient、缺失和冲突；"
+            "与安装成员去重，并动态核验 current signed Population trust，显示 "
+            "passing、breached、insufficient、缺失、撤权和冲突；"
             "只生成防篡改候选预演，不授予 stable rollout 或 promotion 权限。"
         )
 
