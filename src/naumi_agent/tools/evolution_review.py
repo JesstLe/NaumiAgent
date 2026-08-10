@@ -69,6 +69,10 @@ from naumi_agent.evolution.mechanical_gates import (
     EvolutionMechanicalGateError,
     render_mechanical_gate,
 )
+from naumi_agent.evolution.post_rollback_behavioral_lanes import (
+    EvolutionPostRollbackBehavioralLaneError,
+    render_post_rollback_behavioral_lane,
+)
 from naumi_agent.evolution.post_rollback_runtime_verifications import (
     EvolutionPostRollbackRuntimeVerificationError,
     render_post_rollback_runtime_verification,
@@ -2685,6 +2689,79 @@ class EvolutionPostRollbackRuntimeVerificationTool(Tool):
         return render_post_rollback_runtime_verification(view)
 
 
+class EvolutionPostRollbackBehavioralLaneTool(Tool):
+    """Run one fresh native H5c lane against the exact installed baseline."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_post_rollback_behavioral_lane"
+
+    @property
+    def description(self) -> str:
+        return (
+            "在 rolled_back Outcome 的 exact installed baseline 上，按原 H5c "
+            "repetitions 重新执行一个 Final Evaluation lane；不聚合全部平台，"
+            "不授予学习或推广权限。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "request_id": {
+                    "type": "string",
+                    "pattern": "^evrerollbackreq_[0-9a-f]{24}$",
+                },
+                "comparison_id": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                },
+            },
+            "required": ["request_id", "comparison_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="回滚后行为验证 Lane",
+            search_hint=(
+                "evolution post rollback installed runtime behavioral h5c lane "
+                "自进化 回滚 行为 评测"
+            ),
+        )
+
+    async def execute(self, request_id: str, comparison_id: str) -> str:
+        try:
+            view = await (
+                self._engine.evolution_post_rollback_behavioral_lane_service.record(
+                    request_id=str(request_id or "").strip(),
+                    comparison_id=str(comparison_id or "").strip(),
+                )
+            )
+        except (
+            AttributeError,
+            EvolutionPostRollbackBehavioralLaneError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "post_rollback_behavioral_lane_failed")
+            return f"回滚后行为验证 Lane 未完成（`{code}`）：{exc}"
+        return render_post_rollback_behavioral_lane(view)
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -2728,6 +2805,7 @@ def create_evolution_review_tools(
         EvolutionRevalidationRollbackOutcomeTool(engine),
         EvolutionProposalBeforeAfterEvidenceTool(engine),
         EvolutionPostRollbackRuntimeVerificationTool(engine),
+        EvolutionPostRollbackBehavioralLaneTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -2755,6 +2833,7 @@ __all__ = [
     "EvolutionPromotionApprovalDecisionTool",
     "EvolutionPromotionPackageInputTool",
     "EvolutionPromotionPackageTool",
+    "EvolutionPostRollbackBehavioralLaneTool",
     "EvolutionPostRollbackRuntimeVerificationTool",
     "EvolutionProposalBeforeAfterEvidenceTool",
     "EvolutionRewardHackingEvidenceTool",

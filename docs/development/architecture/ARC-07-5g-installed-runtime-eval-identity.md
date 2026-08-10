@@ -39,7 +39,7 @@ machine 仅接受 `arm64|aarch64 -> arm64` 与 `x86_64|amd64 -> x64`。未知架
 
 ## H5c 解锁边界
 
-下一切片 HAR-09.6c2a 可以从四处组装完整且可复核的 Harness identity：
+HAR-09.6c2a 现已从四处组装完整且可复核的 Harness identity：
 
 - Source：installed slot manifest 的 `source_commit/source_tree_sha256`；
 - Configuration：原 H5c baseline 的 Suite/Profile/Policy/runner/repetitions；
@@ -60,6 +60,6 @@ machine 仅接受 `arm64|aarch64 -> arm64` 与 `x86_64|amd64 -> x64`。未知架
 
 - Windows `.exe` 与 Linux frozen binary 的真实跨平台验收仍待平台 runner；
 - runtime platform 只建立 H5c identity 前置，不代表行为恢复；
-- HAR-09.6c2a 仍需绑定 6c1 Verification、Outcome、原 H5c baseline cohort、fresh installed-runtime samples 与
-  fresh H5c comparison；
+- HAR-09.6c2a 已绑定 6c1 Verification、Outcome、原 H5c baseline cohort、fresh installed-runtime samples 与
+  fresh H5c comparison；完整跨平台矩阵仍等待 HAR-09.6c2b；
 - 长期观察窗口和 learning/promotion authority 继续关闭。

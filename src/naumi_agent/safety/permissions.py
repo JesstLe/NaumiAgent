@@ -871,6 +871,19 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         risk_level=PermissionRiskLevel.MEDIUM,
         tool_family="evolution_runtime_verification",
     ),
+    "evolution_post_rollback_behavioral_lane": PermissionRule(
+        tool_name="evolution_post_rollback_behavioral_lane",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+        max_calls_per_session=20,
+        risk_level=PermissionRiskLevel.MEDIUM,
+        tool_family="evolution_runtime_verification",
+    ),
     "workbench_govern_proposal": PermissionRule(
         tool_name="workbench_govern_proposal",
         allowed_modes=[

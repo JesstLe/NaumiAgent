@@ -77,4 +77,6 @@ Outcome 固定：
 现已把原 Final Evaluation 的 RED/GREEN 实施比较绑定回 Proposal。HAR-09.6c1 又在 active baseline 上产生新的
 boot probe 与 launcher identity，证明 installed runtime fresh mechanical recovery；它仍不是行为级或长期结果。
 ARC-07.5f/5g 已关闭“用当前 workspace import 或父进程平台冒充 installed runtime Eval identity”的 transport
-缺口。下一切片是 HAR-09.6c2a Outcome/H5c lane binding；长期指标缺失时仍禁止 `promoted` 与 policy learning。
+缺口。HAR-09.6c2a 已进一步完成 Outcome/6c1/BeforeAfter/original-H5c-bound 的单平台 fresh installed-runtime
+lane，但它不等于完整 behavioral matrix。下一切片是 HAR-09.6c2b 全 lane 聚合；长期指标缺失时仍禁止
+`promoted` 与 policy learning。
