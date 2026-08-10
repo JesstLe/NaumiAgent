@@ -442,7 +442,7 @@ def _fallback_slash_command_registry() -> list[dict[str, Any]]:
         },
         {
             "command": "/evolution",
-            "description": "审查 Candidate 或加入 Workbench 队列",
+            "description": "审查 Candidate、执行受控回滚或加入 Workbench 队列",
         },
         {
             "command": "/mode",

@@ -2,7 +2,7 @@
 
 ## 问题与目标
 
-EVO-03.7a/3.7b1/3.7b2、EVO-04.1a 至 4.7a 与 EVO-05.1a 至 5.3c 已注册二十二个非只读 Agent Tool。它们拥有真实的 durable
+EVO-03.7a/3.7b1/3.7b2、EVO-04.1a 之后与 EVO-05 已注册一组非只读 Agent Tool。它们拥有真实的 durable
 写入，但此前没有精确 `PermissionRule`，因此 normal runtime 将其判为 `UNKNOWN_TOOL`，Engine 的“所有注册
 工具均受治理”门也会失败。
 
@@ -26,7 +26,7 @@ Promotion Input、review-only Package、不可执行 Approval Requirement 或 ro
 
 Signature Tool 只创建 nonce Challenge 或验证外部 public signature；Approval Decision Tool 只聚合 current
 authority 并保持所有 Git/Promotion 字段为 false；Revalidation Request Tool 只冻结 current approved Decision
-与 exact Package，不执行 rebase、验证或 Git 写入。因此十八类
+与 exact Package，不执行 rebase、验证或 Git 写入。因此派生证据类
 派生创建为 `MEDIUM`：高于只读查询，但不逐次要求确认。Reflection 撤销与 Principal 治理均为
 `HIGH`：normal 由 PermissionChecker 确认；Principal 变更还必须完成 HAR durable interaction。bypass 按全权限
 语义跳过 PermissionChecker 确认，但不会代答 HAR。
@@ -62,23 +62,27 @@ authority 并保持所有 Git/Promotion 字段为 false；Revalidation Request T
 | `evolution_revalidation_validation_plan` | rebind RED/GREEN to current target and immutable source | `evolution_evaluation_artifact` | 50 |
 | `evolution_revalidation_runtime_contract` | bind fresh metric runners and adversarial probes | `evolution_evaluation_artifact` | 50 |
 | `evolution_revalidation_evaluation_source` | persist exact revalidation overlays for evaluation | `evolution_evaluation_artifact` | 20 |
+| `evolution_revalidation_rollback_execute` | exact-source installed-slot rollback | `evolution_release_rollback` | 20 |
 
 Independent Review 的上限更低，因为首次成功路径会调用 Reviewer 模型；durable single-flight 仍负责同一 Gate
 并发去重，权限上限负责限制一个会话内不同 Gate 的总调用面。
 
 ## 模式语义
 
-- permissive/moderate/strict：派生创建及隔离再验证允许且无逐次确认；Reflection 撤销和 Principal 治理允许但要求确认。
-- lockdown：阻断所有二十二类写入；已有只读 Authority Tool 仍按各自只读规则工作。
-- bypass：全权限直接通过，不要求确认，也不受本层 session call cap 限制。
+- permissive/moderate/strict：派生创建及隔离再验证允许且无逐次确认；Reflection 撤销、Principal 治理和真实
+  installed-slot rollback 允许但要求一次确认。
+- lockdown：阻断矩阵中的所有写入；已有只读 Authority Tool 仍按各自只读规则工作。
+- bypass：全权限直接通过，不要求确认，也不受本层 session call cap 限制；rollback 的 Source、pause、slot 与 CAS
+  mechanical gates 仍不可绕过。
 
 bypass 只绕过交互 PermissionChecker；executor 仍必须重读 authority、验证 workspace/identity/digest/budget，
 Store 冲突与 mechanical veto 仍不可被绕过。
 
 ## 验收
 
-- 十八个派生 Tool 在 permissive/moderate/strict 返回 `ALLOW + MEDIUM`，family 精确匹配；
-- Reflection 撤销与 Principal 治理在 normal 返回 `ALLOW + HIGH + confirmation`，bypass 无 PermissionChecker 确认；
+- 表中的派生证据 Tool 在 permissive/moderate/strict 返回 `ALLOW + MEDIUM`，family 精确匹配；
+- Reflection 撤销、Principal 治理与 installed-slot rollback 在 normal 返回 `ALLOW + HIGH + confirmation`，bypass
+  无 PermissionChecker 确认；
 - lockdown 返回 `MODE_BLOCKED`；
 - normal 模式达到各自上限后返回 `MAX_CALLS_EXCEEDED`；
 - bypass 在超过同一上限后仍直接允许且无确认；

@@ -7,10 +7,12 @@ import os
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import aiosqlite
 import pytest
 
+from naumi_agent.cli.slash_router import execute_slash_command
 from naumi_agent.evolution.promotion_package_inputs import (
     EVOLUTION_PROMOTION_ROLLBACK_PLAN_POLICY,
     EvolutionPromotionRollbackOperation,
@@ -43,6 +45,18 @@ from naumi_agent.evolution.revalidation_rollout_stage_entries import (
     EvolutionRevalidationRolloutControlStore,
 )
 from naumi_agent.release.slots import ReleaseSlotStore
+from naumi_agent.safety.permissions import (
+    PermissionChecker,
+    PermissionMode,
+    PermissionOutcome,
+    PermissionReasonCode,
+    PermissionRiskLevel,
+)
+from naumi_agent.tools.base import ToolCall, ToolRegistry, ToolResult
+from naumi_agent.tools.evolution_review import (
+    EvolutionRevalidationRollbackExecutionTool,
+)
+from naumi_agent.ui.command_index import build_terminal_command_index
 from tests.unit.test_release_slots import _bundle
 
 T0 = datetime(2026, 8, 10, 1, 0, tzinfo=UTC)
@@ -397,3 +411,103 @@ async def test_data_restore_requirement_blocks_pointer_switch(tmp_path: Path) ->
 
     assert blocked.value.code == "rollback_execution_data_restore_unavailable"
     assert release_store.active() == candidate_pointer
+
+
+def test_rollback_tool_permission_is_one_confirmation_and_bypass_is_direct() -> None:
+    tool = EvolutionRevalidationRollbackExecutionTool(SimpleNamespace())
+    arguments = {"request_id": "evrerollbackreq_" + "1" * 24}
+
+    guarded = PermissionChecker(PermissionMode.MODERATE).check(
+        tool.name,
+        arguments,
+        tool=tool,
+    )
+    bypass = PermissionChecker(PermissionMode.BYPASS).check(
+        tool.name,
+        arguments,
+        tool=tool,
+    )
+    blocked = PermissionChecker(PermissionMode.LOCKDOWN).check(
+        tool.name,
+        arguments,
+        tool=tool,
+    )
+
+    assert guarded.allowed
+    assert guarded.outcome is PermissionOutcome.CONFIRM
+    assert guarded.requires_confirmation
+    assert not guarded.requires_double_confirm
+    assert not guarded.allow_session_grant
+    assert guarded.risk_level is PermissionRiskLevel.HIGH
+    assert guarded.tool_family == "evolution_release_rollback"
+    assert bypass.allowed
+    assert bypass.outcome is PermissionOutcome.ALLOW
+    assert not bypass.requires_confirmation
+    assert not blocked.allowed
+    assert blocked.code is PermissionReasonCode.MODE_BLOCKED
+
+    for surface in ("new_ui", "tui"):
+        command = next(
+            item
+            for item in build_terminal_command_index(surface)
+            if item.command == "/evolution"
+        )
+        assert "revalidation-rollback-execute" in command.arguments.syntax
+        assert command.permission_risk == "tool_execution"
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(os.name == "nt", reason="fixture is a POSIX executable")
+async def test_rollback_agent_tool_and_shared_slash_return_same_durable_receipt(
+    tmp_path: Path,
+) -> None:
+    root, request, _source, _release_store, _pointer, service_factory, _db_path = (
+        await _scenario(tmp_path)
+    )
+    service = service_factory()
+    tool = EvolutionRevalidationRollbackExecutionTool(
+        SimpleNamespace(
+            workspace_root=root,
+            evolution_revalidation_rollback_execution_service=service,
+        )
+    )
+    registry = ToolRegistry()
+    registry.register(tool)
+
+    class _SlashEngine:
+        def __init__(self) -> None:
+            self.tool_registry = registry
+            self.calls: list[tuple[ToolCall, str | None]] = []
+
+        async def execute_tool(
+            self,
+            call: ToolCall,
+            *,
+            agent_name: str | None = None,
+        ) -> ToolResult:
+            self.calls.append((call, agent_name))
+            registered = self.tool_registry.get(call.name)
+            assert registered is not None
+            arguments = registered.parse_arguments(call.arguments)
+            return ToolResult(
+                call_id=call.id,
+                status="success",
+                content=await registered.execute(**arguments),
+            )
+
+    agent_result = await tool.execute(request.request_id)
+    engine = _SlashEngine()
+    slash_result = await execute_slash_command(
+        engine,
+        f"/evolution revalidation-rollback-execute {request.request_id}",
+    )
+
+    receipt = await service.store.get_by_request(request.request_id)
+    assert receipt is not None
+    assert receipt.receipt_id in agent_result
+    assert receipt.receipt_id in slash_result
+    assert "Candidate → Baseline" in agent_result
+    assert "本回执不授予 promotion 权限" in slash_result
+    assert len(engine.calls) == 1
+    assert engine.calls[0][0].name == "evolution_revalidation_rollback_execute"
+    assert engine.calls[0][1] == "cli"

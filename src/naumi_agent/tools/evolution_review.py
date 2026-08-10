@@ -104,6 +104,10 @@ from naumi_agent.evolution.revalidation_requests import (
     EvolutionRevalidationRequestError,
     render_evolution_revalidation_request,
 )
+from naumi_agent.evolution.revalidation_rollback_executions import (
+    EvolutionRevalidationRollbackExecutionError,
+    render_revalidation_rollback_execution,
+)
 from naumi_agent.evolution.revalidation_runtime_contracts import (
     EvolutionRevalidationRuntimeContractError,
     render_evolution_revalidation_runtime_contract,
@@ -2402,6 +2406,74 @@ class EvolutionRevalidationRuntimeContractTool(Tool):
         return render_evolution_revalidation_runtime_contract(view)
 
 
+class EvolutionRevalidationRollbackExecutionTool(Tool):
+    """Execute one exact-source, authority-bound installed-slot rollback."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_revalidation_rollback_execute"
+
+    @property
+    def description(self) -> str:
+        return (
+            "消费 exact Rollback Request 与 immutable Source，在 paused kill switch 下"
+            "以 expected-pointer CAS 原子切回已验证 baseline slot，并返回 durable Receipt。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "request_id": {
+                    "type": "string",
+                    "pattern": "^evrerollbackreq_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["request_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=True,
+            concurrency_safe=True,
+            requires_confirmation=True,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="Evolution 受控版本槽回滚",
+            search_hint=(
+                "evolution revalidation rollback installed slot baseline receipt "
+                "自进化 回滚 版本槽"
+            ),
+        )
+
+    async def execute(self, request_id: str) -> str:
+        normalized = str(request_id or "").strip()
+        try:
+            view = (
+                await self._engine.evolution_revalidation_rollback_execution_service.execute(
+                    request_id=normalized,
+                )
+            )
+        except (
+            AttributeError,
+            EvolutionRevalidationRollbackExecutionError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "rollback_execution_failed")
+            return f"Evolution 受控版本槽回滚未完成（`{code}`）：{exc}"
+        return render_revalidation_rollback_execution(view)
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -2441,6 +2513,7 @@ def create_evolution_review_tools(
         EvolutionRevalidationEvaluationSourceTool(engine),
         EvolutionRevalidationValidationPlanTool(engine),
         EvolutionRevalidationRuntimeContractTool(engine),
+        EvolutionRevalidationRollbackExecutionTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -2477,6 +2550,7 @@ __all__ = [
     "EvolutionRevalidationEvaluationSourceTool",
     "EvolutionRevalidationValidationPlanTool",
     "EvolutionRevalidationRuntimeContractTool",
+    "EvolutionRevalidationRollbackExecutionTool",
     "EvolutionRevalidationReplayTool",
     "EvolutionReflectionMemoryRevokeTool",
     "EvolutionReflectionMemoryTool",

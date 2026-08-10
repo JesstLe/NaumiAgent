@@ -170,6 +170,9 @@
 - [EVO-05.6b2a Fenced Installed-Slot Rollback](EVO-05-6b2a-fenced-slot-rollback.md)：已交付；消费 exact
   Request/Source/Plan，以 v3 authority-bound pointer 和 expected-pointer CAS 回滚 binary bundle，支持 Receipt 写入
   崩溃恢复与 post-rollback Launch Resolution；需要配置/数据恢复时等待 ARC-07.6 并失败关闭。
+- [EVO-05.6b2a1 Explicit Rollback Action](EVO-05-6b2a1-explicit-rollback-action.md)：已交付；Agent Tool 与
+  `/evolution revalidation-rollback-execute` 共用 Engine 权限管线和同一执行服务，normal 单次确认、bypass 直接执行，
+  New UI/TUI 显示同一 durable Receipt。
 - EVO-05.6b2b Config/Data Rollback：消费 ARC-07.6 snapshot/migration authority，完成需要数据保护的兼容回滚。
 - EVO-05.7 Outcome record：promoted/rolled_back/superseded 与长期指标。
 
