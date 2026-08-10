@@ -101,6 +101,12 @@ from naumi_agent.evolution.post_rollback_remote_lane_placements import (
     EvolutionPostRollbackRemoteLanePlacementError,
     render_post_rollback_remote_lane_placement,
 )
+from naumi_agent.evolution.post_rollback_remote_results import (
+    MAX_REMOTE_RESULT_MANIFEST_BYTES,
+    EvolutionPostRollbackRemoteResultError,
+    EvolutionPostRollbackRemoteResultManifest,
+    render_post_rollback_remote_result,
+)
 from naumi_agent.evolution.post_rollback_runtime_verifications import (
     EvolutionPostRollbackRuntimeVerificationError,
     render_post_rollback_runtime_verification,
@@ -3425,6 +3431,94 @@ class EvolutionPostRollbackRemoteExecutionAuthorizationTool(Tool):
             return f"回滚后远端执行授权未完成（`{code}`）：{exc}"
 
 
+class EvolutionPostRollbackRemoteResultTool(Tool):
+    """Ingest or inspect one Worker-signed remote Runtime Eval cohort."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_post_rollback_remote_result"
+
+    @property
+    def description(self) -> str:
+        return (
+            "验证 exact Worker Ed25519 签名与 execution authorization，原子准入"
+            "完整 Runtime Eval cohort，并写入 canonical H5a/H5c；不授予学习或晋升权。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["submit", "inspect"]},
+                "manifest_json": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": MAX_REMOTE_RESULT_MANIFEST_BYTES,
+                },
+                "manifest_id": {
+                    "type": "string",
+                    "pattern": "^evpostresultmanifest_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["action"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="回滚后远端结果接收",
+            search_hint=(
+                "evolution post rollback remote signed result ingestion h5a h5c "
+                "自进化 回滚 远端 签名 结果 接收"
+            ),
+        )
+
+    async def execute(
+        self,
+        action: str,
+        manifest_json: str = "",
+        manifest_id: str = "",
+    ) -> str:
+        normalized = str(action or "").strip().lower()
+        try:
+            service = self._engine.evolution_post_rollback_remote_result_service
+            if normalized == "submit":
+                if manifest_id:
+                    raise ValueError("submit 只接受 manifest_json。")
+                manifest = EvolutionPostRollbackRemoteResultManifest.model_validate_json(
+                    str(manifest_json or "")
+                )
+                view = await service.submit(manifest=manifest)
+                return render_post_rollback_remote_result(view)
+            if normalized == "inspect":
+                if manifest_json:
+                    raise ValueError("inspect 只接受 manifest_id。")
+                view = await service.inspect(manifest_id=str(manifest_id or "").strip())
+                return render_post_rollback_remote_result(view)
+            raise ValueError("action 仅支持 submit 或 inspect。")
+        except (
+            AttributeError,
+            EvolutionPostRollbackRemoteResultError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "post_rollback_remote_result_failed")
+            return f"回滚后远端结果接收未完成（`{code}`）：{exc}"
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -3476,6 +3570,7 @@ def create_evolution_review_tools(
         EvolutionPostRollbackRemoteClaimTool(engine),
         EvolutionPostRollbackRemoteDeliveryTool(engine),
         EvolutionPostRollbackRemoteExecutionAuthorizationTool(engine),
+        EvolutionPostRollbackRemoteResultTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -3510,6 +3605,7 @@ __all__ = [
     "EvolutionPostRollbackRemoteClaimTool",
     "EvolutionPostRollbackRemoteDeliveryTool",
     "EvolutionPostRollbackRemoteExecutionAuthorizationTool",
+    "EvolutionPostRollbackRemoteResultTool",
     "EvolutionPostRollbackTargetBaselineTool",
     "EvolutionPostRollbackRuntimeVerificationTool",
     "EvolutionProposalBeforeAfterEvidenceTool",

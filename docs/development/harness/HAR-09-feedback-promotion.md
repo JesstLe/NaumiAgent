@@ -104,6 +104,10 @@
 - HAR-09.6c2a1 已把完整 Final Evaluation lane 集冻结为 Coverage Contract，动态区分 recorded/missing/stale，
   并显式标记本机可执行与必须由目标主机执行的 lane。该 Contract 固定无 execution/learning/promotion authority；
   详见 `HAR-09-6c2a1-post-rollback-behavioral-coverage.md`。
+- HAR-09.6c2a2a-6c2a3f 已补齐 target placement/baseline、durable health/capacity、authenticated claim、
+  encrypted delivery、execution authorization 与 signed result ingestion。Control Plane 在 current authorization
+  窗口内原子准入完整 typed cohort，并复用 canonical H5a/H5c；单个 remote lane 仍固定无矩阵、learning 或
+  promotion authority，下一步由 HAR-09.6c2b 验证并聚合完整 Behavioral Matrix。
 
 EVO-02.1b 已把不可执行 Contract 包装为 workspace-bound durable Authority；HAR-09.5c 在其上补齐产品动作、
 Proposal 单飞键和历史 projection 迁移。Contract 仍不是执行或 promotion 许可。

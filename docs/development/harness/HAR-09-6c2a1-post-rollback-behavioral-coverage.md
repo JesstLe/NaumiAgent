@@ -133,7 +133,7 @@ authority：
    baseline source/version 等价的目标平台 artifact，不能只按版本字符串匹配；
 3. `HAR-09.6c2a3 Remote Lane Dispatch + Claim`：绑定容量、健康、身份和 lease；
 4. `HAR-09.6c2a3e Remote Execution Authorization` 已复用远程 revalidation 的 permission/run-grant/Ed25519
-   模式并使用独立 post-rollback domain；Signed Result Ingestion 由 6c2a3f 继续；
+   模式并使用独立 post-rollback domain；Signed Result Ingestion 已由 6c2a3f 完成；
 5. `HAR-09.6c2b Post-Rollback Behavioral Matrix`：集合完整性、跨 lane verdict 与
    `behavioral_evaluation_recorded=true`；
 6. Workbench/New UI/TUI typed coverage 详情投影；

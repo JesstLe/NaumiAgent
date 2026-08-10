@@ -2921,7 +2921,8 @@ def _print_help() -> None:
             "outcome-verify-behavior|outcome-behavior-coverage|"
             "outcome-place-behavior|outcome-resolve-behavior|"
             "outcome-dispatch-behavior|outcome-claim-behavior|"
-            "outcome-deliver-behavior|outcome-authorize-behavior|enqueue]",
+            "outcome-deliver-behavior|outcome-authorize-behavior|"
+            "outcome-ingest-behavior|enqueue]",
             "审查 Candidate、执行回滚，并记录 Outcome、实施前后、Runtime 与行为证据",
         ),
         (
@@ -3927,6 +3928,25 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 arg="",
             )
             return
+        if action == "outcome-ingest-behavior":
+            if len(parts) != 3 or parts[1] not in {"submit", "inspect"}:
+                raise ValueError(
+                    "outcome-ingest-behavior 需要 submit 或 inspect 子命令与一个参数。"
+                )
+            operation = parts[1]
+            arguments = {"action": operation}
+            if operation == "submit":
+                arguments["manifest_json"] = parts[2]
+            else:
+                arguments["manifest_id"] = parts[2]
+            await _run_tool_slash_command(
+                engine,
+                slash_command="/evolution",
+                tool_name="evolution_post_rollback_remote_result",
+                parse_args=lambda _arg: arguments,
+                arg="",
+            )
+            return
         service = engine.evolution_review_service
         if action == "detail":
             if len(parts) != 2:
@@ -3965,7 +3985,8 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "outcome-verify-behavior、outcome-behavior-coverage、"
                 "outcome-place-behavior、outcome-resolve-behavior、"
                 "outcome-dispatch-behavior、outcome-claim-behavior、"
-                "outcome-deliver-behavior、outcome-authorize-behavior 或 enqueue。"
+                "outcome-deliver-behavior、outcome-authorize-behavior、"
+                "outcome-ingest-behavior 或 enqueue。"
             )
     except ValueError as exc:
         if action == "enqueue":
@@ -4173,6 +4194,8 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution outcome-authorize-behavior submit <start-challenge-id> "
             "<worker-signature-base64>；"
             "/evolution outcome-authorize-behavior inspect <reference-id>；"
+            "/evolution outcome-ingest-behavior submit '<manifest-json>'；"
+            "/evolution outcome-ingest-behavior inspect <manifest-id>；"
             "/evolution enqueue <candidate-id> --mission <id> --task <id> "
             "[--agent <name>]",
             style="yellow",

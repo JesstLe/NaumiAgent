@@ -114,4 +114,4 @@ Ed25519、X25519、HKDF、AES-GCM、Worker Registry、Claim 与 SQLite 验证：
 
 `HAR-09.6c2a3e` 已建立 execution authorization：绑定 current Delivery receipt、current Claim lease、Eval Suite、
 resource budget、attempt identity、父权限、Run Grant 与 start deadline。Worker 必须在执行前再次签署 start challenge；
-delivery receipt 本身仍永远不能直接启动 Eval。下一步由 6c2a3f 接收 exact authorization 下的签名结果。
+delivery receipt 本身仍永远不能直接启动 Eval。6c2a3f 已接收 exact authorization 下的签名结果；下一步由 6c2b 聚合矩阵。

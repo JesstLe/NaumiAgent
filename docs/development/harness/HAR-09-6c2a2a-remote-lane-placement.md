@@ -115,5 +115,5 @@ Worker revoke、更高 epoch takeover、Coverage lane 已被填充、active base
    Placement 的 exact target 从受信任 Catalog 解析与本机 baseline 同 version/source commit/source tree 的
    target-specific Build Attestation，并保持未下载、未安装、无执行权；
 2. `HAR-09.6c2a3 Remote Dispatch/Claim`：验证 fresh health、容量与 lease；
-3. `HAR-09.6c2a3e Execution Authorization` 已完成；Signed Result Ingestion 由 6c2a3f 继续；
+3. `HAR-09.6c2a3e Execution Authorization` 与 `6c2a3f Signed Result Ingestion` 已完成；
 4. `HAR-09.6c2b Post-Rollback Behavioral Matrix`。

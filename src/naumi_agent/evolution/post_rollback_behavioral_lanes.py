@@ -49,6 +49,7 @@ from naumi_agent.harness.eval_statistics import EvalStatisticalVerdict
 from naumi_agent.harness.eval_suite_compare import EvalMechanicalVerdict
 from naumi_agent.harness.store import (
     HarnessStore,
+    HarnessStoreConflictError,
     HarnessStoredEvalResult,
     HarnessStoreError,
 )
@@ -746,6 +747,127 @@ class EvolutionPostRollbackBehavioralLaneService:
                 "Fresh post-rollback H5c Comparison 无法持久化。",
             ) from exc
         return tuple(receipts), tuple(records), fresh.receipt
+
+    async def validate_remote_runtime_receipts(
+        self,
+        *,
+        request_id: str,
+        comparison_id: str,
+        receipts: tuple[ReleaseRuntimeEvalReceipt, ...],
+    ) -> None:
+        """Validate a complete remote cohort without creating durable H5 evidence."""
+        await self._prepare_remote_runtime_receipts(
+            request_id=request_id,
+            comparison_id=comparison_id,
+            receipts=receipts,
+        )
+
+    async def record_remote_runtime_receipts(
+        self,
+        *,
+        request_id: str,
+        comparison_id: str,
+        batch_id: str,
+        receipts: tuple[ReleaseRuntimeEvalReceipt, ...],
+    ) -> tuple[tuple[HarnessStoredEvalResult, ...], HarnessEvalComparisonReceipt]:
+        """Record an already-admitted remote cohort through the canonical H5a/H5c path."""
+        original, baseline, baseline_records, results = (
+            await self._prepare_remote_runtime_receipts(
+                request_id=request_id,
+                comparison_id=comparison_id,
+                receipts=receipts,
+            )
+        )
+        records: list[HarnessStoredEvalResult] = []
+        for index, (receipt, result) in enumerate(zip(receipts, results, strict=True)):
+            try:
+                stored = await self.harness_store.record_eval_result(
+                    workspace_root=self.workspace_root,
+                    batch_id=batch_id,
+                    sample_index=index,
+                    result=result,
+                    created_at=receipt.evaluated_at,
+                )
+            except HarnessStoreConflictError as exc:
+                raise EvolutionPostRollbackBehavioralLaneError(
+                    "post_rollback_remote_h5a_conflict",
+                    "Remote Runtime result 与既有 H5a sample 冲突。",
+                ) from exc
+            except (HarnessStoreError, OSError, TypeError, ValueError) as exc:
+                raise EvolutionPostRollbackBehavioralLaneError(
+                    "post_rollback_remote_h5a_store_failed",
+                    "Remote Runtime result 无法写入 H5a。",
+                ) from exc
+            records.append(stored)
+        built = build_eval_comparison_receipt(
+            workspace_root=self.workspace_root,
+            suite_id=original.receipt.suite_id,
+            baseline_id=baseline.id,
+            baseline_batch_id=baseline.batch_id,
+            baseline_samples_sha256=baseline.samples_sha256,
+            baseline_samples=_samples(baseline_records),
+            current_batch_id=batch_id,
+            current_samples=_samples(tuple(records)),
+            created_at=max(_aware(item.created_at) for item in records).isoformat(),
+        )
+        try:
+            fresh = await self.harness_store.record_eval_comparison_receipt(built)
+        except (HarnessStoreError, TypeError, ValueError) as exc:
+            raise EvolutionPostRollbackBehavioralLaneError(
+                "post_rollback_remote_h5c_store_failed",
+                "Remote Runtime cohort 无法写入 H5c Comparison。",
+            ) from exc
+        return tuple(records), fresh.receipt
+
+    async def _prepare_remote_runtime_receipts(
+        self,
+        *,
+        request_id: str,
+        comparison_id: str,
+        receipts: tuple[ReleaseRuntimeEvalReceipt, ...],
+    ):
+        request = _request_id(request_id)
+        comparison = _comparison_id(comparison_id)
+        sources = await self._sources(
+            request,
+            comparison,
+            require_active=True,
+            create=True,
+        )
+        lane = sources["selected_lane"]
+        runtime_request = load_post_rollback_runtime_eval_request(
+            self.workspace_root,
+            lane.suite_id,
+        )
+        original, baseline, baseline_records = await self._original_h5c(lane)
+        _validate_original_suite(runtime_request, original, baseline_records)
+        if not (
+            len(receipts) == len(baseline_records)
+            and 5 <= len(receipts) <= 100
+            and all(item.request == runtime_request for item in receipts)
+        ):
+            raise EvolutionPostRollbackBehavioralLaneError(
+                "post_rollback_remote_runtime_cohort_incomplete",
+                "Remote Runtime receipt 必须完整覆盖原 H5c repetitions。",
+            )
+        slot = sources["slot"]
+        try:
+            results = tuple(
+                _runtime_result(
+                    slot=slot,
+                    request=runtime_request,
+                    receipt=receipt,
+                    baseline_result=baseline_records[0].result,
+                    repetitions=len(baseline_records),
+                )
+                for receipt in receipts
+            )
+        except (TypeError, ValueError) as exc:
+            raise EvolutionPostRollbackBehavioralLaneError(
+                "post_rollback_remote_runtime_receipt_invalid",
+                "Remote Runtime receipt 无法投影为 canonical H5a。",
+            ) from exc
+        return original, baseline, baseline_records, results
 
 
 def render_post_rollback_behavioral_lane(
