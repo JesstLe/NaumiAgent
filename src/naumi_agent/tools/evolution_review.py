@@ -215,6 +215,10 @@ from naumi_agent.evolution.stable_rollback_readiness import (
     EvolutionStableRollbackReadinessError,
     render_stable_rollback_readiness,
 )
+from naumi_agent.evolution.stable_rollout_authorizations import (
+    EvolutionStableRolloutAuthorizationError,
+    render_stable_rollout_authorization,
+)
 from naumi_agent.evolution.store import EvolutionStoreError
 from naumi_agent.tools.base import Tool, ToolMetadata
 
@@ -2798,6 +2802,91 @@ class EvolutionStableRollbackReadinessTool(Tool):
         return render_stable_rollback_readiness(readiness)
 
 
+class EvolutionStableRolloutAuthorizationTool(Tool):
+    """Issue or inspect one member-scoped stable rollout capability."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_stable_rollout_authorization"
+
+    @property
+    def description(self) -> str:
+        return (
+            "为 exact current Population Completion 中的单个 member 签发或重验短期、"
+            "single-use、binary-only Stable Rollout Authorization；绑定 rollback "
+            "readiness 与 kill-switch generation，不授予配置/数据或 promotion 权限。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["issue", "inspect"]},
+                "completion_receipt_id": {"type": "string"},
+                "intent_id": {"type": "string"},
+                "authorization_id": {"type": "string"},
+                "validity_seconds": {
+                    "type": "integer",
+                    "minimum": 60,
+                    "maximum": 900,
+                },
+            },
+            "required": ["action"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="Stable Rollout 授权",
+            search_hint=(
+                "evolution stable rollout authorization 自进化 稳定发布 授权"
+            ),
+        )
+
+    async def execute(
+        self,
+        action: str,
+        completion_receipt_id: str = "",
+        intent_id: str = "",
+        authorization_id: str = "",
+        validity_seconds: int = 300,
+    ) -> str:
+        try:
+            service = self._engine.evolution_stable_rollout_authorization_service
+            if action == "issue":
+                view = await service.issue(
+                    completion_receipt_id=completion_receipt_id,
+                    intent_id=intent_id,
+                    validity_seconds=validity_seconds,
+                )
+            elif action == "inspect":
+                view = await service.inspect(authorization_id=authorization_id)
+            else:
+                raise ValueError("action 必须是 issue 或 inspect。")
+        except (
+            AttributeError,
+            EvolutionStableRolloutAuthorizationError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "stable_rollout_authorization_failed")
+            return f"Stable Rollout Authorization 不可用（`{code}`）：{exc}"
+        return render_stable_rollout_authorization(view)
+
+
 class EvolutionRevalidationRollbackOutcomeTool(Tool):
     """Record one proposal-bound historical rollback Outcome."""
 
@@ -4200,6 +4289,7 @@ def create_evolution_review_tools(
         EvolutionStablePopulationCandidatePreviewTool(engine),
         EvolutionStablePopulationCompletionTool(engine),
         EvolutionStableRollbackReadinessTool(engine),
+        EvolutionStableRolloutAuthorizationTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -4255,6 +4345,7 @@ __all__ = [
     "EvolutionStablePopulationCandidatePreviewTool",
     "EvolutionStablePopulationCompletionTool",
     "EvolutionStableRollbackReadinessTool",
+    "EvolutionStableRolloutAuthorizationTool",
     "EvolutionRevalidationRollbackExecutionTool",
     "EvolutionRevalidationRollbackOutcomeTool",
     "EvolutionRevalidationReplayTool",

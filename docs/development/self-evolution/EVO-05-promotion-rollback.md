@@ -193,6 +193,9 @@
 - [EVO-05.5f5x1 Stable Rollback Readiness](EVO-05-5f5x1-stable-rollback-readiness.md)：已交付；
   current Completion/Deployment 与真实 active/prior pointer、retained slot 和原始 Boot Receipt 形成 binary-only readiness；不预造
   breach-only Rollback Request，配置/数据、stable rollout 与 promotion authority 仍关闭；
+- [EVO-05.5f5x2 Stable Rollout Authorization](EVO-05-5f5x2-stable-rollout-authorization.md)：已交付；
+  member-scoped、短期、single-use、binary-only authority 绑定 Completion/Readiness/control generation；尚未执行 finalization，
+  配置/数据和 promotion authority 关闭；
 - [EVO-05.6a Automatic Pause and Rollback Request](EVO-05-6a-automatic-pause-rollback-request.md)：已交付；
   exact breach 会触发或复用 kill switch，并冻结只读 exact Rollback Request，不虚报执行完成。
 - [EVO-05.6b1 Immutable Rollback Source](EVO-05-6b1-immutable-rollback-source.md)：已交付；从 exact Git

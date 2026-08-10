@@ -648,6 +648,11 @@ async def test_engine_composes_candidate_preview_service_and_tool(
         )
         assert not service.stage_completion_inspector.initialized
         assert "evolution_stable_rollback_readiness" in engine.tool_registry.names
+        assert (
+            engine.evolution_stable_rollout_authorization_service.store
+            is engine.evolution_stable_rollout_authorization_store
+        )
+        assert "evolution_stable_rollout_authorization" in engine.tool_registry.names
         result = await engine.execute_tool(
             ToolCall(
                 id="stable-population-preview-engine",

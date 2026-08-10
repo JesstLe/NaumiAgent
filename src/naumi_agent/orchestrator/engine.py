@@ -503,6 +503,10 @@ from naumi_agent.evolution.stable_rollback_readiness import (
     EvolutionStableDeploymentInspectionPort,
     EvolutionStableRollbackReadinessService,
 )
+from naumi_agent.evolution.stable_rollout_authorizations import (
+    EvolutionStableRolloutAuthorizationService,
+    EvolutionStableRolloutAuthorizationStore,
+)
 from naumi_agent.evolution.static_guards import EvolutionStaticGuard
 from naumi_agent.evolution.validation_cohorts import (
     EvolutionBaselineCohortRequestBuilder,
@@ -2597,6 +2601,18 @@ class AgentEngine:
                     self.evolution_stable_deployment_inspector
                 ),
                 release_slot_store=self.evolution_release_slot_store,
+            )
+        )
+        self.evolution_stable_rollout_authorization_store = (
+            EvolutionStableRolloutAuthorizationStore(config.memory.session_db_path)
+        )
+        self.evolution_stable_rollout_authorization_service = (
+            EvolutionStableRolloutAuthorizationService(
+                workspace_root=paths.workspace_root,
+                completion_inspector=self.evolution_stable_population_completion_service,
+                readiness_inspector=self.evolution_stable_rollback_readiness_service,
+                control_store=self.evolution_revalidation_rollout_control_store,
+                store=self.evolution_stable_rollout_authorization_store,
             )
         )
         self.evolution_revalidation_rollback_request_store = (

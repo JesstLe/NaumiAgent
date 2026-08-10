@@ -231,6 +231,8 @@ source 或动态重验变化会立即撤权。stable rollout 与 promotion autho
 [EVO-05.5f5x1](EVO-05-5f5x1-stable-rollback-readiness.md) 已交付：将 current Completion、current Stable Deployment、
 真实 active pointer、retained prior slot 与原始 Boot Receipt 绑定为 content-addressed binary rollback readiness；配置/数据、stable
 rollout 与 promotion authority 仍关闭，健康 rollout 不误用 breach-only Rollback Request。
+[EVO-05.5f5x2](EVO-05-5f5x2-stable-rollout-authorization.md) 已交付：按 member 将 Completion、Readiness 与
+kill-switch generation 冻结为短期 single-use binary-only Authorization；配置/数据与 promotion authority 关闭，尚未执行 finalization。
 [EVO-05.6a](EVO-05-6a-automatic-pause-rollback-request.md) 已让 exact breach 幂等触发或复用 HMAC kill switch，并冻结
 绑定 exact prior Rollback Plan 的只读 Request；它不写 workspace/Git，也不把请求虚报成已回滚。
 [EVO-05.6b1](EVO-05-6b1-immutable-rollback-source.md) 已从 exact Git commit/tree 读取 baseline blob，验证每个

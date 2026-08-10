@@ -105,5 +105,6 @@ Readiness 不持久化为新的 durable receipt；它是针对 current sources �
 - binary readiness 不等于 config/data safety。5f5x2 必须显式判断 candidate 是否需要 migration/snapshot；需要时必须等待
   ARC-07.6 authority，不能把本切片的 false 升格为 true。
 - 本地 Readiness 没有 exporter/signature envelope，不可作为跨控制面凭据。
-- 下一最小切片是 EVO-05.5f5x2：将 current 5f5w Completion、current 5f5x1 Readiness、current kill-switch generation、短期
-  expiry 和 single-use nonce 绑定为 Stable Rollout Authorization；Promotion authority 继续独立。
+- [EVO-05.5f5x2](EVO-05-5f5x2-stable-rollout-authorization.md) 已将 current Completion、Readiness、kill-switch
+  generation、短期 expiry 和 single-use nonce 绑定为 member-scoped binary-only Authorization；executor 与 Promotion authority
+  继续独立。
