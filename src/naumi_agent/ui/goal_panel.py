@@ -58,12 +58,33 @@ class TerminalOutboxCounts(BaseModel):
         return self
 
 
+class TerminalOutboxDeadLetterItem(BaseModel):
+    """Identity-redacted review target for one authenticated dead letter."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    dead_letter_id: str = Field(pattern=r"^ptfail_[0-9a-f]{24}$")
+    disposition: Literal["retry_exhausted", "permanent"]
+    failure_code: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")
+    failure_attempts: int = Field(ge=1, le=1000)
+    total_claim_attempts: int = Field(ge=1, le=1_000_000)
+    occurred_at: str = Field(min_length=1, max_length=64)
+    manual_review_required: Literal[True] = True
+
+    @model_validator(mode="after")
+    def _time_is_aware(self) -> TerminalOutboxDeadLetterItem:
+        _parse_aware(self.occurred_at)
+        if self.total_claim_attempts < self.failure_attempts:
+            raise ValueError("terminal outbox dead-letter 认领次数小于失败次数。")
+        return self
+
+
 class TerminalOutboxProjection(BaseModel):
     """Typed Goal-page projection of the automatic terminal recovery service."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schema_version: Literal[2] = 2
+    schema_version: Literal[3] = 3
     enabled: bool
     status: Literal[
         "idle", "recovering", "backoff", "degraded", "disabled", "unavailable"
@@ -81,6 +102,8 @@ class TerminalOutboxProjection(BaseModel):
     next_delay_seconds: float = Field(ge=0, le=604_800)
     failure_codes: tuple[str, ...] = Field(max_length=8)
     warning: str = Field(max_length=500)
+    dead_letters: tuple[TerminalOutboxDeadLetterItem, ...] = Field(max_length=20)
+    dead_letters_truncated: bool
 
     @model_validator(mode="after")
     def _state_is_coherent(self) -> TerminalOutboxProjection:
@@ -97,6 +120,16 @@ class TerminalOutboxProjection(BaseModel):
             raise ValueError("terminal outbox unavailable 必须说明原因。")
         if self.status == "degraded" and not self.failure_codes:
             raise ValueError("terminal outbox degraded 必须包含 failure code。")
+        ids = [item.dead_letter_id for item in self.dead_letters]
+        if len(ids) != len(set(ids)):
+            raise ValueError("terminal outbox dead-letter 目标不得重复。")
+        if len(self.dead_letters) > self.counts.dead_letter:
+            raise ValueError("terminal outbox dead-letter 目录超过总数。")
+        if self.dead_letters_truncated:
+            if len(self.dead_letters) >= self.counts.dead_letter:
+                raise ValueError("terminal outbox dead-letter 截断事实不一致。")
+        elif len(self.dead_letters) != self.counts.dead_letter:
+            raise ValueError("terminal outbox dead-letter 目录与总数不一致。")
         return self
 
 
@@ -367,6 +400,8 @@ def _build_terminal_outbox_projection(
         dead_letter=0,
     )
     warnings: list[str] = []
+    dead_letters: tuple[TerminalOutboxDeadLetterItem, ...] = ()
+    dead_letters_truncated = False
     if pursuit_store.db_path.is_file():
         try:
             backlog = pursuit_store.terminal_outbox_backlog(
@@ -381,10 +416,33 @@ def _build_terminal_outbox_projection(
                 expired_claimed=backlog.expired_claimed,
                 dead_letter=backlog.dead_letter,
             )
+            catalog = pursuit_store.terminal_outbox_dead_letter_catalog(
+                limit=20,
+                scan_limit=10_000,
+            )
+            if catalog.total != counts.dead_letter:
+                raise ValueError("terminal outbox dead-letter catalog 与 backlog 不一致")
+            dead_letters = tuple(
+                TerminalOutboxDeadLetterItem(
+                    dead_letter_id=event.event_id,
+                    disposition=event.disposition.value,
+                    failure_code=event.failure_code,
+                    failure_attempts=event.sequence,
+                    total_claim_attempts=event.attempt_count,
+                    occurred_at=datetime.fromtimestamp(
+                        event.occurred_at,
+                        tz=UTC,
+                    ).isoformat(),
+                )
+                for event in catalog.records
+            )
+            dead_letters_truncated = catalog.truncated
         except Exception:
             warnings.append(
                 "终态恢复队列读取失败，请运行 `/doctor` 检查 Pursuit Store。"
             )
+            dead_letters = ()
+            dead_letters_truncated = counts.dead_letter > 0
 
     snapshot: PursuitTerminalOutboxWorkerSnapshot | None = None
     if enabled and worker_snapshot is not None:
@@ -455,6 +513,8 @@ def _build_terminal_outbox_projection(
         ),
         failure_codes=failure_codes,
         warning=warning,
+        dead_letters=dead_letters,
+        dead_letters_truncated=dead_letters_truncated,
     )
 
 
@@ -587,6 +647,19 @@ def _render_terminal_outbox(value: TerminalOutboxProjection) -> list[str]:
         lines.append(f"- 下次检查：约 {value.next_delay_seconds:.1f}s")
     if value.failure_codes:
         lines.append(f"- 最近失败：{', '.join(value.failure_codes)}")
+    for item in value.dead_letters:
+        disposition = (
+            "重试预算耗尽"
+            if item.disposition == "retry_exhausted"
+            else "机械不变量破坏"
+        )
+        lines.append(
+            f"- 死信 `{item.dead_letter_id}` · {disposition} · "
+            f"{item.failure_code} · 失败 {item.failure_attempts} 次 / "
+            f"总认领 {item.total_claim_attempts} 次 · {item.occurred_at}"
+        )
+    if value.dead_letters_truncated:
+        lines.append("- 死信目录已按当前视图上限截断。")
     if value.warning:
         lines.append(f"- ⚠️ {value.warning}")
     return lines
@@ -1013,6 +1086,7 @@ __all__ = [
     "GOAL_PANEL_SCHEMA_VERSION",
     "GoalPursuitSnapshot",
     "TerminalOutboxCounts",
+    "TerminalOutboxDeadLetterItem",
     "TerminalOutboxProjection",
     "build_goal_pursuit_snapshot",
     "build_goal_pursuit_snapshot_with_recovery",

@@ -68,6 +68,13 @@ class PursuitTerminalOutboxBacklog:
     assessed_at: float
 
 
+@dataclass(frozen=True, slots=True)
+class PursuitTerminalOutboxDeadLetterCatalog:
+    records: tuple[PursuitTerminalOutboxFailureEvent, ...]
+    total: int
+    truncated: bool
+
+
 class PursuitStoreError(RuntimeError):
     """Raised when durable Pursuit state is invalid or unavailable."""
 
@@ -1026,6 +1033,85 @@ class PursuitStore:
         except sqlite3.Error as exc:
             raise PursuitStoreError(
                 f"读取 terminal outbox failure 失败：{exc}"
+            ) from exc
+
+    def terminal_outbox_dead_letter_catalog(
+        self,
+        *,
+        limit: int = 20,
+        scan_limit: int = 10_000,
+    ) -> PursuitTerminalOutboxDeadLetterCatalog:
+        """Authenticate the complete bounded authority before projecting active dead letters."""
+        if (
+            isinstance(limit, bool)
+            or not 1 <= limit <= 100
+            or isinstance(scan_limit, bool)
+            or not limit <= scan_limit <= 10_000
+        ):
+            raise ValueError("terminal outbox dead-letter catalog 策略无效。")
+        if not self._db_path.exists():
+            return PursuitTerminalOutboxDeadLetterCatalog((), 0, False)
+        try:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT outbox_id FROM pursuit_terminal_outbox_failure_heads
+                    UNION
+                    SELECT DISTINCT outbox_id FROM pursuit_terminal_outbox_failures
+                    ORDER BY outbox_id ASC
+                    LIMIT ?
+                    """,
+                    (scan_limit + 1,),
+                ).fetchall()
+                if len(rows) > scan_limit:
+                    raise PursuitStoreError(
+                        "terminal outbox dead-letter authority 超过有界扫描上限。"
+                    )
+                active: list[PursuitTerminalOutboxFailureEvent] = []
+                for row in rows:
+                    outbox_id = str(row["outbox_id"])
+                    failures = self._verify_terminal_outbox_failures(
+                        conn,
+                        outbox_id,
+                        limit=1000,
+                    )
+                    if not failures:
+                        raise PursuitStoreError(
+                            "terminal outbox dead-letter authority 缺少 failure。"
+                        )
+                    outbox = self._get_terminal_outbox_with_connection(
+                        conn,
+                        outbox_id,
+                    )
+                    if outbox is None:
+                        raise PursuitStoreError(
+                            "terminal outbox dead-letter authority 缺少 outbox。"
+                        )
+                    latest = failures[-1]
+                    if (
+                        outbox.state is PursuitTerminalOutboxState.PENDING
+                        and latest.dead_letter_authority
+                    ):
+                        active.append(latest)
+                active.sort(
+                    key=lambda event: (event.occurred_at, event.event_id),
+                    reverse=True,
+                )
+                total = len(active)
+                return PursuitTerminalOutboxDeadLetterCatalog(
+                    records=tuple(active[:limit]),
+                    total=total,
+                    truncated=total > limit,
+                )
+        except PursuitStoreError:
+            raise
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise PursuitStoreError(
+                f"terminal outbox dead-letter catalog 校验失败：{exc}"
+            ) from exc
+        except sqlite3.Error as exc:
+            raise PursuitStoreError(
+                f"读取 terminal outbox dead-letter catalog 失败：{exc}"
             ) from exc
 
     def record_terminal_outbox_failure(
