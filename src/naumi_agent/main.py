@@ -2920,7 +2920,7 @@ def _print_help() -> None:
             "outcome-before-after|outcome-verify-runtime|"
             "outcome-verify-behavior|outcome-behavior-coverage|"
             "outcome-behavior-matrix|outcome-observation-contract|"
-            "outcome-admit-runtime|"
+            "outcome-admit-runtime|outcome-assess-long-term|"
             "outcome-place-behavior|outcome-resolve-behavior|"
             "outcome-dispatch-behavior|outcome-claim-behavior|"
             "outcome-deliver-behavior|outcome-authorize-behavior|"
@@ -3834,6 +3834,22 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 arg="",
             )
             return
+        if action == "outcome-assess-long-term":
+            if len(parts) != 3:
+                raise ValueError(
+                    "outcome-assess-long-term 需要 Rollback Request ID 和 Runtime Subject ID。"
+                )
+            await _run_tool_slash_command(
+                engine,
+                slash_command="/evolution",
+                tool_name="evolution_post_rollback_long_term_assessment",
+                parse_args=lambda _arg: {
+                    "request_id": parts[1],
+                    "subject_id": parts[2],
+                },
+                arg="",
+            )
+            return
         if action == "outcome-place-behavior":
             if len(parts) != 4:
                 raise ValueError(
@@ -4028,7 +4044,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "outcome-before-after、outcome-verify-runtime、"
                 "outcome-verify-behavior、outcome-behavior-coverage、"
                 "outcome-behavior-matrix、outcome-observation-contract、"
-                "outcome-admit-runtime、"
+                "outcome-admit-runtime、outcome-assess-long-term、"
                 "outcome-place-behavior、outcome-resolve-behavior、"
                 "outcome-dispatch-behavior、outcome-claim-behavior、"
                 "outcome-deliver-behavior、outcome-authorize-behavior、"
@@ -4226,6 +4242,8 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution outcome-behavior-matrix <rollback-request-id>；"
             "/evolution outcome-observation-contract <rollback-request-id>；"
             "/evolution outcome-admit-runtime <rollback-request-id> "
+            "<runtime-subject-id>；"
+            "/evolution outcome-assess-long-term <rollback-request-id> "
             "<runtime-subject-id>；"
             "/evolution outcome-place-behavior <rollback-request-id> "
             "<final-evaluation-comparison-id> <worker-id>；"

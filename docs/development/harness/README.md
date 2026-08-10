@@ -153,13 +153,14 @@ installed-runtime fresh H5a/H5c 单平台 lane，并通过共享 Tool/Slash 同�
 Final Evaluation lane 覆盖契约，明确区分本机 installed baseline 与必须由目标主机重新证明的 lane，避免把
 macOS slot 冒充为 Linux/Windows evidence。目标平台 baseline 解析、远程授权与签名结果摄入已完成；HAR-09.6c2b1
 又提供完整矩阵聚合能力和动态可撤权总体 verdict，HAR-09.6c2b2 已把该 typed Matrix 同源投影到 Workbench、
-New UI 与 Textual TUI fallback。真实 Windows/Linux daemon 生产证据、长期指标与 promoted Outcome 仍待后续验收。
+New UI 与 Textual TUI fallback。真实 Windows/Linux daemon 生产证据与 promoted Outcome 仍待后续验收。
 HAR-09.6d1 已进一步把 recovered Matrix、fresh Runtime Verification 和 exact baseline runtime 冻结为内容寻址的
 长期观察契约，明确 1 小时、12 个 operational samples、heartbeat-timeout gap 与 censoring 规则，并通过共享
 Tool/Slash 暴露；它尚不读取 observation ledger，也不授予长期、学习、推广或执行 authority。
 HAR-09.6d2 已把该契约逐字段绑定到 exact managed New UI/TUI `ReleaseRuntimeIdentity`、Harness Binding 与原子
 startup sequence-1 origin sample，生成动态可撤权的 observation input；长期窗口聚合和 sustained-health verdict
-仍留给 6d3。
+已由 HAR-09.6d3 继续完成：真实 ledger 分页、head 二次读取和 insufficient/passing/breached/censored 四态评估均已
+落地。6e Long-Term Outcome Authority、promoted Outcome 与配置/数据 rollback 仍未完成。
 HAR-09.6c2a2a 已进一步将 missing remote lane 绑定到 exact active Worker incarnation，并机械导出
 `macos/linux/windows-{arm64|x64}` target。HAR-09.6c2a2b 又从 current signed Release Channel Catalog 解析
 同 version/source commit/source tree 的 target-specific Build Attestation，并动态绑定 Channel/Builder trust；健康、

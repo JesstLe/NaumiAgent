@@ -82,6 +82,10 @@ from naumi_agent.evolution.post_rollback_behavioral_matrix import (
     EvolutionPostRollbackBehavioralMatrixError,
     render_post_rollback_behavioral_matrix,
 )
+from naumi_agent.evolution.post_rollback_long_term_observation_assessments import (
+    EvolutionPostRollbackLongTermObservationAssessmentError,
+    render_post_rollback_long_term_observation_assessment,
+)
 from naumi_agent.evolution.post_rollback_long_term_observation_contracts import (
     EvolutionPostRollbackLongTermObservationContractError,
     render_post_rollback_long_term_observation_contract,
@@ -3085,6 +3089,78 @@ class EvolutionPostRollbackRuntimeObservationAdmissionTool(Tool):
         return render_post_rollback_runtime_observation_admission(view)
 
 
+class EvolutionPostRollbackLongTermObservationAssessmentTool(Tool):
+    """Assess the current admitted runtime ledger under the frozen contract."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_post_rollback_long_term_assessment"
+
+    @property
+    def description(self) -> str:
+        return (
+            "分页复验 admitted runtime 的 append-only heartbeat ledger，并按冻结规则"
+            "机械判定 insufficient、passing、breached 或 censored；不授予学习或推广权限。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "request_id": {
+                    "type": "string",
+                    "pattern": "^evrerollbackreq_[0-9a-f]{24}$",
+                },
+                "subject_id": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_-]{0,95}$",
+                },
+            },
+            "required": ["request_id", "subject_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="回滚后长期观察评估",
+            search_hint=(
+                "evolution post rollback long term observation assessment health "
+                "自进化 回滚 长期 观察 健康 评估"
+            ),
+        )
+
+    async def execute(self, request_id: str, subject_id: str) -> str:
+        try:
+            view = await (
+                self._engine.evolution_post_rollback_long_term_assessment_service.assess(
+                    request_id=str(request_id or "").strip(),
+                    subject_id=str(subject_id or "").strip(),
+                )
+            )
+        except (
+            AttributeError,
+            EvolutionPostRollbackLongTermObservationAssessmentError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "post_rollback_long_term_assessment_failed")
+            return f"回滚后长期观察评估未完成（`{code}`）：{exc}"
+        return render_post_rollback_long_term_observation_assessment(view)
+
+
 class EvolutionPostRollbackRemoteLanePlacementTool(Tool):
     """Bind a missing remote lane to one exact active worker incarnation."""
 
@@ -3785,6 +3861,7 @@ def create_evolution_review_tools(
         EvolutionPostRollbackBehavioralMatrixTool(engine),
         EvolutionPostRollbackLongTermObservationContractTool(engine),
         EvolutionPostRollbackRuntimeObservationAdmissionTool(engine),
+        EvolutionPostRollbackLongTermObservationAssessmentTool(engine),
         EvolutionPostRollbackRemoteLanePlacementTool(engine),
         EvolutionPostRollbackTargetBaselineTool(engine),
         EvolutionPostRollbackRemoteDispatchTool(engine),
@@ -3823,6 +3900,7 @@ __all__ = [
     "EvolutionPostRollbackBehavioralCoverageTool",
     "EvolutionPostRollbackBehavioralMatrixTool",
     "EvolutionPostRollbackLongTermObservationContractTool",
+    "EvolutionPostRollbackLongTermObservationAssessmentTool",
     "EvolutionPostRollbackRuntimeObservationAdmissionTool",
     "EvolutionPostRollbackRemoteLanePlacementTool",
     "EvolutionPostRollbackRemoteDispatchTool",
