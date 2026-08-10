@@ -230,8 +230,35 @@ def _default_command(
         "--runtime-health-check",
         hidden=True,
     ),
+    runtime_eval_json: bool = typer.Option(
+        False,
+        "--runtime-eval-json",
+        hidden=True,
+    ),
 ) -> None:
     """默认无子命令时启动新一代终端 UI."""
+    if runtime_eval_json:
+        from naumi_agent.release.runtime_eval import (
+            MAX_RUNTIME_EVAL_INPUT_BYTES,
+            ReleaseRuntimeEvalError,
+            parse_and_execute_runtime_eval,
+        )
+
+        try:
+            if os.environ.get("NAUMI_RELEASE_RUNTIME_EVAL", "") != "1":
+                raise ReleaseRuntimeEvalError(
+                    "release_runtime_eval_environment_missing",
+                    "Runtime Eval 缺少受控执行环境。",
+                )
+            raw = sys.stdin.buffer.read(MAX_RUNTIME_EVAL_INPUT_BYTES + 1)
+            response = parse_and_execute_runtime_eval(raw)
+        except (OSError, TypeError, ValueError, ReleaseRuntimeEvalError) as exc:
+            code = getattr(exc, "code", "release_runtime_eval_failed")
+            typer.echo(f"Naumi Runtime Eval 错误 [{code}]。", err=True)
+            raise typer.Exit(78) from exc
+        sys.stdout.buffer.write(response + b"\n")
+        sys.stdout.buffer.flush()
+        raise typer.Exit()
     if runtime_health_check:
         from naumi_agent.release.runtime_health import (
             ReleaseRuntimeHealthError,

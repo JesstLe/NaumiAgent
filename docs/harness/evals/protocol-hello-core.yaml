@@ -40,9 +40,19 @@ cases:
       outcome: accepted
       selected_version: 1
       capabilities:
+        - agent_recovery_actions
+        - doctor_export
+        - doctor_live_probe
+        - doctor_trace_index
+        - evolution_evaluation_lane
         - goal_snapshot
         - heartbeat
+        - pursuit_recovery_actions
+        - sequence_integrity
+        - session_list
         - task_snapshot
+        - terminal_event_cursor
+        - terminal_event_recovery
         - typed_ui_messages
         - workbench_snapshot
         - workbench_proposal_actions

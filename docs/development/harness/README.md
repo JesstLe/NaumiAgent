@@ -147,6 +147,7 @@ Service 重验、CAS 与审计保持不变。HAR-09.6a 已补齐 `rolled_back` O
 只读投影和服务端 Contract 终态阻断。HAR-09.6b 又把原 Promotion Input 中 proposal-bound Final Evaluation
 与全部 HAR-08 H5c lane 登记为 `implementation_before_after`，并同步 Workbench/New UI/TUI；它明确不是
 回滚后行为恢复证明。HAR-09.6c1 已新增 fresh baseline boot 与 launcher identity verification，并同步三端；
+ARC-07.5f 已提供 exact installed backend 的首个 `protocol_hello@1` Eval transport，但尚未绑定 Outcome/H5c lane；
 行为级 Eval、长期指标与 promoted Outcome 仍未完成。
 HAR-07.5b 已为 New UI 增加 `v` Evidence 焦点和 `/harness evidence`，并让 CLI/Textual TUI 复用相同
 Explain authority；HAR-07.4b1 已补齐空闲 Bridge 有界重启、重新协商和精确 session 回执恢复。

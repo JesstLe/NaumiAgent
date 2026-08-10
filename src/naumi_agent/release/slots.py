@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import platform
@@ -15,12 +16,16 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal, Self
 
 if TYPE_CHECKING:
     from naumi_agent.release.launcher import ReleaseLaunchResolution
+    from naumi_agent.release.runtime_eval import (
+        ReleaseRuntimeEvalReceipt,
+        ReleaseRuntimeEvalRequest,
+    )
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -33,6 +38,7 @@ _MAX_MANIFEST_BYTES = 8 * 1024 * 1024
 _MAX_FILES = 100_000
 _MAX_TOTAL_BYTES = 8 * 1024 * 1024 * 1024
 _BOOT_TIMEOUT_SECONDS = 20
+_RUNTIME_EVAL_TIMEOUT_SECONDS = 30
 _FORBIDDEN_COMPONENTS = frozenset({".git", "__pycache__", "docs", "frontend", "src", "tests"})
 _FORBIDDEN_NAMES = frozenset({"package.json", "pyproject.toml", "manifest.in", "uv.lock"})
 _FORBIDDEN_SUFFIXES = (".py", ".pyc", ".pyo", ".js", ".jsx", ".ts", ".tsx", ".map", ".ipynb")
@@ -431,6 +437,188 @@ class ReleaseSlotStore:
                 ),
             )
             db.commit()
+        return receipt
+
+    def evaluate_runtime_protocol(
+        self,
+        slot_id: str,
+        request: ReleaseRuntimeEvalRequest,
+        *,
+        timeout_seconds: int = _RUNTIME_EVAL_TIMEOUT_SECONDS,
+    ) -> ReleaseRuntimeEvalReceipt:
+        """Run one bounded eval request through the exact installed backend binary."""
+        from naumi_agent.release.runtime_eval import (
+            MAX_RUNTIME_EVAL_OUTPUT_BYTES,
+            ReleaseRuntimeEvalRequest,
+            ReleaseRuntimeEvalResponse,
+            build_runtime_eval_process_request,
+            build_runtime_eval_receipt,
+        )
+
+        try:
+            item = ReleaseRuntimeEvalRequest.model_validate_json(request.model_dump_json())
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ReleaseSlotError(
+                "release_runtime_eval_request_invalid",
+                "Installed Runtime Eval Request 无效。",
+            ) from exc
+        slot = self.inspect_installed_slot(slot_id)
+        _require_host_target(slot.target)
+        binary = Path(slot.bundle_dir) / slot.backend_path
+        binary_sha = _sha256_file(binary)
+        process_request = build_runtime_eval_process_request(item)
+        encoded = process_request.model_dump_json().encode("utf-8")
+        process_started_at = datetime.now(UTC)
+        try:
+            completed = subprocess.run(
+                [str(binary), "--runtime-eval-json"],
+                input=encoded,
+                check=False,
+                capture_output=True,
+                cwd=slot.bundle_dir,
+                timeout=max(1, min(timeout_seconds, _RUNTIME_EVAL_TIMEOUT_SECONDS)),
+                env=_runtime_eval_environment(),
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise ReleaseSlotError(
+                "release_runtime_eval_timeout",
+                "Installed Runtime Eval 超过 30 秒硬上限。",
+            ) from exc
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ReleaseSlotError(
+                "release_runtime_eval_failed",
+                "Installed Runtime Eval 无法执行。",
+            ) from exc
+        total_output = len(completed.stdout) + len(completed.stderr)
+        if total_output > MAX_RUNTIME_EVAL_OUTPUT_BYTES:
+            raise ReleaseSlotError(
+                "release_runtime_eval_output_oversized",
+                "Installed Runtime Eval 输出超过 512 KiB。",
+            )
+        if completed.returncode != 0 or completed.stderr:
+            raise ReleaseSlotError(
+                "release_runtime_eval_process_failed",
+                "Installed Runtime Eval 进程失败或产生非协议输出。",
+            )
+        try:
+            response = ReleaseRuntimeEvalResponse.model_validate_json(completed.stdout)
+        except ValueError as exc:
+            raise ReleaseSlotError(
+                "release_runtime_eval_response_invalid",
+                "Installed Runtime Eval 返回了无效协议响应。",
+            ) from exc
+        if not (
+            response.process_request_id == process_request.process_request_id
+            and response.process_request_sha256
+            == process_request.process_request_sha256
+            and response.authority_request_id == item.request_id
+            and response.authority_request_sha256 == item.request_sha256
+        ):
+            raise ReleaseSlotError(
+                "release_runtime_eval_response_mismatch",
+                "Installed Runtime Eval 响应未绑定当前 Request。",
+            )
+        process_finished_at = datetime.now(UTC)
+        evaluated_at = _aware(response.evaluated_at)
+        if not (
+            process_started_at - timedelta(seconds=1)
+            <= evaluated_at
+            <= process_finished_at + timedelta(seconds=1)
+        ):
+            raise ReleaseSlotError(
+                "release_runtime_eval_response_time_invalid",
+                "Installed Runtime Eval 响应时间不在当前进程窗口内。",
+            )
+        try:
+            receipt = build_runtime_eval_receipt(
+                slot_id=slot.slot_id,
+                slot_sha256=slot.slot_sha256,
+                manifest_sha256=slot.manifest_sha256,
+                binary_sha256=binary_sha,
+                request=item,
+                process_request=process_request,
+                response=response,
+                input_bytes=len(encoded),
+                output_bytes=len(completed.stdout),
+            )
+        except ValueError as exc:
+            raise ReleaseSlotError(
+                "release_runtime_eval_response_untrusted",
+                "Installed Runtime Eval 响应未通过父进程机械复验。",
+            ) from exc
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute(
+                "INSERT OR IGNORE INTO release_runtime_eval_receipts "
+                "(receipt_id, receipt_sha256, slot_id, request_sha256, receipt_json, "
+                "evaluated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    receipt.receipt_id,
+                    receipt.receipt_sha256,
+                    receipt.slot_id,
+                    receipt.request.request_sha256,
+                    receipt.model_dump_json(),
+                    receipt.evaluated_at,
+                ),
+            )
+            row = db.execute(
+                "SELECT receipt_json FROM release_runtime_eval_receipts "
+                "WHERE receipt_id = ?",
+                (receipt.receipt_id,),
+            ).fetchone()
+            db.commit()
+        if row is None:
+            raise ReleaseSlotError(
+                "release_runtime_eval_receipt_missing",
+                "Installed Runtime Eval Receipt 持久化后不可读取。",
+            )
+        restored = type(receipt).model_validate_json(row["receipt_json"])
+        if restored != receipt:
+            raise ReleaseSlotError(
+                "release_runtime_eval_receipt_conflict",
+                "Installed Runtime Eval Receipt identity 冲突。",
+            )
+        return restored
+
+    def get_runtime_eval_receipt(
+        self,
+        receipt_id: str,
+    ) -> ReleaseRuntimeEvalReceipt | None:
+        from naumi_agent.release.runtime_eval import ReleaseRuntimeEvalReceipt
+
+        if re.fullmatch(r"relruntimeeval_[0-9a-f]{24}", str(receipt_id)) is None:
+            raise ReleaseSlotError(
+                "release_runtime_eval_receipt_id_invalid",
+                "Installed Runtime Eval Receipt ID 格式无效。",
+            )
+        if not self.db_path.is_file():
+            return None
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT receipt_json FROM release_runtime_eval_receipts "
+                "WHERE receipt_id = ?",
+                (receipt_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            receipt = ReleaseRuntimeEvalReceipt.model_validate_json(row["receipt_json"])
+        except ValueError as exc:
+            raise ReleaseSlotError(
+                "release_runtime_eval_receipt_corrupt",
+                "Installed Runtime Eval Receipt 损坏或无法验证。",
+            ) from exc
+        slot = self.inspect_installed_slot(receipt.slot_id)
+        binary = Path(slot.bundle_dir) / slot.backend_path
+        if not (
+            receipt.slot_sha256 == slot.slot_sha256
+            and receipt.manifest_sha256 == slot.manifest_sha256
+            and hmac.compare_digest(receipt.binary_sha256, _sha256_file(binary))
+        ):
+            raise ReleaseSlotError(
+                "release_runtime_eval_receipt_stale",
+                "Installed Runtime Eval Receipt 与当前 slot bytes 不一致。",
+            )
         return receipt
 
     def activate(
@@ -1200,6 +1388,27 @@ def _aware(value):
     return parsed.astimezone(UTC)
 
 
+def _runtime_eval_environment() -> dict[str, str]:
+    """Pass only process essentials; never inherit provider credentials or config."""
+    allowed = (
+        "PATH",
+        "SYSTEMROOT",
+        "WINDIR",
+        "TMPDIR",
+        "TEMP",
+        "TMP",
+        "LANG",
+        "LC_ALL",
+    )
+    environment = {key: os.environ[key] for key in allowed if key in os.environ}
+    environment.update({
+        "NAUMI_RELEASE_RUNTIME_EVAL": "1",
+        "NO_COLOR": "1",
+        "PYTHONNOUSERSITE": "1",
+    })
+    return environment
+
+
 def _digest(payload) -> str:
     return hashlib.sha256(
         json.dumps(
@@ -1230,6 +1439,12 @@ def _ensure_schema(db: sqlite3.Connection) -> None:
         "resolution_id TEXT PRIMARY KEY, resolution_sha256 TEXT NOT NULL UNIQUE, "
         "pointer_sha256 TEXT NOT NULL, resolution_json TEXT NOT NULL, "
         "resolved_at TEXT NOT NULL);"
+        "CREATE TABLE IF NOT EXISTS release_runtime_eval_receipts ("
+        "receipt_id TEXT PRIMARY KEY, receipt_sha256 TEXT NOT NULL UNIQUE, "
+        "slot_id TEXT NOT NULL, request_sha256 TEXT NOT NULL, "
+        "receipt_json TEXT NOT NULL, evaluated_at TEXT NOT NULL);"
+        "CREATE INDEX IF NOT EXISTS idx_release_runtime_eval_slot_request "
+        "ON release_runtime_eval_receipts(slot_id, request_sha256, evaluated_at);"
     )
 
 
