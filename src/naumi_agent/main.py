@@ -2916,7 +2916,7 @@ def _print_help() -> None:
         ),
         (
             "/evolution [list|detail|experiment-contract|evaluation|"
-            "stable-population-preview|"
+            "stable-population-preview|stable-population-completion|"
             "revalidation-rollback-execute|revalidation-rollback-outcome|"
             "outcome-before-after|outcome-verify-runtime|"
             "outcome-verify-behavior|outcome-behavior-coverage|"
@@ -3743,6 +3743,31 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 arg="",
             )
             return
+        if action == "stable-population-completion":
+            if len(parts) not in {2, 3} or parts[1] not in {"complete", "inspect"}:
+                raise ValueError(
+                    "stable-population-completion 需要 complete [Snapshot ID] "
+                    "或 inspect <Receipt ID>。"
+                )
+            operation = parts[1]
+            if operation == "inspect" and len(parts) != 3:
+                raise ValueError("stable-population-completion inspect 需要 Receipt ID。")
+            await _run_tool_slash_command(
+                engine,
+                slash_command="/evolution",
+                tool_name="evolution_stable_population_completion",
+                parse_args=lambda _arg: {
+                    "action": operation,
+                    "snapshot_id": (
+                        parts[2]
+                        if operation == "complete" and len(parts) == 3
+                        else None
+                    ),
+                    "receipt_id": parts[2] if operation == "inspect" else None,
+                },
+                arg="",
+            )
+            return
         if action == "revalidation-rollback-outcome":
             if len(parts) != 2:
                 raise ValueError(
@@ -4076,7 +4101,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "reflection-revoke、promotion-input、promotion-package、"
                 "approval-requirement、approval-request、approval-principal、"
                 "approval-signature、approval-decision、revalidation-request、"
-                "stable-population-preview、"
+                "stable-population-preview、stable-population-completion、"
                 "revalidation-rollback-execute、revalidation-rollback-outcome、"
                 "outcome-before-after、outcome-verify-runtime、"
                 "outcome-verify-behavior、outcome-behavior-coverage、"
@@ -4271,6 +4296,10 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution revalidation-validation-plan <immutable-source-id>；"
             "/evolution revalidation-runtime-contract <validation-plan-id>；"
             "/evolution stable-population-preview [population-snapshot-id] [limit]；"
+            "/evolution stable-population-completion complete "
+            "[population-snapshot-id]；"
+            "/evolution stable-population-completion inspect "
+            "<completion-receipt-id>；"
             "/evolution revalidation-rollback-execute <rollback-request-id>；"
             "/evolution revalidation-rollback-outcome <rollback-request-id>；"
             "/evolution outcome-before-after <rollback-request-id>；"

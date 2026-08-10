@@ -186,7 +186,10 @@
   且 stable rollout/promotion authority 仍关闭；
 - [EVO-05.5f5v Default Stable Read Graph](EVO-05-5f5v-default-stable-read-graph.md)：已交付；
   默认 Engine source-lazy 恢复 opt-in、percentage、stable 全部 inspect 依赖，拒绝 signer/interaction 写端口；真实动态预演可用，
-  但尚未形成 durable Population Completion 或 rollout/promotion authority；
+  但不直接形成 rollout/promotion authority；
+- [EVO-05.5f5w Stable Population Completion Authority](EVO-05-5f5w-stable-population-completion-authority.md)：已交付；
+  writer-fenced exact member source-set 形成 durable Completion Receipt，并对 Snapshot/trust/member evidence 动态撤权；仍不授予
+  stable rollout 或 promotion authority；
 - [EVO-05.6a Automatic Pause and Rollback Request](EVO-05-6a-automatic-pause-rollback-request.md)：已交付；
   exact breach 会触发或复用 kill switch，并冻结只读 exact Rollback Request，不虚报执行完成。
 - [EVO-05.6b1 Immutable Rollback Source](EVO-05-6b1-immutable-rollback-source.md)：已交付；从 exact Git

@@ -207,6 +207,10 @@ from naumi_agent.evolution.stable_population_candidate_previews import (
     EvolutionStablePopulationCandidatePreviewError,
     render_stable_population_candidate_preview,
 )
+from naumi_agent.evolution.stable_population_completions import (
+    EvolutionStablePopulationCompletionError,
+    render_stable_population_completion,
+)
 from naumi_agent.evolution.store import EvolutionStoreError
 from naumi_agent.tools.base import Tool, ToolMetadata
 
@@ -2627,6 +2631,91 @@ class EvolutionStablePopulationCandidatePreviewTool(Tool):
         return render_stable_population_candidate_preview(preview)
 
 
+class EvolutionStablePopulationCompletionTool(Tool):
+    """Issue or dynamically re-inspect one exact stable population completion."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_stable_population_completion"
+
+    @property
+    def description(self) -> str:
+        return (
+            "对 exact current Population 和全部 5f5r member Views 执行动态重验，"
+            "在 SQLite writer fence 内签发幂等、可防篡改的 Stable Population "
+            "Completion Receipt，或重新检查既有 Receipt 是否因成员 source、"
+            "Population trust 或新 Snapshot 而撤权；不授予 rollout/promotion 权限。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["complete", "inspect"]},
+                "snapshot_id": {
+                    "type": ["string", "null"],
+                    "pattern": "^relpopsnapshot_[0-9a-f]{24}$",
+                },
+                "receipt_id": {
+                    "type": ["string", "null"],
+                    "pattern": "^evstablepopcomplete_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["action"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="Stable Population 完成权威",
+            search_hint=(
+                "evolution stable population completion receipt authority "
+                "自进化 稳定发布 群体 完成 回执 撤权"
+            ),
+        )
+
+    async def execute(
+        self,
+        action: str,
+        snapshot_id: str | None = None,
+        receipt_id: str | None = None,
+    ) -> str:
+        try:
+            service = self._engine.evolution_stable_population_completion_service
+            if action == "complete":
+                if receipt_id is not None:
+                    raise ValueError("complete 不接受 receipt_id。")
+                view = await service.complete(snapshot_id=snapshot_id)
+            elif action == "inspect":
+                if snapshot_id is not None or receipt_id is None:
+                    raise ValueError("inspect 需要且仅接受 receipt_id。")
+                view = await service.inspect(receipt_id=receipt_id)
+            else:
+                raise ValueError("action 必须是 complete 或 inspect。")
+        except (
+            AttributeError,
+            EvolutionStablePopulationCompletionError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "stable_population_completion_failed")
+            return f"Stable Population Completion 未完成（`{code}`）：{exc}"
+        return render_stable_population_completion(view)
+
+
 class EvolutionRevalidationRollbackOutcomeTool(Tool):
     """Record one proposal-bound historical rollback Outcome."""
 
@@ -4027,6 +4116,7 @@ def create_evolution_review_tools(
         EvolutionPostRollbackRemoteExecutionAuthorizationTool(engine),
         EvolutionPostRollbackRemoteResultTool(engine),
         EvolutionStablePopulationCandidatePreviewTool(engine),
+        EvolutionStablePopulationCompletionTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -4080,6 +4170,7 @@ __all__ = [
     "EvolutionRevalidationValidationPlanTool",
     "EvolutionRevalidationRuntimeContractTool",
     "EvolutionStablePopulationCandidatePreviewTool",
+    "EvolutionStablePopulationCompletionTool",
     "EvolutionRevalidationRollbackExecutionTool",
     "EvolutionRevalidationRollbackOutcomeTool",
     "EvolutionRevalidationReplayTool",

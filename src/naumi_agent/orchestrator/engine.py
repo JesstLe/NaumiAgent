@@ -491,6 +491,10 @@ from naumi_agent.evolution.self_review_red_baseline import (
 from naumi_agent.evolution.stable_population_candidate_previews import (
     EvolutionStablePopulationCandidatePreviewService,
 )
+from naumi_agent.evolution.stable_population_completions import (
+    EvolutionStablePopulationCompletionService,
+    EvolutionStablePopulationCompletionStore,
+)
 from naumi_agent.evolution.stable_read_graph import (
     EvolutionLazyStableReadGraphInspector,
     build_evolution_stable_read_graph_inspector,
@@ -2556,6 +2560,18 @@ class AgentEngine:
                 stage_completion_inspector=(
                     self.evolution_stable_stage_completion_inspector
                 ),
+            )
+        )
+        self.evolution_stable_population_completion_store = (
+            EvolutionStablePopulationCompletionStore(config.memory.session_db_path)
+        )
+        self.evolution_stable_population_completion_service = (
+            EvolutionStablePopulationCompletionService(
+                workspace_root=paths.workspace_root,
+                preview_service=(
+                    self.evolution_stable_population_candidate_preview_service
+                ),
+                store=self.evolution_stable_population_completion_store,
             )
         )
         self.evolution_revalidation_rollback_request_store = (

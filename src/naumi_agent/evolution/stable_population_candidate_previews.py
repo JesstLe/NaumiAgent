@@ -7,6 +7,7 @@ import hashlib
 import json
 import re
 from collections import Counter, defaultdict
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -231,6 +232,32 @@ class EvolutionStablePopulationCandidatePreviewError(RuntimeError):
         self.code = code
 
 
+@dataclass(frozen=True)
+class EvolutionStablePopulationAuthorityMaterial:
+    """One atomic projection plus the complete, untruncated current member set."""
+
+    preview: EvolutionStablePopulationCandidatePreview
+    member_receipts: tuple[EvolutionRevalidationStableStageCompletion, ...]
+
+    def __post_init__(self) -> None:
+        member_ids = tuple(item.installation_member_id for item in self.member_receipts)
+        if member_ids != tuple(sorted(set(member_ids))):
+            raise ValueError("Stable Population authority material 成员顺序无效。")
+        if any(
+            item.workspace_root != self.preview.workspace_root
+            or item.population_snapshot_id != self.preview.population_snapshot_id
+            or item.population_snapshot_sha256
+            != self.preview.population_snapshot_sha256
+            or item.population_snapshot_sequence
+            != self.preview.population_snapshot_sequence
+            or item.population_denominator != self.preview.population_denominator
+            for item in self.member_receipts
+        ):
+            raise ValueError("Stable Population authority material source identity 不一致。")
+        if len(self.member_receipts) != self.preview.observed_members:
+            raise ValueError("Stable Population authority material 成员数量不一致。")
+
+
 class EvolutionStablePopulationCandidatePreviewService:
     """Project bounded durable candidates without granting rollout authority."""
 
@@ -265,6 +292,19 @@ class EvolutionStablePopulationCandidatePreviewService:
         snapshot_id: str | None = None,
         limit: int = 50,
     ) -> EvolutionStablePopulationCandidatePreview:
+        return (
+            await self.inspect_authority_material(
+                snapshot_id=snapshot_id,
+                limit=limit,
+            )
+        ).preview
+
+    async def inspect_authority_material(
+        self,
+        *,
+        snapshot_id: str | None = None,
+        limit: int = 50,
+    ) -> EvolutionStablePopulationAuthorityMaterial:
         requested = _snapshot_id(snapshot_id)
         bounded_limit = _limit(limit)
         rows = await self._read_current_rows(requested)
@@ -275,11 +315,10 @@ class EvolutionStablePopulationCandidatePreviewService:
         selected_receipts = tuple(
             item for item in receipts if item.population_snapshot_id == selected
         )
-        dynamic_results = await self._inspect_stage_completions(
-            _current_member_receipts(selected_receipts)
-        )
+        member_receipts = _current_member_receipts(selected_receipts)
+        dynamic_results = await self._inspect_stage_completions(member_receipts)
         population_view, population_error = await self._inspect_population(selected)
-        return _build_preview(
+        preview = _build_preview(
             workspace_root=self.workspace_root,
             requested_snapshot_id=requested,
             snapshot_id=selected,
@@ -291,6 +330,10 @@ class EvolutionStablePopulationCandidatePreviewService:
             dynamic_results=dynamic_results,
             limit=bounded_limit,
             generated_at=_aware(self.clock()).isoformat(),
+        )
+        return EvolutionStablePopulationAuthorityMaterial(
+            preview=preview,
+            member_receipts=member_receipts,
         )
 
     async def _inspect_stage_completions(
@@ -899,6 +942,7 @@ __all__ = [
     "EvolutionStablePopulationCandidatePreviewError",
     "EvolutionStablePopulationCandidatePreviewService",
     "EvolutionStablePopulationCandidateStatus",
+    "EvolutionStablePopulationAuthorityMaterial",
     "EvolutionStableStageCompletionInspectionPort",
     "render_stable_population_candidate_preview",
 ]
