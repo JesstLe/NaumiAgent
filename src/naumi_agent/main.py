@@ -2916,6 +2916,7 @@ def _print_help() -> None:
         ),
         (
             "/evolution [list|detail|experiment-contract|evaluation|"
+            "stable-population-preview|"
             "revalidation-rollback-execute|revalidation-rollback-outcome|"
             "outcome-before-after|outcome-verify-runtime|"
             "outcome-verify-behavior|outcome-behavior-coverage|"
@@ -3724,6 +3725,24 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 arg="",
             )
             return
+        if action == "stable-population-preview":
+            if len(parts) > 3:
+                raise ValueError(
+                    "stable-population-preview 仅接受可选 Snapshot ID 和 limit。"
+                )
+            snapshot_id = None if len(parts) < 2 else parts[1]
+            limit = 50 if len(parts) < 3 else int(parts[2])
+            await _run_tool_slash_command(
+                engine,
+                slash_command="/evolution",
+                tool_name="evolution_stable_population_candidate_preview",
+                parse_args=lambda _arg: {
+                    "snapshot_id": snapshot_id,
+                    "limit": limit,
+                },
+                arg="",
+            )
+            return
         if action == "revalidation-rollback-outcome":
             if len(parts) != 2:
                 raise ValueError(
@@ -4057,6 +4076,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "reflection-revoke、promotion-input、promotion-package、"
                 "approval-requirement、approval-request、approval-principal、"
                 "approval-signature、approval-decision、revalidation-request、"
+                "stable-population-preview、"
                 "revalidation-rollback-execute、revalidation-rollback-outcome、"
                 "outcome-before-after、outcome-verify-runtime、"
                 "outcome-verify-behavior、outcome-behavior-coverage、"
@@ -4250,6 +4270,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution revalidation-evaluation-source <fresh-evaluation-plan-id>；"
             "/evolution revalidation-validation-plan <immutable-source-id>；"
             "/evolution revalidation-runtime-contract <validation-plan-id>；"
+            "/evolution stable-population-preview [population-snapshot-id] [limit]；"
             "/evolution revalidation-rollback-execute <rollback-request-id>；"
             "/evolution revalidation-rollback-outcome <rollback-request-id>；"
             "/evolution outcome-before-after <rollback-request-id>；"

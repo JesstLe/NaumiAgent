@@ -488,6 +488,9 @@ from naumi_agent.evolution.self_review_green_cohort import (
 from naumi_agent.evolution.self_review_red_baseline import (
     EvolutionSelfReviewRedBaselineExecutor,
 )
+from naumi_agent.evolution.stable_population_candidate_previews import (
+    EvolutionStablePopulationCandidatePreviewService,
+)
 from naumi_agent.evolution.static_guards import EvolutionStaticGuard
 from naumi_agent.evolution.validation_cohorts import (
     EvolutionBaselineCohortRequestBuilder,
@@ -2492,6 +2495,12 @@ class AgentEngine:
                     self.evolution_revalidation_opt_in_deployment_service
                 ),
                 store=self.evolution_revalidation_opt_in_runtime_health_store,
+            )
+        )
+        self.evolution_stable_population_candidate_preview_service = (
+            EvolutionStablePopulationCandidatePreviewService(
+                workspace_root=paths.workspace_root,
+                db_path=config.memory.session_db_path,
             )
         )
         self.evolution_revalidation_rollback_request_store = (

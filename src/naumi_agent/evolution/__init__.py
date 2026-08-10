@@ -1109,6 +1109,15 @@ if TYPE_CHECKING:
         EvolutionSelfReviewRedCohortReceipt,
         SelfReviewRedMetricSummary,
     )
+    from naumi_agent.evolution.stable_population_candidate_previews import (
+        EVOLUTION_STABLE_POPULATION_CANDIDATE_PREVIEW_POLICY,
+        EvolutionStablePopulationCandidateItem,
+        EvolutionStablePopulationCandidatePreview,
+        EvolutionStablePopulationCandidatePreviewError,
+        EvolutionStablePopulationCandidatePreviewService,
+        EvolutionStablePopulationCandidateStatus,
+        render_stable_population_candidate_preview,
+    )
     from naumi_agent.evolution.static_guards import (
         EvolutionStaticGuard,
         EvolutionStaticGuardPolicy,
@@ -1493,6 +1502,13 @@ __all__ = [
     "EvolutionRevalidationStableStageCompletionService",
     "EvolutionRevalidationStableStageCompletionStore",
     "EvolutionRevalidationStableStageCompletionView",
+    "EVOLUTION_STABLE_POPULATION_CANDIDATE_PREVIEW_POLICY",
+    "EvolutionStablePopulationCandidateItem",
+    "EvolutionStablePopulationCandidatePreview",
+    "EvolutionStablePopulationCandidatePreviewError",
+    "EvolutionStablePopulationCandidatePreviewService",
+    "EvolutionStablePopulationCandidateStatus",
+    "render_stable_population_candidate_preview",
     "EVOLUTION_REVALIDATION_PERCENTAGE_DEPLOYMENT_POLICY",
     "EvolutionRevalidationPercentageDeploymentError",
     "EvolutionRevalidationPercentageDeploymentReceipt",
@@ -2675,6 +2691,15 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationStableStageCompletionStore",
         "EvolutionRevalidationStableStageCompletionView",
     }
+    stable_population_candidate_preview_exports = {
+        "EVOLUTION_STABLE_POPULATION_CANDIDATE_PREVIEW_POLICY",
+        "EvolutionStablePopulationCandidateItem",
+        "EvolutionStablePopulationCandidatePreview",
+        "EvolutionStablePopulationCandidatePreviewError",
+        "EvolutionStablePopulationCandidatePreviewService",
+        "EvolutionStablePopulationCandidateStatus",
+        "render_stable_population_candidate_preview",
+    }
     revalidation_percentage_stage_completion_exports = {
         "EVOLUTION_REVALIDATION_PERCENTAGE_STAGE_COMPLETION_POLICY",
         "EvolutionRevalidationPercentageStageCompletion",
@@ -3339,6 +3364,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_stable_observation_windows"
     elif name in revalidation_stable_stage_completion_exports:
         module_name = "revalidation_stable_stage_completions"
+    elif name in stable_population_candidate_preview_exports:
+        module_name = "stable_population_candidate_previews"
     elif name in revalidation_percentage_stage_completion_exports:
         module_name = "revalidation_percentage_stage_completions"
     elif name in revalidation_opt_in_observation_assessment_exports:

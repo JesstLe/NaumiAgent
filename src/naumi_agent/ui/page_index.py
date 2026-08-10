@@ -130,16 +130,21 @@ _PAGE_DEFINITIONS = (
         page_id="evolution",
         command="/evolution",
         label="Evolution",
-        description="查看自进化 Candidate、受控回滚回执与 Proposal Outcome。",
+        description=(
+            "查看自进化 Candidate、Stable Population 候选、受控回滚回执与 Proposal Outcome。"
+        ),
         keywords=(
             "candidate",
             "evolution",
             "rollback",
             "outcome",
             "proposal",
+            "population",
+            "stable",
             "候选",
             "审查",
             "进化",
+            "稳定发布",
             "回滚",
             "结果",
         ),
