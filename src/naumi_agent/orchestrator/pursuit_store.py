@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import math
 import re
 import sqlite3
@@ -122,6 +123,35 @@ class PursuitTerminalOutboxDisposedCatalog:
     records: tuple[PursuitTerminalOutboxDisposedCatalogRecord, ...]
     total: int
     truncated: bool
+
+
+@dataclass(frozen=True, slots=True)
+class PursuitTerminalOutboxRetentionReference:
+    kind: str
+    reference_sha256: str
+    fact_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class PursuitTerminalOutboxRetentionRecord:
+    disposed: PursuitTerminalOutboxDisposedCatalogRecord
+    protection_refs: tuple[PursuitTerminalOutboxRetentionReference, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class PursuitTerminalOutboxRetentionPage:
+    assessed_at: float
+    cutoff_at: float
+    retention_days: int
+    limit: int
+    scan_limit: int
+    total_outbox_count: int
+    pending_count: int
+    delivered_count: int
+    abandoned_count: int
+    eligible_count: int
+    scanned_count: int
+    records: tuple[PursuitTerminalOutboxRetentionRecord, ...]
 
 
 class PursuitStoreError(RuntimeError):
@@ -1310,6 +1340,128 @@ class PursuitStore:
             raise PursuitStoreError(
                 f"读取 terminal outbox disposed catalog 失败：{exc}"
             ) from exc
+
+    def preview_terminal_outbox_retention(
+        self,
+        *,
+        assessed_at: float,
+        retention_days: int = 30,
+        limit: int = 20,
+        scan_limit: int = 100,
+    ) -> PursuitTerminalOutboxRetentionPage:
+        """Build a side-effect-free page of old abandoned outbox cohorts."""
+        if (
+            not math.isfinite(assessed_at)
+            or assessed_at <= 0
+            or isinstance(retention_days, bool)
+            or not 1 <= retention_days <= 3650
+            or isinstance(limit, bool)
+            or not 1 <= limit <= 20
+            or isinstance(scan_limit, bool)
+            or not limit <= scan_limit <= 100
+        ):
+            raise ValueError("terminal outbox retention preview 策略无效。")
+        cutoff_at = assessed_at - retention_days * 86_400
+        empty = PursuitTerminalOutboxRetentionPage(
+            assessed_at=assessed_at,
+            cutoff_at=cutoff_at,
+            retention_days=retention_days,
+            limit=limit,
+            scan_limit=scan_limit,
+            total_outbox_count=0,
+            pending_count=0,
+            delivered_count=0,
+            abandoned_count=0,
+            eligible_count=0,
+            scanned_count=0,
+            records=(),
+        )
+        if not self._db_path.is_file() or self._db_path.stat().st_size == 0:
+            return empty
+        conn = self._open_connection()
+        try:
+            conn.execute("PRAGMA query_only = ON")
+            conn.execute("BEGIN DEFERRED")
+            count_row = conn.execute(
+                """
+                SELECT
+                    COUNT(*) AS total_count,
+                    SUM(CASE WHEN o.state = 'delivered' THEN 1 ELSE 0 END)
+                        AS delivered_count,
+                    SUM(CASE WHEN a.outbox_id IS NOT NULL THEN 1 ELSE 0 END)
+                        AS abandoned_count,
+                    SUM(CASE WHEN o.state = 'delivered' AND a.outbox_id IS NOT NULL
+                        THEN 1 ELSE 0 END) AS overlap_count
+                FROM pursuit_terminal_outbox AS o
+                LEFT JOIN pursuit_terminal_outbox_dead_letter_abandons AS a
+                  ON a.outbox_id = o.outbox_id
+                """
+            ).fetchone()
+            total = int(count_row["total_count"] or 0)
+            delivered = int(count_row["delivered_count"] or 0)
+            abandoned = int(count_row["abandoned_count"] or 0)
+            if int(count_row["overlap_count"] or 0):
+                raise PursuitStoreError(
+                    "terminal outbox retention 发现 delivered/abandoned 重叠。"
+                )
+            pending = total - delivered - abandoned
+            if pending < 0:
+                raise PursuitStoreError(
+                    "terminal outbox retention effective-state 汇总不一致。"
+                )
+            eligible_row = conn.execute(
+                """
+                SELECT COUNT(*) AS eligible_count
+                FROM pursuit_terminal_outbox_dead_letter_abandons
+                WHERE created_at <= ?
+                """,
+                (cutoff_at,),
+            ).fetchone()
+            eligible = int(eligible_row["eligible_count"] or 0)
+            rows = conn.execute(
+                """
+                SELECT outbox_id
+                FROM pursuit_terminal_outbox_dead_letter_abandons
+                WHERE created_at <= ?
+                ORDER BY created_at ASC, receipt_id ASC
+                LIMIT ?
+                """,
+                (cutoff_at, scan_limit),
+            ).fetchall()
+            records = tuple(
+                self._terminal_outbox_retention_record_with_connection(
+                    conn,
+                    str(row["outbox_id"]),
+                )
+                for row in rows[:limit]
+            )
+            return PursuitTerminalOutboxRetentionPage(
+                assessed_at=assessed_at,
+                cutoff_at=cutoff_at,
+                retention_days=retention_days,
+                limit=limit,
+                scan_limit=scan_limit,
+                total_outbox_count=total,
+                pending_count=pending,
+                delivered_count=delivered,
+                abandoned_count=abandoned,
+                eligible_count=eligible,
+                scanned_count=len(rows),
+                records=records,
+            )
+        except PursuitStoreError:
+            raise
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise PursuitStoreError(
+                f"terminal outbox retention preview 校验失败：{exc}"
+            ) from exc
+        except sqlite3.Error as exc:
+            raise PursuitStoreError(
+                f"读取 terminal outbox retention preview 失败：{exc}"
+            ) from exc
+        finally:
+            conn.rollback()
+            conn.close()
 
     def get_terminal_dead_letter_requeue(
         self,
@@ -3520,6 +3672,155 @@ class PursuitStore:
             outbox=outbox,
             state=state,
             abandon_receipt=abandon,
+        )
+
+    def _terminal_outbox_retention_record_with_connection(
+        self,
+        conn: sqlite3.Connection,
+        outbox_id: str,
+    ) -> PursuitTerminalOutboxRetentionRecord:
+        snapshot = self._terminal_outbox_effective_snapshot_with_connection(
+            conn,
+            outbox_id,
+        )
+        if (
+            snapshot is None
+            or snapshot.state is not PursuitTerminalOutboxEffectiveState.ABANDONED
+            or snapshot.abandon_receipt is None
+        ):
+            raise PursuitStoreError(
+                "terminal outbox retention candidate 不是 authenticated abandoned。"
+            )
+        outbox = snapshot.outbox
+        receipt = snapshot.abandon_receipt
+        outbox_events = self._verify_terminal_outbox_events(conn, outbox_id)
+        dispatch = self._get_terminal_dispatch_with_connection(conn, outbox_id)
+        dispatch_events = self._verify_terminal_dispatch_events(conn, outbox_id)
+        failures = self._verify_terminal_outbox_failures(
+            conn,
+            outbox_id,
+            limit=1000,
+        )
+        requeues = self._verify_terminal_dead_letter_requeues(
+            conn,
+            outbox_id,
+            failures=failures,
+            dispatch_events=dispatch_events,
+        )
+        attempt = self._get_recovery_attempt_with_connection(
+            conn,
+            outbox.attempt_id,
+        )
+        attempt_events = self._verify_recovery_attempt_events(
+            conn,
+            outbox.attempt_id,
+        )
+        boundary_row = conn.execute(
+            """
+            SELECT * FROM pursuit_boundary_decisions
+            WHERE run_id = ? AND decision_id = ?
+            """,
+            (outbox.run_id, outbox.boundary_decision_id),
+        ).fetchone()
+        head = conn.execute(
+            "SELECT * FROM pursuit_terminal_outbox_failure_heads "
+            "WHERE outbox_id = ?",
+            (outbox_id,),
+        ).fetchone()
+        if (
+            dispatch is None
+            or attempt is None
+            or boundary_row is None
+            or head is None
+            or not failures
+            or failures[-1].event_id != receipt.dead_letter_id
+        ):
+            raise PursuitStoreError(
+                "terminal outbox retention candidate 缺少 protection authority。"
+            )
+        _boundary_decision_from_row(boundary_row)
+
+        references: list[PursuitTerminalOutboxRetentionReference] = []
+
+        def add(kind: str, identity: str, fact_sha256: str) -> None:
+            if not re.fullmatch(r"[0-9a-f]{64}", fact_sha256):
+                raise PursuitStoreError(
+                    "terminal outbox retention protection fact digest 无效。"
+                )
+            references.append(PursuitTerminalOutboxRetentionReference(
+                kind=kind,
+                reference_sha256=hashlib.sha256(
+                    f"{kind}:{identity}".encode()
+                ).hexdigest(),
+                fact_sha256=fact_sha256,
+            ))
+
+        add("recovery_attempt", outbox.attempt_id, attempt.digest())
+        for event in attempt_events:
+            add(
+                "recovery_attempt_event",
+                f"{outbox.attempt_id}:{event.sequence}",
+                event.digest(),
+            )
+        add("outbox_snapshot", outbox_id, outbox.digest())
+        for event in outbox_events:
+            add("outbox_event", f"{outbox_id}:{event.sequence}", event.digest())
+        add("dispatch_snapshot", outbox_id, dispatch.digest())
+        for event in dispatch_events:
+            add(
+                "dispatch_event",
+                f"{outbox_id}:{event.sequence}",
+                event.digest(),
+            )
+        head_payload = json.dumps(
+            {
+                "dead_letter": int(head["dead_letter"]),
+                "latest_failure_sha256": str(head["latest_failure_sha256"]),
+                "latest_sequence": int(head["latest_sequence"]),
+                "updated_at": float(head["updated_at"]),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        add(
+            "failure_head",
+            outbox_id,
+            hashlib.sha256(head_payload.encode("utf-8")).hexdigest(),
+        )
+        for event in failures:
+            add("failure_event", event.event_id, event.digest())
+        for requeue in requeues.values():
+            add("requeue_receipt", requeue.receipt_id, requeue.receipt_sha256)
+        add("abandon_receipt", receipt.receipt_id, receipt.receipt_sha256)
+        add(
+            "boundary_decision",
+            f"{outbox.run_id}:{outbox.boundary_decision_id}",
+            str(boundary_row["payload_sha256"]),
+        )
+        add(
+            "checkpoint_pointer",
+            f"{outbox.run_id}:{outbox.checkpoint_id}",
+            outbox.digest(),
+        )
+        references.sort(key=lambda item: (item.kind, item.reference_sha256))
+        if len(references) > 5_000:
+            raise PursuitStoreError(
+                "terminal outbox retention protection refs 超过有界上限。"
+            )
+        if len({(item.kind, item.reference_sha256) for item in references}) != len(
+            references
+        ):
+            raise PursuitStoreError(
+                "terminal outbox retention protection refs 重复。"
+            )
+        disposed = PursuitTerminalOutboxDisposedCatalogRecord(
+            outbox=outbox,
+            failure=failures[-1],
+            receipt=receipt,
+        )
+        return PursuitTerminalOutboxRetentionRecord(
+            disposed=disposed,
+            protection_refs=tuple(references),
         )
 
     def _get_terminal_outbox_with_connection(

@@ -4396,10 +4396,32 @@ class NaumiApp(App):
         outbox_parts = (
             arg.strip().split() if subcommand == "outbox" else []
         )
+        retention_kwargs: dict[str, Any] | None = None
         if outbox_parts and outbox_parts[0] == "requeue":
             tool_name = "pursuit_terminal_dead_letter_requeue"
         elif outbox_parts and outbox_parts[0] == "abandon":
             tool_name = "pursuit_terminal_dead_letter_abandon"
+        elif outbox_parts and outbox_parts[0] in {
+            "retention-preview", "retention_preview",
+        }:
+            from naumi_agent.tools.pursuit import (
+                parse_terminal_outbox_retention_preview_args,
+            )
+
+            try:
+                retention_kwargs = parse_terminal_outbox_retention_preview_args(
+                    outbox_parts[1:]
+                )
+            except ValueError as exc:
+                status.status_text = str(exc)
+                chat.mount(Markdown(
+                    "**用法**: `/pursue outbox retention-preview "
+                    "[--retention-days N] [--limit N] [--scan-limit N] "
+                    "[--assessed-at ISO]`",
+                    classes="agent-msg",
+                ))
+                return
+            tool_name = "pursuit_terminal_outbox_retention_preview"
         tool = self.engine.tool_registry.get(tool_name)
         if tool is None:
             chat.mount(Markdown(f"**工具未注册**: `{tool_name}`", classes="agent-msg"))
@@ -4410,6 +4432,7 @@ class NaumiApp(App):
             return
         if subcommand == "outbox" and not (
             arg.strip() == "run-now"
+            or retention_kwargs is not None
             or (
                 len(outbox_parts) == 2
                 and outbox_parts[0] == "requeue"
@@ -4427,22 +4450,28 @@ class NaumiApp(App):
         ):
             status.status_text = (
                 "用法: /pursue outbox run-now | requeue <ptfail_...> | "
-                "abandon <ptfail_...> <reason>"
+                "abandon <ptfail_...> <reason> | retention-preview "
+                "[--retention-days N] [--limit N] [--scan-limit N] "
+                "[--assessed-at ISO]"
             )
             return
         status.status_text = "目标追踪状态处理中..."
         try:
             if subcommand == "outbox":
                 arguments = (
-                    {"dead_letter_id": outbox_parts[1]}
-                    if outbox_parts[0] == "requeue"
+                    retention_kwargs
+                    if retention_kwargs is not None
                     else (
-                        {
-                            "dead_letter_id": outbox_parts[1],
-                            "reason": outbox_parts[2],
-                        }
-                        if outbox_parts[0] == "abandon"
-                        else {}
+                        {"dead_letter_id": outbox_parts[1]}
+                        if outbox_parts[0] == "requeue"
+                        else (
+                            {
+                                "dead_letter_id": outbox_parts[1],
+                                "reason": outbox_parts[2],
+                            }
+                            if outbox_parts[0] == "abandon"
+                            else {}
+                        )
                     )
                 )
             elif subcommand == "list":

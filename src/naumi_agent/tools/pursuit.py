@@ -21,6 +21,9 @@ from naumi_agent.orchestrator.pursuit_recovery_reconcile import (
     format_pursuit_reconcile_result,
 )
 from naumi_agent.orchestrator.pursuit_store import format_run, format_run_list
+from naumi_agent.orchestrator.pursuit_terminal_retention import (
+    render_terminal_outbox_retention_preview,
+)
 from naumi_agent.tools.base import Tool, ToolMetadata
 
 if TYPE_CHECKING:
@@ -36,6 +39,9 @@ if TYPE_CHECKING:
     from naumi_agent.orchestrator.pursuit_terminal_outbox import (
         PursuitTerminalOutboxRunReceipt,
     )
+    from naumi_agent.orchestrator.pursuit_terminal_retention import (
+        PursuitTerminalOutboxRetentionPreview,
+    )
     from naumi_agent.runtime.ports.model import ModelPort
 
 logger = logging.getLogger(__name__)
@@ -45,6 +51,54 @@ _background_pursuit_tasks: set[asyncio.Task[str]] = set()
 MAX_PURSUIT_GOAL_CHARS = 8_000
 PURSUIT_RUN_ID_RE = re.compile(r"^[a-zA-Z0-9_.:-]{1,128}$")
 PURSUIT_RECOVERY_ATTEMPT_ID_RE = re.compile(r"^recovery-[0-9a-f]{64}$")
+
+
+def parse_terminal_outbox_retention_preview_args(
+    tokens: list[str],
+) -> dict[str, Any]:
+    """Parse the shared CLI/TUI retention-preview option grammar."""
+    option_names = {
+        "--retention-days": "retention_days",
+        "--limit": "limit",
+        "--scan-limit": "scan_limit",
+        "--assessed-at": "assessed_at",
+    }
+    parsed: dict[str, Any] = {
+        "retention_days": 30,
+        "limit": 20,
+        "scan_limit": 100,
+    }
+    seen: set[str] = set()
+    index = 0
+    while index < len(tokens):
+        option = tokens[index]
+        field = option_names.get(option)
+        if field is None:
+            raise ValueError(f"未知 retention-preview 参数：{option}")
+        if option in seen:
+            raise ValueError(f"retention-preview 参数重复：{option}")
+        if index + 1 >= len(tokens):
+            raise ValueError(f"retention-preview 参数缺少值：{option}")
+        value = tokens[index + 1]
+        if value.startswith("--"):
+            raise ValueError(f"retention-preview 参数缺少值：{option}")
+        if field == "assessed_at":
+            if not value or len(value) > 64:
+                raise ValueError("--assessed-at 必须是最长 64 字符的 ISO 时间。")
+            parsed[field] = value
+        else:
+            if not re.fullmatch(r"[0-9]+", value):
+                raise ValueError(f"{option} 必须是十进制整数。")
+            parsed[field] = int(value)
+        seen.add(option)
+        index += 2
+    if not 1 <= parsed["retention_days"] <= 3_650:
+        raise ValueError("--retention-days 必须在 1..3650 之间。")
+    if not 1 <= parsed["limit"] <= 20:
+        raise ValueError("--limit 必须在 1..20 之间。")
+    if not parsed["limit"] <= parsed["scan_limit"] <= 100:
+        raise ValueError("--scan-limit 必须在 limit..100 之间。")
+    return parsed
 
 
 def set_pursuit_dependencies(
@@ -707,6 +761,108 @@ class PursuitTerminalDeadLetterAbandonTool(Tool):
         ))
 
 
+class PursuitTerminalOutboxRetentionPreviewTool(Tool):
+    """Preview old authenticated abandoned outboxes without mutating them."""
+
+    def __init__(
+        self,
+        runner: Callable[
+            [int, int, int, str | None],
+            Awaitable[PursuitTerminalOutboxRetentionPreview],
+        ],
+    ) -> None:
+        self._runner = runner
+
+    @property
+    def name(self) -> str:
+        return "pursuit_terminal_outbox_retention_preview"
+
+    @property
+    def description(self) -> str:
+        return (
+            "只读预演超过保留期的 authenticated abandoned Pursuit 终态 outbox；"
+            "认证每条保护引用并签发防篡改 preview，不删除或归档任何记录。"
+        )
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            user_facing_name="预演 Pursuit 终态 Outbox 保留策略",
+            search_hint=(
+                "pursuit terminal outbox retention preview abandoned protection refs"
+            ),
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "retention_days": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 3650,
+                    "default": 30,
+                    "description": "仅选择已处置时间不晚于该保留期截止点的记录。",
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 20,
+                    "default": 20,
+                    "description": "本轮最多返回的认证候选数。",
+                },
+                "scan_limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 100,
+                    "description": "本轮最多扫描的年龄合格记录数，不能小于 limit。",
+                },
+                "assessed_at": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "可选的带时区 ISO 时间，仅用于可复现审计。",
+                },
+            },
+            "required": [],
+            "additionalProperties": False,
+        }
+
+    async def execute(self, **kwargs: Any) -> str:
+        retention_days = kwargs.get("retention_days", 30)
+        limit = kwargs.get("limit", 20)
+        scan_limit = kwargs.get("scan_limit", 100)
+        assessed_at = kwargs.get("assessed_at")
+        for value, name, lower, upper in (
+            (retention_days, "retention_days", 1, 3_650),
+            (limit, "limit", 1, 20),
+            (scan_limit, "scan_limit", 1, 100),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"{name} 必须是整数。")
+            if not lower <= value <= upper:
+                raise ValueError(f"{name} 必须在 {lower}..{upper} 之间。")
+        if scan_limit < limit:
+            raise ValueError("scan_limit 不能小于 limit。")
+        if assessed_at is not None:
+            if not isinstance(assessed_at, str) or not assessed_at.strip():
+                raise ValueError("assessed_at 必须是带时区 ISO 时间。")
+            assessed_at = assessed_at.strip()
+            if len(assessed_at) > 64:
+                raise ValueError("assessed_at 最长 64 个字符。")
+        preview = await self._runner(
+            retention_days,
+            limit,
+            scan_limit,
+            assessed_at,
+        )
+        return render_terminal_outbox_retention_preview(preview)
+
+
 def create_pursuit_tool(
     *,
     terminal_outbox_runner: (
@@ -724,6 +880,13 @@ def create_pursuit_tool(
         Callable[
             [str, str, str],
             Awaitable[PursuitTerminalDeadLetterAbandonReceipt],
+        ]
+        | None
+    ) = None,
+    terminal_outbox_retention_preview: (
+        Callable[
+            [int, int, int, str | None],
+            Awaitable[PursuitTerminalOutboxRetentionPreview],
         ]
         | None
     ) = None,
@@ -747,5 +910,9 @@ def create_pursuit_tool(
     if terminal_dead_letter_abandon is not None:
         tools.append(PursuitTerminalDeadLetterAbandonTool(
             terminal_dead_letter_abandon,
+        ))
+    if terminal_outbox_retention_preview is not None:
+        tools.append(PursuitTerminalOutboxRetentionPreviewTool(
+            terminal_outbox_retention_preview,
         ))
     return tools
