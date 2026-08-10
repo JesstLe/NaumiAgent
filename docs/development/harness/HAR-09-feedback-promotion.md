@@ -107,7 +107,10 @@
 - HAR-09.6c2a2a-6c2a3f 已补齐 target placement/baseline、durable health/capacity、authenticated claim、
   encrypted delivery、execution authorization 与 signed result ingestion。Control Plane 在 current authorization
   窗口内原子准入完整 typed cohort，并复用 canonical H5a/H5c；单个 remote lane 仍固定无矩阵、learning 或
-  promotion authority，下一步由 HAR-09.6c2b 验证并聚合完整 Behavioral Matrix。
+  promotion authority，完整聚合已由 HAR-09.6c2b1 独立完成。
+- HAR-09.6c2b1 已对 exact Coverage lane 集聚合本机 Behavioral Lane 与远端 signed ingestion receipt，动态重验
+  H5c 并签发完整 recovery verdict。Matrix 只授予行为评测 authority；专用 Workbench/New UI/TUI 详情、长期指标、
+  promoted Outcome 与 policy learning 仍未完成。
 
 EVO-02.1b 已把不可执行 Contract 包装为 workspace-bound durable Authority；HAR-09.5c 在其上补齐产品动作、
 Proposal 单飞键和历史 projection 迁移。Contract 仍不是执行或 promotion 许可。

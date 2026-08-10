@@ -171,7 +171,7 @@ class EvolutionPostRollbackBehavioralLane(_StrictModel):
             and comparison.current_samples_sha256 == self.fresh_samples_sha256
         ):
             raise ValueError("Post-Rollback fresh H5c 与原 baseline/fresh cohort 不一致。")
-        expected_status = _recovery_status(comparison)
+        expected_status = post_rollback_recovery_status(comparison)
         if self.recovery_status != expected_status:
             raise ValueError("Post-Rollback recovery status 与 fresh H5c 不一致。")
         latest = max(_aware(item.evaluated_at) for item in self.runtime_eval_receipts)
@@ -1082,7 +1082,7 @@ def _build_artifact(
         "fresh_batch_id": fresh_comparison.current_batch_id,
         "fresh_samples_sha256": eval_sample_set_sha256(_samples(fresh_records)),
         "fresh_comparison": fresh_comparison.model_dump(mode="json"),
-        "recovery_status": _recovery_status(fresh_comparison),
+        "recovery_status": post_rollback_recovery_status(fresh_comparison),
         "lane_evaluation_recorded": True,
         "behavioral_evaluation_recorded": False,
         "long_term_metrics_recorded": False,
@@ -1212,7 +1212,7 @@ def load_post_rollback_runtime_eval_request(
     return matches[0]
 
 
-def _recovery_status(
+def post_rollback_recovery_status(
     comparison: HarnessEvalComparisonReceipt,
 ) -> Literal["recovered", "changed", "inconclusive", "incompatible"]:
     mechanical = tuple(item.mechanical_verdict for item in comparison.sample_evidence)
@@ -1373,5 +1373,6 @@ __all__ = [
     "EvolutionPostRollbackBehavioralLaneStore",
     "EvolutionPostRollbackBehavioralLaneView",
     "load_post_rollback_runtime_eval_request",
+    "post_rollback_recovery_status",
     "render_post_rollback_behavioral_lane",
 ]

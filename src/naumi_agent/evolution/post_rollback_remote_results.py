@@ -383,6 +383,67 @@ class EvolutionPostRollbackRemoteResultStore:
                 "Remote result durable admission 损坏或无法读取。",
             ) from exc
 
+    async def list_by_lane(
+        self,
+        *,
+        outcome_id: str,
+        comparison_id: str,
+        limit: int = 3,
+    ) -> tuple[EvolutionPostRollbackRemoteResultManifest, ...]:
+        """Return bounded admitted manifests for one exact behavioral lane."""
+        outcome = _outcome_id(outcome_id)
+        comparison = _comparison_id(comparison_id)
+        bounded = max(1, min(int(limit), 10))
+        if not self.db_path.is_file():
+            return ()
+        try:
+            async with aiosqlite.connect(self.db_path, timeout=5.0) as db:
+                db.row_factory = aiosqlite.Row
+                await _ensure_schema(db)
+                await self._backfill_lane_index(db)
+                rows = await (
+                    await db.execute(
+                        "SELECT manifests.*, "
+                        "lane_index.outcome_id AS indexed_outcome_id, "
+                        "lane_index.comparison_id AS indexed_comparison_id, "
+                        "lane_index.request_id AS indexed_request_id, "
+                        "lane_index.suite_id AS indexed_suite_id FROM "
+                        "evolution_post_rollback_remote_result_manifests AS manifests "
+                        "JOIN evolution_post_rollback_remote_result_lane_index AS lane_index "
+                        "ON lane_index.manifest_id = manifests.manifest_id "
+                        "WHERE lane_index.outcome_id = ? AND "
+                        "lane_index.comparison_id = ? "
+                        "ORDER BY manifests.admitted_at, manifests.manifest_id LIMIT ?",
+                        (outcome, comparison, bounded + 1),
+                    )
+                ).fetchall()
+            if len(rows) > bounded:
+                raise EvolutionPostRollbackRemoteResultError(
+                    "post_rollback_remote_result_lane_conflict",
+                    "同一 Post-Rollback lane 存在过多 Remote result admission。",
+                )
+            manifests = tuple(self._stored_manifest(row) for row in rows)
+            for row, manifest in zip(rows, manifests, strict=True):
+                payload = manifest.payload
+                if not (
+                    row["indexed_outcome_id"] == payload.outcome_id
+                    and row["indexed_comparison_id"] == payload.comparison_id
+                    and row["indexed_request_id"] == payload.request_id
+                    and row["indexed_suite_id"] == payload.suite_id
+                ):
+                    raise EvolutionPostRollbackRemoteResultError(
+                        "post_rollback_remote_result_lane_index_tampered",
+                        "Remote result lane index 与 signed manifest 不一致。",
+                    )
+            return manifests
+        except EvolutionPostRollbackRemoteResultError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise EvolutionPostRollbackRemoteResultError(
+                "post_rollback_remote_result_store_corrupt",
+                "Remote result lane index 损坏或无法读取。",
+            ) from exc
+
     async def get_receipt(
         self, manifest_id: str
     ) -> EvolutionPostRollbackRemoteResultReceipt | None:
@@ -525,9 +586,11 @@ class EvolutionPostRollbackRemoteResultStore:
                 ).fetchone()
                 if existing is not None:
                     restored = self._stored_manifest(existing)
-                    await db.rollback()
                     if restored == item:
+                        await _record_lane_index(db, restored)
+                        await db.commit()
                         return restored
+                    await db.rollback()
                     raise EvolutionPostRollbackRemoteResultError(
                         "post_rollback_remote_result_attempt_conflict",
                         "同一 Remote attempt 已绑定不同结果 manifest。",
@@ -548,6 +611,7 @@ class EvolutionPostRollbackRemoteResultStore:
                         admission_attestation_sha256,
                     ),
                 )
+                await _record_lane_index(db, item)
                 await db.commit()
             return item
         except EvolutionPostRollbackRemoteResultError:
@@ -666,6 +730,27 @@ class EvolutionPostRollbackRemoteResultStore:
                 "Remote result control-plane key 不可用。",
             )
         return key
+
+    async def _backfill_lane_index(self, db: aiosqlite.Connection) -> None:
+        rows = await (
+            await db.execute(
+                "SELECT manifests.* FROM "
+                "evolution_post_rollback_remote_result_manifests AS manifests "
+                "LEFT JOIN evolution_post_rollback_remote_result_lane_index AS lane_index "
+                "ON lane_index.manifest_id = manifests.manifest_id "
+                "WHERE lane_index.manifest_id IS NULL "
+                "ORDER BY manifests.admitted_at, manifests.manifest_id LIMIT 1001"
+            )
+        ).fetchall()
+        if len(rows) > 1000:
+            raise EvolutionPostRollbackRemoteResultError(
+                "post_rollback_remote_result_lane_index_backlog",
+                "Remote result lane index 待迁移记录超过安全上限。",
+            )
+        for row in rows:
+            await _record_lane_index(db, self._stored_manifest(row))
+        if rows:
+            await db.commit()
 
 
 class EvolutionPostRollbackRemoteResultService:
@@ -1213,6 +1298,26 @@ def _attempt_id(value: str) -> str:
     return normalized
 
 
+def _outcome_id(value: str) -> str:
+    normalized = str(value or "").strip()
+    if re.fullmatch(r"^evrerollbackout_[0-9a-f]{24}$", normalized) is None:
+        raise EvolutionPostRollbackRemoteResultError(
+            "post_rollback_remote_result_outcome_id_invalid",
+            "Rollback Outcome ID 格式无效。",
+        )
+    return normalized
+
+
+def _comparison_id(value: str) -> str:
+    normalized = str(value or "").strip()
+    if re.fullmatch(_SHA256_RE, normalized) is None:
+        raise EvolutionPostRollbackRemoteResultError(
+            "post_rollback_remote_result_comparison_id_invalid",
+            "Remote result 原 H5c Comparison ID 格式无效。",
+        )
+    return normalized
+
+
 def _aware(value) -> datetime:
     parsed = datetime.fromisoformat(value) if isinstance(value, str) else value
     if not isinstance(parsed, datetime) or parsed.utcoffset() is None:
@@ -1255,8 +1360,62 @@ async def _ensure_schema(db: aiosqlite.Connection) -> None:
             receipt_json TEXT NOT NULL,
             ingested_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS evolution_post_rollback_remote_result_lane_index (
+            manifest_id TEXT PRIMARY KEY,
+            outcome_id TEXT NOT NULL,
+            comparison_id TEXT NOT NULL,
+            request_id TEXT NOT NULL,
+            suite_id TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_post_rollback_remote_result_lane
+        ON evolution_post_rollback_remote_result_lane_index(
+            outcome_id, comparison_id, manifest_id
+        );
         """
     )
+
+
+async def _record_lane_index(
+    db: aiosqlite.Connection,
+    manifest: EvolutionPostRollbackRemoteResultManifest,
+) -> None:
+    payload = manifest.payload
+    exact = (
+        manifest.manifest_id,
+        payload.outcome_id,
+        payload.comparison_id,
+        payload.request_id,
+        payload.suite_id,
+    )
+    await db.execute(
+        "INSERT OR IGNORE INTO evolution_post_rollback_remote_result_lane_index "
+        "(manifest_id, outcome_id, comparison_id, request_id, suite_id) "
+        "VALUES (?, ?, ?, ?, ?)",
+        exact,
+    )
+    existing = await (
+        await db.execute(
+            "SELECT * FROM evolution_post_rollback_remote_result_lane_index "
+            "WHERE manifest_id = ?",
+            (manifest.manifest_id,),
+        )
+    ).fetchone()
+    current = (
+        None
+        if existing is None
+        else (
+            existing["manifest_id"],
+            existing["outcome_id"],
+            existing["comparison_id"],
+            existing["request_id"],
+            existing["suite_id"],
+        )
+    )
+    if current != exact:
+        raise EvolutionPostRollbackRemoteResultError(
+            "post_rollback_remote_result_lane_index_tampered",
+            "Remote result lane index 与 signed manifest 不一致。",
+        )
 
 
 __all__ = [
