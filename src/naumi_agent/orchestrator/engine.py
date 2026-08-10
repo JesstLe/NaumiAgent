@@ -205,6 +205,10 @@ from naumi_agent.evolution.promotion_packages import (
     EvolutionPromotionPackageStore,
     EvolutionPromotionTargetProbe,
 )
+from naumi_agent.evolution.proposal_before_after_evidence import (
+    EvolutionProposalBeforeAfterEvidenceService,
+    EvolutionProposalBeforeAfterEvidenceStore,
+)
 from naumi_agent.evolution.proposal_outcomes import (
     EvolutionProposalOutcomeProjectionService,
 )
@@ -2460,6 +2464,29 @@ class AgentEngine:
                 store=self.evolution_revalidation_rollback_outcome_store,
             )
         )
+        self.evolution_proposal_before_after_evidence_store = (
+            EvolutionProposalBeforeAfterEvidenceStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_proposal_before_after_evidence_service = (
+            EvolutionProposalBeforeAfterEvidenceService(
+                workspace_root=paths.workspace_root,
+                outcome_service=(
+                    self.evolution_revalidation_rollback_outcome_service
+                ),
+                fresh_input_store=(
+                    self.evolution_revalidation_promotion_input_store
+                ),
+                final_evaluation_store=(
+                    self.evolution_final_evaluation_receipt_store
+                ),
+                harness_store=self._harness_store,
+                evidence_store=(
+                    self.evolution_proposal_before_after_evidence_store
+                ),
+            )
+        )
         self.evolution_proposal_outcome_projection_service = (
             EvolutionProposalOutcomeProjectionService(
                 rollback_outcome_store=(
@@ -2467,6 +2494,12 @@ class AgentEngine:
                 ),
                 rollback_outcome_service=(
                     self.evolution_revalidation_rollback_outcome_service
+                ),
+                before_after_store=(
+                    self.evolution_proposal_before_after_evidence_store
+                ),
+                before_after_service=(
+                    self.evolution_proposal_before_after_evidence_service
                 ),
             )
         )

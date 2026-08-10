@@ -238,6 +238,10 @@ function renderProposalDetail(snapshot, proposal, width) {
     const authority = outcome.authority_valid
       ? color(ANSI.green, "authority 有效")
       : color(ANSI.red, "authority 已失效");
+    const beforeAfter = outcome.before_after_evidence;
+    const beforeAfterLabel = beforeAfter
+      ? color(ANSI.green, `已记录 · ${array(beforeAfter.lanes).length} lanes`)
+      : color(ANSI.yellow, "尚未记录");
     lines.push(
       color(ANSI.cyan, "实施 Outcome"),
       `${color(ANSI.yellow, "rolled_back")} · ${authority}`,
@@ -245,7 +249,13 @@ function renderProposalDetail(snapshot, proposal, width) {
       `Rollback Receipt · ${compactText(outcome.rollback_receipt_id, 128)}`,
       `Experiment Contract · ${compactText(outcome.experiment_contract_id, 128)}`,
       `Breach · ${compactText(array(outcome.breach_reasons).join(", ") || "-", 800)}`,
-      color(ANSI.yellow, "HAR-08 before/after · 尚未记录 · 长期指标 · 尚未记录"),
+      `HAR-08 before/after · ${beforeAfterLabel} · ${color(ANSI.yellow, "长期指标 · 尚未记录")}`,
+      ...(beforeAfter
+        ? [
+            `Before/After Evidence · ${compactText(beforeAfter.evidence_id, 128)}`,
+            color(ANSI.dim, "口径 · 实施前 RED baseline → 实施后 GREEN candidate；不是回滚后评测。"),
+          ]
+        : []),
       color(ANSI.dim, "不能再次签发 Contract、标记 promoted 或进入 policy learning。"),
     );
   }

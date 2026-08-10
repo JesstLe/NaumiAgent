@@ -952,6 +952,33 @@ class WorkbenchService:
                     payload = dict(value)
                 else:
                     raise TypeError("Proposal Outcome projection 类型无效。")
+                before_after = payload.get("before_after_evidence")
+                before_after_recorded = payload.get("before_after_recorded")
+                before_after_valid = before_after is None
+                if isinstance(before_after, dict):
+                    from naumi_agent.evolution.proposal_before_after_evidence import (
+                        EvolutionProposalBeforeAfterEvidence,
+                    )
+
+                    try:
+                        evidence = EvolutionProposalBeforeAfterEvidence.model_validate(
+                            before_after
+                        )
+                    except ValueError:
+                        before_after_valid = False
+                    else:
+                        before_after_valid = bool(
+                            evidence.outcome_id == payload.get("outcome_id")
+                            and evidence.outcome_sha256
+                            == payload.get("outcome_sha256")
+                            and evidence.workbench_session_id == session_id
+                            and evidence.workbench_proposal_id == str(proposal_id)
+                            and evidence.experiment_contract_id
+                            == payload.get("experiment_contract_id")
+                            and evidence.candidate_id == payload.get("candidate_id")
+                            and evidence.candidate_revision
+                            == payload.get("candidate_revision")
+                        )
                 if not (
                     str(proposal_id) == str(payload.get("workbench_proposal_id") or "")
                     and session_id == str(payload.get("workbench_session_id") or "")
@@ -961,7 +988,10 @@ class WorkbenchService:
                     and payload.get("governance_state_unchanged") is True
                     and payload.get("status") == "rolled_back"
                     and payload.get("contract_issue_allowed") is False
-                    and payload.get("before_after_recorded") is False
+                    and isinstance(before_after_recorded, bool)
+                    and before_after_recorded is (before_after is not None)
+                    and before_after_valid
+                    and payload.get("post_rollback_evaluation_recorded") is False
                     and payload.get("long_term_metrics_recorded") is False
                     and payload.get("promoted") is False
                     and payload.get("learning_authority") is False

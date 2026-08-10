@@ -398,6 +398,18 @@ if TYPE_CHECKING:
         EvolutionPromotionTargetSnapshot,
         render_evolution_promotion_package,
     )
+    from naumi_agent.evolution.proposal_before_after_evidence import (
+        EVOLUTION_PROPOSAL_BEFORE_AFTER_EVIDENCE_POLICY,
+        EvolutionProposalBeforeAfterCohort,
+        EvolutionProposalBeforeAfterEvidence,
+        EvolutionProposalBeforeAfterEvidenceBuilder,
+        EvolutionProposalBeforeAfterEvidenceError,
+        EvolutionProposalBeforeAfterEvidenceService,
+        EvolutionProposalBeforeAfterEvidenceStore,
+        EvolutionProposalBeforeAfterEvidenceView,
+        EvolutionProposalBeforeAfterLane,
+        render_proposal_before_after_evidence,
+    )
     from naumi_agent.evolution.proposal_outcomes import (
         EVOLUTION_PROPOSAL_OUTCOME_PROJECTION_POLICY,
         EvolutionProposalOutcomeProjection,
@@ -1777,6 +1789,16 @@ __all__ = [
     "EvolutionProposalOutcomeProjection",
     "EvolutionProposalOutcomeProjectionError",
     "EvolutionProposalOutcomeProjectionService",
+    "EVOLUTION_PROPOSAL_BEFORE_AFTER_EVIDENCE_POLICY",
+    "EvolutionProposalBeforeAfterCohort",
+    "EvolutionProposalBeforeAfterEvidence",
+    "EvolutionProposalBeforeAfterEvidenceBuilder",
+    "EvolutionProposalBeforeAfterEvidenceError",
+    "EvolutionProposalBeforeAfterEvidenceService",
+    "EvolutionProposalBeforeAfterEvidenceStore",
+    "EvolutionProposalBeforeAfterEvidenceView",
+    "EvolutionProposalBeforeAfterLane",
+    "render_proposal_before_after_evidence",
     "adapt_harness_failure_evidence",
     "adapt_self_review_static_evidence",
     "build_candidate_draft",
@@ -2816,6 +2838,18 @@ def __getattr__(name: str) -> object:
         "EvolutionProposalOutcomeProjectionError",
         "EvolutionProposalOutcomeProjectionService",
     }
+    proposal_before_after_exports = {
+        "EVOLUTION_PROPOSAL_BEFORE_AFTER_EVIDENCE_POLICY",
+        "EvolutionProposalBeforeAfterCohort",
+        "EvolutionProposalBeforeAfterEvidence",
+        "EvolutionProposalBeforeAfterEvidenceBuilder",
+        "EvolutionProposalBeforeAfterEvidenceError",
+        "EvolutionProposalBeforeAfterEvidenceService",
+        "EvolutionProposalBeforeAfterEvidenceStore",
+        "EvolutionProposalBeforeAfterEvidenceView",
+        "EvolutionProposalBeforeAfterLane",
+        "render_proposal_before_after_evidence",
+    }
     experiment_exports = {
         "EvolutionExperimentContract",
         "EvolutionExperimentContractAuthority",
@@ -3206,6 +3240,8 @@ def __getattr__(name: str) -> object:
         module_name = "promotion_packages"
     elif name in proposal_exports:
         module_name = "proposal"
+    elif name in proposal_before_after_exports:
+        module_name = "proposal_before_after_evidence"
     elif name in proposal_outcome_exports:
         module_name = "proposal_outcomes"
     elif name in experiment_exports:

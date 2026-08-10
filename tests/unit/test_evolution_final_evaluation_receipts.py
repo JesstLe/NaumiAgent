@@ -115,6 +115,20 @@ from naumi_agent.evolution.mutation_generation import (
     EvolutionMutationGenerationTraceStore,
 )
 from naumi_agent.evolution.mutation_receipts import EvolutionMutationReceiptStore
+from naumi_agent.evolution.promotion_package_inputs import (
+    EvolutionPromotionEvidenceKind,
+    EvolutionPromotionPackageInput,
+)
+from naumi_agent.evolution.promotion_package_inputs import (
+    _sha256_payload as _promotion_sha256,
+)
+from naumi_agent.evolution.proposal_before_after_evidence import (
+    EvolutionProposalBeforeAfterEvidenceBuilder,
+    EvolutionProposalBeforeAfterEvidenceError,
+    EvolutionProposalBeforeAfterEvidenceService,
+    EvolutionProposalBeforeAfterEvidenceStore,
+    render_proposal_before_after_evidence,
+)
 from naumi_agent.evolution.reflection_memories import (
     EvolutionReflectionLessonKind,
     EvolutionReflectionMemory,
@@ -126,6 +140,20 @@ from naumi_agent.evolution.reflection_memories import (
     EvolutionReflectionRevocationReason,
     EvolutionReflectionSignal,
     render_evolution_reflection_memory,
+)
+from naumi_agent.evolution.revalidation_promotion_inputs import (
+    EVOLUTION_REVALIDATION_PROMOTION_INPUT_POLICY,
+    EvolutionRevalidationPromotionInput,
+)
+from naumi_agent.evolution.revalidation_promotion_inputs import (
+    _sha256_payload as _fresh_promotion_sha256,
+)
+from naumi_agent.evolution.revalidation_rollback_outcomes import (
+    EVOLUTION_REVALIDATION_ROLLBACK_OUTCOME_POLICY,
+    EvolutionRevalidationRollbackOutcome,
+)
+from naumi_agent.evolution.revalidation_rollback_outcomes import (
+    _digest as _rollback_outcome_sha256,
 )
 from naumi_agent.evolution.reward_hacking_evidence import (
     EvolutionRewardHackingEvidence,
@@ -164,6 +192,7 @@ from naumi_agent.model.router import (
     ModelRuntimeIdentity,
     TokenUsage,
 )
+from naumi_agent.tools.base import ToolCall, ToolRegistry, ToolResult
 from naumi_agent.tools.evolution_review import (
     EvolutionCounterfactualEvidenceTool,
     EvolutionDecisionInputTool,
@@ -172,6 +201,7 @@ from naumi_agent.tools.evolution_review import (
     EvolutionFinalEvaluationReceiptTool,
     EvolutionIndependentReviewTool,
     EvolutionMechanicalGateTool,
+    EvolutionProposalBeforeAfterEvidenceTool,
     EvolutionReflectionMemoryRevokeTool,
     EvolutionReflectionMemoryTool,
     EvolutionRewardHackingEvidenceTool,
@@ -179,6 +209,10 @@ from naumi_agent.tools.evolution_review import (
 from naumi_agent.user_interaction import normalize_interaction_request
 from tests.unit.test_evolution_experiment_leases import (
     _adversarial_probe_fixture,
+)
+from tests.unit.test_evolution_promotion_package_inputs import (
+    _accepted_reflection,
+    _package,
 )
 
 
@@ -517,6 +551,129 @@ def _cohort(
     })
 
 
+def _before_after_lineage(workspace, experiment, final):
+    memory = _accepted_reflection(workspace)
+    prior_payload = _package(workspace, memory).model_dump(mode="json")
+    prior_payload.update(
+        candidate_id=final.candidate_id,
+        candidate_revision=final.candidate_revision,
+        candidate_sha256=experiment.source.candidate_sha256,
+        experiment_contract_id=experiment.contract_id,
+        experiment_contract_sha256=experiment.manifest_sha256,
+        final_evaluation_receipt_id=final.receipt_id,
+        final_evaluation_receipt_sha256=final.receipt_sha256,
+        required_platforms=list(final.required_platforms),
+        evaluation_lane_count=final.lane_count,
+    )
+    for ref in prior_payload["evidence_refs"]:
+        if ref["kind"] == EvolutionPromotionEvidenceKind.EXPERIMENT_CONTRACT.value:
+            ref["authority_id"] = experiment.contract_id
+            ref["authority_sha256"] = experiment.manifest_sha256
+        elif ref["kind"] == EvolutionPromotionEvidenceKind.FINAL_EVALUATION.value:
+            ref["authority_id"] = final.receipt_id
+            ref["authority_sha256"] = final.receipt_sha256
+    prior_core = {
+        key: value
+        for key, value in prior_payload.items()
+        if key not in {"input_id", "input_sha256"}
+    }
+    prior_sha = _promotion_sha256(prior_core)
+    prior = EvolutionPromotionPackageInput.model_validate({
+        **prior_core,
+        "input_id": f"evpromoin_{prior_sha[:24]}",
+        "input_sha256": prior_sha,
+    })
+    fresh_core = {
+        "schema_version": 1,
+        "policy_version": EVOLUTION_REVALIDATION_PROMOTION_INPUT_POLICY,
+        "workspace_root": str(workspace.resolve()),
+        "candidate_id": prior.candidate_id,
+        "candidate_revision": prior.candidate_revision,
+        "risk_level": prior.risk_level,
+        "contract_id": f"evrevalruntime_{'1' * 24}",
+        "contract_sha256": "1" * 64,
+        "final_evaluation_id": f"evrevalfinal_{'2' * 24}",
+        "final_evaluation_sha256": "2" * 64,
+        "reapproval_authority_id": f"evreapproval_{'3' * 24}",
+        "reapproval_authority_sha256": "3" * 64,
+        "prior_input_id": prior.input_id,
+        "prior_input_sha256": prior.input_sha256,
+        "prior_input": prior.model_dump(mode="json"),
+        "required_platforms": list(prior.required_platforms),
+        "prior_final_invalidated": True,
+        "prior_decision_reusable": False,
+        "prior_approval_reusable": False,
+        "prior_signature_reusable": False,
+        "patch_and_rollback_carried_forward": True,
+        "source_current_at_issue": True,
+        "input_complete": True,
+        "approval_requirement_ready": True,
+        "approval_decided": False,
+        "promotion_authority": False,
+        "contains_source_code": False,
+        "contains_freeform_narrative": False,
+        "llm_generated": False,
+        "created_at": prior.created_at,
+    }
+    fresh_sha = _fresh_promotion_sha256(fresh_core)
+    fresh = EvolutionRevalidationPromotionInput.model_validate({
+        **fresh_core,
+        "input_id": f"evrevalpromoin_{fresh_sha[:24]}",
+        "input_sha256": fresh_sha,
+    })
+    source = experiment.source
+    outcome_core = {
+        "schema_version": 1,
+        "policy_version": EVOLUTION_REVALIDATION_ROLLBACK_OUTCOME_POLICY,
+        "workspace_root": str(workspace.resolve()),
+        "status": "rolled_back",
+        "rollback_receipt_id": f"evrerollbackexec_{'4' * 24}",
+        "rollback_receipt_sha256": "4" * 64,
+        "request_id": f"evrerollbackreq_{'5' * 24}",
+        "request_sha256": "5" * 64,
+        "plan_id": f"evrerolloutplan_{'6' * 24}",
+        "plan_sha256": "6" * 64,
+        "promotion_input_id": fresh.input_id,
+        "promotion_input_sha256": fresh.input_sha256,
+        "runtime_contract_id": fresh.contract_id,
+        "runtime_contract_sha256": fresh.contract_sha256,
+        "prior_input_id": prior.input_id,
+        "prior_input_sha256": prior.input_sha256,
+        "experiment_contract_id": experiment.contract_id,
+        "experiment_contract_sha256": experiment.manifest_sha256,
+        "experiment_authority_id": f"evxauth_{'7' * 24}",
+        "experiment_authority_sha256": "7" * 64,
+        "workbench_session_id": source.session_id,
+        "workbench_proposal_id": source.workbench_proposal_id,
+        "proposal_id": source.proposal_id,
+        "proposal_kind": source.proposal_kind,
+        "candidate_id": source.candidate_id,
+        "candidate_revision": source.candidate_revision,
+        "candidate_sha256": source.candidate_sha256,
+        "candidate_slot_id": "candidate-slot",
+        "candidate_slot_sha256": "8" * 64,
+        "baseline_slot_id": "baseline-slot",
+        "baseline_slot_sha256": "9" * 64,
+        "breach_reasons": ["runtime_guardrail_breach"],
+        "rollback_fact_verified": True,
+        "proposal_binding_verified": True,
+        "outcome_recorded": True,
+        "promoted": False,
+        "superseded": False,
+        "long_term_metrics_recorded": False,
+        "learning_authority": False,
+        "promotion_authority": False,
+        "recorded_at": "2026-08-10T00:00:00+00:00",
+    }
+    outcome_sha = _rollback_outcome_sha256(outcome_core)
+    outcome = EvolutionRevalidationRollbackOutcome.model_validate({
+        **outcome_core,
+        "outcome_id": f"evrerollbackout_{outcome_sha[:24]}",
+        "outcome_sha256": outcome_sha,
+    })
+    return outcome, fresh, prior
+
+
 @pytest.mark.asyncio
 async def test_final_evaluation_receipt_reloads_exact_complete_authority(
     tmp_path: Path,
@@ -697,6 +854,193 @@ async def test_final_evaluation_receipt_reloads_exact_complete_authority(
     assert receipt.receipt_id == f"evfinal_{receipt.receipt_sha256[:24]}"
     assert await final_store.get(contract.contract_id) == receipt
     assert await final_store.get_by_receipt_id(receipt.receipt_id) == receipt
+
+    outcome, fresh_input, prior_input = _before_after_lineage(
+        workspace,
+        experiment,
+        receipt,
+    )
+
+    class _OutcomeAuthority:
+        async def inspect(self, *, request_id):
+            assert request_id == outcome.request_id
+            return SimpleNamespace(outcome=outcome, outcome_authority=True)
+
+    class _FreshInputAuthority:
+        async def get(self, contract_id):
+            assert contract_id == fresh_input.contract_id
+            return fresh_input
+
+    class _FinalAuthority:
+        async def get_by_receipt_id(self, receipt_id):
+            assert receipt_id == receipt.receipt_id
+            return receipt
+
+    class _EvidenceSink:
+        async def record(self, item):
+            self.item = item
+            return item
+
+    evidence_service = EvolutionProposalBeforeAfterEvidenceService(
+        workspace_root=workspace,
+        outcome_service=_OutcomeAuthority(),  # type: ignore[arg-type]
+        fresh_input_store=_FreshInputAuthority(),  # type: ignore[arg-type]
+        final_evaluation_store=_FinalAuthority(),  # type: ignore[arg-type]
+        harness_store=harness_store,
+        evidence_store=_EvidenceSink(),  # type: ignore[arg-type]
+        now=lambda: "2026-08-10T00:01:00+00:00",
+    )
+    evidence_view = await evidence_service.record(request_id=outcome.request_id)
+    evidence = evidence_view.evidence
+    assert evidence_view.before_after_authority
+    assert evidence.evidence_kind == "implementation_before_after"
+    assert evidence.lane_count == receipt.lane_count == 2
+    assert evidence.lanes[0].lane_kind == "interventional"
+    assert evidence.lanes[1].lane_kind == "adversarial"
+    assert evidence.lanes[0].before.failed_samples == 5
+    assert evidence.lanes[0].after.passed_samples == 5
+    assert evidence.before_after_recorded
+    assert not evidence.post_rollback_evaluation_recorded
+    assert not evidence.long_term_metrics_recorded
+    assert not evidence.learning_authority
+    assert not evidence.promotion_authority
+    rendered_evidence = render_proposal_before_after_evidence(evidence_view)
+    assert "实施前 RED baseline" in rendered_evidence
+    assert "不是回滚后评测" in rendered_evidence
+
+    tool = EvolutionProposalBeforeAfterEvidenceTool(
+        SimpleNamespace(
+            evolution_proposal_before_after_evidence_service=evidence_service
+        )
+    )
+    tool_output = await tool.execute(outcome.request_id)
+    assert tool_output == rendered_evidence
+    registry = ToolRegistry()
+    registry.register(tool)
+
+    class _BeforeAfterSlashEngine:
+        def __init__(self):
+            self.tool_registry = registry
+
+        async def execute_tool(self, call: ToolCall, *, agent_name=None):
+            registered = self.tool_registry.get(call.name)
+            assert registered is not None and agent_name == "cli"
+            content = await registered.execute(**json.loads(call.arguments))
+            return ToolResult(call_id=call.id, status="success", content=content)
+
+    slash_output = await execute_slash_command(
+        _BeforeAfterSlashEngine(),
+        f"/evolution outcome-before-after {outcome.request_id}",
+    )
+    assert evidence.evidence_id in slash_output
+    assert "不是回滚后评测" in slash_output
+
+    authority_db = tmp_path / "before-after-authority.db"
+    with sqlite3.connect(authority_db) as db:
+        db.execute(
+            "CREATE TABLE evolution_revalidation_rollback_outcomes "
+            "(outcome_id TEXT PRIMARY KEY, outcome_sha256 TEXT NOT NULL)"
+        )
+        db.execute(
+            "INSERT INTO evolution_revalidation_rollback_outcomes VALUES (?, ?)",
+            (outcome.outcome_id, outcome.outcome_sha256),
+        )
+        db.execute(
+            "CREATE TABLE evolution_revalidation_promotion_inputs "
+            "(input_id TEXT PRIMARY KEY, input_sha256 TEXT NOT NULL)"
+        )
+        db.execute(
+            "INSERT INTO evolution_revalidation_promotion_inputs VALUES (?, ?)",
+            (fresh_input.input_id, fresh_input.input_sha256),
+        )
+        db.execute(
+            "CREATE TABLE evolution_promotion_package_inputs "
+            "(input_id TEXT PRIMARY KEY, input_sha256 TEXT NOT NULL)"
+        )
+        db.execute(
+            "INSERT INTO evolution_promotion_package_inputs VALUES (?, ?)",
+            (prior_input.input_id, prior_input.input_sha256),
+        )
+        db.execute(
+            "CREATE TABLE evolution_final_evaluation_receipts "
+            "(receipt_id TEXT PRIMARY KEY, receipt_sha256 TEXT NOT NULL)"
+        )
+        db.execute(
+            "INSERT INTO evolution_final_evaluation_receipts VALUES (?, ?)",
+            (receipt.receipt_id, receipt.receipt_sha256),
+        )
+        db.commit()
+    durable_store = EvolutionProposalBeforeAfterEvidenceStore(authority_db)
+    dual_store_service = EvolutionProposalBeforeAfterEvidenceService(
+        workspace_root=workspace,
+        outcome_service=_OutcomeAuthority(),  # type: ignore[arg-type]
+        fresh_input_store=_FreshInputAuthority(),  # type: ignore[arg-type]
+        final_evaluation_store=_FinalAuthority(),  # type: ignore[arg-type]
+        harness_store=harness_store,
+        evidence_store=durable_store,
+        now=lambda: "2026-08-10T00:01:00+00:00",
+    )
+    dual_store_view = await dual_store_service.record(request_id=outcome.request_id)
+    assert dual_store_view.before_after_authority
+    assert dual_store_view.evidence == evidence
+    repeated_evidence = await asyncio.gather(
+        *(durable_store.record(evidence) for _ in range(8))
+    )
+    assert all(item == evidence for item in repeated_evidence)
+    conflicting = EvolutionProposalBeforeAfterEvidenceBuilder().build(
+        outcome=outcome,
+        fresh_input=fresh_input,
+        prior_input=prior_input,
+        final_evaluation=receipt,
+        recorded_at="2026-08-10T00:02:00+00:00",
+    )
+    with pytest.raises(EvolutionProposalBeforeAfterEvidenceError) as conflict:
+        await durable_store.record(conflicting)
+    assert conflict.value.code == "proposal_before_after_conflict"
+
+    class _MissingHarnessAuthority:
+        async def get_eval_comparison_receipt_by_id(self, workspace_root, comparison_id):
+            return None
+
+    stale_service = EvolutionProposalBeforeAfterEvidenceService(
+        workspace_root=workspace,
+        outcome_service=_OutcomeAuthority(),  # type: ignore[arg-type]
+        fresh_input_store=_FreshInputAuthority(),  # type: ignore[arg-type]
+        final_evaluation_store=_FinalAuthority(),  # type: ignore[arg-type]
+        harness_store=_MissingHarnessAuthority(),  # type: ignore[arg-type]
+        evidence_store=_EvidenceSink(),  # type: ignore[arg-type]
+    )
+    with pytest.raises(EvolutionProposalBeforeAfterEvidenceError) as stale:
+        await stale_service.record(request_id=outcome.request_id)
+    assert stale.value.code == "proposal_before_after_comparison_stale"
+
+    class _ChangingHarnessAuthority:
+        def __init__(self):
+            self.reads = 0
+
+        async def get_eval_comparison_receipt_by_id(self, workspace_root, comparison_id):
+            self.reads += 1
+            if self.reads > receipt.lane_count:
+                return None
+            return await harness_store.get_eval_comparison_receipt_by_id(
+                workspace_root,
+                comparison_id,
+            )
+
+    changing_sink = _EvidenceSink()
+    changing_service = EvolutionProposalBeforeAfterEvidenceService(
+        workspace_root=workspace,
+        outcome_service=_OutcomeAuthority(),  # type: ignore[arg-type]
+        fresh_input_store=_FreshInputAuthority(),  # type: ignore[arg-type]
+        final_evaluation_store=_FinalAuthority(),  # type: ignore[arg-type]
+        harness_store=_ChangingHarnessAuthority(),  # type: ignore[arg-type]
+        evidence_store=changing_sink,  # type: ignore[arg-type]
+        now=lambda: "2026-08-10T00:01:00+00:00",
+    )
+    with pytest.raises(EvolutionProposalBeforeAfterEvidenceError) as changed:
+        await changing_service.record(request_id=outcome.request_id)
+    assert changed.value.code == "proposal_before_after_authority_changed"
+    assert changing_sink.item == evidence
 
     engine = SimpleNamespace(evolution_final_evaluation_receipt_executor=executor)
     tool_output = await EvolutionFinalEvaluationReceiptTool(engine).execute(
