@@ -75,15 +75,18 @@
   EVO-04.6b 已把 escalation 用户答案形成不可变 Resolution。`accepted_experiment` 仍只设置
   `promotion_review_ready`，不执行 promotion。EVO-04.7a 已将 Decision/Resolution 投影为非注入、可撤销的
   结构化 Reflection Memory。EVO-05.1a/1b 已进一步冻结不可执行 Promotion Package Input 与 exact-target
-  review Package；EVO-05.2a 又冻结了不可执行 Approval Requirement。但 HAR-09.6 仍需等待显式
-  promotion/rollback executor 和 Outcome authority，不能把 Decision、Resolution、Reflection、Package Input、
+  review Package；EVO-05.2a 又冻结了不可执行 Approval Requirement。但 HAR-09.6 的 promoted 路径仍需显式
+  promotion executor 和完整 Outcome authority，不能把 Decision、Resolution、Reflection、Package Input、
   Package 或 Approval Requirement 直接记为 promoted outcome。
 - EVO-05.6b2a 已提供第一个真实 `rollback_executed=true` 的 authority-bound slot Receipt，并明确
-  `outcome_recorded=false`；这关闭了无数据迁移回滚的执行事实前置，但 HAR-09.6 仍需 EVO-05.7 Outcome、
-  Proposal/Contract 反向绑定与 ARC-07.6 数据恢复分支，不能直接把该 Receipt 标记为 Proposal outcome。
+  `outcome_recorded=false`；这关闭了无数据迁移回滚的执行事实前置，但 Receipt 本身仍不能直接标记为 Proposal outcome。
 - EVO-05.6b2a1 已把该事实接到受权限治理的 Agent Tool 与共享 Slash Router；normal 只有一次高风险确认，bypass
   不确认，New UI/TUI 回显同一 durable Receipt。该产品入口仍不改变 `outcome_recorded=false`。
-- HAR-09 仍未实现 outcome tracking，因此整体继续保持 partial。
+- EVO-05.7a 已新增独立 Proposal-bound `rolled_back` Outcome：通过 Fresh/Prior Promotion Input 和原始 Experiment
+  Contract Authority 反向绑定 Workbench Proposal，且篡改动态撤权。它尚无 HAR-08 before/after 或长期指标，因此
+  HAR-09.6 仍为 partial，Workbench 不得据此显示 promoted 或触发 policy learning。
+- HAR-09 outcome tracking 已有 `rolled_back` authority 前置，但尚未完成 Workbench projection、before/after 与长期指标，
+  因此整体继续保持 partial。
 
 EVO-02.1b 已把不可执行 Contract 包装为 workspace-bound durable Authority；HAR-09.5c 在其上补齐产品动作、
 Proposal 单飞键和历史 projection 迁移。Contract 仍不是执行或 promotion 许可。

@@ -63,6 +63,7 @@ authority 并保持所有 Git/Promotion 字段为 false；Revalidation Request T
 | `evolution_revalidation_runtime_contract` | bind fresh metric runners and adversarial probes | `evolution_evaluation_artifact` | 50 |
 | `evolution_revalidation_evaluation_source` | persist exact revalidation overlays for evaluation | `evolution_evaluation_artifact` | 20 |
 | `evolution_revalidation_rollback_execute` | exact-source installed-slot rollback | `evolution_release_rollback` | 20 |
+| `evolution_revalidation_rollback_outcome` | Proposal-bound rolled_back Outcome | `evolution_evaluation_artifact` | 50 |
 
 Independent Review 的上限更低，因为首次成功路径会调用 Reviewer 模型；durable single-flight 仍负责同一 Gate
 并发去重，权限上限负责限制一个会话内不同 Gate 的总调用面。
@@ -70,7 +71,7 @@ Independent Review 的上限更低，因为首次成功路径会调用 Reviewer 
 ## 模式语义
 
 - permissive/moderate/strict：派生创建及隔离再验证允许且无逐次确认；Reflection 撤销、Principal 治理和真实
-  installed-slot rollback 允许但要求一次确认。
+  installed-slot rollback 允许但要求一次确认；rollback Outcome 只记录不可变证据，不再次确认。
 - lockdown：阻断矩阵中的所有写入；已有只读 Authority Tool 仍按各自只读规则工作。
 - bypass：全权限直接通过，不要求确认，也不受本层 session call cap 限制；rollback 的 Source、pause、slot 与 CAS
   mechanical gates 仍不可绕过。

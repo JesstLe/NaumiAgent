@@ -843,6 +843,15 @@ if TYPE_CHECKING:
         EvolutionRevalidationRollbackExecutionView,
         render_revalidation_rollback_execution,
     )
+    from naumi_agent.evolution.revalidation_rollback_outcomes import (
+        EVOLUTION_REVALIDATION_ROLLBACK_OUTCOME_POLICY,
+        EvolutionRevalidationRollbackOutcome,
+        EvolutionRevalidationRollbackOutcomeError,
+        EvolutionRevalidationRollbackOutcomeService,
+        EvolutionRevalidationRollbackOutcomeStore,
+        EvolutionRevalidationRollbackOutcomeView,
+        render_revalidation_rollback_outcome,
+    )
     from naumi_agent.evolution.revalidation_rollback_requests import (
         EVOLUTION_REVALIDATION_ROLLBACK_REQUEST_POLICY,
         EvolutionRevalidationRollbackRequest,
@@ -1234,6 +1243,13 @@ __all__ = [
     "EvolutionRevalidationRollbackExecutionStore",
     "EvolutionRevalidationRollbackExecutionView",
     "render_revalidation_rollback_execution",
+    "EVOLUTION_REVALIDATION_ROLLBACK_OUTCOME_POLICY",
+    "EvolutionRevalidationRollbackOutcome",
+    "EvolutionRevalidationRollbackOutcomeError",
+    "EvolutionRevalidationRollbackOutcomeService",
+    "EvolutionRevalidationRollbackOutcomeStore",
+    "EvolutionRevalidationRollbackOutcomeView",
+    "render_revalidation_rollback_outcome",
     "EVOLUTION_REVALIDATION_ROLLOUT_PLAN_POLICY",
     "EvolutionRevalidationRolloutExposure",
     "EvolutionRevalidationRolloutPlan",
@@ -2264,6 +2280,15 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationRollbackExecutionView",
         "render_revalidation_rollback_execution",
     }
+    revalidation_rollback_outcome_exports = {
+        "EVOLUTION_REVALIDATION_ROLLBACK_OUTCOME_POLICY",
+        "EvolutionRevalidationRollbackOutcome",
+        "EvolutionRevalidationRollbackOutcomeError",
+        "EvolutionRevalidationRollbackOutcomeService",
+        "EvolutionRevalidationRollbackOutcomeStore",
+        "EvolutionRevalidationRollbackOutcomeView",
+        "render_revalidation_rollback_outcome",
+    }
     revalidation_rollback_source_exports = {
         "EVOLUTION_REVALIDATION_ROLLBACK_SOURCE_POLICY",
         "EvolutionRevalidationRollbackSource",
@@ -3053,6 +3078,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_rollback_requests"
     elif name in revalidation_rollback_execution_exports:
         module_name = "revalidation_rollback_executions"
+    elif name in revalidation_rollback_outcome_exports:
+        module_name = "revalidation_rollback_outcomes"
     elif name in revalidation_rollback_source_exports:
         module_name = "revalidation_rollback_sources"
     elif name in revalidation_approval_requirement_exports:

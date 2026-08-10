@@ -202,7 +202,12 @@ Admission、host target 与 previous pointer CAS，仍不执行 boot 或声明 s
 [EVO-05.6a](EVO-05-6a-automatic-pause-rollback-request.md) 已让 exact breach 幂等触发或复用 HMAC kill switch，并冻结
 绑定 exact prior Rollback Plan 的只读 Request；它不写 workspace/Git，也不把请求虚报成已回滚。
 [EVO-05.6b1](EVO-05-6b1-immutable-rollback-source.md) 已从 exact Git commit/tree 读取 baseline blob，验证每个
-restore/remove step 并写入只读 content-addressed storage；真实 version slot 切换、启动验证和 Outcome 仍未完成。
+restore/remove step 并写入只读 content-addressed storage。
+[EVO-05.6b2a](EVO-05-6b2a-fenced-slot-rollback.md) 与
+[EVO-05.6b2a1](EVO-05-6b2a1-explicit-rollback-action.md) 已完成 authority-bound version-slot CAS、boot/launch
+验证、崩溃对账，以及 normal 单次确认/bypass 直通的 Agent Tool 与共享 Slash 入口。
+[EVO-05.7a](EVO-05-7a-rollback-outcome-authority.md) 已把真实 rollback Receipt 反向绑定到原始 Experiment Contract
+与 Workbench Proposal，形成动态可撤权的 `rolled_back` Outcome；长期指标和 promoted/superseded 状态尚未完成。
 [EVO-05.3f2c3b1](EVO-05-3f2c3b1-platform-dispatch-outbox.md) 已把实时准入的 required-platform Worker lane 转为 durable
 queued dispatch，并在 exact Worker incarnation 上预留容量。[EVO-05.3f2c3b2a](EVO-05-3f2c3b2a-authenticated-worker-claim.md)
 已增加 supervisor-attested Ed25519 Worker Identity、一次性 claim challenge 和可续期 lease hash chain。
@@ -210,4 +215,4 @@ queued dispatch，并在 exact Worker incarnation 上预留容量。[EVO-05.3f2c
 可撤销 Run Grant 和 exact evaluation scope 绑定。[EVO-05.3f2c3b2b2](EVO-05-3f2c3b2b2-signed-result-h5a-ingestion.md)
 已接收 exact Worker Ed25519-signed typed result prefix，并在本地重算后幂等写入 H5a/pair Store。
 [EVO-05.3f2c3b2b3](EVO-05-3f2c3b2b3-remote-platform-completion.md) 已原子收口 authorization/capacity、生成 cohort，
-并以 completion 门禁推动 Matrix lane 完成；rollback executor 和 Outcome 回注仍未完成。
+并以 completion 门禁推动 Matrix lane 完成；远端 stable runtime、配置/数据 rollback 与完整长期 Outcome 仍未完成。

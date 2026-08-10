@@ -13,16 +13,41 @@ import aiosqlite
 import pytest
 
 from naumi_agent.cli.slash_router import execute_slash_command
+from naumi_agent.evolution.experiments import (
+    EvolutionExperimentContract,
+    EvolutionExperimentContractStore,
+    _manifest_digest,
+)
 from naumi_agent.evolution.promotion_package_inputs import (
     EVOLUTION_PROMOTION_ROLLBACK_PLAN_POLICY,
+    EvolutionPromotionEvidenceKind,
+    EvolutionPromotionPackageInput,
     EvolutionPromotionRollbackOperation,
     EvolutionPromotionRollbackPlan,
     EvolutionPromotionRollbackStep,
+    _baseline,
+    _migration_assessment,
+    _patch_manifest,
+    _rollback_plan,
+    _sha256_payload,
+)
+from naumi_agent.evolution.revalidation_promotion_inputs import (
+    EVOLUTION_REVALIDATION_PROMOTION_INPUT_POLICY,
+    EvolutionRevalidationPromotionInput,
+    EvolutionRevalidationPromotionInputStore,
+)
+from naumi_agent.evolution.revalidation_promotion_inputs import (
+    _sha256_payload as _fresh_sha256,
 )
 from naumi_agent.evolution.revalidation_rollback_executions import (
     EvolutionRevalidationRollbackExecutionError,
     EvolutionRevalidationRollbackExecutionService,
     EvolutionRevalidationRollbackExecutionStore,
+)
+from naumi_agent.evolution.revalidation_rollback_outcomes import (
+    EvolutionRevalidationRollbackOutcomeError,
+    EvolutionRevalidationRollbackOutcomeService,
+    EvolutionRevalidationRollbackOutcomeStore,
 )
 from naumi_agent.evolution.revalidation_rollback_requests import (
     EVOLUTION_REVALIDATION_ROLLBACK_REQUEST_POLICY,
@@ -55,8 +80,16 @@ from naumi_agent.safety.permissions import (
 from naumi_agent.tools.base import ToolCall, ToolRegistry, ToolResult
 from naumi_agent.tools.evolution_review import (
     EvolutionRevalidationRollbackExecutionTool,
+    EvolutionRevalidationRollbackOutcomeTool,
 )
 from naumi_agent.ui.command_index import build_terminal_command_index
+from tests.unit.test_evolution_promotion_package_inputs import (
+    _accepted_reflection,
+    _package,
+)
+from tests.unit.test_evolution_revalidation_promotion_inputs import (
+    _persist_prior_dependency,
+)
 from tests.unit.test_release_slots import _bundle
 
 T0 = datetime(2026, 8, 10, 1, 0, tzinfo=UTC)
@@ -94,7 +127,12 @@ class _FailOnceStore(EvolutionRevalidationRollbackExecutionStore):
         return await super().record(receipt)
 
 
-async def _scenario(tmp_path: Path, *, data_restore_required: bool = False):
+async def _scenario(
+    tmp_path: Path,
+    *,
+    data_restore_required: bool = False,
+    with_outcome_lineage: bool = False,
+):
     root = (tmp_path / "workspace").resolve()
     root.mkdir()
     _git(root, "init", "-q")
@@ -147,6 +185,8 @@ async def _scenario(tmp_path: Path, *, data_restore_required: bool = False):
     rollback = EvolutionPromotionRollbackPlan.model_validate(
         {**rollback_core, "plan_sha256": _digest(rollback_core)}
     )
+    db_path = root / ".naumi" / "evolution.db"
+    db_path.parent.mkdir(parents=True)
     plan_core = {
         "schema_version": 1,
         "policy_version": EVOLUTION_REVALIDATION_ROLLOUT_PLAN_POLICY,
@@ -198,8 +238,25 @@ async def _scenario(tmp_path: Path, *, data_restore_required: bool = False):
             "plan_sha256": plan_digest,
         }
     )
-    db_path = root / ".naumi" / "evolution.db"
-    db_path.parent.mkdir(parents=True)
+    if with_outcome_lineage:
+        fresh, _authority, _experiment_store = await _persist_outcome_lineage(
+            root,
+            SimpleNamespace(rollback_plan=rollback),
+            plan,
+            db_path,
+        )
+        plan_core.update(
+            promotion_input_id=fresh.input_id,
+            promotion_input_sha256=fresh.input_sha256,
+        )
+        plan_digest = _digest(plan_core)
+        plan = EvolutionRevalidationRolloutPlan.model_validate(
+            {
+                **plan_core,
+                "plan_id": f"evrerolloutplan_{plan_digest[:24]}",
+                "plan_sha256": plan_digest,
+            }
+        )
     control_store = EvolutionRevalidationRolloutControlStore(
         db_path, control_plane_key_provider=lambda: b"r" * 32
     )
@@ -259,8 +316,10 @@ async def _scenario(tmp_path: Path, *, data_restore_required: bool = False):
             "observation_id TEXT PRIMARY KEY, observation_sha256 TEXT NOT NULL)"
         )
         await db.execute(
-            "CREATE TABLE evolution_revalidation_promotion_inputs ("
-            "input_id TEXT PRIMARY KEY, input_sha256 TEXT NOT NULL)"
+            "CREATE TABLE IF NOT EXISTS evolution_revalidation_promotion_inputs ("
+            "input_id TEXT PRIMARY KEY, input_sha256 TEXT NOT NULL UNIQUE, "
+            "contract_id TEXT NOT NULL UNIQUE, input_json TEXT NOT NULL, "
+            "created_at TEXT NOT NULL)"
         )
         await db.execute(
             "CREATE TABLE evolution_revalidation_rollout_plans ("
@@ -273,8 +332,15 @@ async def _scenario(tmp_path: Path, *, data_restore_required: bool = False):
             (request.observation_id, request.observation_sha256),
         )
         await db.execute(
-            "INSERT INTO evolution_revalidation_promotion_inputs VALUES (?, ?)",
-            (request.promotion_input_id, request.promotion_input_sha256),
+            "INSERT OR IGNORE INTO evolution_revalidation_promotion_inputs "
+            "VALUES (?, ?, ?, ?, ?)",
+            (
+                request.promotion_input_id,
+                request.promotion_input_sha256,
+                plan.contract_id,
+                "{}",
+                T0.isoformat(),
+            ),
         )
         await db.execute(
             "INSERT INTO evolution_revalidation_rollout_plans VALUES (?, ?, ?, ?, ?, ?)",
@@ -346,6 +412,229 @@ async def _scenario(tmp_path: Path, *, data_restore_required: bool = False):
         )
 
     return root, request, source, release_store, candidate_pointer, service, db_path
+
+
+async def _persist_outcome_lineage(root: Path, request, plan, db_path: Path):
+    source = {
+        "session_id": "session-rollback-outcome",
+        "mission_id": "mission-rollback-outcome",
+        "task_id": "task-rollback-outcome",
+        "workbench_proposal_id": "proposal-rollback-outcome",
+        "proposal_id": "evp_" + "1" * 24,
+        "candidate_id": plan.candidate_id,
+        "candidate_revision": plan.candidate_revision,
+        "candidate_sha256": "c" * 64,
+        "proposal_kind": "code",
+        "generator_version": "evolution-proposal-v1",
+        "governance_policy_version": "proposal-governance-v1",
+        "reviewer": "Human",
+        "approved_at": T0.isoformat(),
+    }
+    contract_core = {
+        "schema_version": 1,
+        "policy_version": "evolution-experiment-contract-v1",
+        "source": source,
+        "baseline": {
+            "commit": request.rollback_plan.baseline_commit,
+            "workspace_dirty_at_issue": False,
+        },
+        "scope": {
+            "policy_version": "evolution-experiment-scope-v1",
+            "impact_scope": "files:app.py,new.py",
+            "allowed_files": ["app.py", "new.py"],
+        },
+        "budget": {
+            "policy_version": "evolution-experiment-budget-v1",
+            "max_changed_files": 2,
+            "max_changed_lines": 10,
+            "max_tool_calls": 20,
+            "max_duration_seconds": 300,
+            "max_attempts": 1,
+        },
+        "allowed_tools": ["file_read", "glob", "grep", "file_edit", "file_write"],
+        "allowed_checks": [
+            {
+                "metric_name": "rollback_error_rate",
+                "direction": "decrease",
+                "target": 0.0,
+                "verifier": "harness_replay",
+                "procedure": "回放同一失败场景并比较错误率。",
+            }
+        ],
+        "seed": 1,
+        "network_access": False,
+        "dependency_installation": False,
+        "requires_worktree_lease": True,
+        "requires_source_snapshot": True,
+        "requires_static_guard": True,
+        "execution_ready": False,
+        "state": "contract",
+    }
+    contract_sha = _manifest_digest(contract_core)
+    contract = EvolutionExperimentContract.model_validate(
+        {
+            **contract_core,
+            "contract_id": f"evx_{contract_sha[:24]}",
+            "manifest_sha256": contract_sha,
+        }
+    )
+    experiment_store = EvolutionExperimentContractStore(db_path)
+    authority = await experiment_store.record(workspace_root=root, contract=contract)
+
+    baseline_bytes = b"print('baseline')\n"
+    candidate_bytes = b"print('candidate')\n"
+    created_bytes = b"created = True\n"
+    facts = []
+    for values in (
+        {
+            "path": "app.py",
+            "operation": "modify",
+            "before_sha256": hashlib.sha256(baseline_bytes).hexdigest(),
+            "after_sha256": hashlib.sha256(candidate_bytes).hexdigest(),
+            "unified_diff_sha256": "1" * 64,
+            "added_lines": 1,
+            "deleted_lines": 1,
+            "api_change": "unchanged",
+        },
+        {
+            "path": "new.py",
+            "operation": "create",
+            "before_sha256": None,
+            "after_sha256": hashlib.sha256(created_bytes).hexdigest(),
+            "unified_diff_sha256": "2" * 64,
+            "added_lines": 1,
+            "deleted_lines": 0,
+            "api_change": "not_applicable",
+        },
+    ):
+        facts.append(SimpleNamespace(**values, fact_sha256=_sha256_payload(values)))
+    mutation = SimpleNamespace(
+        mutation_receipt_id="evmr_" + "6" * 24,
+        receipt_sha256="6" * 64,
+        files=tuple(facts),
+        files_sha256=_sha256_payload(
+            [{**vars(item), "fact_sha256": item.fact_sha256} for item in facts]
+        ),
+        total_added_lines=2,
+        total_deleted_lines=1,
+    )
+    patch = _patch_manifest(mutation)
+    baseline = _baseline(
+        False,
+        SimpleNamespace(
+            baseline_commit=request.rollback_plan.baseline_commit,
+            source_snapshot_id=request.rollback_plan.source_snapshot_id,
+            source_snapshot_sha256=request.rollback_plan.source_snapshot_sha256,
+            baseline_tree_sha256=request.rollback_plan.baseline_tree_sha256,
+            profile_sha256="9" * 64,
+            experiment_config_sha256="a" * 64,
+            toolset_sha256="b" * 64,
+        ),
+    )
+    migration = _migration_assessment(patch.files)
+    rollback = _rollback_plan(patch.files, baseline, migration)
+    assert rollback == request.rollback_plan
+
+    memory = _accepted_reflection(root)
+    prior_payload = _package(root, memory).model_dump(mode="json")
+    prior_payload.update(
+        candidate_id=plan.candidate_id,
+        candidate_revision=plan.candidate_revision,
+        candidate_sha256=source["candidate_sha256"],
+        risk_level=plan.risk_level,
+        experiment_contract_id=contract.contract_id,
+        experiment_contract_sha256=contract.manifest_sha256,
+        mutation_receipt_id=mutation.mutation_receipt_id,
+        mutation_receipt_sha256=mutation.receipt_sha256,
+        required_platforms=list(plan.required_platforms),
+        patch=patch.model_dump(mode="json"),
+        baseline=baseline.model_dump(mode="json"),
+        migration=migration.model_dump(mode="json"),
+        rollback=rollback.model_dump(mode="json"),
+    )
+    for ref in prior_payload["evidence_refs"]:
+        if ref["kind"] == EvolutionPromotionEvidenceKind.EXPERIMENT_CONTRACT.value:
+            ref["authority_id"] = contract.contract_id
+            ref["authority_sha256"] = contract.manifest_sha256
+        elif ref["kind"] == EvolutionPromotionEvidenceKind.MUTATION_RECEIPT.value:
+            ref["authority_id"] = mutation.mutation_receipt_id
+            ref["authority_sha256"] = mutation.receipt_sha256
+    prior_core = {
+        key: value
+        for key, value in prior_payload.items()
+        if key not in {"input_id", "input_sha256"}
+    }
+    prior_sha = _sha256_payload(prior_core)
+    prior = EvolutionPromotionPackageInput.model_validate(
+        {
+            **prior_core,
+            "input_id": f"evpromoin_{prior_sha[:24]}",
+            "input_sha256": prior_sha,
+        }
+    )
+    _persist_prior_dependency(db_path, prior)
+
+    fresh_core = {
+        "schema_version": 1,
+        "policy_version": EVOLUTION_REVALIDATION_PROMOTION_INPUT_POLICY,
+        "workspace_root": str(root),
+        "candidate_id": plan.candidate_id,
+        "candidate_revision": plan.candidate_revision,
+        "risk_level": plan.risk_level,
+        "contract_id": plan.contract_id,
+        "contract_sha256": plan.contract_sha256,
+        "final_evaluation_id": plan.final_evaluation_id,
+        "final_evaluation_sha256": plan.final_evaluation_sha256,
+        "reapproval_authority_id": "evreapproval_" + "3" * 24,
+        "reapproval_authority_sha256": "3" * 64,
+        "prior_input_id": prior.input_id,
+        "prior_input_sha256": prior.input_sha256,
+        "prior_input": prior.model_dump(mode="json"),
+        "required_platforms": list(plan.required_platforms),
+        "prior_final_invalidated": True,
+        "prior_decision_reusable": False,
+        "prior_approval_reusable": False,
+        "prior_signature_reusable": False,
+        "patch_and_rollback_carried_forward": True,
+        "source_current_at_issue": True,
+        "input_complete": True,
+        "approval_requirement_ready": True,
+        "approval_decided": False,
+        "promotion_authority": False,
+        "contains_source_code": False,
+        "contains_freeform_narrative": False,
+        "llm_generated": False,
+        "created_at": T0.isoformat(),
+    }
+    fresh_sha = _fresh_sha256(fresh_core)
+    fresh = EvolutionRevalidationPromotionInput.model_validate(
+        {
+            **fresh_core,
+            "input_id": f"evrevalpromoin_{fresh_sha[:24]}",
+            "input_sha256": fresh_sha,
+        }
+    )
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute(
+            "CREATE TABLE IF NOT EXISTS evolution_revalidation_promotion_inputs ("
+            "input_id TEXT PRIMARY KEY, input_sha256 TEXT NOT NULL UNIQUE, "
+            "contract_id TEXT NOT NULL UNIQUE, input_json TEXT NOT NULL, "
+            "created_at TEXT NOT NULL)"
+        )
+        await db.execute(
+            "INSERT INTO evolution_revalidation_promotion_inputs "
+            "(input_id, input_sha256, contract_id, input_json, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (
+                fresh.input_id,
+                fresh.input_sha256,
+                fresh.contract_id,
+                fresh.model_dump_json(),
+                fresh.created_at,
+            ),
+        )
+        await db.commit()
+    return fresh, authority, experiment_store
 
 
 @pytest.mark.asyncio
@@ -446,6 +735,142 @@ def test_rollback_tool_permission_is_one_confirmation_and_bypass_is_direct() -> 
     assert not blocked.allowed
     assert blocked.code is PermissionReasonCode.MODE_BLOCKED
 
+    outcome_tool = EvolutionRevalidationRollbackOutcomeTool(SimpleNamespace())
+    outcome_guarded = PermissionChecker(PermissionMode.MODERATE).check(
+        outcome_tool.name,
+        arguments,
+        tool=outcome_tool,
+    )
+    outcome_bypass = PermissionChecker(PermissionMode.BYPASS).check(
+        outcome_tool.name,
+        arguments,
+        tool=outcome_tool,
+    )
+    assert outcome_guarded.allowed
+    assert outcome_guarded.outcome is PermissionOutcome.ALLOW
+    assert not outcome_guarded.requires_confirmation
+    assert outcome_guarded.risk_level is PermissionRiskLevel.MEDIUM
+    assert outcome_bypass.allowed
+    assert outcome_bypass.outcome is PermissionOutcome.ALLOW
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(os.name == "nt", reason="fixture is a POSIX executable")
+async def test_rollback_outcome_binds_real_receipt_to_proposal_and_fails_closed(
+    tmp_path: Path,
+) -> None:
+    root, request, _source, _release, _pointer, execution_factory, db_path = (
+        await _scenario(tmp_path, with_outcome_lineage=True)
+    )
+    execution_service = execution_factory()
+    execution_view = await execution_service.execute(request_id=request.request_id)
+    outcome_clock = iter(
+        (T0 + timedelta(minutes=7, microseconds=index)).isoformat()
+        for index in range(16)
+    )
+    outcome_service = EvolutionRevalidationRollbackOutcomeService(
+        workspace_root=root,
+        execution_service=execution_service,
+        request_store=EvolutionRevalidationRollbackRequestStore(db_path),
+        plan_store=EvolutionRevalidationRolloutPlanStore(db_path),
+        promotion_input_store=EvolutionRevalidationPromotionInputStore(db_path),
+        experiment_store=EvolutionExperimentContractStore(db_path),
+        store=EvolutionRevalidationRollbackOutcomeStore(db_path),
+        now=lambda: next(outcome_clock),
+    )
+
+    views = await asyncio.gather(
+        *(outcome_service.record(request_id=request.request_id) for _ in range(8))
+    )
+    view = views[0]
+    assert all(item == view for item in views)
+    assert view.outcome_authority
+    assert view.rollback_fact_authority
+    assert view.proposal_binding_valid
+    assert view.active_baseline_authority
+    assert view.outcome.status == "rolled_back"
+    assert view.outcome.rollback_receipt_id == execution_view.receipt.receipt_id
+    assert view.outcome.workbench_proposal_id == "proposal-rollback-outcome"
+    assert view.outcome.experiment_contract_id.startswith("evx_")
+    assert view.outcome.outcome_recorded
+    assert not view.outcome.promoted
+    assert not view.outcome.superseded
+    assert not view.outcome.long_term_metrics_recorded
+    assert not view.outcome.learning_authority
+    assert not view.promotion_authority
+
+    tool = EvolutionRevalidationRollbackOutcomeTool(
+        SimpleNamespace(evolution_revalidation_rollback_outcome_service=outcome_service)
+    )
+    rendered = await tool.execute(request.request_id)
+    assert view.outcome.outcome_id in rendered
+    assert "长期指标：尚未记录" in rendered
+    assert "不授予 promotion authority" in rendered
+
+    registry = ToolRegistry()
+    registry.register(tool)
+
+    class _OutcomeSlashEngine:
+        def __init__(self) -> None:
+            self.tool_registry = registry
+            self.calls: list[tuple[ToolCall, str | None]] = []
+
+        async def execute_tool(
+            self, call: ToolCall, *, agent_name: str | None = None
+        ) -> ToolResult:
+            self.calls.append((call, agent_name))
+            registered = self.tool_registry.get(call.name)
+            assert registered is not None
+            arguments = registered.parse_arguments(call.arguments)
+            return ToolResult(
+                call_id=call.id,
+                status="success",
+                content=await registered.execute(**arguments),
+            )
+
+    slash_engine = _OutcomeSlashEngine()
+    slash_rendered = await execute_slash_command(
+        slash_engine,
+        f"/evolution revalidation-rollback-outcome {request.request_id}",
+    )
+    assert view.outcome.outcome_id in slash_rendered
+    assert "不授予 promotion authority" in slash_rendered
+    assert len(slash_engine.calls) == 1
+    assert slash_engine.calls[0][0].name == "evolution_revalidation_rollback_outcome"
+    assert slash_engine.calls[0][1] == "cli"
+
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute(
+            "UPDATE evolution_experiment_contracts SET authority_sha256 = ? "
+            "WHERE contract_id = ?",
+            ("0" * 64, view.outcome.experiment_contract_id),
+        )
+        await db.commit()
+    stale = await outcome_service.inspect(request_id=request.request_id)
+    assert not stale.durable_dependencies_valid
+    assert not stale.proposal_binding_valid
+    assert not stale.outcome_authority
+    assert not stale.long_term_metrics_authority
+    with pytest.raises(EvolutionRevalidationRollbackOutcomeError) as blocked:
+        await outcome_service.record(request_id=request.request_id)
+    assert blocked.value.code == "rollback_outcome_stale"
+
+
+@pytest.mark.asyncio
+async def test_rollback_outcome_rejects_invalid_request_id(tmp_path: Path) -> None:
+    service = EvolutionRevalidationRollbackOutcomeService(
+        workspace_root=tmp_path,
+        execution_service=SimpleNamespace(),
+        request_store=SimpleNamespace(),
+        plan_store=SimpleNamespace(),
+        promotion_input_store=SimpleNamespace(),
+        experiment_store=SimpleNamespace(),
+        store=EvolutionRevalidationRollbackOutcomeStore(tmp_path / "outcome.db"),
+    )
+    with pytest.raises(EvolutionRevalidationRollbackOutcomeError) as invalid:
+        await service.record(request_id="../forged")
+    assert invalid.value.code == "rollback_outcome_request_id_invalid"
+
     for surface in ("new_ui", "tui"):
         command = next(
             item
@@ -453,6 +878,7 @@ def test_rollback_tool_permission_is_one_confirmation_and_bypass_is_direct() -> 
             if item.command == "/evolution"
         )
         assert "revalidation-rollback-execute" in command.arguments.syntax
+        assert "revalidation-rollback-outcome" in command.arguments.syntax
         assert command.permission_risk == "tool_execution"
 
 

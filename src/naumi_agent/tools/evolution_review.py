@@ -108,6 +108,10 @@ from naumi_agent.evolution.revalidation_rollback_executions import (
     EvolutionRevalidationRollbackExecutionError,
     render_revalidation_rollback_execution,
 )
+from naumi_agent.evolution.revalidation_rollback_outcomes import (
+    EvolutionRevalidationRollbackOutcomeError,
+    render_revalidation_rollback_outcome,
+)
 from naumi_agent.evolution.revalidation_runtime_contracts import (
     EvolutionRevalidationRuntimeContractError,
     render_evolution_revalidation_runtime_contract,
@@ -2474,6 +2478,71 @@ class EvolutionRevalidationRollbackExecutionTool(Tool):
         return render_revalidation_rollback_execution(view)
 
 
+class EvolutionRevalidationRollbackOutcomeTool(Tool):
+    """Record one proposal-bound historical rollback Outcome."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_revalidation_rollback_outcome"
+
+    @property
+    def description(self) -> str:
+        return (
+            "把可验证 Rollback Receipt 反向绑定到原始 Experiment Contract 与 "
+            "Workbench Proposal，幂等记录 rolled_back Outcome。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "request_id": {
+                    "type": "string",
+                    "pattern": "^evrerollbackreq_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["request_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="Evolution 回滚 Outcome",
+            search_hint=(
+                "evolution rollback outcome proposal contract receipt rolled back "
+                "自进化 回滚 结果"
+            ),
+        )
+
+    async def execute(self, request_id: str) -> str:
+        try:
+            view = await self._engine.evolution_revalidation_rollback_outcome_service.record(
+                request_id=str(request_id or "").strip(),
+            )
+        except (
+            AttributeError,
+            EvolutionRevalidationRollbackOutcomeError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "rollback_outcome_failed")
+            return f"Evolution 回滚 Outcome 未完成（`{code}`）：{exc}"
+        return render_revalidation_rollback_outcome(view)
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -2514,6 +2583,7 @@ def create_evolution_review_tools(
         EvolutionRevalidationValidationPlanTool(engine),
         EvolutionRevalidationRuntimeContractTool(engine),
         EvolutionRevalidationRollbackExecutionTool(engine),
+        EvolutionRevalidationRollbackOutcomeTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -2551,6 +2621,7 @@ __all__ = [
     "EvolutionRevalidationValidationPlanTool",
     "EvolutionRevalidationRuntimeContractTool",
     "EvolutionRevalidationRollbackExecutionTool",
+    "EvolutionRevalidationRollbackOutcomeTool",
     "EvolutionRevalidationReplayTool",
     "EvolutionReflectionMemoryRevokeTool",
     "EvolutionReflectionMemoryTool",

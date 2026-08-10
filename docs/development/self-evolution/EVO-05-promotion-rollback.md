@@ -174,7 +174,10 @@
   `/evolution revalidation-rollback-execute` 共用 Engine 权限管线和同一执行服务，normal 单次确认、bypass 直接执行，
   New UI/TUI 显示同一 durable Receipt。
 - EVO-05.6b2b Config/Data Rollback：消费 ARC-07.6 snapshot/migration authority，完成需要数据保护的兼容回滚。
-- EVO-05.7 Outcome record：promoted/rolled_back/superseded 与长期指标。
+- [EVO-05.7a Rollback Outcome Authority](EVO-05-7a-rollback-outcome-authority.md)：已交付；把真实 rollback
+  Receipt 反向绑定到原始 Experiment Contract 与 Workbench Proposal，形成 `rolled_back` historical Outcome；长期指标、
+  `promoted/superseded` 与 policy learning authority 仍保持关闭。
+- EVO-05.7 后续：promoted/superseded ledger、HAR-08 before/after 与长期指标。
 
 ## 验收标准
 
@@ -195,5 +198,5 @@ Authority、版本化 Fresh Promotion Input、新 Approval Requirement/Response�
 真实 local-canary executor、可信 monitor baseline、runtime observation、显式本机 opt-in Intent、authority-bound pointer
 activation/crash reconcile、percentage assignment/runtime/window/outcome aggregation、stable entry authorization、逐安装 stable
 Deployment Intent/Boot Preparation/Activation 与 automatic pause/rollback request；无数据迁移的 version-slot rollback 已能
-authority-bound 执行和崩溃对账，但尚未实现 stable runtime execution、配置/数据 rollback 或最终 Outcome 回注。任何界面不得把 stable entry 或 Deployment Intent authority 宣称为已进入 stable rollout，
+authority-bound 执行和崩溃对账，真实 rollback 也已形成 Proposal-bound `rolled_back` Outcome；但尚未实现 stable runtime execution、配置/数据 rollback、promoted/superseded Outcome 或长期指标回注。任何界面不得把 stable entry 或 Deployment Intent authority 宣称为已进入 stable rollout，
 也不得把 rollback source 冻结宣称为已回滚。
