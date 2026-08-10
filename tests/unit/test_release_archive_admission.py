@@ -234,6 +234,7 @@ async def test_signed_archive_admission_converges_and_dynamically_revokes(
     assert all(item == view for item in views)
     assert view.archive_admission_authority
     assert view.percentage_deployment_intent_input_authority
+    assert view.stable_deployment_intent_input_authority
     assert view.receipt.archive_format == archive_format
     assert view.receipt.extraction_executed
     assert view.receipt.installation_executed
@@ -286,6 +287,7 @@ async def test_signed_archive_admission_converges_and_dynamically_revokes(
     tampered = await services[0].inspect(download_source_id=source_id)
     assert not tampered.installed_slot_current
     assert not tampered.percentage_deployment_intent_input_authority
+    assert not tampered.stable_deployment_intent_input_authority
 
 
 def _tar_with_traversal(path: Path, _bundle: str) -> None:

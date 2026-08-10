@@ -192,6 +192,8 @@ percentage release、Completion Receipt、Run Usage 与完整 heartbeat coverage
 completion drop、p95 latency 与 cost guardrail；来源漂移会撤权，且 Stage Completion 仍不等于 stable entry 或 rollout 完成。
 [EVO-05.5f5j](EVO-05-5f5j-percentage-to-stable-stage-advance.md) 已把 current passing Completion、Plan、control generation、
 mandatory user option 与短期 TTL 冻结为 stable entry authority；bypass 不绕过该治理门，且 entry 仍不等于 stable deployment。
+[EVO-05.5f5k](EVO-05-5f5k-stable-deployment-intent.md) 已冻结实现契约：stable 必须以 current complete signed Population 和
+逐安装 proof-of-possession 覆盖 100% 目标，不能复用 percentage selected cohort；当前状态为 planned。
 [EVO-05.6a](EVO-05-6a-automatic-pause-rollback-request.md) 已让 exact breach 幂等触发或复用 HMAC kill switch，并冻结
 绑定 exact prior Rollback Plan 的只读 Request；它不写 workspace/Git，也不把请求虚报成已回滚。
 [EVO-05.6b1](EVO-05-6b1-immutable-rollback-source.md) 已从 exact Git commit/tree 读取 baseline blob，验证每个
