@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sqlite3
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -168,6 +168,16 @@ async def test_managed_terminal_startup_records_stable_exposure(
             subject_id="stable-runtime-secondary",
         )
     assert conflict.value.code == "stable_runtime_exposure_already_recorded"
+
+    data["runtime_now"][0] = datetime.fromisoformat(
+        view.receipt.deployment.preparation.intent.expires_at
+    ) + timedelta(seconds=1)
+    await lifecycle._producer.pulse_now()
+    after_launch_expiry = await first.inspect(intent_id=data["intent_id"])
+    assert not after_launch_expiry.deployment_launch_input_current
+    assert after_launch_expiry.active_deployment_current
+    assert after_launch_expiry.current_runtime_exposure_authority
+    assert after_launch_expiry.stable_observation_input_authority
 
     assert await lifecycle.close()
     stopped = await first.inspect(intent_id=data["intent_id"])

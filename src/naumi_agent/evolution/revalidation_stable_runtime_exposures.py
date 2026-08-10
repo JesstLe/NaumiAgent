@@ -120,6 +120,7 @@ class EvolutionRevalidationStableRuntimeExposureView(_StrictModel):
     receipt: EvolutionRevalidationStableRuntimeExposureReceipt
     receipt_source_current: bool
     deployment_fact_current: bool
+    active_deployment_current: bool
     deployment_launch_input_current: bool
     release_binding_current: bool
     startup_observations_current: bool
@@ -145,7 +146,7 @@ class EvolutionRevalidationStableRuntimeExposureView(_StrictModel):
         )
         current = bool(
             fact
-            and self.deployment_launch_input_current
+            and self.active_deployment_current
             and self.runtime_heartbeat_current
         )
         if not (
@@ -372,6 +373,7 @@ class EvolutionRevalidationStableRuntimeExposureService:
         intent_id = receipt.deployment.preparation.intent.intent_id
         receipt_source_current = False
         deployment_fact_current = False
+        active_deployment_current = False
         deployment_launch_input_current = False
         release_binding_current = False
         startup_observations_current = False
@@ -388,6 +390,10 @@ class EvolutionRevalidationStableRuntimeExposureService:
             deployment_fact_current = bool(
                 deployment_view.receipt == receipt.deployment
                 and deployment_view.deployment_fact_authority
+            )
+            active_deployment_current = bool(
+                deployment_view.receipt == receipt.deployment
+                and deployment_view.active_deployment_authority
             )
             deployment_launch_input_current = bool(
                 deployment_view.receipt == receipt.deployment
@@ -432,7 +438,7 @@ class EvolutionRevalidationStableRuntimeExposureService:
         checks = {
             "receipt_source_changed": receipt_source_current,
             "deployment_fact_changed": deployment_fact_current,
-            "deployment_launch_input_changed": deployment_launch_input_current,
+            "active_deployment_changed": active_deployment_current,
             "release_binding_changed": release_binding_current,
             "startup_observations_changed": startup_observations_current,
             "runtime_heartbeat_not_current": runtime_heartbeat_current,
@@ -446,13 +452,14 @@ class EvolutionRevalidationStableRuntimeExposureService:
         )
         current = bool(
             fact
-            and deployment_launch_input_current
+            and active_deployment_current
             and runtime_heartbeat_current
         )
         return EvolutionRevalidationStableRuntimeExposureView(
             receipt=receipt,
             receipt_source_current=receipt_source_current,
             deployment_fact_current=deployment_fact_current,
+            active_deployment_current=active_deployment_current,
             deployment_launch_input_current=deployment_launch_input_current,
             release_binding_current=release_binding_current,
             startup_observations_current=startup_observations_current,
