@@ -62,4 +62,6 @@ Completion Evidence。[HAR-10.2k](HAR-10-2k-release-bound-chat-run-provenance.md
 [EVO-05.5f5e](../self-evolution/EVO-05-5f5e-percentage-runtime-exposure.md) 已严格消费 startup origin 的 sequence 1 starting 与
 sequence 2 running，形成单 installation Exposure Receipt；
 [EVO-05.5f5f](../self-evolution/EVO-05-5f5f-percentage-observation-window.md) 已进一步消费完整 sample chain，按冻结 guardrail
-机械区分 insufficient/passing/breached。5f5g 仍需用本 Ledger 的 bounded paging 建立 durable current assessment。
+机械区分 insufficient/passing/breached；
+[EVO-05.5f5g](../self-evolution/EVO-05-5f5g-durable-percentage-observation-assessment.md) 已使用本 Ledger 的 verified cursor、
+500 条分页、head/binding 二次读取与最近 5000 条 suffix 建立 durable current assessment。

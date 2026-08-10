@@ -58,8 +58,10 @@ class EvolutionRevalidationPercentageObservationWindow(_StrictModel):
     assessed_at: str = Field(min_length=1, max_length=100)
     first_observed_at: str = Field(min_length=1, max_length=100)
     last_observed_at: str = Field(min_length=1, max_length=100)
-    first_sequence: Literal[1] = 1
-    last_sequence: int = Field(ge=2, le=_MAX_SAMPLES)
+    sample_scope: Literal["origin", "suffix"]
+    suffix_anchor_sha256: str = Field(pattern=r"^(|[0-9a-f]{64})$")
+    first_sequence: int = Field(ge=1, le=2_147_483_647)
+    last_sequence: int = Field(ge=2, le=2_147_483_647)
     sample_count: int = Field(ge=2, le=_MAX_SAMPLES)
     operational_sample_count: int = Field(ge=0, le=_MAX_SAMPLES)
     minimum_sample_count: int = Field(ge=2, le=_MAX_SAMPLES)
@@ -100,6 +102,8 @@ class EvolutionRevalidationPercentageObservationWindow(_StrictModel):
         fields = (
             "first_observed_at",
             "last_observed_at",
+            "sample_scope",
+            "suffix_anchor_sha256",
             "first_sequence",
             "last_sequence",
             "sample_count",
@@ -246,14 +250,30 @@ def _evaluate(
             "percentage_observation_sample_count_invalid",
             "Percentage Observation 样本数必须在 2 到 5000 之间。",
         )
-    if not (
+    starts_at_origin = bool(
         samples[0] == exposure.startup_observation
         and samples[1] == exposure.ready_observation
-    ):
+    )
+    starts_at_suffix = bool(
+        samples[0].heartbeat_sequence > exposure.ready_observation.heartbeat_sequence
+        and samples[0].chain_origin_kind == "startup"
+        and samples[0].chain_origin_sequence == 1
+        and samples[0].previous_sample_sha256
+        and _aware(samples[0].observed_at)
+        >= _aware(exposure.ready_observation.observed_at)
+        and (
+            samples[0].heartbeat_sequence
+            != exposure.ready_observation.heartbeat_sequence + 1
+            or samples[0].previous_sample_sha256
+            == exposure.ready_observation.sample_sha256
+        )
+    )
+    if not (starts_at_origin or starts_at_suffix):
         raise EvolutionRevalidationPercentageObservationWindowError(
             "percentage_observation_origin_mismatch",
-            "Percentage Observation 必须从 exact Exposure startup pair 开始。",
+            "Percentage Observation 必须从 exact Exposure startup pair 或连续 suffix 开始。",
         )
+    sample_scope = "origin" if starts_at_origin else "suffix"
     previous = None
     maximum_gap = 0.0
     timeout = samples[0].timeout_seconds
@@ -325,7 +345,10 @@ def _evaluate(
     )
     latest_age_exact = max(0.0, (assessed - last).total_seconds())
     minimum_samples = math.ceil(stage.minimum_observation_seconds / timeout) + 1
-    if minimum_samples > _MAX_SAMPLES - 1:
+    maximum_operational_samples = (
+        _MAX_SAMPLES - 1 if sample_scope == "origin" else _MAX_SAMPLES
+    )
+    if minimum_samples > maximum_operational_samples:
         raise EvolutionRevalidationPercentageObservationWindowError(
             "percentage_observation_policy_exceeds_sample_bound",
             "当前 heartbeat timeout 无法在 5000 个样本内证明 percentage 窗口。",
@@ -358,7 +381,11 @@ def _evaluate(
     return {
         "first_observed_at": first.isoformat(),
         "last_observed_at": last.isoformat(),
-        "first_sequence": 1,
+        "sample_scope": sample_scope,
+        "suffix_anchor_sha256": (
+            "" if sample_scope == "origin" else samples[0].previous_sample_sha256
+        ),
+        "first_sequence": samples[0].heartbeat_sequence,
         "last_sequence": samples[-1].heartbeat_sequence,
         "sample_count": len(samples),
         "operational_sample_count": len(operational),
