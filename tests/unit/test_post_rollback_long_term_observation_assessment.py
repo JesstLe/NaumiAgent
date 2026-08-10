@@ -86,7 +86,7 @@ def _identity(workspace: Path, contract) -> ReleaseRuntimeIdentity:
     )
 
 
-async def _fixture(tmp_path: Path):
+async def _fixture(tmp_path: Path, *, rollback_outcome=None):
     (
         contract_service,
         contract_store,
@@ -94,7 +94,14 @@ async def _fixture(tmp_path: Path):
         _verification,
         _matrix_service,
         _verification_service,
-    ) = _contract_fixture(tmp_path)
+    ) = _contract_fixture(
+        tmp_path,
+        outcome_id=(None if rollback_outcome is None else rollback_outcome.outcome_id),
+        outcome_sha256=(
+            None if rollback_outcome is None else rollback_outcome.outcome_sha256
+        ),
+        request_id=(None if rollback_outcome is None else rollback_outcome.request_id),
+    )
     contract_view = await contract_service.record(request_id=matrix.request_id)
     contract = contract_view.contract
     identity = _identity(contract_service.workspace_root, contract)

@@ -86,6 +86,6 @@ learning/promotion/execution authority 为 false。
 - `promotion_authority=false`；
 - `execution_authority=false`。
 
-下一独立切片应是 `HAR-09.6e Post-Rollback Long-Term Outcome Authority`：把 recovered Matrix 与当前 passing
-Assessment 组合成新的 durable Outcome revision，并建立 rolled_back → recovered/observed 的 supersede ledger。它仍不能
-绕过独立 promotion policy、人工 approval 或配置/数据 rollback 证据。
+下一独立切片 [HAR-09.6e1](HAR-09-6e1-post-rollback-long-term-outcome-authority.md) 已把 recovered Matrix 与当前
+passing Assessment 组合成新的 durable Outcome revision，并建立 rolled_back → recovery-observed 的 append-only
+supersede ledger。它仍不能绕过独立 promotion policy、人工 approval 或配置/数据 rollback 证据。

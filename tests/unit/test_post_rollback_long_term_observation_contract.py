@@ -59,17 +59,24 @@ class _VerificationService:
         return SimpleNamespace(verification_authority=self.authority)
 
 
-def _fixture(tmp_path: Path):
+def _fixture(
+    tmp_path: Path,
+    *,
+    outcome_id: str | None = None,
+    outcome_sha256: str | None = None,
+    request_id: str | None = None,
+):
     workspace = (tmp_path / "workspace").resolve()
-    workspace.mkdir()
+    workspace.mkdir(exist_ok=True)
     db_path = tmp_path / "session.db"
-    outcome_id = "evrerollbackout_" + "1" * 24
-    request_id = "evrerollbackreq_" + "2" * 24
+    outcome_id = outcome_id or "evrerollbackout_" + "1" * 24
+    outcome_sha256 = outcome_sha256 or "4" * 64
+    request_id = request_id or "evrerollbackreq_" + "2" * 24
     verification_id = "evpostrollback_" + "3" * 24
     matrix = SimpleNamespace(
         workspace_root=str(workspace),
         outcome_id=outcome_id,
-        outcome_sha256="4" * 64,
+        outcome_sha256=outcome_sha256,
         request_id=request_id,
         matrix_id="evpostmatrix_" + "5" * 24,
         matrix_sha256="6" * 64,
