@@ -20,6 +20,7 @@ from naumi_agent.release.population_registry import (
     ReleaseTrustedPopulationRegistryKey,
     _digest,
     create_release_population_trust_policy,
+    load_release_population_trust_policy,
 )
 
 T0 = datetime(2026, 8, 10, 8, 0, tzinfo=UTC)
@@ -72,6 +73,43 @@ def _credentials(signer, *, count: int, channel: str = "stable"):
     )
 
 
+def test_population_trust_policy_loader_is_bounded_and_rejects_symlinks(
+    tmp_path: Path,
+) -> None:
+    policy = _policy(_signer())
+    source = tmp_path / "trusted-population.json"
+    source.write_text(policy.model_dump_json(), encoding="utf-8")
+    assert load_release_population_trust_policy(source) == policy
+
+    malformed = tmp_path / "malformed.json"
+    malformed.write_text("{}", encoding="utf-8")
+    with pytest.raises(ReleasePopulationRegistryError) as invalid:
+        load_release_population_trust_policy(malformed)
+    assert invalid.value.code == "population_trust_policy_invalid"
+
+    empty = tmp_path / "empty.json"
+    empty.write_bytes(b"")
+    with pytest.raises(ReleasePopulationRegistryError) as empty_source:
+        load_release_population_trust_policy(empty)
+    assert empty_source.value.code == "population_trust_policy_size_invalid"
+
+    oversized = tmp_path / "oversized.json"
+    oversized.write_bytes(b"x" * (512 * 1024 + 1))
+    with pytest.raises(ReleasePopulationRegistryError) as oversized_source:
+        load_release_population_trust_policy(oversized)
+    assert oversized_source.value.code == "population_trust_policy_size_invalid"
+
+    link = tmp_path / "trusted-population-link.json"
+    try:
+        link.symlink_to(source)
+    except OSError:
+        pass
+    else:
+        with pytest.raises(ReleasePopulationRegistryError) as symlink:
+            load_release_population_trust_policy(link)
+        assert symlink.value.code == "population_trust_policy_file_invalid"
+
+
 @pytest.mark.asyncio
 async def test_signed_population_snapshot_is_private_chained_and_concurrent(
     tmp_path: Path,
@@ -119,6 +157,14 @@ async def test_signed_population_snapshot_is_private_chained_and_concurrent(
         for item in credentials
     )
 
+    not_yet_valid_store = build(clock=lambda: T0)
+    not_yet_valid = await not_yet_valid_store.inspect(
+        snapshot_id=snapshot.snapshot_id
+    )
+    assert not_yet_valid.not_yet_valid
+    assert "snapshot_not_yet_valid" in not_yet_valid.invalidation_reasons
+    assert not not_yet_valid.population_snapshot_authority
+
     next_snapshot = signer.issue_snapshot(
         channel="stable",
         credentials=credentials[:-1],
@@ -127,8 +173,9 @@ async def test_signed_population_snapshot_is_private_chained_and_concurrent(
         valid_from=(T0 + timedelta(days=1, seconds=1)).isoformat(),
         expires_at=(T0 + timedelta(days=8)).isoformat(),
     )
-    latest = await stores[0].record(next_snapshot)
-    historical = await stores[1].inspect(snapshot_id=snapshot.snapshot_id)
+    future_store = build(clock=lambda: T0 + timedelta(days=1, seconds=2))
+    latest = await future_store.record(next_snapshot)
+    historical = await future_store.inspect(snapshot_id=snapshot.snapshot_id)
     assert latest.population_snapshot_authority
     assert next_snapshot.payload.sequence == 2
     assert next_snapshot.payload.previous_snapshot_id == snapshot.snapshot_id

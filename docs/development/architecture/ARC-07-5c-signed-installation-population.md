@@ -17,7 +17,9 @@ Ed25519 key 签发的安装凭证与完整 population snapshot；本模块不从
 - credential 与 snapshot 必须在 exact trusted-key 时间窗内签发；
 - key 不可信、已撤销、过期或 signature 无效均 fail closed。
 
-当前 Trust Policy 仍由进程外配置提供；独立标准分发、key rotation channel 和离线企业 trust bundle 属于 ARC-07 后续工作。
+Trust Policy 由进程外配置提供；EVO-05.5f5t 已增加 installer-owned 普通文件的有界、防符号链接加载器，并在默认 release
+root 下使用 `trust/trusted-population.json`。独立标准分发、key rotation channel 和离线企业 trust bundle 仍属于 ARC-07
+后续工作。
 
 ## Privacy-bounded Installation Credential
 
@@ -54,7 +56,7 @@ Snapshot 冻结：
 - 写入前验证 Snapshot 与每个 Credential signature、Trust Policy 和完整成员约束；
 - SQLite `BEGIN IMMEDIATE` 内核对 channel sequence/previous link，拒绝缺口、分叉与回退；
 - 相同 content-addressed Snapshot 并发写入幂等收敛；
-- View 每次重读 durable artifact、latest channel head、current Trust Policy 和 expiry；
+- View 每次重读 durable artifact、latest channel head、current Trust Policy、valid-from 和 expiry；
 - 新 Snapshot、Registry key revocation、artifact 篡改或到期会动态撤销 `population_snapshot_authority`。
 
 Snapshot 始终固定 `cohort_assignment_authority=false` 与 `percentage_rollout_authority=false`。它只是可信 population 输入，不能被 UI
@@ -73,9 +75,9 @@ Snapshot 始终固定 `cohort_assignment_authority=false` 与 `percentage_rollou
 
 ## 当前边界与下一步
 
-本模块实现客户端侧 exact ingest/store/view 与测试用内存 signer，不实现远端 Registry HTTP 服务、安装 key provisioning、credential
-renewal/revocation API、10,000 以上的 Merkle 分页或 telemetry accounting。生产 Registry 必须在独立服务端部署 signer 和 pseudonym
-key，客户端只分发 trust policy/public artifacts。
+本模块实现客户端侧 exact ingest/store/view、生产 trust 文件加载与测试用内存 signer，不实现远端 Registry HTTP 服务、安装 key
+provisioning、credential renewal/revocation API、10,000 以上的 Merkle 分页或 telemetry accounting。生产 Registry 必须在独立
+服务端部署 signer 和 pseudonym key，客户端只分发 trust policy/public artifacts。
 
 下一切片 EVO-05.5f5a 必须同时消费 current ARC-07.5c Snapshot 与 current EVO-05.5f4e Stage Entry View，并要求安装私钥对
 exact assignment challenge 做 proof-of-possession；随后才能通过稳定 hash 决定 member 是否进入 limited percentage cohort。
