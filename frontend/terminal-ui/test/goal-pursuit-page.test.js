@@ -90,6 +90,54 @@ test("Goal page renders dead-letter authority as an actionable degraded state", 
   assert.match(lines, /\/pursue outbox abandon ptfail_a{24} no_longer_required/);
 });
 
+test("Goal page renders authenticated disposed history with distinct semantics", () => {
+  const lines = renderGoalPursuitPage({
+    snapshot: {
+      include_finished: true,
+      goals: [],
+      terminal_outbox: {
+        enabled: true,
+        status: "idle",
+        worker_state: "waiting",
+        counts: {
+          total_pending: 0,
+          due: 0,
+          backoff: 0,
+          live_claimed: 0,
+          expired_claimed: 0,
+          dead_letter: 0,
+        },
+        pass_count: 1,
+        delivered_count: 0,
+        retry_scheduled_count: 0,
+        dead_lettered_count: 1,
+        failure_count: 1,
+        next_delay_seconds: 30,
+        failure_codes: [],
+        warning: "",
+        dead_letters: [],
+        dead_letters_truncated: false,
+        disposed_count: 1,
+        disposed: [{
+          receipt_id: `ptabn_${"b".repeat(24)}`,
+          dead_letter_id: `ptfail_${"a".repeat(24)}`,
+          effective_state: "abandoned",
+          reason: "superseded",
+          failure_code: "lease_missing",
+          failure_sequence: 2,
+          abandoned_at: "2026-08-05T00:00:20+00:00",
+        }],
+        disposed_truncated: false,
+      },
+    },
+  }, 180, 20).map(stripAnsi).join("\n");
+
+  assert.match(lines, /已处置历史 · 1/);
+  assert.match(lines, /✓ 已放弃 ptfail_a{24} · 已被替代 · lease_missing/);
+  assert.match(lines, /effective-state abandoned · failure seq 2 · 回执 ptabn_b{24}/);
+  assert.doesNotMatch(lines, /重入队命令/);
+});
+
 test("Goal page exposes shared interaction detail command for every state", () => {
   const lines = renderGoalPursuitPage({
     snapshot: {

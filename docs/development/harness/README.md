@@ -50,8 +50,9 @@ New UI/TUI schema v2 告警；HAR-10.8f2e 再提供全 authority 认证、identi
 和 schema v3 三端投影；HAR-10.8f2f 进一步通过 ToolExecution、不可变 receipt 与原子 head/dispatch 转换交付
 exact requeue，并同步 New UI `d/u` 与 CLI/Textual TUI fallback。HAR-10.8f2g 又以 append-only overlay 交付
 exact abandon，不伪造 delivered，并通过受控原因、
-不可变回执与三端入口永久撤销领取资格；disposed history/effective-state projection、retention 与 push stream
-仍未完成。
+不可变回执与三端入口永久撤销领取资格；HAR-10.8f2h 再统一认证 `pending/delivered/abandoned`
+effective-state，并把脱敏 disposed history 同源投影到 Agent Tool、New UI、CLI 与 Textual TUI。cursor 翻页、
+retention preview/apply 与 push stream 仍未完成。
 UI-18.5b1 已让 New UI 通过 typed ToolExecution 消费该账本，并让 TUI fallback 显示同源动作、共享命令
 和最近 attempt；前端不解析工具文案生成结果状态。
 HAR-10.2a 在 Harness DB v12 建立 typed heartbeat，并接入 Pursuit lease worker 的 acquire/renew/release；

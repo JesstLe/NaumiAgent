@@ -6264,7 +6264,7 @@ function normalizeGoalSnapshot(payload) {
 function normalizeGoalTerminalOutbox(value) {
   const item = harnessObject(value, "goals/snapshot terminal_outbox");
   const schemaVersion = Number(item.schema_version);
-  if (![1, 2, 3].includes(schemaVersion)) {
+  if (![1, 2, 3, 4].includes(schemaVersion)) {
     throw new Error("goals/snapshot terminal_outbox schema_version 不兼容");
   }
   const counts = harnessObject(
@@ -6354,7 +6354,7 @@ function normalizeGoalTerminalOutbox(value) {
   }
   let deadLetters = [];
   let deadLettersTruncated = normalizedCounts.dead_letter > 0;
-  if (schemaVersion === 3) {
+  if (schemaVersion >= 3) {
     if (!Array.isArray(item.dead_letters) || item.dead_letters.length > 20) {
       throw new Error("goals/snapshot terminal_outbox dead_letters 必须是至多 20 项数组");
     }
@@ -6428,8 +6428,91 @@ function normalizeGoalTerminalOutbox(value) {
   ) {
     throw new Error("goals/snapshot terminal_outbox dead-letter 目录与总数不一致");
   }
+  let disposedCount = 0;
+  let disposed = [];
+  let disposedTruncated = false;
+  if (schemaVersion === 4) {
+    disposedCount = harnessNonnegativeInteger(
+      item.disposed_count,
+      "goals/snapshot terminal_outbox.disposed_count",
+    );
+    if (disposedCount > 10_000) {
+      throw new Error("goals/snapshot terminal_outbox disposed_count 超出上限");
+    }
+    if (!Array.isArray(item.disposed) || item.disposed.length > 20) {
+      throw new Error("goals/snapshot terminal_outbox disposed 必须是至多 20 项数组");
+    }
+    disposed = item.disposed.map((raw, index) => {
+      const entry = harnessObject(
+        raw,
+        `goals/snapshot terminal_outbox.disposed[${index}]`,
+      );
+      const receiptId = harnessText(
+        entry.receipt_id,
+        `goals/snapshot terminal_outbox.disposed[${index}].receipt_id`,
+      );
+      const deadLetterId = harnessText(
+        entry.dead_letter_id,
+        `goals/snapshot terminal_outbox.disposed[${index}].dead_letter_id`,
+      );
+      const failureCode = harnessText(
+        entry.failure_code,
+        `goals/snapshot terminal_outbox.disposed[${index}].failure_code`,
+      );
+      const failureSequence = harnessNonnegativeInteger(
+        entry.failure_sequence,
+        `goals/snapshot terminal_outbox.disposed[${index}].failure_sequence`,
+      );
+      if (
+        !/^ptabn_[0-9a-f]{24}$/.test(receiptId)
+        || !/^ptfail_[0-9a-f]{24}$/.test(deadLetterId)
+        || !/^[a-z][a-z0-9_]{0,63}$/.test(failureCode)
+        || failureSequence < 1
+        || failureSequence > 1_000_000
+      ) {
+        throw new Error("goals/snapshot terminal_outbox disposed authority 无效");
+      }
+      if (entry.effective_state !== "abandoned") {
+        throw new Error("goals/snapshot terminal_outbox disposed effective_state 无效");
+      }
+      return {
+        receipt_id: receiptId,
+        dead_letter_id: deadLetterId,
+        effective_state: "abandoned",
+        reason: harnessChoice(
+          entry.reason,
+          `goals/snapshot terminal_outbox.disposed[${index}].reason`,
+          new Set([
+            "no_longer_required",
+            "superseded",
+            "external_resolution",
+            "invalid_target",
+          ]),
+        ),
+        failure_code: failureCode,
+        failure_sequence: failureSequence,
+        abandoned_at: goalTerminalTimestamp(
+          entry.abandoned_at,
+          `goals/snapshot terminal_outbox.disposed[${index}].abandoned_at`,
+        ),
+      };
+    });
+    disposedTruncated = harnessBoolean(
+      item.disposed_truncated,
+      "goals/snapshot terminal_outbox.disposed_truncated",
+    );
+  }
+  if (
+    new Set(disposed.map((entry) => entry.receipt_id)).size !== disposed.length
+    || new Set(disposed.map((entry) => entry.dead_letter_id)).size !== disposed.length
+    || disposed.length > disposedCount
+    || (disposedTruncated && disposed.length >= disposedCount)
+    || (!disposedTruncated && disposed.length !== disposedCount)
+  ) {
+    throw new Error("goals/snapshot terminal_outbox disposed 目录与总数不一致");
+  }
   return {
-    schema_version: 3,
+    schema_version: 4,
     enabled,
     status,
     worker_state: workerState,
@@ -6465,6 +6548,9 @@ function normalizeGoalTerminalOutbox(value) {
     warning,
     dead_letters: deadLetters,
     dead_letters_truncated: deadLettersTruncated,
+    disposed_count: disposedCount,
+    disposed,
+    disposed_truncated: disposedTruncated,
   };
 }
 

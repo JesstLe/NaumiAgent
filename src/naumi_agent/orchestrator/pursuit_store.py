@@ -9,6 +9,7 @@ import re
 import sqlite3
 import threading
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -88,6 +89,39 @@ class PursuitTerminalOutboxDeadLetterCatalog:
 class PursuitTerminalOutboxDeadLetterCatalogRecord:
     event: PursuitTerminalOutboxFailureEvent
     failure_attempts: int
+
+
+class PursuitTerminalOutboxEffectiveState(StrEnum):
+    """Authenticated state after applying terminal disposition overlays."""
+
+    PENDING = "pending"
+    DELIVERED = "delivered"
+    ABANDONED = "abandoned"
+
+
+@dataclass(frozen=True, slots=True)
+class PursuitTerminalOutboxEffectiveSnapshot:
+    """One authenticated outbox and its authoritative effective state."""
+
+    outbox: PursuitTerminalOutboxRecord
+    state: PursuitTerminalOutboxEffectiveState
+    abandon_receipt: PursuitTerminalDeadLetterAbandonReceipt | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PursuitTerminalOutboxDisposedCatalogRecord:
+    """Authenticated historical evidence for one abandoned outbox."""
+
+    outbox: PursuitTerminalOutboxRecord
+    failure: PursuitTerminalOutboxFailureEvent
+    receipt: PursuitTerminalDeadLetterAbandonReceipt
+
+
+@dataclass(frozen=True, slots=True)
+class PursuitTerminalOutboxDisposedCatalog:
+    records: tuple[PursuitTerminalOutboxDisposedCatalogRecord, ...]
+    total: int
+    truncated: bool
 
 
 class PursuitStoreError(RuntimeError):
@@ -870,6 +904,30 @@ class PursuitStore:
         except sqlite3.Error as exc:
             raise PursuitStoreError(f"读取 terminal outbox 失败：{exc}") from exc
 
+    def get_terminal_outbox_effective_state(
+        self,
+        outbox_id: str,
+    ) -> PursuitTerminalOutboxEffectiveSnapshot | None:
+        """Read one authenticated outbox after applying disposition authority."""
+        if not self._db_path.exists():
+            return None
+        try:
+            with self._connect() as conn:
+                return self._terminal_outbox_effective_snapshot_with_connection(
+                    conn,
+                    outbox_id,
+                )
+        except PursuitStoreError:
+            raise
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise PursuitStoreError(
+                f"terminal outbox effective-state 校验失败：{exc}"
+            ) from exc
+        except sqlite3.Error as exc:
+            raise PursuitStoreError(
+                f"读取 terminal outbox effective-state 失败：{exc}"
+            ) from exc
+
     def list_pending_terminal_outbox(
         self,
         *,
@@ -1154,6 +1212,103 @@ class PursuitStore:
         except sqlite3.Error as exc:
             raise PursuitStoreError(
                 f"读取 terminal outbox dead-letter catalog 失败：{exc}"
+            ) from exc
+
+    def terminal_outbox_disposed_catalog(
+        self,
+        *,
+        limit: int = 20,
+        scan_limit: int = 10_000,
+    ) -> PursuitTerminalOutboxDisposedCatalog:
+        """Return a bounded, authenticated history of abandoned outboxes."""
+        if (
+            isinstance(limit, bool)
+            or not 1 <= limit <= 100
+            or isinstance(scan_limit, bool)
+            or not limit <= scan_limit <= 10_000
+        ):
+            raise ValueError("terminal outbox disposed catalog 策略无效。")
+        if not self._db_path.exists():
+            return PursuitTerminalOutboxDisposedCatalog((), 0, False)
+        try:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT outbox_id FROM pursuit_terminal_outbox_failure_heads
+                    UNION
+                    SELECT DISTINCT outbox_id FROM pursuit_terminal_outbox_failures
+                    UNION
+                    SELECT DISTINCT outbox_id
+                    FROM pursuit_terminal_outbox_dead_letter_abandons
+                    ORDER BY outbox_id ASC
+                    LIMIT ?
+                    """,
+                    (scan_limit + 1,),
+                ).fetchall()
+                if len(rows) > scan_limit:
+                    raise PursuitStoreError(
+                        "terminal outbox disposed authority 超过有界扫描上限。"
+                    )
+                disposed: list[PursuitTerminalOutboxDisposedCatalogRecord] = []
+                for row in rows:
+                    outbox_id = str(row["outbox_id"])
+                    snapshot = (
+                        self._terminal_outbox_effective_snapshot_with_connection(
+                            conn,
+                            outbox_id,
+                        )
+                    )
+                    if snapshot is None:
+                        raise PursuitStoreError(
+                            "terminal outbox disposed authority 缺少 outbox。"
+                        )
+                    if snapshot.state is not PursuitTerminalOutboxEffectiveState.ABANDONED:
+                        continue
+                    receipt = snapshot.abandon_receipt
+                    if receipt is None:
+                        raise PursuitStoreError(
+                            "terminal outbox abandoned 状态缺少认证回执。"
+                        )
+                    failures = self._verify_terminal_outbox_failures(
+                        conn,
+                        outbox_id,
+                        limit=1000,
+                    )
+                    if (
+                        not failures
+                        or failures[-1].event_id != receipt.dead_letter_id
+                        or failures[-1].sequence != receipt.failure_sequence
+                    ):
+                        raise PursuitStoreError(
+                            "terminal outbox disposed history 与 failure authority 不一致。"
+                        )
+                    disposed.append(PursuitTerminalOutboxDisposedCatalogRecord(
+                        outbox=snapshot.outbox,
+                        failure=failures[-1],
+                        receipt=receipt,
+                    ))
+                disposed.sort(
+                    key=lambda record: (
+                        record.receipt.abandoned_at,
+                        record.receipt.receipt_id,
+                    ),
+                    reverse=True,
+                )
+                total = len(disposed)
+                return PursuitTerminalOutboxDisposedCatalog(
+                    records=tuple(disposed[:limit]),
+                    total=total,
+                    truncated=total > limit,
+                )
+        except PursuitStoreError:
+            raise
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise PursuitStoreError(
+                f"terminal outbox disposed catalog 校验失败：{exc}"
+            ) from exc
+        except sqlite3.Error as exc:
+            raise PursuitStoreError(
+                f"读取 terminal outbox disposed catalog 失败：{exc}"
             ) from exc
 
     def get_terminal_dead_letter_requeue(
@@ -3308,6 +3463,64 @@ class PursuitStore:
                 )
             elif dispatch.state is not PursuitTerminalDispatchState.IDLE:
                 raise PursuitStoreError("terminal dispatch 迁移初态无效。")
+
+    def _terminal_outbox_effective_snapshot_with_connection(
+        self,
+        conn: sqlite3.Connection,
+        outbox_id: str,
+    ) -> PursuitTerminalOutboxEffectiveSnapshot | None:
+        outbox = self._get_terminal_outbox_with_connection(conn, outbox_id)
+        if outbox is None:
+            return None
+        dispatch = self._get_terminal_dispatch_with_connection(conn, outbox_id)
+        if dispatch is None:
+            raise PursuitStoreError(
+                "terminal outbox effective-state 缺少 dispatch authority。"
+            )
+        failures = self._verify_terminal_outbox_failures(
+            conn,
+            outbox_id,
+            limit=1000,
+        )
+        dispatch_events = self._verify_terminal_dispatch_events(conn, outbox_id)
+        abandons = self._verify_terminal_dead_letter_abandons(
+            conn,
+            outbox_id,
+            failures=failures,
+            dispatch_events=dispatch_events,
+        )
+        if len(abandons) > 1:
+            raise PursuitStoreError(
+                "terminal outbox effective-state 存在多个 abandon authority。"
+            )
+        abandon = next(iter(abandons.values()), None)
+        if outbox.state is PursuitTerminalOutboxState.DELIVERED:
+            if abandon is not None:
+                raise PursuitStoreError(
+                    "delivered terminal outbox 不得存在 abandon authority。"
+                )
+            if dispatch.state is not PursuitTerminalDispatchState.DELIVERED:
+                raise PursuitStoreError(
+                    "delivered terminal outbox 与 dispatch 状态不一致。"
+                )
+            state = PursuitTerminalOutboxEffectiveState.DELIVERED
+        elif abandon is not None:
+            if (
+                dispatch.state is not PursuitTerminalDispatchState.IDLE
+                or not failures
+                or failures[-1].event_id != abandon.dead_letter_id
+            ):
+                raise PursuitStoreError(
+                    "abandoned terminal outbox 与 failure/dispatch authority 不一致。"
+                )
+            state = PursuitTerminalOutboxEffectiveState.ABANDONED
+        else:
+            state = PursuitTerminalOutboxEffectiveState.PENDING
+        return PursuitTerminalOutboxEffectiveSnapshot(
+            outbox=outbox,
+            state=state,
+            abandon_receipt=abandon,
+        )
 
     def _get_terminal_outbox_with_connection(
         self,
