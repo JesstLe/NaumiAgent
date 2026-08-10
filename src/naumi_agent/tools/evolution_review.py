@@ -203,6 +203,10 @@ from naumi_agent.evolution.reward_hacking_evidence import (
     EvolutionRewardHackingEvidenceError,
     render_reward_hacking_evidence,
 )
+from naumi_agent.evolution.stable_population_candidate_previews import (
+    EvolutionStablePopulationCandidatePreviewError,
+    render_stable_population_candidate_preview,
+)
 from naumi_agent.evolution.store import EvolutionStoreError
 from naumi_agent.tools.base import Tool, ToolMetadata
 
@@ -2548,6 +2552,79 @@ class EvolutionRevalidationRollbackExecutionTool(Tool):
         return render_revalidation_rollback_execution(view)
 
 
+class EvolutionStablePopulationCandidatePreviewTool(Tool):
+    """Preview durable cross-installation stable completion candidates."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_stable_population_candidate_preview"
+
+    @property
+    def description(self) -> str:
+        return (
+            "有界扫描 durable Stable Stage Completion receipts，按 Population Snapshot "
+            "与安装成员去重，显示 passing、breached、insufficient、缺失和冲突；"
+            "只生成防篡改候选预演，不授予 stable rollout 或 promotion 权限。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "snapshot_id": {
+                    "type": ["string", "null"],
+                    "pattern": "^relpopsnapshot_[0-9a-f]{24}$",
+                },
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+            },
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="Stable Population 候选预演",
+            search_hint=(
+                "evolution stable population candidate completion rollout preview "
+                "自进化 稳定发布 成员 候选 预演"
+            ),
+        )
+
+    async def execute(
+        self,
+        snapshot_id: str | None = None,
+        limit: int = 50,
+    ) -> str:
+        try:
+            preview = (
+                await self._engine.evolution_stable_population_candidate_preview_service.preview(
+                    snapshot_id=snapshot_id,
+                    limit=limit,
+                )
+            )
+        except (
+            AttributeError,
+            EvolutionStablePopulationCandidatePreviewError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "stable_population_candidate_preview_failed")
+            return f"Stable Population 候选预演不可用（`{code}`）：{exc}"
+        return render_stable_population_candidate_preview(preview)
+
+
 class EvolutionRevalidationRollbackOutcomeTool(Tool):
     """Record one proposal-bound historical rollback Outcome."""
 
@@ -3947,6 +4024,7 @@ def create_evolution_review_tools(
         EvolutionPostRollbackRemoteDeliveryTool(engine),
         EvolutionPostRollbackRemoteExecutionAuthorizationTool(engine),
         EvolutionPostRollbackRemoteResultTool(engine),
+        EvolutionStablePopulationCandidatePreviewTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -3999,6 +4077,7 @@ __all__ = [
     "EvolutionRevalidationEvaluationSourceTool",
     "EvolutionRevalidationValidationPlanTool",
     "EvolutionRevalidationRuntimeContractTool",
+    "EvolutionStablePopulationCandidatePreviewTool",
     "EvolutionRevalidationRollbackExecutionTool",
     "EvolutionRevalidationRollbackOutcomeTool",
     "EvolutionRevalidationReplayTool",

@@ -175,6 +175,9 @@
 - [EVO-05.5f5q Stable Release-bound Execution Outcome](EVO-05-5f5q-stable-release-bound-execution-outcome.md)：已交付；
   将单个真实 terminal run 绑定到 exact Stable Intent、Population member、durable Window、Completion/Usage 与 heartbeat coverage；
   failed/cancelled 也进入 Population observation，但单 Outcome 不授予 stable-stage、rollout 或 promotion authority；
+- [EVO-05.5f5s Stable Population Candidate Preview](EVO-05-5f5s-stable-population-candidate-preview.md)：已交付；
+  有界校验 durable 5f5r receipts 并按 Snapshot/member 投影跨安装候选覆盖、缺失与冲突；生产动态重验尚未组合，固定不授予
+  stable rollout 或 promotion authority；
 - [EVO-05.6a Automatic Pause and Rollback Request](EVO-05-6a-automatic-pause-rollback-request.md)：已交付；
   exact breach 会触发或复用 kill switch，并冻结只读 exact Rollback Request，不虚报执行完成。
 - [EVO-05.6b1 Immutable Rollback Source](EVO-05-6b1-immutable-rollback-source.md)：已交付；从 exact Git

@@ -73,5 +73,6 @@ Evidence 不复制 prompt、工具参数、工具输出、完整 assistant 正�
 ## 当前边界与下一步
 
 5f5r 证明的是 exact Stable Intent 对应的单 installation member 完成了足够真实运行，并未证明 Population Snapshot 中全部成员均已
-完成 stable exposure、observation 与 completed-run guardrail。因此，后续必须先对照 Population rollout、promotion、Harness recovery 与
-UI/TUI 文档，确定最小的跨安装成员聚合/展示切片；不得直接把本 Evidence 接到 promotion，也不得沿自进化编号无界展开。
+完成 stable exposure、observation 与 completed-run guardrail。[EVO-05.5f5s](EVO-05-5f5s-stable-population-candidate-preview.md)
+已先交付 durable candidate 的跨安装成员只读聚合/展示，并明确固定无 rollout/promotion authority。下一步必须补生产动态
+重验组合与 current trusted Population 对账；不得直接把历史 Evidence 接到 promotion，也不得沿自进化编号无界展开。
