@@ -305,6 +305,34 @@ class EvolutionRevalidationStableDeploymentIntentStore:
                 "Stable Deployment Intent durable source 无效。",
             ) from exc
 
+    async def get_by_intent(
+        self,
+        intent_id: str,
+    ) -> EvolutionRevalidationStableDeploymentIntent | None:
+        _require_id(intent_id, r"^evrestableintent_[0-9a-f]{24}$", "Intent")
+        if not self.db_path.is_file():
+            return None
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                db.row_factory = aiosqlite.Row
+                await _ensure_schema(db)
+                row = await (
+                    await db.execute(
+                        "SELECT intent_json FROM "
+                        "evolution_revalidation_stable_deployment_intents "
+                        "WHERE intent_id = ?",
+                        (intent_id,),
+                    )
+                ).fetchone()
+            return None if row is None else _restore(str(row["intent_json"]))
+        except EvolutionRevalidationStableDeploymentIntentError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise EvolutionRevalidationStableDeploymentIntentError(
+                "stable_deployment_intent_source_invalid",
+                "Stable Deployment Intent durable source 无效。",
+            ) from exc
+
     async def record(self, intent):
         item = _validated(intent)
         encoded = item.model_dump_json()
@@ -431,6 +459,7 @@ class EvolutionRevalidationStableDeploymentIntentService:
         self.workspace_root = Path(workspace_root).expanduser().resolve(strict=True)
         self.channel = channel
         self.store = store
+        self.slot_store = store.slot_store
         self.sign_challenge = sign_challenge
         self.clock = store.clock if clock is None else clock
         if clock is not None and store.clock is not clock:
@@ -528,6 +557,19 @@ class EvolutionRevalidationStableDeploymentIntentService:
         if intent is None:
             raise EvolutionRevalidationStableDeploymentIntentError(
                 "stable_deployment_intent_missing", "指定 Stable Deployment Intent 不存在。"
+            )
+        return await self._view(intent)
+
+    async def inspect_intent(
+        self,
+        *,
+        intent_id: str,
+    ) -> EvolutionRevalidationStableDeploymentIntentView:
+        intent = await self.store.get_by_intent(intent_id)
+        if intent is None:
+            raise EvolutionRevalidationStableDeploymentIntentError(
+                "stable_deployment_intent_missing",
+                "指定 Stable Deployment Intent 不存在。",
             )
         return await self._view(intent)
 

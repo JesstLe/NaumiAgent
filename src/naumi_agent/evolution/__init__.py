@@ -923,6 +923,14 @@ if TYPE_CHECKING:
         EvolutionRevalidationRuntimeSourcePair,
         EvolutionRevalidationRuntimeSourceService,
     )
+    from naumi_agent.evolution.revalidation_stable_boot_preparations import (
+        EVOLUTION_REVALIDATION_STABLE_BOOT_PREPARATION_POLICY,
+        EvolutionRevalidationStableBootPreparation,
+        EvolutionRevalidationStableBootPreparationError,
+        EvolutionRevalidationStableBootPreparationService,
+        EvolutionRevalidationStableBootPreparationStore,
+        EvolutionRevalidationStableBootPreparationView,
+    )
     from naumi_agent.evolution.revalidation_stable_deployment_intents import (
         EVOLUTION_REVALIDATION_STABLE_DEPLOYMENT_INTENT_POLICY,
         EvolutionRevalidationStableDeploymentIntent,
@@ -1319,6 +1327,12 @@ __all__ = [
     "EvolutionRevalidationPercentageDeploymentIntentService",
     "EvolutionRevalidationPercentageDeploymentIntentStore",
     "EvolutionRevalidationPercentageDeploymentIntentView",
+    "EVOLUTION_REVALIDATION_STABLE_BOOT_PREPARATION_POLICY",
+    "EvolutionRevalidationStableBootPreparation",
+    "EvolutionRevalidationStableBootPreparationError",
+    "EvolutionRevalidationStableBootPreparationService",
+    "EvolutionRevalidationStableBootPreparationStore",
+    "EvolutionRevalidationStableBootPreparationView",
     "EVOLUTION_REVALIDATION_STABLE_DEPLOYMENT_INTENT_POLICY",
     "EvolutionRevalidationStableDeploymentIntent",
     "EvolutionRevalidationStableDeploymentIntentError",
@@ -2398,6 +2412,14 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationPercentageStageAdvanceStore",
         "EvolutionRevalidationPercentageStageAdvanceView",
     }
+    revalidation_stable_boot_preparation_exports = {
+        "EVOLUTION_REVALIDATION_STABLE_BOOT_PREPARATION_POLICY",
+        "EvolutionRevalidationStableBootPreparation",
+        "EvolutionRevalidationStableBootPreparationError",
+        "EvolutionRevalidationStableBootPreparationService",
+        "EvolutionRevalidationStableBootPreparationStore",
+        "EvolutionRevalidationStableBootPreparationView",
+    }
     revalidation_stable_deployment_intent_exports = {
         "EVOLUTION_REVALIDATION_STABLE_DEPLOYMENT_INTENT_POLICY",
         "EvolutionRevalidationStableDeploymentIntent",
@@ -3026,6 +3048,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_percentage_runtime_exposures"
     elif name in revalidation_percentage_stage_advance_exports:
         module_name = "revalidation_percentage_stage_advances"
+    elif name in revalidation_stable_boot_preparation_exports:
+        module_name = "revalidation_stable_boot_preparations"
     elif name in revalidation_stable_deployment_intent_exports:
         module_name = "revalidation_stable_deployment_intents"
     elif name in revalidation_stable_installation_proof_exports:

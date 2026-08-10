@@ -195,6 +195,8 @@ mandatory user option 与短期 TTL 冻结为 stable entry authority；bypass �
 [EVO-05.5f5k](EVO-05-5f5k-stable-deployment-intent.md) 已交付：stable 以 current complete signed Population 和逐安装
 Ed25519 proof-of-possession 覆盖 100% 目标，不复用 percentage selected cohort；durable Intent Service/Store/View 绑定 exact
 Admission、host target 与 previous pointer CAS，仍不执行 boot 或声明 stable rollout。
+[EVO-05.5f5l](EVO-05-5f5l-stable-boot-preparation.md) 已交付：以跨进程 claim/lease 对 exact stable candidate 执行真实
+`--version` probe，形成独立 Stable Prepared Receipt 和 activation input；仍不切换 pointer、不启动用户进程或声明 stable rollout。
 [EVO-05.6a](EVO-05-6a-automatic-pause-rollback-request.md) 已让 exact breach 幂等触发或复用 HMAC kill switch，并冻结
 绑定 exact prior Rollback Plan 的只读 Request；它不写 workspace/Git，也不把请求虚报成已回滚。
 [EVO-05.6b1](EVO-05-6b1-immutable-rollback-source.md) 已从 exact Git commit/tree 读取 baseline blob，验证每个
