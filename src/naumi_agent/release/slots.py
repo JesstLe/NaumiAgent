@@ -33,6 +33,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 RELEASE_SLOT_POLICY = "naumi-release-slot-v1"
 RELEASE_BOOT_RECEIPT_POLICY = "naumi-release-boot-receipt-v1"
 RELEASE_ACTIVE_POINTER_POLICY = "naumi-release-active-pointer-v1"
+RELEASE_STABLE_MEMBER_FINALIZATION_POLICY = (
+    "naumi-release-stable-member-finalization-v1"
+)
 _SHA256_RE = r"^[0-9a-f]{64}$"
 _SAFE_LABEL_RE = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
 _MAX_MANIFEST_BYTES = 8 * 1024 * 1024
@@ -214,6 +217,61 @@ class ReleaseActivePointer(_StrictModel):
         digest = _digest(core)
         if self.pointer_sha256 != digest or self.pointer_id != f"relactive_{digest[:24]}":
             raise ValueError("Release Active Pointer identity 不一致。")
+        return self
+
+
+class ReleaseStableMemberFinalizationAuthority(_StrictModel):
+    kind: Literal["evolution_stable_rollout_authorization"] = (
+        "evolution_stable_rollout_authorization"
+    )
+    authority_id: str = Field(pattern=r"^evstablerolloutauth_[0-9a-f]{24}$")
+    authority_sha256: str = Field(pattern=_SHA256_RE)
+    completion_receipt_id: str = Field(
+        pattern=r"^evstablepopcomplete_[0-9a-f]{24}$"
+    )
+    completion_receipt_sha256: str = Field(pattern=_SHA256_RE)
+    installation_member_id: str = Field(pattern=r"^relpopmember_[0-9a-f]{24}$")
+    expected_pointer_id: str = Field(pattern=r"^relactive_[0-9a-f]{24}$")
+    expected_pointer_sha256: str = Field(pattern=_SHA256_RE)
+    expected_pointer_generation: int = Field(ge=2, le=1_000_000_000)
+
+
+class ReleaseStableMemberFinalization(_StrictModel):
+    schema_version: Literal[1] = 1
+    policy_version: Literal[
+        "naumi-release-stable-member-finalization-v1"
+    ] = RELEASE_STABLE_MEMBER_FINALIZATION_POLICY
+    finalization_id: str = Field(pattern=r"^relstablefinal_[0-9a-f]{24}$")
+    finalization_sha256: str = Field(pattern=_SHA256_RE)
+    authority: ReleaseStableMemberFinalizationAuthority
+    active_pointer: ReleaseActivePointer
+    expected_pointer_cas_satisfied: Literal[True] = True
+    binary_stable_member_finalized: Literal[True] = True
+    config_data_mutation_executed: Literal[False] = False
+    deployment_executed: Literal[False] = False
+    rollback_executed: Literal[False] = False
+    promotion_executed: Literal[False] = False
+    finalized_at: str = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def _exact(self) -> Self:
+        if not (
+            self.active_pointer.pointer_id == self.authority.expected_pointer_id
+            and self.active_pointer.pointer_sha256
+            == self.authority.expected_pointer_sha256
+            and self.active_pointer.generation
+            == self.authority.expected_pointer_generation
+        ):
+            raise ValueError("Stable member finalization pointer authority 不一致。")
+        _aware(self.finalized_at)
+        core = self.model_dump(
+            mode="json", exclude={"finalization_id", "finalization_sha256"}
+        )
+        digest = _digest(core)
+        if self.finalization_sha256 != digest or self.finalization_id != (
+            f"relstablefinal_{digest[:24]}"
+        ):
+            raise ValueError("Stable member finalization identity 不一致。")
         return self
 
 
@@ -873,6 +931,113 @@ class ReleaseSlotStore:
             )
         return None if not matches else matches[0]
 
+    def get_stable_member_finalization(
+        self,
+        authority_id: str,
+    ) -> ReleaseStableMemberFinalization | None:
+        if re.fullmatch(r"evstablerolloutauth_[0-9a-f]{24}", authority_id) is None:
+            raise ValueError("Stable member finalization authority ID 格式无效。")
+        if not self.db_path.is_file():
+            return None
+        with self._connect() as db:
+            db.execute("BEGIN")
+            self._validated_active(db)
+            row = db.execute(
+                "SELECT finalization_json FROM release_stable_member_finalizations "
+                "WHERE authority_id = ?",
+                (authority_id,),
+            ).fetchone()
+            db.rollback()
+        return (
+            None
+            if row is None
+            else ReleaseStableMemberFinalization.model_validate_json(
+                row["finalization_json"]
+            )
+        )
+
+    def finalize_stable_member(
+        self,
+        authority: ReleaseStableMemberFinalizationAuthority,
+        *,
+        finalized_at: str | None = None,
+    ) -> ReleaseStableMemberFinalization:
+        typed = ReleaseStableMemberFinalizationAuthority.model_validate_json(
+            authority.model_dump_json()
+        )
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            current = self._validated_active(db)
+            existing = db.execute(
+                "SELECT finalization_json FROM release_stable_member_finalizations "
+                "WHERE authority_id = ?",
+                (typed.authority_id,),
+            ).fetchone()
+            if existing is not None:
+                restored = ReleaseStableMemberFinalization.model_validate_json(
+                    existing["finalization_json"]
+                )
+                db.rollback()
+                if restored.authority != typed:
+                    raise ReleaseSlotError(
+                        "release_stable_finalization_authority_conflict",
+                        "同一 Stable Rollout Authorization 已绑定不同 finalization。",
+                    )
+                return restored
+            if not (
+                current is not None
+                and current.pointer_id == typed.expected_pointer_id
+                and current.pointer_sha256 == typed.expected_pointer_sha256
+                and current.generation == typed.expected_pointer_generation
+            ):
+                db.rollback()
+                raise ReleaseSlotError(
+                    "release_stable_finalization_pointer_conflict",
+                    "Active pointer 在 stable member finalization 前已变化。",
+                )
+            core = {
+                "schema_version": 1,
+                "policy_version": RELEASE_STABLE_MEMBER_FINALIZATION_POLICY,
+                "authority": typed.model_dump(mode="json"),
+                "active_pointer": current.model_dump(mode="json"),
+                "expected_pointer_cas_satisfied": True,
+                "binary_stable_member_finalized": True,
+                "config_data_mutation_executed": False,
+                "deployment_executed": False,
+                "rollback_executed": False,
+                "promotion_executed": False,
+                "finalized_at": _aware(
+                    finalized_at or datetime.now(UTC).isoformat()
+                ).isoformat(),
+            }
+            digest = _digest(core)
+            item = ReleaseStableMemberFinalization.model_validate(
+                {
+                    **core,
+                    "finalization_id": f"relstablefinal_{digest[:24]}",
+                    "finalization_sha256": digest,
+                }
+            )
+            db.execute(
+                "INSERT INTO release_stable_member_finalizations "
+                "(finalization_id, finalization_sha256, authority_id, "
+                "completion_receipt_id, installation_member_id, "
+                "pointer_sha256, finalization_json, finalized_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    item.finalization_id,
+                    item.finalization_sha256,
+                    typed.authority_id,
+                    typed.completion_receipt_id,
+                    typed.installation_member_id,
+                    current.pointer_sha256,
+                    item.model_dump_json(),
+                    item.finalized_at,
+                ),
+            )
+            db.commit()
+        return item
+
     def resolve_active_backend(self) -> ResolvedReleaseSlot:
         with self._connect() as db:
             db.execute("BEGIN")
@@ -1469,6 +1634,14 @@ def _ensure_schema(db: sqlite3.Connection) -> None:
         "receipt_json TEXT NOT NULL, evaluated_at TEXT NOT NULL);"
         "CREATE INDEX IF NOT EXISTS idx_release_runtime_eval_slot_request "
         "ON release_runtime_eval_receipts(slot_id, request_sha256, evaluated_at);"
+        "CREATE TABLE IF NOT EXISTS release_stable_member_finalizations ("
+        "finalization_id TEXT PRIMARY KEY, finalization_sha256 TEXT NOT NULL UNIQUE, "
+        "authority_id TEXT NOT NULL UNIQUE, completion_receipt_id TEXT NOT NULL, "
+        "installation_member_id TEXT NOT NULL, pointer_sha256 TEXT NOT NULL, "
+        "finalization_json TEXT NOT NULL, finalized_at TEXT NOT NULL);"
+        "CREATE INDEX IF NOT EXISTS idx_release_stable_member_completion "
+        "ON release_stable_member_finalizations("
+        "completion_receipt_id, installation_member_id, finalized_at);"
     )
 
 
@@ -1476,6 +1649,7 @@ __all__ = [
     "RELEASE_ACTIVE_POINTER_POLICY",
     "RELEASE_BOOT_RECEIPT_POLICY",
     "RELEASE_SLOT_POLICY",
+    "RELEASE_STABLE_MEMBER_FINALIZATION_POLICY",
     "ReleaseActivationAuthority",
     "ReleaseRollbackAuthority",
     "ReleaseActivePointer",
@@ -1483,6 +1657,8 @@ __all__ = [
     "ReleaseSlotBootReceipt",
     "ReleaseSlotError",
     "ReleaseSlotStore",
+    "ReleaseStableMemberFinalization",
+    "ReleaseStableMemberFinalizationAuthority",
     "ResolvedBootedReleaseSlot",
     "ResolvedReleaseSlot",
     "host_release_target",
