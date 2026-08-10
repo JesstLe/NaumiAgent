@@ -47,6 +47,16 @@ from naumi_agent.daemons.authenticated_worker_identity import (
     issue_authenticated_worker_identity,
     verify_authenticated_worker_identity,
 )
+from naumi_agent.daemons.authenticated_worker_transport_key import (
+    AUTHENTICATED_WORKER_TRANSPORT_KEY_POLICY,
+    AuthenticatedWorkerTransportKey,
+    AuthenticatedWorkerTransportKeyAuthority,
+    AuthenticatedWorkerTransportKeyError,
+    AuthenticatedWorkerTransportKeyStore,
+    AuthenticatedWorkerTransportKeyView,
+    issue_authenticated_worker_transport_key,
+    verify_authenticated_worker_transport_key,
+)
 from naumi_agent.daemons.worker_contract import (
     WorkerAdmissionDecision,
     WorkerAdmissionReason,
@@ -86,6 +96,7 @@ from naumi_agent.daemons.worker_registry import (
 __all__ = [
     "AGENT_JOB_SCHEMA_VERSION",
     "AUTHENTICATED_WORKER_IDENTITY_POLICY",
+    "AUTHENTICATED_WORKER_TRANSPORT_KEY_POLICY",
     "AgentJobCapacityExhaustedError",
     "AgentJobCapacityPolicy",
     "AgentJobCapacitySnapshot",
@@ -117,6 +128,11 @@ __all__ = [
     "AuthenticatedWorkerIdentityError",
     "AuthenticatedWorkerIdentityStore",
     "AuthenticatedWorkerIdentityView",
+    "AuthenticatedWorkerTransportKey",
+    "AuthenticatedWorkerTransportKeyAuthority",
+    "AuthenticatedWorkerTransportKeyError",
+    "AuthenticatedWorkerTransportKeyStore",
+    "AuthenticatedWorkerTransportKeyView",
     "StoredAgentJob",
     "StoredAgentJobPublication",
     "StoredAgentJobPublicationDelivery",
@@ -152,8 +168,10 @@ __all__ = [
     "issue_worker_contract",
     "issue_worker_health_report",
     "issue_authenticated_worker_identity",
+    "issue_authenticated_worker_transport_key",
     "normalize_worker_timestamp",
     "verify_worker_contract",
     "verify_worker_health_report",
     "verify_authenticated_worker_identity",
+    "verify_authenticated_worker_transport_key",
 ]

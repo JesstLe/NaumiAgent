@@ -53,3 +53,7 @@ RPC、多轮模型循环、重复副作用阻断与父 Runtime authority callbac
 Control schema v6 在 New UI/TUI 区分独立执行与内嵌降级。当前仍是一任务一进程；quarantine requeue/prune、完整 Supervisor、
 Agent/Browser 完整持久 Worker、priority/公平调度与跨主机 topology 尚未实现，因此
 ARC-06 保持 partial。
+
+ARC-04.1d/1e 已为跨主机 Harness 链分别建立 supervisor-attested Ed25519 Worker Identity 与独立 X25519
+Transport Key：exact incarnation、同库持久化、代际轮换和动态 fencing 已完成，但 key artifact 不冒充 baseline
+delivery；远端 envelope、Worker ACK、execution authorization 和 result ingestion 仍由 HAR-09.6c2a3d 以后完成。

@@ -69,5 +69,6 @@ inspect 或后续 claim verification 才调用 provider；因此普通启动、P
 
 ## 后续
 
-HAR-09.6c2a3c 将使用本 identity 签发 one-time claim/renew challenge，验证 Ed25519 signature，并把 claim lease
-expiry 同 exact capacity reservation expiry 取较早值。该后续仍不得把 claim 等同于 baseline transport 或执行授权。
+HAR-09.6c2a3c 已使用本 identity 签发 one-time claim/renew challenge，验证 Ed25519 signature，并把 claim lease
+expiry 同 exact capacity reservation expiry 取较早值。ARC-04.1e 又建立独立 X25519 Transport Key；签名 key 与
+加密 key 不混用，二者都不能单独等同于 baseline transport 或执行授权。
