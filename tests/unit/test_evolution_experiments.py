@@ -283,8 +283,10 @@ async def test_approved_proposal_issues_stable_non_executable_contract(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("terminal_status", ["rolled_back", "rollback_recovery_observed"])
 async def test_contract_issuer_fails_closed_for_terminal_or_unavailable_outcome(
     tmp_path: Path,
+    terminal_status: str,
 ) -> None:
     workspace, _store, _service, _contract_store, issuer, proposal_id = (
         await _approved_fixture(tmp_path)
@@ -292,7 +294,7 @@ async def test_contract_issuer_fails_closed_for_terminal_or_unavailable_outcome(
     terminal = {
         "workbench_session_id": "session-1",
         "workbench_proposal_id": proposal_id,
-        "status": "rolled_back",
+        "status": terminal_status,
         "contract_issue_allowed": False,
     }
     issuer.bind_proposal_outcome_reader(

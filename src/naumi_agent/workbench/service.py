@@ -883,7 +883,7 @@ class WorkbenchService:
             is_evolution = proposal.source_kind is ProposalSourceKind.EVOLUTION_CANDIDATE
             snapshot["outcome"] = projection
             snapshot["outcome_status"] = (
-                "rolled_back"
+                str(projection.get("status") or "")
                 if projection is not None and projection.get("authority_valid") is True
                 else "evidence_invalid"
                 if projection is not None
@@ -952,137 +952,17 @@ class WorkbenchService:
                     payload = dict(value)
                 else:
                     raise TypeError("Proposal Outcome projection 类型无效。")
-                before_after = payload.get("before_after_evidence")
-                before_after_recorded = payload.get("before_after_recorded")
-                before_after_valid = before_after is None
-                if isinstance(before_after, dict):
-                    from naumi_agent.evolution.proposal_before_after_evidence import (
-                        EvolutionProposalBeforeAfterEvidence,
-                    )
-
-                    try:
-                        evidence = EvolutionProposalBeforeAfterEvidence.model_validate(
-                            before_after
-                        )
-                    except ValueError:
-                        before_after_valid = False
-                    else:
-                        before_after_valid = bool(
-                            evidence.outcome_id == payload.get("outcome_id")
-                            and evidence.outcome_sha256
-                            == payload.get("outcome_sha256")
-                            and evidence.workbench_session_id == session_id
-                            and evidence.workbench_proposal_id == str(proposal_id)
-                            and evidence.experiment_contract_id
-                            == payload.get("experiment_contract_id")
-                            and evidence.candidate_id == payload.get("candidate_id")
-                            and evidence.candidate_revision
-                            == payload.get("candidate_revision")
-                        )
-                post_rollback = payload.get("post_rollback_verification")
-                post_rollback_recorded = payload.get(
-                    "post_rollback_verification_recorded"
+                from naumi_agent.evolution.proposal_outcomes import (
+                    EvolutionProposalOutcomeProjection,
                 )
-                post_rollback_evaluation_recorded = payload.get(
-                    "post_rollback_evaluation_recorded"
-                )
-                post_rollback_valid = post_rollback is None
-                if isinstance(post_rollback, dict):
-                    from naumi_agent.evolution.post_rollback_runtime_verifications import (
-                        EvolutionPostRollbackRuntimeVerification,
-                    )
 
-                    try:
-                        verification = (
-                            EvolutionPostRollbackRuntimeVerification.model_validate(
-                                post_rollback
-                            )
-                        )
-                    except ValueError:
-                        post_rollback_valid = False
-                    else:
-                        post_rollback_valid = bool(
-                            verification.outcome_id == payload.get("outcome_id")
-                            and verification.outcome_sha256
-                            == payload.get("outcome_sha256")
-                            and verification.workbench_session_id == session_id
-                            and verification.workbench_proposal_id
-                            == str(proposal_id)
-                            and verification.experiment_contract_id
-                            == payload.get("experiment_contract_id")
-                            and verification.candidate_id
-                            == payload.get("candidate_id")
-                            and verification.candidate_revision
-                            == payload.get("candidate_revision")
-                        )
-                behavioral_matrix = payload.get("post_rollback_behavioral_matrix")
-                behavioral_recorded = payload.get(
-                    "post_rollback_behavioral_evaluation_recorded"
-                )
-                behavioral_matrix_valid = behavioral_matrix is None
-                if isinstance(behavioral_matrix, dict):
-                    from naumi_agent.evolution.post_rollback_behavioral_matrix import (
-                        EvolutionPostRollbackBehavioralMatrix,
-                    )
-
-                    try:
-                        matrix = EvolutionPostRollbackBehavioralMatrix.model_validate(
-                            behavioral_matrix
-                        )
-                    except ValueError:
-                        behavioral_matrix_valid = False
-                    else:
-                        behavioral_matrix_valid = bool(
-                            matrix.outcome_id == payload.get("outcome_id")
-                            and matrix.outcome_sha256 == payload.get("outcome_sha256")
-                            and isinstance(before_after, dict)
-                            and matrix.before_after_evidence_id
-                            == before_after.get("evidence_id")
-                            and matrix.before_after_evidence_sha256
-                            == before_after.get("evidence_sha256")
-                            and matrix.final_evaluation_id
-                            == before_after.get("final_evaluation_id")
-                            and matrix.final_evaluation_sha256
-                            == before_after.get("final_evaluation_sha256")
-                            and isinstance(post_rollback, dict)
-                            and matrix.runtime_verification_id
-                            == post_rollback.get("verification_id")
-                            and matrix.runtime_verification_sha256
-                            == post_rollback.get("verification_sha256")
-                            and matrix.behavioral_evaluation_recorded
-                        )
+                projection = EvolutionProposalOutcomeProjection.model_validate(payload)
                 if not (
-                    str(proposal_id) == str(payload.get("workbench_proposal_id") or "")
-                    and session_id == str(payload.get("workbench_session_id") or "")
-                    and payload.get("schema_version") == 1
-                    and payload.get("policy_version")
-                    == "evolution-proposal-outcome-projection-v1"
-                    and payload.get("governance_state_unchanged") is True
-                    and payload.get("status") == "rolled_back"
-                    and payload.get("contract_issue_allowed") is False
-                    and isinstance(before_after_recorded, bool)
-                    and before_after_recorded is (before_after is not None)
-                    and before_after_valid
-                    and isinstance(post_rollback_recorded, bool)
-                    and post_rollback_recorded is (post_rollback is not None)
-                    and isinstance(post_rollback_evaluation_recorded, bool)
-                    and post_rollback_evaluation_recorded
-                    is (post_rollback is not None)
-                    and post_rollback_valid
-                    and isinstance(behavioral_recorded, bool)
-                    and behavioral_recorded is (behavioral_matrix is not None)
-                    and behavioral_matrix_valid
-                    and payload.get("long_term_metrics_recorded") is False
-                    and payload.get("promoted") is False
-                    and payload.get("learning_authority") is False
-                    and payload.get("promotion_authority") is False
-                    and not (
-                        payload.get("active_baseline") is True
-                        and payload.get("authority_valid") is not True
-                    )
+                    str(proposal_id) == projection.workbench_proposal_id
+                    and session_id == projection.workbench_session_id
                 ):
                     raise ValueError("Proposal Outcome projection 绑定无效。")
-                normalized[str(proposal_id)] = payload
+                normalized[str(proposal_id)] = projection.model_dump(mode="json")
             return normalized, ""
         except (OSError, RuntimeError, TypeError, ValueError):
             return {}, "proposal_outcome_unavailable"

@@ -3887,6 +3887,171 @@ test("normalizes workbench snapshot events", () => {
   assert.equal(record.payload.worktrees[0].task.private_prompt, undefined);
   assert.equal(record.payload.worktrees[0].lease.private_token, undefined);
 
+  const longTermOutcome = {
+    schema_version: 1,
+    policy_version: "evolution-post-rollback-long-term-outcome-v1",
+    outcome_id: `evpostlongout_${"6".repeat(24)}`,
+    outcome_sha256: "6".repeat(64),
+    workspace_root: "/workspace",
+    status: "rollback_recovery_observed",
+    revision_sequence: 1,
+    root_rollback_outcome_id: proposal.outcome.outcome_id,
+    root_rollback_outcome_sha256: proposal.outcome.outcome_sha256,
+    request_id: `evrerollbackreq_${"7".repeat(24)}`,
+    prior_outcome_kind: "rollback_outcome",
+    prior_outcome_id: proposal.outcome.outcome_id,
+    prior_outcome_sha256: proposal.outcome.outcome_sha256,
+    observation_contract_id: `evpostobservecontract_${"8".repeat(24)}`,
+    observation_contract_sha256: "8".repeat(64),
+    behavioral_matrix_id: `evpostmatrix_${"9".repeat(24)}`,
+    behavioral_matrix_sha256: "9".repeat(64),
+    assessment_id: `evpostobservewindow_${"a".repeat(24)}`,
+    assessment_sha256: "a".repeat(64),
+    admission_id: `evpostobserveadmit_${"b".repeat(24)}`,
+    admission_sha256: "b".repeat(64),
+    workbench_session_id: "s",
+    workbench_proposal_id: "proposal-1",
+    proposal_id: `evp_${"c".repeat(24)}`,
+    proposal_kind: "code",
+    candidate_id: proposal.outcome.candidate_id,
+    candidate_revision: proposal.outcome.candidate_revision,
+    candidate_sha256: "d".repeat(64),
+    baseline_slot_id: `relslot_${"e".repeat(24)}`,
+    baseline_slot_sha256: "e".repeat(64),
+    baseline_version: "0.1.214",
+    baseline_target: "macos-arm64",
+    runtime_subject_id: "runtime-long-term",
+    runtime_binding_id: `hrreleasebinding_${"f".repeat(24)}`,
+    runtime_identity_id: `relruntimeidentity_${"1".repeat(24)}`,
+    assessment_head_sequence: 14,
+    observation_seconds: 3600,
+    operational_sample_count: 13,
+    rollback_fact_preserved: true,
+    behavioral_recovery_verified: true,
+    long_term_metrics_recorded: true,
+    baseline_sustained_health_verified: true,
+    candidate_promoted: false,
+    promoted: false,
+    learning_authority: false,
+    promotion_authority: false,
+    execution_authority: false,
+    recorded_at: "2026-08-10T01:00:00+00:00",
+  };
+  const supersedeEvent = {
+    schema_version: 1,
+    policy_version: "evolution-post-rollback-outcome-supersede-v1",
+    event_id: `evpostoutsup_${"2".repeat(24)}`,
+    event_sha256: "2".repeat(64),
+    workspace_root: "/workspace",
+    request_id: longTermOutcome.request_id,
+    root_rollback_outcome_id: proposal.outcome.outcome_id,
+    root_rollback_outcome_sha256: proposal.outcome.outcome_sha256,
+    sequence: 1,
+    previous_event_id: "",
+    previous_event_sha256: "",
+    prior_outcome_kind: "rollback_outcome",
+    prior_outcome_id: proposal.outcome.outcome_id,
+    prior_outcome_sha256: proposal.outcome.outcome_sha256,
+    successor_outcome_id: longTermOutcome.outcome_id,
+    successor_outcome_sha256: longTermOutcome.outcome_sha256,
+    transition: "rollback_recovery_observed",
+    reason: "behavioral_and_long_term_baseline_recovery_verified",
+    projection_head_changed: true,
+    rollback_fact_deleted: false,
+    candidate_promoted: false,
+    learning_authority: false,
+    promotion_authority: false,
+    execution_authority: false,
+    recorded_at: longTermOutcome.recorded_at,
+  };
+  const recoveredProposal = {
+    ...proposal,
+    outcome_status: "rollback_recovery_observed",
+    outcome: {
+      ...proposal.outcome,
+      schema_version: 2,
+      policy_version: "evolution-proposal-outcome-projection-v2",
+      status: "rollback_recovery_observed",
+      outcome_id: longTermOutcome.outcome_id,
+      outcome_sha256: longTermOutcome.outcome_sha256,
+      root_rollback_outcome_id: proposal.outcome.outcome_id,
+      root_rollback_outcome_sha256: proposal.outcome.outcome_sha256,
+      recorded_at: longTermOutcome.recorded_at,
+      rollback_outcome_authority: true,
+      long_term_outcome: longTermOutcome,
+      long_term_supersede_event: supersedeEvent,
+      long_term_metrics_recorded: true,
+      long_term_outcome_authority: true,
+      current_long_term_health_authority: true,
+      projection_head_authority: true,
+    },
+  };
+  const recovered = normalizeServerRecord({
+    type: "workbench/snapshot",
+    payload: { ...record.payload, proposals: [recoveredProposal] },
+  });
+  assert.equal(recovered.payload.proposals[0].outcome_status, "rollback_recovery_observed");
+  assert.equal(recovered.payload.proposals[0].outcome.long_term_metrics_recorded, true);
+  assert.equal(
+    recovered.payload.proposals[0].outcome.root_rollback_outcome_id,
+    proposal.outcome.outcome_id,
+  );
+  assert.throws(() => normalizeServerRecord({
+    type: "workbench/snapshot",
+    payload: {
+      ...record.payload,
+      proposals: [{
+        ...recoveredProposal,
+        outcome: {
+          ...recoveredProposal.outcome,
+          long_term_supersede_event: {
+            ...supersedeEvent,
+            root_rollback_outcome_id: `evrerollbackout_${"f".repeat(24)}`,
+          },
+        },
+      }],
+    },
+  }), /Long-Term authority 字段无效/);
+  const { projection_head_authority: _missingHeadAuthority, ...incompleteV2 } = (
+    recoveredProposal.outcome
+  );
+  assert.throws(() => normalizeServerRecord({
+    type: "workbench/snapshot",
+    payload: {
+      ...record.payload,
+      proposals: [{ ...recoveredProposal, outcome: incompleteV2 }],
+    },
+  }), /v2 字段不完整/);
+  assert.throws(() => normalizeServerRecord({
+    type: "workbench/snapshot",
+    payload: {
+      ...record.payload,
+      proposals: [{
+        ...recoveredProposal,
+        outcome: {
+          ...recoveredProposal.outcome,
+          current_long_term_health_authority: false,
+        },
+      }],
+    },
+  }), /Long-Term authority 字段无效/);
+  assert.throws(() => normalizeServerRecord({
+    type: "workbench/snapshot",
+    payload: {
+      ...record.payload,
+      proposals: [{
+        ...recoveredProposal,
+        outcome: {
+          ...recoveredProposal.outcome,
+          long_term_outcome: {
+            ...longTermOutcome,
+            observation_seconds: 604_801,
+          },
+        },
+      }],
+    },
+  }), /Long-Term Outcome authority 字段无效/);
+
   const cohort = {
     batch_id: "implementation:red", samples: 5,
     passed_samples: 0, failed_samples: 5, evaluation_error_samples: 0,

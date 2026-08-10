@@ -189,6 +189,46 @@ def test_reviews_formatter_renders_rollback_outcome_without_contract_action() ->
     assert "`c` 签发" not in rendered
 
 
+def test_reviews_formatter_renders_long_term_outcome_head() -> None:
+    snapshot = _rolled_back_proposal_snapshot()
+    proposal = snapshot["proposals"][0]  # type: ignore[index]
+    root_id = proposal["outcome"]["outcome_id"]
+    proposal["outcome_status"] = "rollback_recovery_observed"
+    proposal["outcome"].update(
+        status="rollback_recovery_observed",
+        outcome_id=f"evpostlongout_{'8' * 24}",
+        root_rollback_outcome_id=root_id,
+        long_term_metrics_recorded=True,
+        long_term_outcome_authority=True,
+        current_long_term_health_authority=True,
+        projection_head_authority=True,
+        long_term_outcome={
+            "outcome_id": f"evpostlongout_{'8' * 24}",
+            "revision_sequence": 1,
+            "assessment_id": f"evpostobservewindow_{'9' * 24}",
+            "assessment_head_sequence": 14,
+            "runtime_subject_id": "runtime-long-term",
+            "runtime_binding_id": f"hrreleasebinding_{'a' * 24}",
+            "observation_seconds": 3600,
+            "operational_sample_count": 13,
+        },
+        long_term_supersede_event={
+            "event_id": f"evpostoutsup_{'b' * 24}",
+        },
+    )
+
+    rendered = format_workbench_reviews_markdown(snapshot)
+
+    assert r"rollback\_recovery\_observed" in rendered
+    assert "长期恢复观察" in rendered
+    assert "长期指标：已记录" in rendered
+    assert "revision 1" in rendered
+    assert "3600s · 13 samples" in rendered
+    assert "历史 rollback fact 保留" in rendered
+    assert "health=true · head=true · outcome=true" in rendered
+    assert "不能再次签发 Experiment Contract" in rendered
+
+
 def test_workbench_formatter_escapes_store_markdown_and_control_characters() -> None:
     snapshot = _snapshot()
     snapshot["missions"][0]["title"] = "# injected\n[link](file:///secret)"  # type: ignore[index]

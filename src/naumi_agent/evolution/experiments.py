@@ -755,7 +755,8 @@ class EvolutionExperimentContractIssuer:
             if not (
                 payload.get("workbench_session_id") == session_id
                 and payload.get("workbench_proposal_id") == proposal_id
-                and payload.get("status") == "rolled_back"
+                and payload.get("status")
+                in {"rolled_back", "rollback_recovery_observed"}
                 and payload.get("contract_issue_allowed") is False
             ):
                 raise ValueError("Proposal Outcome projection 绑定无效。")
@@ -768,7 +769,7 @@ class EvolutionExperimentContractIssuer:
             ) from exc
         raise EvolutionExperimentContractStoreError(
             "experiment_contract_outcome_terminal",
-            "该 Proposal 已形成 rollback Outcome，不能再次签发 Contract。",
+            "该 Proposal 已形成 rollback/recovery Outcome，不能再次签发 Contract。",
         )
 
 

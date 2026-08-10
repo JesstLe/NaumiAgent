@@ -220,7 +220,12 @@ function renderProposalDetail(snapshot, proposal, width) {
     color(ANSI.cyan, `验证计划 · ${array(proposal.validation_plan).length}`),
     ...array(proposal.validation_plan).slice(0, 8).map((step) => color(ANSI.dim, `• ${compactText(step, 1_000)}`)),
     hasOutcome
-      ? color(ANSI.yellow, "该 Proposal 已形成 rollback Outcome；approved 治理记录保持不变。")
+      ? color(
+          ANSI.yellow,
+          outcome.status === "rollback_recovery_observed"
+            ? "该 Proposal 已形成回滚恢复观察 Outcome；approved 治理记录与历史 rollback fact 保持不变。"
+            : "该 Proposal 已形成 rollback Outcome；approved 治理记录保持不变。",
+        )
       : outcomeUnavailable
         ? color(ANSI.red, "Outcome source 暂不可用；已安全阻止 Contract 签发。")
         : proposal.state === "approved"
@@ -250,14 +255,29 @@ function renderProposalDetail(snapshot, proposal, width) {
     const behavioralMatrixLabel = behavioralMatrix
       ? `${color(ANSI.green, `已记录 · ${array(behavioralMatrix.lanes).length} lanes`)} · ${behavioralVerdictLabel(behavioralMatrix.recovery_verdict)}`
       : color(ANSI.yellow, "尚未记录");
+    const longTerm = outcome.long_term_outcome;
+    const supersedeEvent = outcome.long_term_supersede_event;
+    const outcomeStatus = outcome.status || proposal.outcome_status || "rolled_back";
+    const statusColor = outcomeStatus === "rollback_recovery_observed"
+      ? ANSI.green
+      : ANSI.yellow;
+    const outcomeStatusLabel = outcomeStatus === "rollback_recovery_observed"
+      ? "recovery observed"
+      : outcomeStatus;
+    const metricsLabel = outcome.long_term_metrics_recorded
+      ? color(ANSI.green, "长期指标 · 已记录")
+      : color(ANSI.yellow, "长期指标 · 尚未记录");
     lines.push(
       color(ANSI.cyan, "实施 Outcome"),
-      `${color(ANSI.yellow, "rolled_back")} · ${authority}`,
+      `${color(statusColor, outcomeStatusLabel)} · ${authority}`,
       `Outcome · ${compactText(outcome.outcome_id, 128)}`,
+      ...(outcome.root_rollback_outcome_id !== outcome.outcome_id
+        ? [`Rollback Root · ${compactText(outcome.root_rollback_outcome_id, 128)}`]
+        : []),
       `Rollback Receipt · ${compactText(outcome.rollback_receipt_id, 128)}`,
       `Experiment Contract · ${compactText(outcome.experiment_contract_id, 128)}`,
       `Breach · ${compactText(array(outcome.breach_reasons).join(", ") || "-", 800)}`,
-      `HAR-08 before/after · ${beforeAfterLabel} · ${color(ANSI.yellow, "长期指标 · 尚未记录")}`,
+      `HAR-08 before/after · ${beforeAfterLabel} · ${metricsLabel}`,
       ...(beforeAfter
         ? [
             `Before/After Evidence · ${compactText(beforeAfter.evidence_id, 128)}`,
@@ -289,6 +309,17 @@ function renderProposalDetail(snapshot, proposal, width) {
               ].join(" · ");
             }),
             color(ANSI.yellow, "长期指标 / Learning / Promotion · 未授权"),
+          ]
+        : []),
+      ...(longTerm
+        ? [
+            color(ANSI.cyan, "长期恢复观察"),
+            `Long-Term Outcome · ${compactText(longTerm.outcome_id, 128)} · revision ${number(longTerm.revision_sequence)}`,
+            `Assessment · ${compactText(longTerm.assessment_id, 128)} · head #${number(longTerm.assessment_head_sequence)}`,
+            `Runtime · ${compactText(longTerm.runtime_subject_id, 96)} · ${compactText(longTerm.runtime_binding_id, 128)}`,
+            `持续健康 · ${number(longTerm.observation_seconds)}s · ${number(longTerm.operational_sample_count)} samples`,
+            `Supersede Event · ${compactText(supersedeEvent?.event_id, 128)} · rollback fact preserved`,
+            `Authority · health=${Boolean(outcome.current_long_term_health_authority)} · head=${Boolean(outcome.projection_head_authority)} · outcome=${Boolean(outcome.long_term_outcome_authority)}`,
           ]
         : []),
       color(ANSI.dim, "不能再次签发 Contract、标记 promoted 或进入 policy learning。"),
@@ -364,6 +395,9 @@ function behavioralVerdictLabel(value) {
 }
 
 function proposalOutcomeLabel(proposal) {
+  if (proposal?.outcome_status === "rollback_recovery_observed") {
+    return ` · ${color(ANSI.green, "recovery observed")}`;
+  }
   if (proposal?.outcome_status === "rolled_back") {
     return ` · ${color(ANSI.yellow, "rolled_back")}`;
   }

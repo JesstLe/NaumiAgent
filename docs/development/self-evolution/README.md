@@ -224,4 +224,6 @@ managed runtime identity 与 startup-origin Harness ledger；6d3 已完成长期
 [HAR-09.6d3](../harness/HAR-09-6d3-post-rollback-long-term-observation-assessment.md) 已完成真实 ledger 分页、head
 对账、四态长期窗口和动态撤权。[HAR-09.6e1](../harness/HAR-09-6e1-post-rollback-long-term-outcome-authority.md)
 已进一步签发 rollback-recovery-observed Outcome revision 与 append-only supersede event，保留 immutable rollback fact；
-统一 UI 投影、promoted Outcome、配置/数据 rollback 与 policy learning authority 仍未完成。
+[HAR-09.6e2](../harness/HAR-09-6e2-long-term-outcome-projection-parity.md) 又通过 Projection v2 同源同步
+Workbench/New UI/Textual TUI，并保持 Contract 终态阻断。promoted Outcome、配置/数据 rollback 与 policy learning
+authority 仍未完成。
