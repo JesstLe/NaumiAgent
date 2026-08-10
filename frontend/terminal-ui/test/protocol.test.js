@@ -1952,7 +1952,7 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
         owner_id: "private-owner",
       },
       terminal_outbox: {
-        schema_version: 3,
+        schema_version: 4,
         enabled: true,
         status: "recovering",
         worker_state: "waiting",
@@ -1976,6 +1976,19 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
         warning: "",
         dead_letters: [],
         dead_letters_truncated: false,
+        disposed_count: 1,
+        disposed: [{
+          receipt_id: `ptabn_${"b".repeat(24)}`,
+          dead_letter_id: `ptfail_${"c".repeat(24)}`,
+          effective_state: "abandoned",
+          reason: "superseded",
+          failure_code: "lease_missing",
+          failure_sequence: 2,
+          abandoned_at: "2026-07-18T00:00:02+00:00",
+          outbox_id: "drop",
+          source_request_sha256: "drop",
+        }],
+        disposed_truncated: false,
         private_owner: "drop",
       },
     },
@@ -2021,8 +2034,15 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
   assert.equal(normalized.selected_interaction.options[0].label, "继续");
   assert.equal(normalized.terminal_outbox.status, "recovering");
   assert.equal(normalized.terminal_outbox.counts.total_pending, 3);
-  assert.equal(normalized.terminal_outbox.schema_version, 3);
+  assert.equal(normalized.terminal_outbox.schema_version, 4);
   assert.equal(normalized.terminal_outbox.counts.dead_letter, 0);
+  assert.equal(normalized.terminal_outbox.disposed_count, 1);
+  assert.equal(normalized.terminal_outbox.disposed[0].effective_state, "abandoned");
+  assert.equal(Object.hasOwn(normalized.terminal_outbox.disposed[0], "outbox_id"), false);
+  assert.equal(
+    Object.hasOwn(normalized.terminal_outbox.disposed[0], "source_request_sha256"),
+    false,
+  );
   assert.equal(Object.hasOwn(normalized.terminal_outbox, "private_owner"), false);
   assert.equal(Object.hasOwn(normalized.terminal_outbox.counts, "private_owner"), false);
   assert.equal(Object.hasOwn(normalized.selected_interaction, "owner_id"), false);
@@ -2045,9 +2065,10 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
       },
     },
   }).payload.terminal_outbox;
-  assert.equal(legacyNormalized.schema_version, 3);
+  assert.equal(legacyNormalized.schema_version, 4);
   assert.equal(legacyNormalized.counts.dead_letter, 0);
   assert.equal(legacyNormalized.dead_lettered_count, 0);
+  assert.equal(legacyNormalized.disposed_count, 0);
   const reviewedDeadLetter = normalizeServerRecord({
     type: "goals/snapshot",
     payload: {
@@ -2079,6 +2100,23 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
   assert.equal(reviewedDeadLetter.dead_letters.length, 1);
   assert.equal(reviewedDeadLetter.dead_letters[0].failure_code, "lease_missing");
   assert.equal(Object.hasOwn(reviewedDeadLetter.dead_letters[0], "outbox_id"), false);
+  assert.equal(reviewedDeadLetter.disposed_count, 0);
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "goals/snapshot",
+      payload: {
+        ...normalized,
+        terminal_outbox: {
+          ...normalized.terminal_outbox,
+          disposed: [{
+            ...normalized.terminal_outbox.disposed[0],
+            effective_state: "delivered",
+          }],
+        },
+      },
+    }),
+    /effective_state/,
+  );
   assert.throws(
     () => normalizeServerRecord({
       type: "goals/snapshot",

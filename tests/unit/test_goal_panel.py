@@ -236,7 +236,7 @@ async def test_terminal_outbox_projection_is_shared_and_identity_free(tmp_path) 
     payload = snapshot.to_protocol_dict()["terminal_outbox"]
 
     assert payload == {
-        "schema_version": 3,
+        "schema_version": 4,
         "enabled": True,
         "status": "recovering",
         "worker_state": "waiting",
@@ -259,6 +259,9 @@ async def test_terminal_outbox_projection_is_shared_and_identity_free(tmp_path) 
         "warning": "",
         "dead_letters": [],
         "dead_letters_truncated": False,
+        "disposed_count": 0,
+        "disposed": [],
+        "disposed_truncated": False,
     }
     assert "owner" not in str(payload).lower()
     rendered = render_goal_pursuit_snapshot(snapshot)
@@ -349,7 +352,7 @@ async def test_terminal_outbox_projection_surfaces_dead_letter_action(tmp_path) 
 
     projection = snapshot.terminal_outbox
     assert projection is not None
-    assert projection.schema_version == 3
+    assert projection.schema_version == 4
     assert projection.status == "degraded"
     assert projection.counts.dead_letter == 1
     assert "dead_letter_present" in projection.failure_codes
@@ -360,6 +363,75 @@ async def test_terminal_outbox_projection_surfaces_dead_letter_action(tmp_path) 
     assert "死信 1" in rendered
     assert "请人工审查" in rendered
     assert "机械不变量破坏 · lease_missing" in rendered
+
+
+@pytest.mark.asyncio
+async def test_terminal_outbox_projection_surfaces_identity_free_disposed_history(
+    tmp_path,
+) -> None:
+    pursuit_store = PursuitStore(tmp_path / "pursuit")
+    pursuit_store.save_run(PursuitRun(
+        id="pursuit-disposed-view",
+        goal="查看终态处置历史",
+        status=PursuitRunStatus.WAITING,
+        phase="waiting",
+        started_at=1.0,
+        updated_at=2.0,
+    ))
+    pursuit_store.terminal_outbox_backlog = lambda **_: SimpleNamespace(  # type: ignore[method-assign]
+        total_pending=0,
+        due=0,
+        backoff=0,
+        live_claimed=0,
+        expired_claimed=0,
+        dead_letter=0,
+    )
+    pursuit_store.terminal_outbox_dead_letter_catalog = lambda **_: SimpleNamespace(  # type: ignore[method-assign]
+        records=(),
+        total=0,
+        truncated=False,
+    )
+    pursuit_store.terminal_outbox_disposed_catalog = lambda **_: SimpleNamespace(  # type: ignore[method-assign]
+        records=(SimpleNamespace(
+            receipt=SimpleNamespace(
+                receipt_id="ptabn_" + "b" * 24,
+                dead_letter_id="ptfail_" + "a" * 24,
+                reason=SimpleNamespace(value="superseded"),
+                failure_sequence=2,
+                abandoned_at=1785888020.0,
+                source_request_sha256="private-request-digest",
+                prior_failure_sha256="private-failure-digest",
+                dispatch_sha256="private-dispatch-digest",
+            ),
+            failure=SimpleNamespace(failure_code="lease_missing"),
+            outbox=SimpleNamespace(outbox_id="private-outbox-id"),
+        ),),
+        total=1,
+        truncated=False,
+    )
+
+    snapshot = await build_goal_pursuit_snapshot_with_recovery(
+        GoalStore(tmp_path / "goals"),
+        pursuit_store,
+        None,
+        workspace_root=tmp_path,
+        terminal_outbox_enabled=False,
+        assessed_at="2026-08-05T00:00:20+00:00",
+    )
+
+    projection = snapshot.terminal_outbox
+    assert projection is not None
+    assert projection.schema_version == 4
+    assert projection.disposed_count == 1
+    assert projection.disposed[0].effective_state == "abandoned"
+    assert projection.disposed[0].reason == "superseded"
+    payload = projection.model_dump(mode="json")
+    assert "private" not in str(payload)
+    assert "outbox_id" not in str(payload)
+    rendered = render_goal_pursuit_snapshot(snapshot)
+    assert "已处置 `ptfail_" in rendered
+    assert "已被替代 · lease_missing" in rendered
+    assert "回执 `ptabn_" in rendered
 
 
 @pytest.mark.asyncio

@@ -79,12 +79,36 @@ class TerminalOutboxDeadLetterItem(BaseModel):
         return self
 
 
+class TerminalOutboxDisposedItem(BaseModel):
+    """Identity-redacted proof that one dead letter was abandoned."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    receipt_id: str = Field(pattern=r"^ptabn_[0-9a-f]{24}$")
+    dead_letter_id: str = Field(pattern=r"^ptfail_[0-9a-f]{24}$")
+    effective_state: Literal["abandoned"] = "abandoned"
+    reason: Literal[
+        "no_longer_required",
+        "superseded",
+        "external_resolution",
+        "invalid_target",
+    ]
+    failure_code: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")
+    failure_sequence: int = Field(ge=1, le=1_000_000)
+    abandoned_at: str = Field(min_length=1, max_length=64)
+
+    @model_validator(mode="after")
+    def _time_is_aware(self) -> TerminalOutboxDisposedItem:
+        _parse_aware(self.abandoned_at)
+        return self
+
+
 class TerminalOutboxProjection(BaseModel):
     """Typed Goal-page projection of the automatic terminal recovery service."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schema_version: Literal[3] = 3
+    schema_version: Literal[4] = 4
     enabled: bool
     status: Literal[
         "idle", "recovering", "backoff", "degraded", "disabled", "unavailable"
@@ -104,6 +128,9 @@ class TerminalOutboxProjection(BaseModel):
     warning: str = Field(max_length=500)
     dead_letters: tuple[TerminalOutboxDeadLetterItem, ...] = Field(max_length=20)
     dead_letters_truncated: bool
+    disposed_count: int = Field(ge=0, le=10_000)
+    disposed: tuple[TerminalOutboxDisposedItem, ...] = Field(max_length=20)
+    disposed_truncated: bool
 
     @model_validator(mode="after")
     def _state_is_coherent(self) -> TerminalOutboxProjection:
@@ -130,6 +157,19 @@ class TerminalOutboxProjection(BaseModel):
                 raise ValueError("terminal outbox dead-letter 截断事实不一致。")
         elif len(self.dead_letters) != self.counts.dead_letter:
             raise ValueError("terminal outbox dead-letter 目录与总数不一致。")
+        receipt_ids = [item.receipt_id for item in self.disposed]
+        disposed_targets = [item.dead_letter_id for item in self.disposed]
+        if len(receipt_ids) != len(set(receipt_ids)) or len(disposed_targets) != len(
+            set(disposed_targets)
+        ):
+            raise ValueError("terminal outbox disposed authority 不得重复。")
+        if len(self.disposed) > self.disposed_count:
+            raise ValueError("terminal outbox disposed 目录超过总数。")
+        if self.disposed_truncated:
+            if len(self.disposed) >= self.disposed_count:
+                raise ValueError("terminal outbox disposed 截断事实不一致。")
+        elif len(self.disposed) != self.disposed_count:
+            raise ValueError("terminal outbox disposed 目录与总数不一致。")
         return self
 
 
@@ -402,6 +442,9 @@ def _build_terminal_outbox_projection(
     warnings: list[str] = []
     dead_letters: tuple[TerminalOutboxDeadLetterItem, ...] = ()
     dead_letters_truncated = False
+    disposed_count = 0
+    disposed: tuple[TerminalOutboxDisposedItem, ...] = ()
+    disposed_truncated = False
     if pursuit_store.db_path.is_file():
         try:
             backlog = pursuit_store.terminal_outbox_backlog(
@@ -437,12 +480,35 @@ def _build_terminal_outbox_projection(
                 for record in catalog.records
             )
             dead_letters_truncated = catalog.truncated
+            disposed_catalog = pursuit_store.terminal_outbox_disposed_catalog(
+                limit=20,
+                scan_limit=10_000,
+            )
+            disposed_count = disposed_catalog.total
+            disposed = tuple(
+                TerminalOutboxDisposedItem(
+                    receipt_id=record.receipt.receipt_id,
+                    dead_letter_id=record.receipt.dead_letter_id,
+                    reason=record.receipt.reason.value,
+                    failure_code=record.failure.failure_code,
+                    failure_sequence=record.receipt.failure_sequence,
+                    abandoned_at=datetime.fromtimestamp(
+                        record.receipt.abandoned_at,
+                        tz=UTC,
+                    ).isoformat(),
+                )
+                for record in disposed_catalog.records
+            )
+            disposed_truncated = disposed_catalog.truncated
         except Exception:
             warnings.append(
                 "终态恢复队列读取失败，请运行 `/doctor` 检查 Pursuit Store。"
             )
             dead_letters = ()
             dead_letters_truncated = counts.dead_letter > 0
+            disposed_count = 0
+            disposed = ()
+            disposed_truncated = False
 
     snapshot: PursuitTerminalOutboxWorkerSnapshot | None = None
     if enabled and worker_snapshot is not None:
@@ -515,6 +581,9 @@ def _build_terminal_outbox_projection(
         warning=warning,
         dead_letters=dead_letters,
         dead_letters_truncated=dead_letters_truncated,
+        disposed_count=disposed_count,
+        disposed=disposed,
+        disposed_truncated=disposed_truncated,
     )
 
 
@@ -660,6 +729,20 @@ def _render_terminal_outbox(value: TerminalOutboxProjection) -> list[str]:
         )
     if value.dead_letters_truncated:
         lines.append("- 死信目录已按当前视图上限截断。")
+    for item in value.disposed:
+        reason = {
+            "no_longer_required": "不再需要",
+            "superseded": "已被替代",
+            "external_resolution": "外部已解决",
+            "invalid_target": "目标无效",
+        }[item.reason]
+        lines.append(
+            f"- 已处置 `{item.dead_letter_id}` · {reason} · "
+            f"{item.failure_code} · failure seq {item.failure_sequence} · "
+            f"回执 `{item.receipt_id}` · {item.abandoned_at}"
+        )
+    if value.disposed_truncated:
+        lines.append("- 已处置历史已按当前视图上限截断。")
     if value.warning:
         lines.append(f"- ⚠️ {value.warning}")
     return lines
@@ -1087,6 +1170,7 @@ __all__ = [
     "GoalPursuitSnapshot",
     "TerminalOutboxCounts",
     "TerminalOutboxDeadLetterItem",
+    "TerminalOutboxDisposedItem",
     "TerminalOutboxProjection",
     "build_goal_pursuit_snapshot",
     "build_goal_pursuit_snapshot_with_recovery",

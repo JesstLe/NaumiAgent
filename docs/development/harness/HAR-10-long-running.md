@@ -222,7 +222,10 @@
   - HAR-10.8f2g 已实现：append-only exact abandon authority、四类受控原因、不可变回执与不可领取终态覆盖层，
     并同步 Agent Tool、New UI `d/a/z`、CLI 与 Textual TUI；详见
     `HAR-10-8f2g-pursuit-terminal-outbox-dead-letter-abandon.md`。
-  - 未完成：disposed history/effective-state projection、retention、push stream、跨 Store 原子 terminal commit
+  - HAR-10.8f2h 已实现：认证 `pending/delivered/abandoned` effective-state、有界 disposed history 与
+    Goal schema v4，并同步 Agent Tool、New UI、CLI 与 Textual TUI；详见
+    `HAR-10-8f2h-pursuit-terminal-outbox-effective-state-history.md`。
+  - 未完成：disposed cursor 翻页、retention preview/apply、push stream、跨 Store 原子 terminal commit
     与 A5 故障/soak。
 
 ## 与 Pursuit 的合并原则

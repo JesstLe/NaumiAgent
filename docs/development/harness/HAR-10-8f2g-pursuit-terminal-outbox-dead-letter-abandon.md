@@ -69,11 +69,10 @@ request/failure/dispatch 摘要全部剔除。
 
 ## 自我审视与后续边界
 
-- abandon authority 当前没有独立历史分页投影；用户能看到动作回执和 active catalog 消失，但尚无 disposed archive；
-- SQL 基础 delivery state 保留 pending 是刻意的历史事实，不代表仍可调度；任何新查询若只看 state 而忽略
-  disposition overlay 都是缺陷，后续应抽取统一 effective-state query；
-- retention apply 仍不能开始，必须先交付 bounded disposed history/preview 与引用保护；
+- HAR-10.8f2h 已交付统一 effective-state query 与最新 20 项的认证 disposed history；cursor 翻页仍未实现；
+- SQL 基础 delivery state 保留 pending 是刻意的历史事实，不代表仍可调度；新查询必须复用 8f2h authority，
+  不得只看旧 state；
+- retention apply 仍不能开始，必须先交付 preview receipt 与引用保护；
 - push stream、跨 Store 原子 terminal commit、kill-at-every-write-point 与 24 小时 soak 仍未完成。
 
-下一最小切片应抽取 terminal outbox effective-state projection，并提供认证的 abandoned history，使 retention
-preview 能在不扫描内部表细节的情况下引用处置事实。
+下一最小切片应基于 8f2h disposed catalog 交付只读 retention preview 与引用保护图。

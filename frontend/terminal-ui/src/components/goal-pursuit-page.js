@@ -167,6 +167,28 @@ function renderTerminalOutbox(value, selectedDeadLetterIndex, selectedAbandonRea
   if (value.dead_letters_truncated) {
     lines.push(color(ANSI.yellow, "死信目录已按当前视图上限截断。"));
   }
+  if (value.disposed_count > 0) {
+    lines.push(color(ANSI.cyan, `── 已处置历史 · ${value.disposed_count}`));
+    const reasons = {
+      no_longer_required: "不再需要",
+      superseded: "已被替代",
+      external_resolution: "外部已解决",
+      invalid_target: "目标无效",
+    };
+    for (const item of value.disposed || []) {
+      lines.push(color(
+        ANSI.green,
+        `✓ 已放弃 ${item.dead_letter_id} · ${reasons[item.reason] || item.reason} · ${item.failure_code}`,
+      ));
+      lines.push(color(
+        ANSI.dim,
+        `  effective-state ${item.effective_state} · failure seq ${item.failure_sequence} · 回执 ${item.receipt_id} · ${item.abandoned_at}`,
+      ));
+    }
+  }
+  if (value.disposed_truncated) {
+    lines.push(color(ANSI.yellow, "已处置历史已按当前视图上限截断。"));
+  }
   if (value.warning) {
     lines.push(color(ANSI.yellow, `⚠ ${compactText(value.warning, 500)}`));
   }

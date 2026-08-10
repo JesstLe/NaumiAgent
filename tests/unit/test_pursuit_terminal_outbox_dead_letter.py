@@ -8,7 +8,13 @@ import pytest
 from naumi_agent.harness.run_lease import HarnessRunKind
 from naumi_agent.harness.store import HarnessStore
 from naumi_agent.orchestrator.goal_store import GoalStore
-from naumi_agent.orchestrator.pursuit_store import PursuitStore, PursuitStoreError
+from naumi_agent.orchestrator.pursuit import PursuitRun, PursuitRunStatus
+from naumi_agent.orchestrator.pursuit_recovery_attempt import new_recovery_attempt
+from naumi_agent.orchestrator.pursuit_store import (
+    PursuitStore,
+    PursuitStoreError,
+    PursuitTerminalOutboxEffectiveState,
+)
 from naumi_agent.orchestrator.pursuit_terminal_dead_letter import (
     PursuitTerminalOutboxFailureDisposition,
 )
@@ -26,6 +32,7 @@ from naumi_agent.ui.goal_panel import build_goal_pursuit_snapshot_with_recovery
 from tests.unit.test_pursuit_recovery_reconcile import (
     T0,
     _admitted_store,
+    _checkpoint,
     _persist_completed_evidence,
 )
 
@@ -388,6 +395,153 @@ def test_exact_abandon_is_terminal_without_claiming_delivery(tmp_path) -> None:
     assert outbox is not None
     assert outbox.state.value == "pending"
 
+    effective = PursuitStore(store.base_dir).get_terminal_outbox_effective_state(
+        outbox_id
+    )
+    assert effective is not None
+    assert effective.outbox == outbox
+    assert effective.state is PursuitTerminalOutboxEffectiveState.ABANDONED
+    assert effective.abandon_receipt == receipt
+    disposed = PursuitStore(store.base_dir).terminal_outbox_disposed_catalog(
+        limit=1,
+        scan_limit=1,
+    )
+    assert disposed.total == 1
+    assert disposed.truncated is False
+    assert disposed.records[0].outbox == outbox
+    assert disposed.records[0].failure == dead
+    assert disposed.records[0].receipt == receipt
+
+
+def test_effective_state_distinguishes_pending_and_delivered(tmp_path) -> None:
+    store, attempt_id, admitted_at = _admitted_store(tmp_path)
+    _persist_completed_evidence(store, admitted_at=admitted_at)
+    pending = store.list_pending_terminal_outbox(limit=1)[0]
+
+    pending_effective = store.get_terminal_outbox_effective_state(
+        pending.outbox_id
+    )
+    assert pending_effective is not None
+    assert pending_effective.state is PursuitTerminalOutboxEffectiveState.PENDING
+    assert pending_effective.abandon_receipt is None
+
+    run = store.get_run("pursuit-reconcile")
+    assert run is not None and run.boundary_decision is not None
+    store.resolve_recovery_attempt(
+        attempt_id,
+        resolved_at=admitted_at + 20,
+        result_code=run.boundary_decision.code,
+        boundary_decision_id=run.boundary_decision.decision_id,
+    )
+
+    delivered_effective = PursuitStore(
+        store.base_dir
+    ).get_terminal_outbox_effective_state(pending.outbox_id)
+    assert delivered_effective is not None
+    assert delivered_effective.state is PursuitTerminalOutboxEffectiveState.DELIVERED
+    assert delivered_effective.abandon_receipt is None
+    assert store.terminal_outbox_disposed_catalog().total == 0
+
+
+def test_disposed_catalog_is_stably_sorted_and_reports_truncation(tmp_path) -> None:
+    store, _attempt_id, admitted_at = _admitted_store(tmp_path)
+    _persist_completed_evidence(store, admitted_at=admitted_at)
+    first_outbox = store.list_pending_terminal_outbox(limit=1)[0]
+
+    second_run_id = "pursuit-reconcile-disposed-2"
+    base = T0.timestamp() + 100
+    store.save_run(PursuitRun(
+        id=second_run_id,
+        goal="可靠收口第二个恢复请求",
+        status=PursuitRunStatus.RUNNING,
+        phase="resume",
+        started_at=base,
+        updated_at=base,
+        iteration=1,
+        criteria_total=1,
+    ))
+    old_checkpoint = _checkpoint(
+        sequence=1,
+        created_at=base + 0.5,
+        status="running",
+        phase="resume",
+    ).model_copy(update={"run_id": second_run_id})
+    store.save_checkpoint(old_checkpoint)
+    requested, _ = store.prepare_recovery_attempt(new_recovery_attempt(
+        run_id=second_run_id,
+        source_request_id="permission-call-disposed-page-2",
+        requested_at=base,
+    ))
+    store.mark_recovery_attempt_admitted(
+        requested.attempt_id,
+        admitted_at=base + 1,
+        lease_epoch=2,
+        checkpoint_id=old_checkpoint.checkpoint_id(),
+    )
+    run = store.get_run("pursuit-reconcile")
+    assert run is not None and run.boundary_decision is not None
+    store.save_run(PursuitRun(
+        id=second_run_id,
+        goal="可靠收口第二个恢复请求",
+        status=PursuitRunStatus.COMPLETED,
+        phase="complete",
+        started_at=base,
+        updated_at=base + 10,
+        iteration=2,
+        criteria_total=1,
+        criteria_verified=1,
+        boundary_decision=run.boundary_decision,
+    ))
+    store.save_checkpoint(_checkpoint(
+        sequence=2,
+        created_at=base + 10.1,
+        status="completed",
+        phase="complete",
+    ).model_copy(update={"run_id": second_run_id}))
+    pending = store.list_pending_terminal_outbox(limit=10)
+    assert len(pending) == 2
+    second_outbox = next(item for item in pending if item != first_outbox)
+
+    receipts = []
+    for index, outbox in enumerate((first_outbox, second_outbox), start=1):
+        due_at = max(admitted_at + 40, outbox.created_at + 31)
+        claim = store.claim_next_terminal_outbox(
+            owner_id=f"disposed-page-worker-{index}",
+            now=due_at,
+            lease_seconds=30,
+        )
+        assert claim is not None and claim.outbox.outbox_id == outbox.outbox_id
+        dead, _ = store.record_terminal_outbox_failure(
+            outbox.outbox_id,
+            owner_id=f"disposed-page-worker-{index}",
+            claim_epoch=claim.dispatch.claim_epoch,
+            now=due_at + 1,
+            retry_delay_seconds=5,
+            failure_code="lease_missing",
+            max_failures=8,
+            permanent=True,
+        )
+        receipt, _ = store.abandon_terminal_outbox_dead_letter(
+            dead.event_id,
+            source_request_id=f"permission-call-disposed-page-{index}",
+            reason=PursuitTerminalDeadLetterAbandonReason.NO_LONGER_REQUIRED,
+            now=due_at + 2 + index,
+        )
+        receipts.append(receipt)
+
+    catalog = PursuitStore(store.base_dir).terminal_outbox_disposed_catalog(
+        limit=1,
+        scan_limit=2,
+    )
+    assert catalog.total == 2
+    assert catalog.truncated is True
+    assert catalog.records[0].receipt == max(
+        receipts,
+        key=lambda item: (item.abandoned_at, item.receipt_id),
+    )
+    with pytest.raises(ValueError, match="disposed catalog 策略无效"):
+        store.terminal_outbox_disposed_catalog(limit=2, scan_limit=1)
+
 
 def test_tampered_abandon_receipt_fails_catalog_authentication(tmp_path) -> None:
     store, outbox_id, due_at = _pending_store(tmp_path)
@@ -426,6 +580,10 @@ def test_tampered_abandon_receipt_fails_catalog_authentication(tmp_path) -> None
         reopened.get_terminal_dead_letter_abandon(dead.event_id)
     with pytest.raises(PursuitStoreError, match="receipt digest 不匹配"):
         reopened.terminal_outbox_dead_letter_catalog()
+    with pytest.raises(PursuitStoreError, match="receipt digest 不匹配"):
+        reopened.get_terminal_outbox_effective_state(outbox_id)
+    with pytest.raises(PursuitStoreError, match="receipt digest 不匹配"):
+        reopened.terminal_outbox_disposed_catalog()
 
 
 def test_tampered_requeue_receipt_fails_closed_before_claim(tmp_path) -> None:
@@ -549,7 +707,7 @@ async def test_permanent_invariant_enters_dead_letter_immediately(tmp_path) -> N
         )
     ).terminal_outbox
     assert projection is not None
-    assert projection.schema_version == 3
+    assert projection.schema_version == 4
     assert projection.dead_letters[0].dead_letter_id == failures[0].event_id
     assert projection.dead_letters[0].failure_code == "lease_missing"
     assert "outbox_id" not in projection.model_dump(mode="json")["dead_letters"][0]
