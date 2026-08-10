@@ -54,6 +54,7 @@ from naumi_agent.release.channel_catalog import (
     ReleaseChannelTrustPolicyDocument,
     ReleaseTrustedChannelKey,
     create_release_channel_trust_policy,
+    load_release_channel_trust_policy,
 )
 from naumi_agent.release.launcher import (
     RELEASE_LAUNCH_RESOLUTION_POLICY,
@@ -197,6 +198,7 @@ __all__ = [
     "inspect_runtime_identity",
     "load_release_build_attestation",
     "load_release_build_trust_policy",
+    "load_release_channel_trust_policy",
     "resolve_and_record_launch",
     "resolve_launch",
     "parse_runtime_health_report",

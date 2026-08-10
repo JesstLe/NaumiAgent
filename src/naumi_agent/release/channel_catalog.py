@@ -7,7 +7,9 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import re
+import stat
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -38,6 +40,7 @@ _IDENTIFIER_RE = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
 _CHANNEL_RE = r"^[a-z][a-z0-9._-]{0,63}$"
 _SHA256_RE = r"^[0-9a-f]{64}$"
 _MAX_CATALOG_BYTES = 4 * 1024 * 1024
+_MAX_TRUST_POLICY_BYTES = 512 * 1024
 _MAX_ENTRIES = 64
 
 
@@ -440,6 +443,65 @@ def create_release_channel_trust_policy(
             "policy_sha256": digest,
         }
     )
+
+
+def load_release_channel_trust_policy(
+    path: Path,
+) -> ReleaseChannelTrustPolicyDocument:
+    """Load one bounded installer-owned public channel trust root."""
+    source = Path(path).expanduser()
+    try:
+        before = source.lstat()
+        if stat.S_ISLNK(before.st_mode) or not stat.S_ISREG(before.st_mode):
+            raise ReleaseChannelCatalogError(
+                "release_channel_trust_policy_file_invalid",
+                "Channel Trust Policy 必须是普通文件，不能是符号链接。",
+            )
+        if before.st_size <= 0 or before.st_size > _MAX_TRUST_POLICY_BYTES:
+            raise ReleaseChannelCatalogError(
+                "release_channel_trust_policy_size_invalid",
+                "Channel Trust Policy 为空或超过 512 KiB。",
+            )
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(source, flags)
+        try:
+            opened = os.fstat(descriptor)
+            if not stat.S_ISREG(opened.st_mode) or (
+                before.st_dev,
+                before.st_ino,
+            ) != (opened.st_dev, opened.st_ino):
+                raise ReleaseChannelCatalogError(
+                    "release_channel_trust_policy_changed",
+                    "打开期间 Channel Trust Policy identity 发生变化。",
+                )
+            with os.fdopen(descriptor, "rb", closefd=False) as stream:
+                encoded = stream.read(_MAX_TRUST_POLICY_BYTES + 1)
+            after = os.fstat(descriptor)
+        finally:
+            os.close(descriptor)
+        if len(encoded) != before.st_size or (
+            opened.st_size,
+            opened.st_mtime_ns,
+            opened.st_ctime_ns,
+        ) != (after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+            raise ReleaseChannelCatalogError(
+                "release_channel_trust_policy_changed",
+                "读取期间 Channel Trust Policy 大小发生变化。",
+            )
+    except ReleaseChannelCatalogError:
+        raise
+    except OSError as exc:
+        raise ReleaseChannelCatalogError(
+            "release_channel_trust_policy_unreadable",
+            "无法读取 Channel Trust Policy。",
+        ) from exc
+    try:
+        return ReleaseChannelTrustPolicyDocument.model_validate_json(encoded)
+    except ValueError as exc:
+        raise ReleaseChannelCatalogError(
+            "release_channel_trust_policy_invalid",
+            "Channel Trust Policy 不是受支持的 exact artifact。",
+        ) from exc
 
 
 class ReleaseChannelCatalogStore:
@@ -1003,4 +1065,5 @@ __all__ = [
     "ReleaseChannelTrustPolicyDocument",
     "ReleaseTrustedChannelKey",
     "create_release_channel_trust_policy",
+    "load_release_channel_trust_policy",
 ]

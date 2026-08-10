@@ -4,6 +4,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -26,6 +27,7 @@ from naumi_agent.release.channel_catalog import (
     ReleaseChannelEntry,
     ReleaseTrustedChannelKey,
     create_release_channel_trust_policy,
+    load_release_channel_trust_policy,
 )
 
 T0 = datetime(2026, 8, 10, 8, 0, tzinfo=UTC)
@@ -135,6 +137,47 @@ def _entry(
         manifest_sha256=attestation.payload.manifest_sha256,
         build_attestation=attestation,
     )
+
+
+def test_channel_trust_policy_loader_is_bounded_and_rejects_links(
+    tmp_path: Path,
+) -> None:
+    channel_signer = _channel_signer()
+    build_signer = _build_signer()
+    policy, _ = _policies(channel_signer, build_signer)
+    path = tmp_path / "trusted-channels.json"
+    path.write_text(policy.model_dump_json(), encoding="utf-8")
+
+    assert load_release_channel_trust_policy(path) == policy
+
+    path.write_text("{}", encoding="utf-8")
+    with pytest.raises(ReleaseChannelCatalogError) as invalid:
+        load_release_channel_trust_policy(path)
+    assert invalid.value.code == "release_channel_trust_policy_invalid"
+
+    path.write_bytes(b"")
+    with pytest.raises(ReleaseChannelCatalogError) as empty:
+        load_release_channel_trust_policy(path)
+    assert empty.value.code == "release_channel_trust_policy_size_invalid"
+
+    path.write_bytes(b"x" * (512 * 1024 + 1))
+    with pytest.raises(ReleaseChannelCatalogError) as oversized:
+        load_release_channel_trust_policy(path)
+    assert oversized.value.code == "release_channel_trust_policy_size_invalid"
+
+    path.unlink()
+    with pytest.raises(ReleaseChannelCatalogError) as missing:
+        load_release_channel_trust_policy(path)
+    assert missing.value.code == "release_channel_trust_policy_unreadable"
+
+    if os.name != "nt":
+        target = tmp_path / "trusted-channels-target.json"
+        target.write_text(policy.model_dump_json(), encoding="utf-8")
+        link = tmp_path / "trusted-channels-link.json"
+        link.symlink_to(target)
+        with pytest.raises(ReleaseChannelCatalogError) as linked:
+            load_release_channel_trust_policy(link)
+        assert linked.value.code == "release_channel_trust_policy_file_invalid"
 
 
 @pytest.mark.asyncio
