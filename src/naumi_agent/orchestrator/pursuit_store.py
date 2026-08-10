@@ -41,6 +41,10 @@ from naumi_agent.orchestrator.pursuit_terminal_dead_letter import (
     PursuitTerminalOutboxFailureEvent,
     new_pursuit_terminal_outbox_failure_event,
 )
+from naumi_agent.orchestrator.pursuit_terminal_dead_letter_action import (
+    PursuitTerminalDeadLetterRequeueReceipt,
+    new_pursuit_terminal_dead_letter_requeue_receipt,
+)
 from naumi_agent.orchestrator.pursuit_terminal_outbox import (
     PursuitTerminalDispatchState,
     PursuitTerminalOutboxDispatch,
@@ -70,9 +74,15 @@ class PursuitTerminalOutboxBacklog:
 
 @dataclass(frozen=True, slots=True)
 class PursuitTerminalOutboxDeadLetterCatalog:
-    records: tuple[PursuitTerminalOutboxFailureEvent, ...]
+    records: tuple[PursuitTerminalOutboxDeadLetterCatalogRecord, ...]
     total: int
     truncated: bool
+
+
+@dataclass(frozen=True, slots=True)
+class PursuitTerminalOutboxDeadLetterCatalogRecord:
+    event: PursuitTerminalOutboxFailureEvent
+    failure_attempts: int
 
 
 class PursuitStoreError(RuntimeError):
@@ -974,7 +984,10 @@ class PursuitStore:
                     outbox_id,
                     limit=1000,
                 )
-                if failures and failures[-1].dead_letter_authority:
+                if failures and self._terminal_failure_head_is_dead(
+                    conn,
+                    outbox_id,
+                ):
                     raise PursuitStoreError(
                         "terminal dispatch 候选已进入 dead-letter，拒绝认领。"
                     )
@@ -1067,7 +1080,7 @@ class PursuitStore:
                     raise PursuitStoreError(
                         "terminal outbox dead-letter authority 超过有界扫描上限。"
                     )
-                active: list[PursuitTerminalOutboxFailureEvent] = []
+                active: list[PursuitTerminalOutboxDeadLetterCatalogRecord] = []
                 for row in rows:
                     outbox_id = str(row["outbox_id"])
                     failures = self._verify_terminal_outbox_failures(
@@ -1090,11 +1103,25 @@ class PursuitStore:
                     latest = failures[-1]
                     if (
                         outbox.state is PursuitTerminalOutboxState.PENDING
-                        and latest.dead_letter_authority
+                        and self._terminal_failure_head_is_dead(conn, outbox_id)
                     ):
-                        active.append(latest)
+                        prior_row = conn.execute(
+                            "SELECT COALESCE(MAX(failure_sequence), 0) AS sequence "
+                            "FROM pursuit_terminal_outbox_dead_letter_requeues "
+                            "WHERE outbox_id = ? AND failure_sequence < ?",
+                            (outbox_id, latest.sequence),
+                        ).fetchone()
+                        active.append(PursuitTerminalOutboxDeadLetterCatalogRecord(
+                            event=latest,
+                            failure_attempts=(
+                                latest.sequence - int(prior_row["sequence"])
+                            ),
+                        ))
                 active.sort(
-                    key=lambda event: (event.occurred_at, event.event_id),
+                    key=lambda record: (
+                        record.event.occurred_at,
+                        record.event.event_id,
+                    ),
                     reverse=True,
                 )
                 total = len(active)
@@ -1113,6 +1140,231 @@ class PursuitStore:
             raise PursuitStoreError(
                 f"读取 terminal outbox dead-letter catalog 失败：{exc}"
             ) from exc
+
+    def get_terminal_dead_letter_requeue(
+        self,
+        dead_letter_id: str,
+    ) -> PursuitTerminalDeadLetterRequeueReceipt | None:
+        normalized = str(dead_letter_id or "").strip()
+        if not re.fullmatch(r"ptfail_[0-9a-f]{24}", normalized):
+            raise ValueError("terminal dead-letter requeue target 格式无效。")
+        if not self._db_path.exists():
+            return None
+        try:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT outbox_id FROM "
+                    "pursuit_terminal_outbox_dead_letter_requeues "
+                    "WHERE dead_letter_id = ?",
+                    (normalized,),
+                ).fetchone()
+                if row is None:
+                    return None
+                outbox_id = str(row["outbox_id"])
+                failures = self._verify_terminal_outbox_failures(
+                    conn,
+                    outbox_id,
+                    limit=1000,
+                )
+                dispatch_events = self._verify_terminal_dispatch_events(
+                    conn,
+                    outbox_id,
+                )
+                receipts = self._verify_terminal_dead_letter_requeues(
+                    conn,
+                    outbox_id,
+                    failures=failures,
+                    dispatch_events=dispatch_events,
+                )
+                return receipts.get(normalized)
+        except PursuitStoreError:
+            raise
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise PursuitStoreError(
+                f"terminal dead-letter requeue receipt 校验失败：{exc}"
+            ) from exc
+        except sqlite3.Error as exc:
+            raise PursuitStoreError(
+                f"读取 terminal dead-letter requeue receipt 失败：{exc}"
+            ) from exc
+
+    def requeue_terminal_outbox_dead_letter(
+        self,
+        dead_letter_id: str,
+        *,
+        source_request_id: str,
+        now: float,
+    ) -> tuple[PursuitTerminalDeadLetterRequeueReceipt, bool]:
+        """Reopen one exact latest dead letter without deleting failure history."""
+        normalized = str(dead_letter_id or "").strip()
+        normalized_request = str(source_request_id or "").strip()
+        if (
+            not re.fullmatch(r"ptfail_[0-9a-f]{24}", normalized)
+            or not normalized_request
+            or len(normalized_request) > 256
+            or not math.isfinite(now)
+            or now <= 0
+        ):
+            raise ValueError("terminal dead-letter requeue 参数无效。")
+        request_sha256 = hashlib.sha256(
+            normalized_request.encode("utf-8")
+        ).hexdigest()
+        try:
+            with self._connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                source_row = conn.execute(
+                    "SELECT dead_letter_id FROM "
+                    "pursuit_terminal_outbox_dead_letter_requeues "
+                    "WHERE source_request_sha256 = ?",
+                    (request_sha256,),
+                ).fetchone()
+                if (
+                    source_row is not None
+                    and str(source_row["dead_letter_id"]) != normalized
+                ):
+                    raise PursuitStoreConflictError(
+                        "source request 已绑定不同 dead-letter requeue。"
+                    )
+                existing_row = conn.execute(
+                    "SELECT outbox_id, dead_letter_id, source_request_sha256 "
+                    "FROM pursuit_terminal_outbox_dead_letter_requeues "
+                    "WHERE dead_letter_id = ?",
+                    (normalized,),
+                ).fetchone()
+                if existing_row is not None:
+                    outbox_id = str(existing_row["outbox_id"])
+                    failures = self._verify_terminal_outbox_failures(
+                        conn,
+                        outbox_id,
+                        limit=1000,
+                    )
+                    receipts = self._verify_terminal_dead_letter_requeues(
+                        conn,
+                        outbox_id,
+                        failures=failures,
+                        dispatch_events=self._verify_terminal_dispatch_events(
+                            conn,
+                            outbox_id,
+                        ),
+                    )
+                    receipt = receipts.get(normalized)
+                    if receipt is None:
+                        raise PursuitStoreError(
+                            "dead-letter requeue 索引缺少认证回执。"
+                        )
+                    return receipt, False
+
+                failure_row = conn.execute(
+                    "SELECT outbox_id FROM pursuit_terminal_outbox_failures "
+                    "WHERE event_id = ?",
+                    (normalized,),
+                ).fetchone()
+                if failure_row is None:
+                    raise PursuitStoreConflictError("dead-letter target 不存在。")
+                outbox_id = str(failure_row["outbox_id"])
+                outbox = self._get_terminal_outbox_with_connection(conn, outbox_id)
+                current = self._get_terminal_dispatch_with_connection(conn, outbox_id)
+                failures = self._verify_terminal_outbox_failures(
+                    conn,
+                    outbox_id,
+                    limit=1000,
+                )
+                if (
+                    outbox is None
+                    or outbox.state is not PursuitTerminalOutboxState.PENDING
+                    or current is None
+                    or current.state is not PursuitTerminalDispatchState.IDLE
+                    or not failures
+                    or failures[-1].event_id != normalized
+                    or not failures[-1].dead_letter_authority
+                ):
+                    raise PursuitStoreConflictError(
+                        "dead-letter target 不是当前可重入队权威。"
+                    )
+                head = conn.execute(
+                    "SELECT * FROM pursuit_terminal_outbox_failure_heads "
+                    "WHERE outbox_id = ?",
+                    (outbox_id,),
+                ).fetchone()
+                if (
+                    head is None
+                    or int(head["dead_letter"]) != 1
+                    or int(head["latest_sequence"]) != failures[-1].sequence
+                    or not hmac.compare_digest(
+                        str(head["latest_failure_sha256"]),
+                        failures[-1].digest(),
+                    )
+                    or now <= failures[-1].occurred_at
+                ):
+                    raise PursuitStoreConflictError(
+                        "dead-letter head 已漂移或 requeue 时间无效。"
+                    )
+                candidate = PursuitTerminalOutboxDispatch.model_validate(
+                    current.model_copy(update={
+                        "sequence": current.sequence + 1,
+                        "next_attempt_at": now,
+                        "last_failure_code": "",
+                        "updated_at": now,
+                    }).model_dump(mode="json")
+                )
+                receipt = new_pursuit_terminal_dead_letter_requeue_receipt(
+                    dead_letter_id=normalized,
+                    source_request_id=normalized_request,
+                    prior_failure_sha256=failures[-1].digest(),
+                    dispatch_before_sha256=current.digest(),
+                    dispatch_after_sha256=candidate.digest(),
+                    failure_sequence=failures[-1].sequence,
+                    requeued_at=now,
+                )
+                conn.execute(
+                    """
+                    INSERT INTO pursuit_terminal_outbox_dead_letter_requeues (
+                        receipt_id, dead_letter_id, source_request_sha256,
+                        outbox_id, failure_sequence, payload_json,
+                        payload_sha256, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        receipt.receipt_id,
+                        receipt.dead_letter_id,
+                        receipt.source_request_sha256,
+                        outbox_id,
+                        receipt.failure_sequence,
+                        receipt.canonical_json(),
+                        receipt.receipt_sha256,
+                        receipt.requeued_at,
+                    ),
+                )
+                cursor = conn.execute(
+                    """
+                    UPDATE pursuit_terminal_outbox_failure_heads
+                    SET dead_letter = 0, updated_at = ?
+                    WHERE outbox_id = ? AND latest_sequence = ?
+                      AND latest_failure_sha256 = ? AND dead_letter = 1
+                    """,
+                    (
+                        now,
+                        outbox_id,
+                        failures[-1].sequence,
+                        failures[-1].digest(),
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise PursuitStoreConflictError(
+                        "dead-letter head 被并发更新，拒绝 requeue。"
+                    )
+                self._update_terminal_dispatch_with_connection(
+                    conn,
+                    current=current,
+                    candidate=candidate,
+                )
+                return receipt, True
+        except PursuitStoreError:
+            raise
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise PursuitStoreError(f"重入队 terminal dead-letter 失败：{exc}") from exc
+        except sqlite3.Error as exc:
+            raise PursuitStoreError(f"重入队 terminal dead-letter 失败：{exc}") from exc
 
     def record_terminal_outbox_failure(
         self,
@@ -1164,12 +1416,23 @@ class PursuitStore:
                     outbox_id,
                     limit=1000,
                 )
-                if failures and failures[-1].dead_letter_authority:
+                if failures and self._terminal_failure_head_is_dead(
+                    conn,
+                    outbox_id,
+                ):
                     raise PursuitStoreConflictError("terminal outbox 已进入 dead-letter。")
                 sequence = len(failures) + 1
+                last_requeue_row = conn.execute(
+                    "SELECT COALESCE(MAX(failure_sequence), 0) AS sequence "
+                    "FROM pursuit_terminal_outbox_dead_letter_requeues "
+                    "WHERE outbox_id = ?",
+                    (outbox_id,),
+                ).fetchone()
+                last_requeued_sequence = int(last_requeue_row["sequence"])
+                failure_attempt = sequence - last_requeued_sequence
                 if permanent:
                     disposition = PursuitTerminalOutboxFailureDisposition.PERMANENT
-                elif sequence >= max_failures:
+                elif failure_attempt >= max_failures:
                     disposition = (
                         PursuitTerminalOutboxFailureDisposition.RETRY_EXHAUSTED
                     )
@@ -1383,7 +1646,10 @@ class PursuitStore:
                     outbox_id,
                     limit=1000,
                 )
-                if failures and failures[-1].dead_letter_authority:
+                if failures and self._terminal_failure_head_is_dead(
+                    conn,
+                    outbox_id,
+                ):
                     dead_letter += 1
                     continue
                 dispatch = self._get_terminal_dispatch_with_connection(
@@ -2540,7 +2806,6 @@ class PursuitStore:
         pending_digest = outbox_events[0].digest() if outbox_events else ""
         records: list[PursuitTerminalOutboxFailureEvent] = []
         previous_digest = ""
-        dead_letter_seen = False
         for expected_sequence, row in enumerate(rows, start=1):
             payload = str(row["payload_json"])
             actual_digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -2572,24 +2837,119 @@ class PursuitStore:
                 or event.attempt_count != claimed.attempt_count
                 or event.occurred_at < claimed.updated_at
                 or event.occurred_at >= claimed.claim_expires_at
-                or dead_letter_seen
             ):
                 raise PursuitStoreError("terminal outbox failure 事件权威不一致。")
             records.append(event)
             previous_digest = actual_digest
-            dead_letter_seen = event.dead_letter_authority
+        requeues = PursuitStore._verify_terminal_dead_letter_requeues(
+            conn,
+            outbox_id,
+            failures=records,
+            dispatch_events=dispatch_events,
+        )
+        for previous, current in zip(records, records[1:], strict=False):
+            if previous.dead_letter_authority:
+                requeue = requeues.get(previous.event_id)
+                if requeue is None or current.occurred_at <= requeue.requeued_at:
+                    raise PursuitStoreError(
+                        "terminal outbox failure 在未认证 requeue 后继续追加。"
+                    )
         latest = records[-1]
+        latest_requeue = requeues.get(latest.event_id)
+        active_dead_letter = latest.dead_letter_authority and latest_requeue is None
+        expected_head_updated_at = (
+            latest_requeue.requeued_at
+            if latest_requeue is not None
+            else latest.occurred_at
+        )
         if (
             int(head["latest_sequence"]) != latest.sequence
             or not hmac.compare_digest(
                 str(head["latest_failure_sha256"]),
                 latest.digest(),
             )
-            or bool(int(head["dead_letter"])) != latest.dead_letter_authority
-            or float(head["updated_at"]) != latest.occurred_at
+            or bool(int(head["dead_letter"])) != active_dead_letter
+            or float(head["updated_at"]) != expected_head_updated_at
         ):
             raise PursuitStoreError("terminal outbox failure head 与事件链末端不一致。")
         return records
+
+    @staticmethod
+    def _verify_terminal_dead_letter_requeues(
+        conn: sqlite3.Connection,
+        outbox_id: str,
+        *,
+        failures: list[PursuitTerminalOutboxFailureEvent],
+        dispatch_events: list[PursuitTerminalOutboxDispatch],
+    ) -> dict[str, PursuitTerminalDeadLetterRequeueReceipt]:
+        rows = conn.execute(
+            """
+            SELECT * FROM pursuit_terminal_outbox_dead_letter_requeues
+            WHERE outbox_id = ? ORDER BY failure_sequence ASC
+            """,
+            (outbox_id,),
+        ).fetchall()
+        failures_by_id = {event.event_id: event for event in failures}
+        dispatch_by_digest = {event.digest(): event for event in dispatch_events}
+        receipts: dict[str, PursuitTerminalDeadLetterRequeueReceipt] = {}
+        last_requeued_sequence = 0
+        for row in rows:
+            payload = str(row["payload_json"])
+            receipt = PursuitTerminalDeadLetterRequeueReceipt.model_validate_json(
+                payload
+            )
+            failure = failures_by_id.get(receipt.dead_letter_id)
+            before = dispatch_by_digest.get(receipt.dispatch_before_sha256)
+            after = dispatch_by_digest.get(receipt.dispatch_after_sha256)
+            if (
+                receipt.dead_letter_id in receipts
+                or receipt.receipt_id != str(row["receipt_id"])
+                or receipt.dead_letter_id != str(row["dead_letter_id"])
+                or receipt.source_request_sha256
+                != str(row["source_request_sha256"])
+                or receipt.failure_sequence != int(row["failure_sequence"])
+                or receipt.receipt_sha256 != str(row["payload_sha256"])
+                or receipt.requeued_at != float(row["created_at"])
+                or failure is None
+                or not failure.dead_letter_authority
+                or failure.sequence != receipt.failure_sequence
+                or failure.sequence <= last_requeued_sequence
+                or not hmac.compare_digest(
+                    failure.digest(),
+                    receipt.prior_failure_sha256,
+                )
+                or before is None
+                or after is None
+                or before.state is not PursuitTerminalDispatchState.IDLE
+                or after.state is not PursuitTerminalDispatchState.IDLE
+                or before.sequence + 1 != after.sequence
+                or before.updated_at != failure.occurred_at
+                or before.last_failure_code != failure.failure_code
+                or after.updated_at != receipt.requeued_at
+                or after.next_attempt_at != receipt.next_attempt_at
+                or after.last_failure_code
+                or after.attempt_count != before.attempt_count
+                or after.claim_epoch != before.claim_epoch
+                or receipt.requeued_at <= failure.occurred_at
+            ):
+                raise PursuitStoreError(
+                    "terminal dead-letter requeue receipt 权威不一致。"
+                )
+            receipts[receipt.dead_letter_id] = receipt
+            last_requeued_sequence = failure.sequence
+        return receipts
+
+    @staticmethod
+    def _terminal_failure_head_is_dead(
+        conn: sqlite3.Connection,
+        outbox_id: str,
+    ) -> bool:
+        row = conn.execute(
+            "SELECT dead_letter FROM pursuit_terminal_outbox_failure_heads "
+            "WHERE outbox_id = ?",
+            (outbox_id,),
+        ).fetchone()
+        return row is not None and bool(int(row["dead_letter"]))
 
     def _backfill_terminal_dispatches_with_connection(
         self,
@@ -3302,6 +3662,28 @@ class PursuitStore:
                         FOREIGN KEY(outbox_id)
                             REFERENCES pursuit_terminal_outbox(outbox_id)
                             ON DELETE CASCADE
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS
+                    pursuit_terminal_outbox_dead_letter_requeues (
+                        receipt_id TEXT PRIMARY KEY,
+                        dead_letter_id TEXT NOT NULL UNIQUE,
+                        source_request_sha256 TEXT NOT NULL UNIQUE,
+                        outbox_id TEXT NOT NULL,
+                        failure_sequence INTEGER NOT NULL CHECK(failure_sequence >= 1),
+                        payload_json TEXT NOT NULL,
+                        payload_sha256 TEXT NOT NULL,
+                        created_at REAL NOT NULL,
+                        FOREIGN KEY(outbox_id)
+                            REFERENCES pursuit_terminal_outbox(outbox_id)
+                            ON DELETE CASCADE,
+                        FOREIGN KEY(outbox_id, failure_sequence)
+                            REFERENCES pursuit_terminal_outbox_failures(
+                                outbox_id, sequence
+                            ) ON DELETE RESTRICT
                     )
                     """
                 )

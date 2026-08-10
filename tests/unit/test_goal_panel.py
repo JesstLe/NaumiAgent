@@ -310,12 +310,14 @@ async def test_terminal_outbox_projection_surfaces_dead_letter_action(tmp_path) 
     )
     pursuit_store.terminal_outbox_dead_letter_catalog = lambda **_: SimpleNamespace(  # type: ignore[method-assign]
         records=(SimpleNamespace(
-            event_id="ptfail_" + "a" * 24,
-            disposition=SimpleNamespace(value="permanent"),
-            failure_code="lease_missing",
-            sequence=1,
-            attempt_count=3,
-            occurred_at=1785888010.0,
+            event=SimpleNamespace(
+                event_id="ptfail_" + "a" * 24,
+                disposition=SimpleNamespace(value="permanent"),
+                failure_code="lease_missing",
+                attempt_count=3,
+                occurred_at=1785888010.0,
+            ),
+            failure_attempts=1,
         ),),
         total=1,
         truncated=False,

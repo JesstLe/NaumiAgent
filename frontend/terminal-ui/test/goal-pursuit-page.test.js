@@ -84,6 +84,8 @@ test("Goal page renders dead-letter authority as an actionable degraded state", 
   assert.match(lines, /累计 .* 死信 1 .* 失败 1/);
   assert.match(lines, /自动重试已停止，请人工审查/);
   assert.match(lines, /ptfail_a{24} · 机械不变量破坏 · lease_missing/);
+  assert.match(lines, /▶ 死信 ptfail_a{24}/);
+  assert.match(lines, /\/pursue outbox requeue ptfail_a{24}/);
 });
 
 test("Goal page exposes shared interaction detail command for every state", () => {

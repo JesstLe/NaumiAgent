@@ -559,6 +559,9 @@ from naumi_agent.orchestrator.context_assembly import (
     is_harness_context_message,
 )
 from naumi_agent.orchestrator.planner import AdaptivePlanner, ExecutionMode, Plan
+from naumi_agent.orchestrator.pursuit_terminal_dead_letter_action import (
+    PursuitTerminalDeadLetterRequeueReceipt,
+)
 from naumi_agent.orchestrator.pursuit_terminal_outbox import (
     PursuitTerminalOutboxRunReceipt,
     PursuitTerminalOutboxRunStatus,
@@ -3212,6 +3215,9 @@ class AgentEngine:
             terminal_outbox_enabled=(
                 self._config.harness.pursuit_terminal_outbox.enabled
             ),
+            terminal_dead_letter_requeue=(
+                self.requeue_pursuit_terminal_dead_letter
+            ),
         ):
             self._tool_registry.register(tool)
 
@@ -4295,6 +4301,20 @@ class AgentEngine:
         )
         persisted, _ = self.pursuit_store.save_terminal_outbox_run_receipt(receipt)
         return persisted
+
+    async def requeue_pursuit_terminal_dead_letter(
+        self,
+        dead_letter_id: str,
+        source_request_id: str,
+    ) -> PursuitTerminalDeadLetterRequeueReceipt:
+        """Requeue one exact authenticated dead letter and return its receipt."""
+        receipt, _ = self.pursuit_store.requeue_terminal_outbox_dead_letter(
+            dead_letter_id,
+            source_request_id=source_request_id,
+            now=datetime.now(UTC).timestamp(),
+        )
+        self._pursuit_terminal_outbox_worker.wake()
+        return receipt
 
     async def run_agent_publication_recovery_once(
         self,

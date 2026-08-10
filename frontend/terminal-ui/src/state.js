@@ -469,6 +469,7 @@ export function createInitialState() {
       interactionCursor: "",
       interactionCursorStack: [],
       selectedInteractionIndex: 0,
+      selectedDeadLetterIndex: 0,
       recoveryActionPending: false,
       recoveryActionRunId: "",
       recoveryActionRequestId: "",
@@ -916,12 +917,19 @@ export function reduceServerEvent(state, record) {
         Math.max(0, Number(state.goalPanel.selectedInteractionIndex) || 0),
         Math.max(0, (payload.interactions?.length || 1) - 1),
       );
+      state.goalPanel.selectedDeadLetterIndex = Math.min(
+        Math.max(0, Number(state.goalPanel.selectedDeadLetterIndex) || 0),
+        Math.max(0, (payload.terminal_outbox?.dead_letters?.length || 1) - 1),
+      );
       break;
     case "pursuit/recovery/action_result":
       applyPursuitRecoveryActionResult(state, record, payload);
       break;
     case "pursuit/terminal-outbox/action_result":
       applyPursuitTerminalOutboxActionResult(state, record, payload);
+      break;
+    case "pursuit/terminal-outbox/dead-letter/requeue_result":
+      applyPursuitTerminalDeadLetterRequeueResult(state, record, payload);
       break;
     case "evolution/review":
       state.evolutionReview.snapshot = payload;
@@ -1402,6 +1410,7 @@ export function reduceServerEvent(state, record) {
         interactionCursor: "",
         interactionCursorStack: [],
         selectedInteractionIndex: 0,
+        selectedDeadLetterIndex: 0,
         recoveryActionPending: false,
         recoveryActionRunId: "",
         recoveryActionRequestId: "",
@@ -4803,7 +4812,7 @@ export function handleGoalPanelKey(state, key, send) {
   const lower = String(key || "").toLowerCase();
   if (
     state.goalPanel.loading
-    && ["r", "x", "o", "j", "k", "f", "n", "p", "\r", "\n"].includes(lower)
+    && ["r", "x", "o", "d", "u", "j", "k", "f", "n", "p", "\r", "\n"].includes(lower)
   ) {
     return true;
   }
@@ -4817,6 +4826,19 @@ export function handleGoalPanelKey(state, key, send) {
   }
   if (lower === "o") {
     requestTerminalOutboxRunNow(state, send);
+    return true;
+  }
+  if (lower === "d") {
+    const deadLetters = state.goalPanel.snapshot?.terminal_outbox?.dead_letters ?? [];
+    if (deadLetters.length) {
+      state.goalPanel.selectedDeadLetterIndex = (
+        state.goalPanel.selectedDeadLetterIndex + 1
+      ) % deadLetters.length;
+    }
+    return true;
+  }
+  if (lower === "u") {
+    requestSelectedTerminalDeadLetterRequeue(state, send);
     return true;
   }
   const interactions = state.goalPanel.snapshot?.interactions ?? [];
@@ -5011,6 +5033,59 @@ function applyPursuitTerminalOutboxActionResult(state, record, payload) {
   state.goalPanel.terminalOutboxActionError = successful
     ? ""
     : String(payload.message || "终态队列恢复失败。");
+  return true;
+}
+
+function requestSelectedTerminalDeadLetterRequeue(state, send) {
+  state.goalPanel.terminalOutboxActionNotice = "";
+  state.goalPanel.terminalOutboxActionError = "";
+  const deadLetters = state.goalPanel.snapshot?.terminal_outbox?.dead_letters ?? [];
+  const selected = deadLetters[
+    Math.max(0, Number(state.goalPanel.selectedDeadLetterIndex) || 0)
+  ];
+  if (!selected) {
+    state.goalPanel.terminalOutboxActionError = "当前没有可重入队的死信。";
+    return false;
+  }
+  if (state.goalPanel.terminalOutboxActionPending) return false;
+  const capability = negotiatedEventCapabilityStatus(
+    state,
+    "client",
+    "pursuit/terminal-outbox/dead-letter/requeue",
+  );
+  if (capability.status !== "available") {
+    state.goalPanel.terminalOutboxActionNotice = (
+      capability.status === "pending"
+        ? "协议协商尚未完成，未发送死信重入队请求。"
+        : `当前 Bridge 不支持页内重入队；请使用 \`/pursue outbox requeue ${selected.dead_letter_id}\`。`
+    );
+    return false;
+  }
+  const requestId = String(send(
+    "pursuit/terminal-outbox/dead-letter/requeue",
+    { dead_letter_id: selected.dead_letter_id },
+  ) || "");
+  state.goalPanel.terminalOutboxActionPending = true;
+  state.goalPanel.terminalOutboxActionRequestId = requestId;
+  return true;
+}
+
+function applyPursuitTerminalDeadLetterRequeueResult(state, record, payload) {
+  const pendingRequestId = String(state.goalPanel.terminalOutboxActionRequestId || "");
+  if (
+    pendingRequestId
+    && String(record.request_id || "")
+    && pendingRequestId !== String(record.request_id)
+  ) return false;
+  state.goalPanel.terminalOutboxActionPending = false;
+  state.goalPanel.terminalOutboxActionRequestId = "";
+  const successful = payload.status === "requeued";
+  state.goalPanel.terminalOutboxActionNotice = successful
+    ? String(payload.message || "死信已重新加入自动恢复队列。")
+    : "";
+  state.goalPanel.terminalOutboxActionError = successful
+    ? ""
+    : String(payload.message || "死信重入队失败。");
   return true;
 }
 

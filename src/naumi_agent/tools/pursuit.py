@@ -27,6 +27,9 @@ if TYPE_CHECKING:
     from naumi_agent.orchestrator.pursuit import PursuitInteractionPort
     from naumi_agent.orchestrator.pursuit_lease import PursuitLeasePort
     from naumi_agent.orchestrator.pursuit_reconcile import BackgroundTaskLookup
+    from naumi_agent.orchestrator.pursuit_terminal_dead_letter_action import (
+        PursuitTerminalDeadLetterRequeueReceipt,
+    )
     from naumi_agent.orchestrator.pursuit_terminal_outbox import (
         PursuitTerminalOutboxRunReceipt,
     )
@@ -550,12 +553,87 @@ class PursuitTerminalOutboxRunNowTool(Tool):
         ))
 
 
+class PursuitTerminalDeadLetterRequeueTool(Tool):
+    """Requeue one exact authenticated terminal outbox dead letter."""
+
+    def __init__(
+        self,
+        runner: Callable[
+            [str, str],
+            Awaitable[PursuitTerminalDeadLetterRequeueReceipt],
+        ],
+    ) -> None:
+        self._runner = runner
+
+    @property
+    def name(self) -> str:
+        return "pursuit_terminal_dead_letter_requeue"
+
+    @property
+    def description(self) -> str:
+        return (
+            "将一个审查目录中的精确 Pursuit 终态死信重新加入自动恢复队列；"
+            "保留旧失败链，重置该记录的失败预算段，并返回不可变回执。"
+        )
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            destructive=True,
+            requires_confirmation=True,
+            requires_persistent_authorization=True,
+            user_facing_name="重入队 Pursuit 终态死信",
+            search_hint="pursuit terminal dead letter exact requeue receipt",
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "dead_letter_id": {
+                    "type": "string",
+                    "pattern": r"^ptfail_[0-9a-f]{24}$",
+                    "description": "Goal 死信审查目录公开的精确目标 ID。",
+                },
+            },
+            "required": ["dead_letter_id"],
+            "additionalProperties": False,
+        }
+
+    async def execute(self, **kwargs: Any) -> str:
+        dead_letter_id = str(kwargs.get("dead_letter_id") or "").strip()
+        if not re.fullmatch(r"ptfail_[0-9a-f]{24}", dead_letter_id):
+            raise ValueError("dead_letter_id 格式无效。")
+        permission_receipt = current_permission_receipt()
+        source_request_id = (
+            permission_receipt.call_id
+            if permission_receipt is not None
+            else f"local-tool-{uuid.uuid4()}"
+        )
+        receipt = await self._runner(dead_letter_id, source_request_id)
+        return "\n".join((
+            "已将 Pursuit 终态死信重新加入自动恢复队列。",
+            f"- 死信：`{receipt.dead_letter_id}`",
+            f"- 回执：`{receipt.receipt_id}`",
+            f"- 原失败序号：{receipt.failure_sequence}",
+            "- 旧失败证据已保留；新的失败预算段从下一次领取开始。",
+        ))
+
+
 def create_pursuit_tool(
     *,
     terminal_outbox_runner: (
         Callable[[str], Awaitable[PursuitTerminalOutboxRunReceipt]] | None
     ) = None,
     terminal_outbox_enabled: bool = False,
+    terminal_dead_letter_requeue: (
+        Callable[
+            [str, str],
+            Awaitable[PursuitTerminalDeadLetterRequeueReceipt],
+        ]
+        | None
+    ) = None,
 ) -> list[Tool]:
     tools: list[Tool] = [
         PursueTool(),
@@ -568,5 +646,9 @@ def create_pursuit_tool(
         tools.append(PursuitTerminalOutboxRunNowTool(
             terminal_outbox_runner,
             enabled=terminal_outbox_enabled,
+        ))
+    if terminal_dead_letter_requeue is not None:
+        tools.append(PursuitTerminalDeadLetterRequeueTool(
+            terminal_dead_letter_requeue,
         ))
     return tools

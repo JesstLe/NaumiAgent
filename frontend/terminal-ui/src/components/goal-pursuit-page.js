@@ -18,7 +18,7 @@ export function renderGoalPursuitPage(view, width, height) {
     color(ANSI.cyan, "Goal / Pursuit"),
     color(
       ANSI.dim,
-      "r 刷新 · x 恢复当前 Pursuit · o 恢复终态队列 · ↑/↓ 滚动 · j/k 选择交互 · Enter 详情 · f 筛选 · n/p 翻页 · Esc 返回",
+      "r 刷新 · x 恢复当前 Pursuit · o 恢复终态队列 · d 选择死信 · u 重入队 · ↑/↓ 滚动 · j/k 选择交互 · Enter 详情 · f 筛选 · n/p 翻页 · Esc 返回",
     ),
   ];
   if (value.recoveryActionPending) {
@@ -74,7 +74,10 @@ export function renderGoalPursuitPage(view, width, height) {
     }
   }
   if (snapshot?.terminal_outbox) {
-    logical.push(...renderTerminalOutbox(snapshot.terminal_outbox));
+    logical.push(...renderTerminalOutbox(
+      snapshot.terminal_outbox,
+      Math.max(0, Number(value.selectedDeadLetterIndex) || 0),
+    ));
   }
   const wrapped = logical.flatMap((line) => wrapAnsiLine(line, safeWidth));
   const maximum = Math.max(0, wrapped.length - safeHeight);
@@ -84,7 +87,7 @@ export function renderGoalPursuitPage(view, width, height) {
   return lines.map((line) => padRight(fit(line, safeWidth), safeWidth));
 }
 
-function renderTerminalOutbox(value) {
+function renderTerminalOutbox(value, selectedDeadLetterIndex) {
   const labels = {
     idle: "空闲",
     recovering: "正在恢复",
@@ -130,14 +133,20 @@ function renderTerminalOutbox(value) {
   if (value.failure_codes?.length) {
     lines.push(color(ANSI.red, `最近失败 · ${value.failure_codes.join(", ")}`));
   }
-  for (const item of value.dead_letters || []) {
+  for (const [index, item] of (value.dead_letters || []).entries()) {
     const disposition = item.disposition === "retry_exhausted"
       ? "重试预算耗尽"
       : "机械不变量破坏";
     lines.push(color(
-      ANSI.red,
-      `死信 ${item.dead_letter_id} · ${disposition} · ${item.failure_code} · 失败 ${item.failure_attempts} 次 / 总认领 ${item.total_claim_attempts} 次 · ${item.occurred_at}`,
+      index === selectedDeadLetterIndex ? ANSI.yellow : ANSI.red,
+      `${index === selectedDeadLetterIndex ? "▶" : " "} 死信 ${item.dead_letter_id} · ${disposition} · ${item.failure_code} · 失败 ${item.failure_attempts} 次 / 总认领 ${item.total_claim_attempts} 次 · ${item.occurred_at}`,
     ));
+    if (index === selectedDeadLetterIndex) {
+      lines.push(color(
+        ANSI.dim,
+        `  重入队命令 · /pursue outbox requeue ${item.dead_letter_id}`,
+      ));
+    }
   }
   if (value.dead_letters_truncated) {
     lines.push(color(ANSI.yellow, "死信目录已按当前视图上限截断。"));

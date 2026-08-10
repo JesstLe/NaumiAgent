@@ -424,17 +424,17 @@ def _build_terminal_outbox_projection(
                 raise ValueError("terminal outbox dead-letter catalog 与 backlog 不一致")
             dead_letters = tuple(
                 TerminalOutboxDeadLetterItem(
-                    dead_letter_id=event.event_id,
-                    disposition=event.disposition.value,
-                    failure_code=event.failure_code,
-                    failure_attempts=event.sequence,
-                    total_claim_attempts=event.attempt_count,
+                    dead_letter_id=record.event.event_id,
+                    disposition=record.event.disposition.value,
+                    failure_code=record.event.failure_code,
+                    failure_attempts=record.failure_attempts,
+                    total_claim_attempts=record.event.attempt_count,
                     occurred_at=datetime.fromtimestamp(
-                        event.occurred_at,
+                        record.event.occurred_at,
                         tz=UTC,
                     ).isoformat(),
                 )
-                for event in catalog.records
+                for record in catalog.records
             )
             dead_letters_truncated = catalog.truncated
         except Exception:

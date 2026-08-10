@@ -18,6 +18,7 @@ from naumi_agent.orchestrator.pursuit_terminal_outbox_worker import (
     PursuitTerminalOutboxWorkerPolicy,
     classify_terminal_outbox_failure,
 )
+from naumi_agent.safety.permissions import TOOL_PERMISSIONS, PermissionMode
 from naumi_agent.ui.goal_panel import build_goal_pursuit_snapshot_with_recovery
 from tests.unit.test_pursuit_recovery_reconcile import (
     T0,
@@ -86,7 +87,8 @@ def test_retryable_failure_budget_persists_dead_letter_authority(tmp_path) -> No
     catalog = reopened.terminal_outbox_dead_letter_catalog(limit=20)
     assert catalog.total == 1
     assert catalog.truncated is False
-    assert catalog.records == (second,)
+    assert catalog.records[0].event == second
+    assert catalog.records[0].failure_attempts == 2
     assert reopened.claim_next_terminal_outbox(
         owner_id="another-worker",
         now=due_at + 100,
@@ -210,11 +212,165 @@ def test_dead_letter_catalog_returns_authenticated_bounded_records(tmp_path) -> 
 
     catalog = store.terminal_outbox_dead_letter_catalog(limit=1, scan_limit=1)
 
-    assert catalog.records == (event,)
+    assert catalog.records[0].event == event
+    assert catalog.records[0].failure_attempts == 1
     assert catalog.total == 1
     assert catalog.truncated is False
     with pytest.raises(ValueError, match="catalog 策略无效"):
         store.terminal_outbox_dead_letter_catalog(limit=2, scan_limit=1)
+
+
+def test_exact_requeue_preserves_history_and_resets_failure_budget(tmp_path) -> None:
+    store, outbox_id, due_at = _pending_store(tmp_path)
+    first_claim = store.claim_next_terminal_outbox(
+        owner_id="requeue-worker",
+        now=due_at,
+        lease_seconds=30,
+    )
+    assert first_claim is not None
+    first_dead, _ = store.record_terminal_outbox_failure(
+        outbox_id,
+        owner_id="requeue-worker",
+        claim_epoch=first_claim.dispatch.claim_epoch,
+        now=due_at + 1,
+        retry_delay_seconds=5,
+        failure_code="lease_missing",
+        max_failures=8,
+        permanent=True,
+    )
+
+    receipt, created = store.requeue_terminal_outbox_dead_letter(
+        first_dead.event_id,
+        source_request_id="permission-call-requeue-1",
+        now=due_at + 2,
+    )
+
+    assert created is True
+    assert receipt.dead_letter_id == first_dead.event_id
+    assert receipt.failure_sequence == 1
+    assert receipt.next_attempt_at == due_at + 2
+    assert store.get_terminal_dead_letter_requeue(first_dead.event_id) == receipt
+    replayed, replay_created = store.requeue_terminal_outbox_dead_letter(
+        first_dead.event_id,
+        source_request_id="permission-call-requeue-1",
+        now=due_at + 20,
+    )
+    assert replayed == receipt
+    assert replay_created is False
+    assert store.terminal_outbox_backlog(now=due_at + 2).dead_letter == 0
+
+    second_claim = store.claim_next_terminal_outbox(
+        owner_id="requeue-worker",
+        now=due_at + 2,
+        lease_seconds=30,
+    )
+    assert second_claim is not None
+    retryable, _ = store.record_terminal_outbox_failure(
+        outbox_id,
+        owner_id="requeue-worker",
+        claim_epoch=second_claim.dispatch.claim_epoch,
+        now=due_at + 3,
+        retry_delay_seconds=5,
+        failure_code="authority_read_failed",
+        max_failures=2,
+    )
+    assert retryable.sequence == 2
+    assert retryable.disposition is (
+        PursuitTerminalOutboxFailureDisposition.RETRYABLE
+    )
+
+    third_claim = store.claim_next_terminal_outbox(
+        owner_id="requeue-worker",
+        now=due_at + 8,
+        lease_seconds=30,
+    )
+    assert third_claim is not None
+    second_dead, _ = store.record_terminal_outbox_failure(
+        outbox_id,
+        owner_id="requeue-worker",
+        claim_epoch=third_claim.dispatch.claim_epoch,
+        now=due_at + 9,
+        retry_delay_seconds=5,
+        failure_code="authority_read_failed",
+        max_failures=2,
+    )
+    assert second_dead.sequence == 3
+    assert second_dead.disposition is (
+        PursuitTerminalOutboxFailureDisposition.RETRY_EXHAUSTED
+    )
+    failures = store.list_terminal_outbox_failures(outbox_id)
+    assert failures == [first_dead, retryable, second_dead]
+    catalog = store.terminal_outbox_dead_letter_catalog()
+    assert catalog.total == 1
+    assert catalog.records[0].event == second_dead
+    assert catalog.records[0].failure_attempts == 2
+
+    second_receipt, second_created = store.requeue_terminal_outbox_dead_letter(
+        second_dead.event_id,
+        source_request_id="permission-call-requeue-2",
+        now=due_at + 10,
+    )
+    assert second_created is True
+    assert second_receipt.failure_sequence == 3
+    assert store.terminal_outbox_dead_letter_catalog().total == 0
+    assert store.claim_next_terminal_outbox(
+        owner_id="requeue-worker",
+        now=due_at + 10,
+        lease_seconds=30,
+    ) is not None
+
+
+def test_dead_letter_requeue_permission_has_no_secondary_confirmation() -> None:
+    rule = TOOL_PERMISSIONS["pursuit_terminal_dead_letter_requeue"]
+
+    assert set(rule.allowed_modes) == {
+        PermissionMode.BYPASS,
+        PermissionMode.PERMISSIVE,
+        PermissionMode.MODERATE,
+        PermissionMode.STRICT,
+    }
+    assert rule.requires_confirmation is False
+
+
+def test_tampered_requeue_receipt_fails_closed_before_claim(tmp_path) -> None:
+    store, outbox_id, due_at = _pending_store(tmp_path)
+    claim = store.claim_next_terminal_outbox(
+        owner_id="requeue-tamper-worker",
+        now=due_at,
+        lease_seconds=30,
+    )
+    assert claim is not None
+    dead, _ = store.record_terminal_outbox_failure(
+        outbox_id,
+        owner_id="requeue-tamper-worker",
+        claim_epoch=claim.dispatch.claim_epoch,
+        now=due_at + 1,
+        retry_delay_seconds=5,
+        failure_code="lease_missing",
+        max_failures=8,
+        permanent=True,
+    )
+    store.requeue_terminal_outbox_dead_letter(
+        dead.event_id,
+        source_request_id="permission-call-requeue-tamper",
+        now=due_at + 2,
+    )
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute(
+            "UPDATE pursuit_terminal_outbox_dead_letter_requeues "
+            "SET payload_json = replace(payload_json, 'ptreq_', 'broken_') "
+            "WHERE dead_letter_id = ?",
+            (dead.event_id,),
+        )
+
+    reopened = PursuitStore(store.base_dir)
+    with pytest.raises(PursuitStoreError, match="receipt_id 格式无效"):
+        reopened.claim_next_terminal_outbox(
+            owner_id="must-not-claim",
+            now=due_at + 2,
+        )
+    with pytest.raises(PursuitStoreError, match="receipt_id 格式无效"):
+        reopened.terminal_outbox_dead_letter_catalog()
 
 
 @pytest.mark.asyncio

@@ -1679,6 +1679,12 @@ class JsonlEngineBridge:
         if event_type == ClientEventType.PURSUIT_TERMINAL_OUTBOX_RUN_NOW:
             await self.start_pursuit_terminal_outbox_run_now(request_id=request_id)
             return
+        if event_type == ClientEventType.PURSUIT_TERMINAL_DEAD_LETTER_REQUEUE:
+            await self.start_pursuit_terminal_dead_letter_requeue(
+                payload,
+                request_id=request_id,
+            )
+            return
         if event_type == ClientEventType.EVOLUTION_REVIEW_REQUEST:
             await self.show_evolution_review(payload, request_id=request_id)
             return
@@ -4778,6 +4784,150 @@ class JsonlEngineBridge:
             ServerEventType.PURSUIT_TERMINAL_OUTBOX_ACTION_RESULT,
             {
                 "schema_version": 1,
+                "status": status,
+                "code": code,
+                "message": _bounded_action_message(message),
+                "receipt": receipt,
+            },
+            request_id=request_id,
+        )
+
+    async def start_pursuit_terminal_dead_letter_requeue(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Requeue one selected dead letter through ToolExecution authority."""
+        dead_letter_id = str(payload.get("dead_letter_id") or "").strip()
+        if not re.fullmatch(r"ptfail_[0-9a-f]{24}", dead_letter_id):
+            await self._emit_pursuit_terminal_dead_letter_requeue_result(
+                request_id=request_id,
+                dead_letter_id=dead_letter_id,
+                status="blocked",
+                code="invalid_dead_letter_id",
+                message="死信重入队目标无效，请刷新 Goal 页面后重新选择。",
+            )
+            return
+        if request_id in self._pursuit_terminal_outbox_tasks:
+            return
+        if self._pursuit_terminal_outbox_tasks:
+            await self._emit_pursuit_terminal_dead_letter_requeue_result(
+                request_id=request_id,
+                dead_letter_id=dead_letter_id,
+                status="blocked",
+                code="operation_busy",
+                message="已有终态队列控制动作正在执行，请等待其回执。",
+            )
+            return
+
+        async def publish_tool_event(
+            event: str,
+            data: dict[str, object],
+        ) -> None:
+            await self.handle_engine_event(event, dict(data))
+
+        async def run() -> None:
+            from naumi_agent.tools.base import ToolCall
+
+            tool_call_id = (
+                "new-ui-terminal-requeue-"
+                + hashlib.sha256(request_id.encode("utf-8")).hexdigest()[:32]
+            )
+            try:
+                await self.engine.get_or_create_session()
+                result = await self.engine.execute_tool(
+                    ToolCall(
+                        id=tool_call_id,
+                        name="pursuit_terminal_dead_letter_requeue",
+                        arguments=json.dumps(
+                            {"dead_letter_id": dead_letter_id},
+                            ensure_ascii=False,
+                        ),
+                    ),
+                    on_event=publish_tool_event,
+                    agent_name="new-ui",
+                )
+                receipt = self.engine.pursuit_store.get_terminal_dead_letter_requeue(
+                    dead_letter_id
+                )
+                if receipt is None:
+                    status = "blocked" if result.status == "error" else "error"
+                    code = (
+                        "tool_execution_rejected"
+                        if result.status == "error"
+                        else "receipt_authority_missing"
+                    )
+                else:
+                    status = "requeued"
+                    code = "requeued"
+                await self._emit_pursuit_terminal_dead_letter_requeue_result(
+                    request_id=request_id,
+                    dead_letter_id=dead_letter_id,
+                    status=status,
+                    code=code,
+                    message=_bounded_action_message(result.content),
+                    receipt=(
+                        receipt.model_dump(
+                            mode="json",
+                            exclude={
+                                "source_request_sha256",
+                                "prior_failure_sha256",
+                                "dispatch_before_sha256",
+                                "dispatch_after_sha256",
+                            },
+                        )
+                        if receipt is not None
+                        else None
+                    ),
+                )
+                await self.show_goal_panel({}, request_id=request_id)
+            except asyncio.CancelledError:
+                if self._closed:
+                    raise
+                await self._emit_pursuit_terminal_dead_letter_requeue_result(
+                    request_id=request_id,
+                    dead_letter_id=dead_letter_id,
+                    status="error",
+                    code="cancelled",
+                    message="死信重入队请求已取消，请刷新 Goal 页面确认权威状态。",
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Terminal dead-letter requeue UI action failed (%s)",
+                    type(exc).__name__,
+                )
+                await self._emit_pursuit_terminal_dead_letter_requeue_result(
+                    request_id=request_id,
+                    dead_letter_id=dead_letter_id,
+                    status="error",
+                    code="internal_error",
+                    message="死信未能安全重入队，请刷新状态或运行 `/doctor`。",
+                )
+            finally:
+                self._pursuit_terminal_outbox_tasks.pop(request_id, None)
+
+        task = asyncio.create_task(
+            run(),
+            name=f"pursuit-terminal-requeue-{request_id}",
+        )
+        self._pursuit_terminal_outbox_tasks[request_id] = task
+
+    async def _emit_pursuit_terminal_dead_letter_requeue_result(
+        self,
+        *,
+        request_id: str,
+        dead_letter_id: str,
+        status: str,
+        code: str,
+        message: str,
+        receipt: dict[str, Any] | None = None,
+    ) -> None:
+        await self.emit(
+            ServerEventType.PURSUIT_TERMINAL_DEAD_LETTER_REQUEUE_RESULT,
+            {
+                "schema_version": 1,
+                "dead_letter_id": dead_letter_id,
                 "status": status,
                 "code": code,
                 "message": _bounded_action_message(message),

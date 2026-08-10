@@ -887,6 +887,9 @@ function normalizeServerPayload(type, payload) {
   if (type === "pursuit/terminal-outbox/action_result") {
     return normalizePursuitTerminalOutboxActionResult(payload);
   }
+  if (type === "pursuit/terminal-outbox/dead-letter/requeue_result") {
+    return normalizePursuitTerminalDeadLetterRequeueResult(payload);
+  }
   if (type === "tasks/snapshot") {
     return normalizeTaskSnapshot(payload);
   }
@@ -2535,6 +2538,99 @@ function normalizePursuitTerminalOutboxRunReceipt(value) {
     failures: count("failures", 1_000),
     failure_codes: failureCodes,
     created_at: createdAt,
+    receipt_sha256: receiptSha256,
+  };
+}
+
+function normalizePursuitTerminalDeadLetterRequeueResult(payload) {
+  if (Number(payload.schema_version) !== 1) {
+    throw new Error("terminal dead-letter requeue_result schema_version 不兼容");
+  }
+  const deadLetterId = harnessText(
+    payload.dead_letter_id,
+    "terminal dead-letter requeue_result dead_letter_id",
+  );
+  if (!/^ptfail_[0-9a-f]{24}$/.test(deadLetterId)) {
+    throw new Error("terminal dead-letter requeue_result target 无效");
+  }
+  const status = harnessChoice(
+    payload.status,
+    "terminal dead-letter requeue_result status",
+    new Set(["requeued", "blocked", "error"]),
+  );
+  const code = harnessText(
+    payload.code,
+    "terminal dead-letter requeue_result code",
+  );
+  if (!/^[a-z][a-z0-9_]{0,63}$/.test(code)) {
+    throw new Error("terminal dead-letter requeue_result code 无效");
+  }
+  const receipt = payload.receipt == null
+    ? null
+    : normalizePursuitTerminalDeadLetterRequeueReceipt(payload.receipt);
+  if (
+    (status === "requeued") !== (receipt != null)
+    || (receipt && receipt.dead_letter_id !== deadLetterId)
+  ) {
+    throw new Error("terminal dead-letter requeue_result 回执与状态不一致");
+  }
+  return {
+    schema_version: 1,
+    dead_letter_id: deadLetterId,
+    status,
+    code,
+    message: workbenchText(
+      payload.message,
+      "terminal dead-letter requeue_result message",
+      4_000,
+    ),
+    receipt,
+  };
+}
+
+function normalizePursuitTerminalDeadLetterRequeueReceipt(value) {
+  const item = harnessObject(value, "terminal dead-letter requeue receipt");
+  if (Number(item.schema_version) !== 1) {
+    throw new Error("terminal dead-letter requeue receipt schema_version 不兼容");
+  }
+  const receiptId = harnessText(item.receipt_id, "dead-letter requeue receipt_id");
+  const deadLetterId = harnessText(item.dead_letter_id, "dead-letter requeue target");
+  const receiptSha256 = harnessText(
+    item.receipt_sha256,
+    "dead-letter requeue receipt digest",
+  );
+  if (
+    !/^ptreq_[0-9a-f]{24}$/.test(receiptId)
+    || !/^ptfail_[0-9a-f]{24}$/.test(deadLetterId)
+    || !/^[0-9a-f]{64}$/.test(receiptSha256)
+  ) {
+    throw new Error("terminal dead-letter requeue receipt 标识无效");
+  }
+  const failureSequence = harnessNonnegativeInteger(
+    item.failure_sequence,
+    "terminal dead-letter requeue failure_sequence",
+  );
+  if (failureSequence < 1 || failureSequence > 1_000_000) {
+    throw new Error("terminal dead-letter requeue failure_sequence 无效");
+  }
+  const requeuedAt = harnessPositiveFiniteNumber(
+    item.requeued_at,
+    "terminal dead-letter requeue requeued_at",
+  );
+  const nextAttemptAt = harnessPositiveFiniteNumber(
+    item.next_attempt_at,
+    "terminal dead-letter requeue next_attempt_at",
+  );
+  if (requeuedAt !== nextAttemptAt) {
+    throw new Error("terminal dead-letter requeue 未立即授予领取资格");
+  }
+  return {
+    schema_version: 1,
+    receipt_id: receiptId,
+    dead_letter_id: deadLetterId,
+    failure_sequence: failureSequence,
+    requeued_at: requeuedAt,
+    next_attempt_at: nextAttemptAt,
     receipt_sha256: receiptSha256,
   };
 }
@@ -7083,6 +7179,13 @@ function harnessNonnegativeFiniteNumber(value, name) {
 function harnessFiniteNumber(value, name) {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     throw new Error(`${name} 必须是有限数值`);
+  }
+  return value;
+}
+
+function harnessPositiveFiniteNumber(value, name) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    throw new Error(`${name} 必须是正有限数值`);
   }
   return value;
 }

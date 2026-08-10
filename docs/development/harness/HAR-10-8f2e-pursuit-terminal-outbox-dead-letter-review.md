@@ -45,7 +45,8 @@ New UI 和 Goal Tool/Textual fallback 使用同一 Goal projection，逐条红�
 ```
 
 预算耗尽显示“重试预算耗尽”，永久不变量显示“机械不变量破坏”。超过 20 条时显示明确截断提示。
-当前目录没有操作键，避免把只读 ID 误当成已授权处置能力。
+本切片交付时目录没有操作键；后续 HAR-10.8f2f 已以同一稳定 ID 增加权限化 exact requeue，目录本身仍保持
+只读权威投影。
 
 ## 聚焦验收
 
@@ -59,8 +60,9 @@ New UI 和 Goal Tool/Textual fallback 使用同一 Goal projection，逐条红�
 
 ## 自我审视与后续边界
 
-- `dead_letter_id` 现在是稳定的公开审查目标，但还没有对应 action receipt；任何界面都不得自行解除死信。
+- `dead_letter_id` 现在是稳定的公开审查目标；后续 HAR-10.8f2f 已提供 exact requeue action receipt，任何
+  界面仍不得绕过 ToolExecution 自行解除死信。
 - catalog 为保证完整认证使用 10000 authority 硬上限；规模增长后需要认证分页 root，不能取消完整性检查。
 - 当前仅列 active pending dead letters；已经由未来人工操作收口的历史事实仍保留在 failure chain，但尚无历史页。
-- 下一最小切片是 exact manual disposition：以 `dead_letter_id` 定位、复验最新 head、经 ToolExecution 权限链
-  生成不可变 requeue/accept 回执。该动作完成前不能开始 retention apply。
+- HAR-10.8f2f 已完成第一种 exact manual disposition：以 `dead_letter_id` 定位、复验最新 head、经
+  ToolExecution 权限链生成不可变 requeue 回执。accept/abandon 与 retention apply 仍未实现。
