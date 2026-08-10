@@ -147,6 +147,7 @@ _SANDBOX_RETRY_PRUNE_EXECUTION_CODES = frozenset(
 _MAX_DURABLE_CONVERSATION_QUEUE_ITEMS = 20
 _MAX_RUNTIME_HEARTBEAT_CURSOR_LENGTH = 1024
 _MAX_INTERACTION_CURSOR_LENGTH = 1024
+_MAX_PENDING_INTERACTION_CURSOR_LENGTH = 2048
 _MAX_SANDBOX_RETRY_CATALOG_CURSOR_LENGTH = 1024
 _MAX_EVAL_RESULT_BYTES = 4 * 1024 * 1024
 _MAX_SANDBOX_EVAL_REQUEST_BYTES = 256 * 1024
@@ -196,6 +197,18 @@ class HarnessInteractionCatalogPage:
 
     items: tuple[HarnessInteractionRecord, ...]
     state_filter: str
+    next_cursor: str
+
+    @property
+    def has_more(self) -> bool:
+        return bool(self.next_cursor)
+
+
+@dataclass(frozen=True, slots=True)
+class HarnessPendingInteractionPage:
+    """One bounded FIFO/fair recovery page from a fixed pending snapshot."""
+
+    items: tuple[HarnessInteractionRecord, ...]
     next_cursor: str
 
     @property
@@ -4175,7 +4188,25 @@ class HarnessStore:
         subject_id: str = "",
         limit: int = 50,
     ) -> tuple[HarnessInteractionRecord, ...]:
-        """Return bounded pending records without silently changing timeout state."""
+        """Return the first bounded pending recovery page."""
+        page = await self.list_pending_interactions_page(
+            workspace_root=workspace_root,
+            subject_kind=subject_kind,
+            subject_id=subject_id,
+            limit=limit,
+        )
+        return page.items
+
+    async def list_pending_interactions_page(
+        self,
+        *,
+        workspace_root: str | Path,
+        subject_kind: HarnessRunKind | str | None = None,
+        subject_id: str = "",
+        limit: int = 50,
+        cursor: str = "",
+    ) -> HarnessPendingInteractionPage:
+        """Return a stable fair page without silently changing timeout state."""
         workspace = _canonical_workspace(workspace_root)
         if not 1 <= limit <= 100:
             raise ValueError("interaction limit 必须在 1..100 之间。")
@@ -4186,42 +4217,102 @@ class HarnessStore:
         )
         if kind is None and subject:
             raise ValueError("按 subject_id 查询时必须同时提供 subject_kind。")
+        query_kind = kind.value if kind is not None else ""
+        snapshot_rowid = 0
+        lane_positions = {
+            priority: 0 for priority in ("critical", "high", "normal", "low")
+        }
+        schedule_cursor = 0
+        if cursor:
+            snapshot_rowid, lane_positions, schedule_cursor = (
+                _decode_pending_interaction_cursor(
+                    cursor,
+                    workspace_root=workspace,
+                    subject_kind=query_kind,
+                    subject_id=subject,
+                )
+            )
         if not self._db_path.is_file():
-            return ()
+            return HarnessPendingInteractionPage((), "")
         await self._ensure_schema()
         try:
             async with self._connection() as db:
-                lanes: dict[str, list[str]] = {}
+                base_query = (
+                    " FROM harness_interactions WHERE workspace_root = ? "
+                    "AND state = 'pending'"
+                )
+                base_params: list[object] = [workspace]
+                if kind is not None:
+                    base_query += " AND subject_kind = ?"
+                    base_params.append(kind.value)
+                if subject:
+                    base_query += " AND subject_id = ?"
+                    base_params.append(subject)
+                if not cursor:
+                    row = await (
+                        await db.execute(
+                            f"SELECT COALESCE(MAX(rowid), 0){base_query}",
+                            tuple(base_params),
+                        )
+                    ).fetchone()
+                    snapshot_rowid = int(row[0]) if row is not None else 0
+                if snapshot_rowid == 0:
+                    return HarnessPendingInteractionPage((), "")
+
+                lanes: dict[str, list[tuple[int, str]]] = {}
                 for priority in ("critical", "high", "normal", "low"):
                     query = (
-                        "SELECT interaction_id FROM harness_interactions "
-                        "WHERE workspace_root = ? AND state = 'pending' "
-                        "AND priority = ?"
+                        "SELECT rowid, interaction_id"
+                        f"{base_query} AND priority = ? "
+                        "AND rowid > ? AND rowid <= ? "
+                        "ORDER BY rowid ASC LIMIT ?"
                     )
-                    params: list[object] = [workspace, priority]
-                    if kind is not None:
-                        query += " AND subject_kind = ?"
-                        params.append(kind.value)
-                    if subject:
-                        query += " AND subject_id = ?"
-                        params.append(subject)
-                    query += " ORDER BY rowid ASC LIMIT ?"
-                    params.append(limit)
+                    params = [
+                        *base_params,
+                        priority,
+                        lane_positions[priority],
+                        snapshot_rowid,
+                        limit + 1,
+                    ]
                     rows = await (await db.execute(query, tuple(params))).fetchall()
-                    lanes[priority] = [str(row["interaction_id"]) for row in rows]
-                interaction_ids = _merge_interaction_priority_lanes(lanes, limit=limit)
-                records = []
-                for interaction_id in interaction_ids:
+                    lanes[priority] = [
+                        (int(row["rowid"]), str(row["interaction_id"]))
+                        for row in rows
+                    ]
+                selected, next_positions, next_schedule_cursor, has_more = (
+                    _merge_pending_interaction_priority_lanes(
+                        lanes,
+                        positions=lane_positions,
+                        schedule_cursor=schedule_cursor,
+                        limit=limit,
+                    )
+                )
+                records: list[HarnessInteractionRecord] = []
+                for _, interaction_id in selected:
                     record = await self._get_interaction_with_connection(
                         db, workspace, interaction_id,
                     )
-                    if record is not None:
+                    if record is not None and record.state == "pending":
                         records.append(record)
-                return tuple(records)
+                next_cursor = (
+                    _encode_pending_interaction_cursor(
+                        workspace_root=workspace,
+                        subject_kind=query_kind,
+                        subject_id=subject,
+                        snapshot_rowid=snapshot_rowid,
+                        lane_positions=next_positions,
+                        schedule_cursor=next_schedule_cursor,
+                    )
+                    if has_more else ""
+                )
+                return HarnessPendingInteractionPage(
+                    items=tuple(records),
+                    next_cursor=next_cursor,
+                )
         except HarnessStoreError:
             raise
         except (aiosqlite.Error, OSError, ValueError) as exc:
-            raise HarnessStoreError("无法列出待回答用户交互。") from exc
+            raise HarnessStoreError("无法分页列出待回答用户交互。") from exc
 
     async def list_interactions(
         self,
@@ -11212,6 +11303,121 @@ def _decode_interaction_cursor(
     return rowid
 
 
+def _encode_pending_interaction_cursor(
+    *,
+    workspace_root: str,
+    subject_kind: str,
+    subject_id: str,
+    snapshot_rowid: int,
+    lane_positions: Mapping[str, int],
+    schedule_cursor: int,
+) -> str:
+    payload = {
+        "c": schedule_cursor,
+        "h": snapshot_rowid,
+        "i": hashlib.sha256(subject_id.encode("utf-8")).hexdigest(),
+        "k": subject_kind,
+        "p": {
+            priority: int(lane_positions[priority])
+            for priority in ("critical", "high", "normal", "low")
+        },
+        "v": 1,
+        "w": hashlib.sha256(workspace_root.encode("utf-8")).hexdigest(),
+    }
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    envelope = json.dumps(
+        {"d": hashlib.sha256(canonical).hexdigest(), "p": payload},
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(envelope).decode("ascii").rstrip("=")
+
+
+def _decode_pending_interaction_cursor(
+    value: str,
+    *,
+    workspace_root: str,
+    subject_kind: str,
+    subject_id: str,
+) -> tuple[int, dict[str, int], int]:
+    token = value.strip() if isinstance(value, str) else ""
+    if not token or len(token) > _MAX_PENDING_INTERACTION_CURSOR_LENGTH:
+        raise ValueError("pending interaction cursor 为空或过长。")
+    try:
+        padding = "=" * (-len(token) % 4)
+        decoded = base64.b64decode(
+            token + padding,
+            altchars=b"-_",
+            validate=True,
+        )
+        envelope = json.loads(decoded.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("pending interaction cursor 格式无效。") from exc
+    if not isinstance(envelope, dict) or set(envelope) != {"d", "p"}:
+        raise ValueError("pending interaction cursor envelope 无效。")
+    payload = envelope.get("p")
+    digest = envelope.get("d")
+    if not isinstance(payload, dict) or set(payload) != {
+        "c", "h", "i", "k", "p", "v", "w",
+    }:
+        raise ValueError("pending interaction cursor payload 无效。")
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    expected_digest = hashlib.sha256(canonical).hexdigest()
+    if not isinstance(digest, str) or not hmac.compare_digest(digest, expected_digest):
+        raise ValueError("pending interaction cursor 摘要校验失败。")
+    expected = {
+        "i": hashlib.sha256(subject_id.encode("utf-8")).hexdigest(),
+        "k": subject_kind,
+        "w": hashlib.sha256(workspace_root.encode("utf-8")).hexdigest(),
+    }
+    if payload.get("v") != 1:
+        raise ValueError("pending interaction cursor 版本不兼容。")
+    for key, expected_value in expected.items():
+        actual = payload.get(key)
+        if not isinstance(actual, str) or not hmac.compare_digest(actual, expected_value):
+            raise ValueError("pending interaction cursor 与当前查询不匹配。")
+    snapshot_rowid = payload.get("h")
+    schedule_cursor = payload.get("c")
+    positions = payload.get("p")
+    if (
+        isinstance(snapshot_rowid, bool)
+        or not isinstance(snapshot_rowid, int)
+        or snapshot_rowid < 1
+    ):
+        raise ValueError("pending interaction cursor 高水位无效。")
+    if (
+        isinstance(schedule_cursor, bool)
+        or not isinstance(schedule_cursor, int)
+        or not 0 <= schedule_cursor < len(INTERACTION_PRIORITY_SCHEDULE)
+    ):
+        raise ValueError("pending interaction cursor 调度位置无效。")
+    priorities = {"critical", "high", "normal", "low"}
+    if not isinstance(positions, dict) or set(positions) != priorities:
+        raise ValueError("pending interaction cursor lane 位置无效。")
+    normalized_positions: dict[str, int] = {}
+    for priority in priorities:
+        position = positions.get(priority)
+        if (
+            isinstance(position, bool)
+            or not isinstance(position, int)
+            or not 0 <= position <= snapshot_rowid
+        ):
+            raise ValueError("pending interaction cursor lane 位置无效。")
+        normalized_positions[priority] = position
+    return snapshot_rowid, normalized_positions, schedule_cursor
+
+
 def _decode_runtime_heartbeat_cursor(
     value: str,
     *,
@@ -11971,6 +12177,37 @@ def _merge_interaction_priority_lanes(
         if not selected:
             break
     return tuple(merged)
+
+
+def _merge_pending_interaction_priority_lanes(
+    lanes: Mapping[str, Sequence[tuple[int, str]]],
+    *,
+    positions: Mapping[str, int],
+    schedule_cursor: int,
+    limit: int,
+) -> tuple[tuple[tuple[int, str], ...], dict[str, int], int, bool]:
+    """Continue the fair cycle while preserving a cursor per FIFO lane."""
+    remaining = {priority: list(values) for priority, values in lanes.items()}
+    next_positions = dict(positions)
+    selected: list[tuple[int, str]] = []
+    cursor = schedule_cursor
+    while len(selected) < limit and any(remaining.values()):
+        found = False
+        for offset in range(len(INTERACTION_PRIORITY_SCHEDULE)):
+            index = (cursor + offset) % len(INTERACTION_PRIORITY_SCHEDULE)
+            priority = INTERACTION_PRIORITY_SCHEDULE[index]
+            lane = remaining.get(priority, [])
+            if not lane:
+                continue
+            item = lane.pop(0)
+            selected.append(item)
+            next_positions[priority] = item[0]
+            cursor = (index + 1) % len(INTERACTION_PRIORITY_SCHEDULE)
+            found = True
+            break
+        if not found:
+            break
+    return tuple(selected), next_positions, cursor, any(remaining.values())
 _SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS harness_profiles (
     workspace_root TEXT NOT NULL,

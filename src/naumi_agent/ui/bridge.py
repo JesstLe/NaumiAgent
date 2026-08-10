@@ -155,6 +155,7 @@ _TERMINAL_MISSION_STATUSES = frozenset({
     "archived",
 })
 _MAX_QUEUED_CONVERSATIONS = 20
+_MAX_RECOVERED_INTERACTION_CARDS = 50
 _SANDBOX_RETRY_RECOVERY_TIMEOUT_SECONDS = 2.0
 _HARNESS_DETAIL_UNAVAILABLE = (
     "Harness 详情暂不可用。请确认当前工作区状态库可读，然后运行 `/harness doctor`。"
@@ -667,6 +668,9 @@ class JsonlEngineBridge:
         ) = None
         self._interaction_authority_store: object | None = None
         self._interaction_replay_task: asyncio.Task[None] | None = None
+        self._interaction_recovery_cursor = ""
+        self._interaction_recovery_retry_after: float | None = None
+        self._interaction_recovery_rescan_pending = False
         self._interaction_claim_lock = asyncio.Lock()
         runtime_identity = f"terminal-ui-{uuid4().hex}"
         self._runtime_heartbeat_subject_id = runtime_identity
@@ -979,25 +983,75 @@ class JsonlEngineBridge:
         authority = self._interaction_authority()
         if authority is None:
             return
+        capacity = _MAX_RECOVERED_INTERACTION_CARDS - len(
+            self._pending_interactions
+        )
+        if capacity <= 0:
+            return
+        if not self._interaction_recovery_cursor:
+            self._interaction_recovery_rescan_pending = False
         now = datetime.now(UTC)
-        retry_after_seconds: float | None = None
+        cursor_before = self._interaction_recovery_cursor
         try:
             async with self._interaction_claim_lock:
                 recovery = await authority.recover_pending(
                     now=now.isoformat(),
-                    limit=50,
+                    limit=capacity,
+                    cursor=self._interaction_recovery_cursor,
                 )
-                retry_after_seconds = recovery.retry_after_seconds
+                if recovery.retry_after_seconds is not None:
+                    current_retry = self._interaction_recovery_retry_after
+                    self._interaction_recovery_retry_after = min(
+                        current_retry or recovery.retry_after_seconds,
+                        recovery.retry_after_seconds,
+                    )
                 for record in recovery.claimed:
                     await self._bind_replayed_interaction(record)
+                self._interaction_recovery_cursor = recovery.next_cursor
         except Exception as exc:
             logger.warning(
                 "Durable interaction replay failed (%s)", type(exc).__name__,
             )
-            retry_after_seconds = min(retry_after_seconds or 0.5, 0.5)
-        finally:
-            if retry_after_seconds is not None and not self._closed:
+            current_retry = self._interaction_recovery_retry_after
+            self._interaction_recovery_retry_after = min(
+                current_retry or 0.5,
+                0.5,
+            )
+            if not self._interaction_recovery_cursor:
+                self._interaction_recovery_rescan_pending = True
+            if not self._closed:
+                self._schedule_interaction_replay(0.5)
+            return
+        if self._closed:
+            return
+        if (
+            self._interaction_recovery_cursor == cursor_before
+            and self._interaction_recovery_cursor
+            and recovery.retry_after_seconds is not None
+        ):
+            self._schedule_interaction_replay(recovery.retry_after_seconds)
+            return
+        if (
+            self._interaction_recovery_cursor
+            and len(self._pending_interactions) < _MAX_RECOVERED_INTERACTION_CARDS
+        ):
+            self._schedule_interaction_replay(0.0, immediate=True)
+            return
+        if not self._interaction_recovery_cursor:
+            retry_after_seconds = self._interaction_recovery_retry_after
+            self._interaction_recovery_retry_after = None
+            if retry_after_seconds is not None:
+                self._interaction_recovery_rescan_pending = True
                 self._schedule_interaction_replay(retry_after_seconds)
+
+    def _schedule_interaction_recovery_fill(self) -> None:
+        """Fill one released replay-card slot from the current snapshot."""
+        if (
+            (self._interaction_recovery_cursor or self._interaction_recovery_rescan_pending)
+            and len(self._pending_interactions) < _MAX_RECOVERED_INTERACTION_CARDS
+            and not self._closed
+        ):
+            self._schedule_interaction_replay(0.0, immediate=True)
 
     async def _bind_replayed_interaction(
         self,
@@ -1052,12 +1106,20 @@ class JsonlEngineBridge:
             raise
         return True
 
-    def _schedule_interaction_replay(self, delay_seconds: float) -> None:
+    def _schedule_interaction_replay(
+        self,
+        delay_seconds: float,
+        *,
+        immediate: bool = False,
+    ) -> None:
         """Recheck a live foreign owner without stealing its valid lease."""
         current = self._interaction_replay_task
         if current is not None and not current.done():
             return
-        delay = max(0.05, delay_seconds + 0.05)
+        delay = (
+            max(0.0, delay_seconds)
+            if immediate else max(0.05, delay_seconds + 0.05)
+        )
 
         async def replay_after_lease() -> None:
             try:
@@ -1236,6 +1298,7 @@ class JsonlEngineBridge:
         )
         if self._pending_interactions.get(interaction_id) is pending:
             self._pending_interactions.pop(interaction_id, None)
+            self._schedule_interaction_recovery_fill()
 
     def status_payload(self, *, include_slash_commands: bool = True) -> dict[str, Any]:
         """Build the footer/status payload consumed by the terminal UI."""
@@ -5899,6 +5962,7 @@ class JsonlEngineBridge:
         finally:
             if self._pending_interactions.get(request_id) is pending:
                 self._pending_interactions.pop(request_id, None)
+                self._schedule_interaction_recovery_fill()
 
     def _next_interaction_request_id(self) -> str:
         while True:
@@ -5985,6 +6049,7 @@ class JsonlEngineBridge:
         )
         if pending.replay_only:
             self._pending_interactions.pop(interaction_id, None)
+            self._schedule_interaction_recovery_fill()
 
     async def _read_goal_linked_interaction(
         self,
@@ -6177,6 +6242,7 @@ class JsonlEngineBridge:
                         UserInteractionUnavailableError("用户已取消本次交互")
                     )
             self._pending_interactions.pop(interaction_id, None)
+            self._schedule_interaction_recovery_fill()
         await self.emit(
             ServerEventType.INTERACTION_RESOLVED,
             {

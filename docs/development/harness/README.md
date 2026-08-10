@@ -67,7 +67,8 @@ HAR-10.6a 在 Harness Store v13 提供 durable interaction request/answer、time
 Textual TUI 复用相同 authority adapter；UI-18.4c 已补齐 Goal interaction ledger 与显式 cancel。手动
 takeover 已由 UI-18.4d2 以宿主绑定方式补齐；UI-18.4d3 又补齐 filter-bound opaque cursor、
 New UI 页内详情和 TUI 命令式后续页。HAR-10.6c 又以 Store v24 增加不可变四级优先级、
-4:2:1:1 公平轮转、旧账本哈希兼容，以及 New UI/TUI/Goal 同源投影；pending recovery cursor 仍未完成。
+4:2:1:1 公平轮转、旧账本哈希兼容，以及 New UI/TUI/Goal 同源投影；HAR-10.6d 已进一步补齐
+snapshot-bound pending recovery cursor、跨页公平轮转、New UI 50 卡有界补位和 TUI 后续页恢复。
 HAR-10.3a 已为 New UI 增加 `/send-now` 与安全边界队列提升；HAR-10.3b1 已把 Harness Store 升级到 v14，
 交付持久队列 Store 核心；HAR-10.3b2 已进一步接入 Bridge durable enqueue、RunLease claim/renew、fenced terminal
 和显式 Session 恢复；HAR-10.3b3 已升级 Harness Store v15，交付 `/queue` 历史 claim 审查、审计

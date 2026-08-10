@@ -13,7 +13,10 @@ from naumi_agent.harness.interaction import (
     InteractionSubjectKind,
     new_interaction_record,
 )
-from naumi_agent.harness.store import HarnessStoreConflictError
+from naumi_agent.harness.store import (
+    HarnessPendingInteractionPage,
+    HarnessStoreConflictError,
+)
 from naumi_agent.user_interaction import (
     UserInteractionRequest,
     normalize_interaction_response,
@@ -36,10 +39,10 @@ class InteractionAuthorityStore(Protocol):
 
     async def takeover_interaction(self, **kwargs: Any) -> HarnessInteractionRecord: ...
 
-    async def list_pending_interactions(
+    async def list_pending_interactions_page(
         self,
         **kwargs: Any,
-    ) -> tuple[HarnessInteractionRecord, ...]: ...
+    ) -> HarnessPendingInteractionPage: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +50,7 @@ class InteractionRecoveryBatch:
     claimed: tuple[HarnessInteractionRecord, ...]
     expired_ids: tuple[str, ...]
     retry_after_seconds: float | None
+    next_cursor: str
 
 
 class InteractionClaimError(RuntimeError):
@@ -235,18 +239,21 @@ class DurableInteractionAuthorityClient:
         *,
         now: str | None = None,
         limit: int = 50,
+        cursor: str = "",
     ) -> InteractionRecoveryBatch:
         timestamp = datetime.fromisoformat(now) if now else datetime.now(UTC)
         if timestamp.utcoffset() is None:
             raise ValueError("interaction recovery now 必须包含时区。")
-        records = await self.store.list_pending_interactions(
+        page = await self.store.list_pending_interactions_page(
             workspace_root=self.workspace_root,
             limit=limit,
+            cursor=cursor,
         )
         claimed: list[HarnessInteractionRecord] = []
         expired_ids: list[str] = []
         retry_after: float | None = None
-        for record in records:
+        page_failed = False
+        for record in page.items:
             try:
                 if (
                     record.expires_at
@@ -273,11 +280,13 @@ class DurableInteractionAuthorityClient:
                     )
                 claimed.append(record)
             except (HarnessStoreConflictError, ValueError):
+                page_failed = True
                 retry_after = min(retry_after or 0.5, 0.5)
         return InteractionRecoveryBatch(
             claimed=tuple(claimed),
             expired_ids=tuple(expired_ids),
             retry_after_seconds=retry_after,
+            next_cursor=cursor if page_failed else page.next_cursor,
         )
 
     @staticmethod

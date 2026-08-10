@@ -82,8 +82,9 @@ Harness interaction authority 与 PursuitStore 目前不是同一个事务域。
   pending 重启复用与 answered authority 重读；Resolution 不授予 Candidate accept/promotion；
 - EVO-05.5f5j 已通过同一 adapter 收敛并发 stable-entry 交互，并在用户回答后重验 Completion/Plan/control；
 - HAR-10.6c 已补齐四级不可变优先级、4:2:1:1 公平调度、v1 哈希兼容与 New UI/TUI 同源展示；
-  pending recovery 仍上限 50 且无独立 cursor；
+  HAR-10.6d 已补齐独立 snapshot-bound pending recovery cursor，并让 New UI 在 50 卡上限内补位、TUI
+  在当前批次结束后继续下一页；
 - 跨 Store 原子提交、at-rest encryption 和多实例通知仍分别属于 ARC-05/08、ARC-08 与 ARC-06。
 
-HAR-10.3a、HAR-10.6c、UI-18.4c、UI-18.4d1、UI-18.4d2 与 UI-18.4d3 均已交付；下一步应重新比较
+HAR-10.3a、HAR-10.6c、HAR-10.6d、UI-18.4c、UI-18.4d1、UI-18.4d2 与 UI-18.4d3 均已交付；下一步应重新比较
 HAR-10.7 Worker 调度、CC-03 行为对齐与其他用户可见闭环，不提前实现完整 ARC-06。
