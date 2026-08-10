@@ -2919,7 +2919,7 @@ def _print_help() -> None:
             "revalidation-rollback-execute|revalidation-rollback-outcome|"
             "outcome-before-after|outcome-verify-runtime|"
             "outcome-verify-behavior|outcome-behavior-coverage|"
-            "outcome-behavior-matrix|"
+            "outcome-behavior-matrix|outcome-observation-contract|"
             "outcome-place-behavior|outcome-resolve-behavior|"
             "outcome-dispatch-behavior|outcome-claim-behavior|"
             "outcome-deliver-behavior|outcome-authorize-behavior|"
@@ -3804,6 +3804,19 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 arg="",
             )
             return
+        if action == "outcome-observation-contract":
+            if len(parts) != 2:
+                raise ValueError(
+                    "outcome-observation-contract 需要一个 Rollback Request ID。"
+                )
+            await _run_tool_slash_command(
+                engine,
+                slash_command="/evolution",
+                tool_name="evolution_post_rollback_observation_contract",
+                parse_args=lambda _arg: {"request_id": parts[1]},
+                arg="",
+            )
+            return
         if action == "outcome-place-behavior":
             if len(parts) != 4:
                 raise ValueError(
@@ -3997,7 +4010,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "revalidation-rollback-execute、revalidation-rollback-outcome、"
                 "outcome-before-after、outcome-verify-runtime、"
                 "outcome-verify-behavior、outcome-behavior-coverage、"
-                "outcome-behavior-matrix、"
+                "outcome-behavior-matrix、outcome-observation-contract、"
                 "outcome-place-behavior、outcome-resolve-behavior、"
                 "outcome-dispatch-behavior、outcome-claim-behavior、"
                 "outcome-deliver-behavior、outcome-authorize-behavior、"
@@ -4193,6 +4206,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "<final-evaluation-comparison-id>；"
             "/evolution outcome-behavior-coverage <rollback-request-id>；"
             "/evolution outcome-behavior-matrix <rollback-request-id>；"
+            "/evolution outcome-observation-contract <rollback-request-id>；"
             "/evolution outcome-place-behavior <rollback-request-id> "
             "<final-evaluation-comparison-id> <worker-id>；"
             "/evolution outcome-resolve-behavior <rollback-request-id> "
