@@ -81,6 +81,9 @@ class ClientEventType(StrEnum):
     PURSUIT_TERMINAL_DEAD_LETTER_REQUEUE = (
         "pursuit/terminal-outbox/dead-letter/requeue"
     )
+    PURSUIT_TERMINAL_DEAD_LETTER_ABANDON = (
+        "pursuit/terminal-outbox/dead-letter/abandon"
+    )
     EVOLUTION_REVIEW_REQUEST = "evolution/review/request"
     EVOLUTION_EVALUATION_LANE_REQUEST = "evolution/evaluation-lane/request"
     SET_MODE = "set_mode"
@@ -176,6 +179,9 @@ class ServerEventType(StrEnum):
     PURSUIT_TERMINAL_OUTBOX_ACTION_RESULT = "pursuit/terminal-outbox/action_result"
     PURSUIT_TERMINAL_DEAD_LETTER_REQUEUE_RESULT = (
         "pursuit/terminal-outbox/dead-letter/requeue_result"
+    )
+    PURSUIT_TERMINAL_DEAD_LETTER_ABANDON_RESULT = (
+        "pursuit/terminal-outbox/dead-letter/abandon_result"
     )
     EVOLUTION_REVIEW = "evolution/review"
     EVOLUTION_EVALUATION_LANE = "evolution/evaluation-lane"

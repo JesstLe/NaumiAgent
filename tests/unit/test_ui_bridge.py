@@ -78,6 +78,10 @@ from naumi_agent.orchestrator.pursuit_recovery_attempt import (
     new_recovery_attempt,
 )
 from naumi_agent.orchestrator.pursuit_store import PursuitStore
+from naumi_agent.orchestrator.pursuit_terminal_dead_letter_abandon import (
+    PursuitTerminalDeadLetterAbandonReason,
+    new_pursuit_terminal_dead_letter_abandon_receipt,
+)
 from naumi_agent.orchestrator.pursuit_terminal_dead_letter_action import (
     new_pursuit_terminal_dead_letter_requeue_receipt,
 )
@@ -1191,11 +1195,13 @@ def test_protocol_contract_matches_python_enums() -> None:
                 "pursuit/recovery/resume",
                 "pursuit/terminal-outbox/run_now",
                 "pursuit/terminal-outbox/dead-letter/requeue",
+                "pursuit/terminal-outbox/dead-letter/abandon",
             ],
             "server_events": [
                 "pursuit/recovery/action_result",
                 "pursuit/terminal-outbox/action_result",
                 "pursuit/terminal-outbox/dead-letter/requeue_result",
+                "pursuit/terminal-outbox/dead-letter/abandon_result",
             ],
         },
         "terminal_event_recovery": {
@@ -8029,6 +8035,70 @@ async def test_bridge_terminal_dead_letter_requeue_uses_tool_and_public_receipt(
     assert result["payload"]["receipt"]["dead_letter_id"] == dead_letter_id
     assert "source_request_sha256" not in str(result["payload"])
     assert "dispatch_before_sha256" not in str(result["payload"])
+    assert bridge._pursuit_terminal_outbox_tasks == {}
+
+
+@pytest.mark.asyncio
+async def test_bridge_terminal_dead_letter_abandon_uses_tool_and_public_receipt(
+    tmp_path: Path,
+) -> None:
+    engine = _FakeEngine()
+    dead_letter_id = "ptfail_" + "a" * 24
+    receipt_holder: dict[str, Any] = {}
+    engine.pursuit_store = SimpleNamespace(
+        get_terminal_dead_letter_abandon=lambda target: receipt_holder.get(target)
+    )
+    engine.get_or_create_session = AsyncMock(return_value=SimpleNamespace(id="session"))
+
+    async def execute_tool(tool_call: ToolCall, **kwargs: Any) -> ToolResult:
+        assert tool_call.name == "pursuit_terminal_dead_letter_abandon"
+        assert json.loads(tool_call.arguments) == {
+            "dead_letter_id": dead_letter_id,
+            "reason": "superseded",
+        }
+        assert kwargs["agent_name"] == "new-ui"
+        receipt_holder[dead_letter_id] = (
+            new_pursuit_terminal_dead_letter_abandon_receipt(
+                dead_letter_id=dead_letter_id,
+                source_request_id=tool_call.id,
+                prior_failure_sha256="b" * 64,
+                dispatch_sha256="c" * 64,
+                failure_sequence=2,
+                reason=PursuitTerminalDeadLetterAbandonReason.SUPERSEDED,
+                abandoned_at=10.0,
+            )
+        )
+        return ToolResult(
+            call_id=tool_call.id,
+            status="success",
+            content="死信已永久停止后续投递。",
+        )
+
+    engine.execute_tool = execute_tool  # type: ignore[attr-defined]
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    bridge._client_capabilities = {"pursuit_recovery_actions"}
+    bridge._protocol_negotiated = True
+    bridge.show_goal_panel = AsyncMock()  # type: ignore[method-assign]
+
+    await bridge.handle_client_record({
+        "id": "dead-letter-abandon-request",
+        "type": ClientEventType.PURSUIT_TERMINAL_DEAD_LETTER_ABANDON,
+        "payload": {"dead_letter_id": dead_letter_id, "reason": "superseded"},
+    })
+    await asyncio.gather(*tuple(bridge._pursuit_terminal_outbox_tasks.values()))
+
+    result = next(
+        item
+        for item in _records(writer)
+        if item["type"]
+        == "pursuit/terminal-outbox/dead-letter/abandon_result"
+    )
+    assert result["payload"]["status"] == "abandoned"
+    assert result["payload"]["receipt"]["reason"] == "superseded"
+    assert "source_request_sha256" not in str(result["payload"])
+    assert "dispatch_sha256" not in str(result["payload"])
     assert bridge._pursuit_terminal_outbox_tasks == {}
 
 

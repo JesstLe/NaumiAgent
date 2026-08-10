@@ -1685,6 +1685,12 @@ class JsonlEngineBridge:
                 request_id=request_id,
             )
             return
+        if event_type == ClientEventType.PURSUIT_TERMINAL_DEAD_LETTER_ABANDON:
+            await self.start_pursuit_terminal_dead_letter_abandon(
+                payload,
+                request_id=request_id,
+            )
+            return
         if event_type == ClientEventType.EVOLUTION_REVIEW_REQUEST:
             await self.show_evolution_review(payload, request_id=request_id)
             return
@@ -4925,6 +4931,159 @@ class JsonlEngineBridge:
     ) -> None:
         await self.emit(
             ServerEventType.PURSUIT_TERMINAL_DEAD_LETTER_REQUEUE_RESULT,
+            {
+                "schema_version": 1,
+                "dead_letter_id": dead_letter_id,
+                "status": status,
+                "code": code,
+                "message": _bounded_action_message(message),
+                "receipt": receipt,
+            },
+            request_id=request_id,
+        )
+
+    async def start_pursuit_terminal_dead_letter_abandon(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Permanently stop one selected dead letter through ToolExecution."""
+        dead_letter_id = str(payload.get("dead_letter_id") or "").strip()
+        reason = str(payload.get("reason") or "").strip()
+        reasons = {
+            "no_longer_required",
+            "superseded",
+            "external_resolution",
+            "invalid_target",
+        }
+        if (
+            not re.fullmatch(r"ptfail_[0-9a-f]{24}", dead_letter_id)
+            or reason not in reasons
+        ):
+            await self._emit_pursuit_terminal_dead_letter_abandon_result(
+                request_id=request_id,
+                dead_letter_id=dead_letter_id,
+                status="blocked",
+                code="invalid_abandon_target",
+                message="死信放弃目标或原因无效，请刷新 Goal 页面后重新选择。",
+            )
+            return
+        if request_id in self._pursuit_terminal_outbox_tasks:
+            return
+        if self._pursuit_terminal_outbox_tasks:
+            await self._emit_pursuit_terminal_dead_letter_abandon_result(
+                request_id=request_id,
+                dead_letter_id=dead_letter_id,
+                status="blocked",
+                code="operation_busy",
+                message="已有终态队列控制动作正在执行，请等待其回执。",
+            )
+            return
+
+        async def publish_tool_event(
+            event: str,
+            data: dict[str, object],
+        ) -> None:
+            await self.handle_engine_event(event, dict(data))
+
+        async def run() -> None:
+            from naumi_agent.tools.base import ToolCall
+
+            tool_call_id = (
+                "new-ui-terminal-abandon-"
+                + hashlib.sha256(request_id.encode("utf-8")).hexdigest()[:32]
+            )
+            try:
+                await self.engine.get_or_create_session()
+                result = await self.engine.execute_tool(
+                    ToolCall(
+                        id=tool_call_id,
+                        name="pursuit_terminal_dead_letter_abandon",
+                        arguments=json.dumps(
+                            {"dead_letter_id": dead_letter_id, "reason": reason},
+                            ensure_ascii=False,
+                        ),
+                    ),
+                    on_event=publish_tool_event,
+                    agent_name="new-ui",
+                )
+                receipt = self.engine.pursuit_store.get_terminal_dead_letter_abandon(
+                    dead_letter_id
+                )
+                if receipt is None:
+                    status = "blocked" if result.status == "error" else "error"
+                    code = (
+                        "tool_execution_rejected"
+                        if result.status == "error"
+                        else "receipt_authority_missing"
+                    )
+                else:
+                    status = "abandoned"
+                    code = "abandoned"
+                await self._emit_pursuit_terminal_dead_letter_abandon_result(
+                    request_id=request_id,
+                    dead_letter_id=dead_letter_id,
+                    status=status,
+                    code=code,
+                    message=_bounded_action_message(result.content),
+                    receipt=(
+                        receipt.model_dump(
+                            mode="json",
+                            exclude={
+                                "source_request_sha256",
+                                "prior_failure_sha256",
+                                "dispatch_sha256",
+                            },
+                        )
+                        if receipt is not None
+                        else None
+                    ),
+                )
+                await self.show_goal_panel({}, request_id=request_id)
+            except asyncio.CancelledError:
+                if self._closed:
+                    raise
+                await self._emit_pursuit_terminal_dead_letter_abandon_result(
+                    request_id=request_id,
+                    dead_letter_id=dead_letter_id,
+                    status="error",
+                    code="cancelled",
+                    message="死信放弃请求已取消，请刷新 Goal 页面确认权威状态。",
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Terminal dead-letter abandon UI action failed (%s)",
+                    type(exc).__name__,
+                )
+                await self._emit_pursuit_terminal_dead_letter_abandon_result(
+                    request_id=request_id,
+                    dead_letter_id=dead_letter_id,
+                    status="error",
+                    code="internal_error",
+                    message="死信未能安全放弃，请刷新状态或运行 `/doctor`。",
+                )
+            finally:
+                self._pursuit_terminal_outbox_tasks.pop(request_id, None)
+
+        task = asyncio.create_task(
+            run(),
+            name=f"pursuit-terminal-abandon-{request_id}",
+        )
+        self._pursuit_terminal_outbox_tasks[request_id] = task
+
+    async def _emit_pursuit_terminal_dead_letter_abandon_result(
+        self,
+        *,
+        request_id: str,
+        dead_letter_id: str,
+        status: str,
+        code: str,
+        message: str,
+        receipt: dict[str, Any] | None = None,
+    ) -> None:
+        await self.emit(
+            ServerEventType.PURSUIT_TERMINAL_DEAD_LETTER_ABANDON_RESULT,
             {
                 "schema_version": 1,
                 "dead_letter_id": dead_letter_id,

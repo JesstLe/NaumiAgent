@@ -12,6 +12,9 @@ from naumi_agent.orchestrator.pursuit_store import PursuitStore, PursuitStoreErr
 from naumi_agent.orchestrator.pursuit_terminal_dead_letter import (
     PursuitTerminalOutboxFailureDisposition,
 )
+from naumi_agent.orchestrator.pursuit_terminal_dead_letter_abandon import (
+    PursuitTerminalDeadLetterAbandonReason,
+)
 from naumi_agent.orchestrator.pursuit_terminal_outbox_worker import (
     PursuitTerminalFailureClass,
     PursuitTerminalOutboxWorker,
@@ -330,6 +333,99 @@ def test_dead_letter_requeue_permission_has_no_secondary_confirmation() -> None:
         PermissionMode.STRICT,
     }
     assert rule.requires_confirmation is False
+
+    abandon = TOOL_PERMISSIONS["pursuit_terminal_dead_letter_abandon"]
+    assert set(abandon.allowed_modes) == set(rule.allowed_modes)
+    assert abandon.requires_confirmation is False
+
+
+def test_exact_abandon_is_terminal_without_claiming_delivery(tmp_path) -> None:
+    store, outbox_id, due_at = _pending_store(tmp_path)
+    claim = store.claim_next_terminal_outbox(
+        owner_id="abandon-worker",
+        now=due_at,
+        lease_seconds=30,
+    )
+    assert claim is not None
+    dead, _ = store.record_terminal_outbox_failure(
+        outbox_id,
+        owner_id="abandon-worker",
+        claim_epoch=claim.dispatch.claim_epoch,
+        now=due_at + 1,
+        retry_delay_seconds=5,
+        failure_code="lease_missing",
+        max_failures=8,
+        permanent=True,
+    )
+
+    receipt, created = store.abandon_terminal_outbox_dead_letter(
+        dead.event_id,
+        source_request_id="permission-call-abandon-1",
+        reason=PursuitTerminalDeadLetterAbandonReason.SUPERSEDED,
+        now=due_at + 2,
+    )
+
+    assert created is True
+    assert receipt.dead_letter_id == dead.event_id
+    assert receipt.reason is PursuitTerminalDeadLetterAbandonReason.SUPERSEDED
+    assert store.get_terminal_dead_letter_abandon(dead.event_id) == receipt
+    replayed, replay_created = store.abandon_terminal_outbox_dead_letter(
+        dead.event_id,
+        source_request_id="permission-call-abandon-1",
+        reason=PursuitTerminalDeadLetterAbandonReason.SUPERSEDED,
+        now=due_at + 20,
+    )
+    assert replayed == receipt
+    assert replay_created is False
+    assert store.terminal_outbox_dead_letter_catalog().total == 0
+    assert store.terminal_outbox_backlog(now=due_at + 100).total_pending == 0
+    assert store.list_pending_terminal_outbox() == []
+    assert store.claim_next_terminal_outbox(
+        owner_id="must-not-claim",
+        now=due_at + 100,
+    ) is None
+    outbox = store.get_terminal_outbox(outbox_id)
+    assert outbox is not None
+    assert outbox.state.value == "pending"
+
+
+def test_tampered_abandon_receipt_fails_catalog_authentication(tmp_path) -> None:
+    store, outbox_id, due_at = _pending_store(tmp_path)
+    claim = store.claim_next_terminal_outbox(
+        owner_id="abandon-tamper-worker",
+        now=due_at,
+        lease_seconds=30,
+    )
+    assert claim is not None
+    dead, _ = store.record_terminal_outbox_failure(
+        outbox_id,
+        owner_id="abandon-tamper-worker",
+        claim_epoch=claim.dispatch.claim_epoch,
+        now=due_at + 1,
+        retry_delay_seconds=5,
+        failure_code="lease_missing",
+        max_failures=8,
+        permanent=True,
+    )
+    store.abandon_terminal_outbox_dead_letter(
+        dead.event_id,
+        source_request_id="permission-call-abandon-tamper",
+        reason=PursuitTerminalDeadLetterAbandonReason.INVALID_TARGET,
+        now=due_at + 2,
+    )
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute(
+            "UPDATE pursuit_terminal_outbox_dead_letter_abandons "
+            "SET payload_json = replace(payload_json, 'invalid_target', "
+            "'external_resolution') WHERE dead_letter_id = ?",
+            (dead.event_id,),
+        )
+
+    reopened = PursuitStore(store.base_dir)
+    with pytest.raises(PursuitStoreError, match="receipt digest 不匹配"):
+        reopened.get_terminal_dead_letter_abandon(dead.event_id)
+    with pytest.raises(PursuitStoreError, match="receipt digest 不匹配"):
+        reopened.terminal_outbox_dead_letter_catalog()
 
 
 def test_tampered_requeue_receipt_fails_closed_before_claim(tmp_path) -> None:

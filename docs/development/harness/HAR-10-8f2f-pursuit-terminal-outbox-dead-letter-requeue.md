@@ -131,11 +131,11 @@ node --test \
 
 ## 自我审视与未完成边界
 
-- requeue 是明确的可逆恢复动作，不是业务接受；尚无 accept/abandon receipt，用户不能机械收口一个确定不应再投递的记录；
+- requeue 是明确的可逆恢复动作，不是业务接受；后续 HAR-10.8f2g 已用独立 abandon receipt 收口确定不应再投递的记录；
 - active catalog 仍受 10000 authority 完整扫描上限与 20 条 UI 投影上限约束；历史处置尚无分页视图；
 - terminal outbox 仍是 pull worker，尚未实现 push stream；
 - 跨 Harness/Pursuit Store 的最终原子提交、kill-at-every-write-point 矩阵和长时间 soak 仍未完成；
-- retention 必须等 accept/abandon 与历史认证边界明确后再进入 apply，不能用删除替代处置。
+- retention 必须等 disposed history 与引用保护边界明确后再进入 apply，不能用删除替代处置。
 
-下一最小切片应在依赖文档复核后，从 exact accept/abandon receipt 与故障注入前置中选择能解锁更多 Harness
-验收的最小纵切，不一次性扩展全部 disposition。
+后续 HAR-10.8f2g 已交付 exact abandon receipt 与不可领取终态覆盖层。下一最小切片应抽取统一 effective-state
+projection 和认证 abandoned history，为 retention preview 提供稳定输入；仍不一次性扩展 retention apply。

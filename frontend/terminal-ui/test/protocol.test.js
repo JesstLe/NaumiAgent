@@ -2459,6 +2459,47 @@ test("Pursuit terminal dead-letter requeue requires an exact public receipt", ()
   );
 });
 
+test("Pursuit terminal dead-letter abandon requires an exact public receipt", () => {
+  const deadLetterId = `ptfail_${"a".repeat(24)}`;
+  const normalized = normalizeServerRecord({
+    v: PROTOCOL_VERSION,
+    type: "pursuit/terminal-outbox/dead-letter/abandon_result",
+    payload: {
+      schema_version: 1,
+      dead_letter_id: deadLetterId,
+      status: "abandoned",
+      code: "abandoned",
+      message: "死信已永久停止后续投递。",
+      receipt: {
+        schema_version: 1,
+        receipt_id: `ptabn_${"b".repeat(24)}`,
+        dead_letter_id: deadLetterId,
+        failure_sequence: 2,
+        reason: "superseded",
+        abandoned_at: 10,
+        receipt_sha256: "c".repeat(64),
+        source_request_sha256: "drop",
+        dispatch_sha256: "drop",
+      },
+    },
+  });
+
+  assert.equal(normalized.payload.status, "abandoned");
+  assert.equal(normalized.payload.receipt.reason, "superseded");
+  assert.equal("source_request_sha256" in normalized.payload.receipt, false);
+  assert.equal("dispatch_sha256" in normalized.payload.receipt, false);
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "pursuit/terminal-outbox/dead-letter/abandon_result",
+      payload: {
+        ...normalized.payload,
+        receipt: { ...normalized.payload.receipt, reason: "free_text" },
+      },
+    }),
+    /reason 无效/,
+  );
+});
+
 test("evolution review snapshot is strict and drops private fields", () => {
   const item = {
     candidate_id: `evc_${"a".repeat(24)}`, finding_code: "user_reported_defect",

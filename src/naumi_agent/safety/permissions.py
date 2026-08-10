@@ -1460,6 +1460,16 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         ],
         requires_confirmation=False,
     ),
+    "pursuit_terminal_dead_letter_abandon": PermissionRule(
+        tool_name="pursuit_terminal_dead_letter_abandon",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+    ),
     "hot_reload": PermissionRule(
         tool_name="hot_reload",
         allowed_modes=[

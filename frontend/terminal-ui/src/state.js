@@ -470,6 +470,7 @@ export function createInitialState() {
       interactionCursorStack: [],
       selectedInteractionIndex: 0,
       selectedDeadLetterIndex: 0,
+      selectedAbandonReasonIndex: 0,
       recoveryActionPending: false,
       recoveryActionRunId: "",
       recoveryActionRequestId: "",
@@ -930,6 +931,9 @@ export function reduceServerEvent(state, record) {
       break;
     case "pursuit/terminal-outbox/dead-letter/requeue_result":
       applyPursuitTerminalDeadLetterRequeueResult(state, record, payload);
+      break;
+    case "pursuit/terminal-outbox/dead-letter/abandon_result":
+      applyPursuitTerminalDeadLetterAbandonResult(state, record, payload);
       break;
     case "evolution/review":
       state.evolutionReview.snapshot = payload;
@@ -1411,6 +1415,7 @@ export function reduceServerEvent(state, record) {
         interactionCursorStack: [],
         selectedInteractionIndex: 0,
         selectedDeadLetterIndex: 0,
+        selectedAbandonReasonIndex: 0,
         recoveryActionPending: false,
         recoveryActionRunId: "",
         recoveryActionRequestId: "",
@@ -4812,7 +4817,7 @@ export function handleGoalPanelKey(state, key, send) {
   const lower = String(key || "").toLowerCase();
   if (
     state.goalPanel.loading
-    && ["r", "x", "o", "d", "u", "j", "k", "f", "n", "p", "\r", "\n"].includes(lower)
+    && ["r", "x", "o", "d", "u", "a", "z", "j", "k", "f", "n", "p", "\r", "\n"].includes(lower)
   ) {
     return true;
   }
@@ -4839,6 +4844,16 @@ export function handleGoalPanelKey(state, key, send) {
   }
   if (lower === "u") {
     requestSelectedTerminalDeadLetterRequeue(state, send);
+    return true;
+  }
+  if (lower === "a") {
+    state.goalPanel.selectedAbandonReasonIndex = (
+      Math.max(0, Number(state.goalPanel.selectedAbandonReasonIndex) || 0) + 1
+    ) % 4;
+    return true;
+  }
+  if (lower === "z") {
+    requestSelectedTerminalDeadLetterAbandon(state, send);
     return true;
   }
   const interactions = state.goalPanel.snapshot?.interactions ?? [];
@@ -5086,6 +5101,69 @@ function applyPursuitTerminalDeadLetterRequeueResult(state, record, payload) {
   state.goalPanel.terminalOutboxActionError = successful
     ? ""
     : String(payload.message || "死信重入队失败。");
+  return true;
+}
+
+function requestSelectedTerminalDeadLetterAbandon(state, send) {
+  state.goalPanel.terminalOutboxActionNotice = "";
+  state.goalPanel.terminalOutboxActionError = "";
+  const deadLetters = state.goalPanel.snapshot?.terminal_outbox?.dead_letters ?? [];
+  const selected = deadLetters[
+    Math.max(0, Number(state.goalPanel.selectedDeadLetterIndex) || 0)
+  ];
+  if (!selected) {
+    state.goalPanel.terminalOutboxActionError = "当前没有可放弃的死信。";
+    return false;
+  }
+  if (state.goalPanel.terminalOutboxActionPending) return false;
+  const reasons = [
+    "no_longer_required",
+    "superseded",
+    "external_resolution",
+    "invalid_target",
+  ];
+  const reason = reasons[
+    Math.max(0, Number(state.goalPanel.selectedAbandonReasonIndex) || 0)
+      % reasons.length
+  ];
+  const capability = negotiatedEventCapabilityStatus(
+    state,
+    "client",
+    "pursuit/terminal-outbox/dead-letter/abandon",
+  );
+  if (capability.status !== "available") {
+    state.goalPanel.terminalOutboxActionNotice = (
+      capability.status === "pending"
+        ? "协议协商尚未完成，未发送死信放弃请求。"
+        : `当前 Bridge 不支持页内放弃；请使用 \`/pursue outbox abandon ${selected.dead_letter_id} ${reason}\`。`
+    );
+    return false;
+  }
+  const requestId = String(send(
+    "pursuit/terminal-outbox/dead-letter/abandon",
+    { dead_letter_id: selected.dead_letter_id, reason },
+  ) || "");
+  state.goalPanel.terminalOutboxActionPending = true;
+  state.goalPanel.terminalOutboxActionRequestId = requestId;
+  return true;
+}
+
+function applyPursuitTerminalDeadLetterAbandonResult(state, record, payload) {
+  const pendingRequestId = String(state.goalPanel.terminalOutboxActionRequestId || "");
+  if (
+    pendingRequestId
+    && String(record.request_id || "")
+    && pendingRequestId !== String(record.request_id)
+  ) return false;
+  state.goalPanel.terminalOutboxActionPending = false;
+  state.goalPanel.terminalOutboxActionRequestId = "";
+  const successful = payload.status === "abandoned";
+  state.goalPanel.terminalOutboxActionNotice = successful
+    ? String(payload.message || "死信已永久停止后续投递。")
+    : "";
+  state.goalPanel.terminalOutboxActionError = successful
+    ? ""
+    : String(payload.message || "死信放弃失败。");
   return true;
 }
 

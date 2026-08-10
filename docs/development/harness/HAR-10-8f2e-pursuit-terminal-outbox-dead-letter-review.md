@@ -65,4 +65,5 @@ New UI 和 Goal Tool/Textual fallback 使用同一 Goal projection，逐条红�
 - catalog 为保证完整认证使用 10000 authority 硬上限；规模增长后需要认证分页 root，不能取消完整性检查。
 - 当前仅列 active pending dead letters；已经由未来人工操作收口的历史事实仍保留在 failure chain，但尚无历史页。
 - HAR-10.8f2f 已完成第一种 exact manual disposition：以 `dead_letter_id` 定位、复验最新 head、经
-  ToolExecution 权限链生成不可变 requeue 回执。accept/abandon 与 retention apply 仍未实现。
+  ToolExecution 权限链生成不可变 requeue 回执；HAR-10.8f2g 又补齐 exact abandon。disposed history 与
+  retention apply 仍未实现。
