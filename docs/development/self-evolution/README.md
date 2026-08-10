@@ -211,6 +211,9 @@ append-only 持久化并在 inspect 时动态复核 active Deployment、Binding�
 [EVO-05.5f5q](EVO-05-5f5q-stable-release-bound-execution-outcome.md) 已交付：将真实 ChatRun 的 release provenance、Completion
 Receipt、RunUsage 与 heartbeat coverage 绑定到 exact Stable Intent、Population member 和 durable Window；失败结果也进入 Population
 observation，只有 completed 形成单 run authority，仍不授予 stable-stage、rollout 或 promotion authority。
+[EVO-05.5f5r](EVO-05-5f5r-stable-completed-run-aggregation.md) 已交付：动态重验同一 Stable Intent 的不同真实 run，按 current
+stable Window、GREEN Baseline 和第四阶段 guardrail 计算 completed-run aggregation；它只形成单 installation member 的
+stable-stage completion，仍不冒充完整 Population rollout 或 promotion。
 [EVO-05.6a](EVO-05-6a-automatic-pause-rollback-request.md) 已让 exact breach 幂等触发或复用 HMAC kill switch，并冻结
 绑定 exact prior Rollback Plan 的只读 Request；它不写 workspace/Git，也不把请求虚报成已回滚。
 [EVO-05.6b1](EVO-05-6b1-immutable-rollback-source.md) 已从 exact Git commit/tree 读取 baseline blob，验证每个
