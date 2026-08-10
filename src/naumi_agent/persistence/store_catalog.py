@@ -186,7 +186,7 @@ def build_store_catalog(config: AppConfig) -> tuple[StoreDefinition, ...]:
             WORKER_REGISTRY_SCHEMA_VERSION,
             DataSensitivity.RESTRICTED,
             RetentionPolicy.AUDIT_LONG_TERM,
-            "Worker incarnation、能力合同、撤销与 fencing 历史",
+            "Worker incarnation、能力合同、durable health、撤销与 fencing 历史",
         ),
         _definition(
             "runtime.execution_grants",

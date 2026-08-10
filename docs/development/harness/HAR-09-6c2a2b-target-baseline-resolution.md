@@ -45,6 +45,7 @@ authority，并明确标注“未下载、未安装、未下发、无执行/结�
 
 ## 后续切片
 
-1. `HAR-09.6c2a3 Remote Dispatch + Claim`：fresh heartbeat、accepting-jobs、资源容量与 fenced lease；
-2. `HAR-09.6c2a4 Execution Authorization + Signed Result Ingestion`；
-3. `HAR-09.6c2b Post-Rollback Behavioral Matrix`。
+1. `HAR-09.6c2a3a` 已先把 exact incarnation heartbeat/accepting/active jobs 纳入 Registry v5 durable authority；
+2. `HAR-09.6c2a3b Remote Dispatch`：同时消费 fresh health 与 atomic capacity reservation；
+3. `HAR-09.6c2a4 Execution Authorization + Signed Result Ingestion`；
+4. `HAR-09.6c2b Post-Rollback Behavioral Matrix`。
