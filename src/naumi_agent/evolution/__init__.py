@@ -923,6 +923,14 @@ if TYPE_CHECKING:
         EvolutionRevalidationRuntimeSourcePair,
         EvolutionRevalidationRuntimeSourceService,
     )
+    from naumi_agent.evolution.revalidation_stable_installation_proofs import (
+        EVOLUTION_REVALIDATION_STABLE_INSTALLATION_PROOF_DOMAIN,
+        EvolutionRevalidationStableInstallationProof,
+        EvolutionRevalidationStableInstallationProofError,
+        EvolutionRevalidationStableInstallationProofPayload,
+        SignStableInstallationChallenge,
+        build_stable_installation_proof,
+    )
     from naumi_agent.evolution.revalidation_stage_completion_metrics import (
         EvolutionRevalidationStageCompletionMetrics,
         EvolutionRevalidationStageCompletionStatus,
@@ -1303,6 +1311,12 @@ __all__ = [
     "EvolutionRevalidationPercentageDeploymentIntentService",
     "EvolutionRevalidationPercentageDeploymentIntentStore",
     "EvolutionRevalidationPercentageDeploymentIntentView",
+    "EVOLUTION_REVALIDATION_STABLE_INSTALLATION_PROOF_DOMAIN",
+    "EvolutionRevalidationStableInstallationProof",
+    "EvolutionRevalidationStableInstallationProofError",
+    "EvolutionRevalidationStableInstallationProofPayload",
+    "SignStableInstallationChallenge",
+    "build_stable_installation_proof",
     "EVOLUTION_REVALIDATION_PERCENTAGE_DEPLOYMENT_POLICY",
     "EvolutionRevalidationPercentageDeploymentError",
     "EvolutionRevalidationPercentageDeploymentReceipt",
@@ -2370,6 +2384,14 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationPercentageStageAdvanceStore",
         "EvolutionRevalidationPercentageStageAdvanceView",
     }
+    revalidation_stable_installation_proof_exports = {
+        "EVOLUTION_REVALIDATION_STABLE_INSTALLATION_PROOF_DOMAIN",
+        "EvolutionRevalidationStableInstallationProof",
+        "EvolutionRevalidationStableInstallationProofError",
+        "EvolutionRevalidationStableInstallationProofPayload",
+        "SignStableInstallationChallenge",
+        "build_stable_installation_proof",
+    }
     revalidation_percentage_stage_completion_exports = {
         "EVOLUTION_REVALIDATION_PERCENTAGE_STAGE_COMPLETION_POLICY",
         "EvolutionRevalidationPercentageStageCompletion",
@@ -2982,6 +3004,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_percentage_runtime_exposures"
     elif name in revalidation_percentage_stage_advance_exports:
         module_name = "revalidation_percentage_stage_advances"
+    elif name in revalidation_stable_installation_proof_exports:
+        module_name = "revalidation_stable_installation_proofs"
     elif name in revalidation_percentage_stage_completion_exports:
         module_name = "revalidation_percentage_stage_completions"
     elif name in revalidation_opt_in_observation_assessment_exports:
