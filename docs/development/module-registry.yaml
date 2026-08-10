@@ -80,6 +80,7 @@ modules:
   - {id: EVO-05.5f5h, status: implemented, path: self-evolution/EVO-05-5f5h-percentage-release-bound-execution-outcome.md, depends_on: [EVO-05.5f5g, HAR-10.2k]}
   - {id: EVO-05.5f5i, status: implemented, path: self-evolution/EVO-05-5f5i-percentage-completed-run-aggregation.md, depends_on: [EVO-05.5f5h, EVO-05.5a]}
   - {id: EVO-05.5f5j, status: implemented, path: self-evolution/EVO-05-5f5j-percentage-to-stable-stage-advance.md, depends_on: [EVO-05.5f5i, HAR-10.6]}
+  - {id: EVO-05.5f5k, status: planned, path: self-evolution/EVO-05-5f5k-stable-deployment-intent.md, depends_on: [EVO-05.5f5j, ARC-07.5c, ARC-07.5d3]}
   - {id: EVO-05.6a, status: implemented, path: self-evolution/EVO-05-6a-automatic-pause-rollback-request.md, depends_on: [EVO-05.5b, EVO-05.1a]}
   - {id: EVO-05.6b1, status: implemented, path: self-evolution/EVO-05-6b1-immutable-rollback-source.md, depends_on: [EVO-05.6a]}
   - {id: EVO-06, status: planned, path: self-evolution/EVO-06-continuous-evolution.md, depends_on: [EVO-05, HAR-09]}

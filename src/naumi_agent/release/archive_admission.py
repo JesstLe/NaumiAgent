@@ -162,6 +162,7 @@ class ReleaseArchiveAdmissionView(_StrictModel):
     invalidation_reasons: tuple[str, ...] = Field(max_length=8)
     archive_admission_authority: bool
     percentage_deployment_intent_input_authority: bool
+    stable_deployment_intent_input_authority: bool
     boot_executed: Literal[False] = False
     active_pointer_switched: Literal[False] = False
     process_started: Literal[False] = False
@@ -179,6 +180,7 @@ class ReleaseArchiveAdmissionView(_StrictModel):
         if not (
             self.archive_admission_authority is admitted
             and self.percentage_deployment_intent_input_authority is intent
+            and self.stable_deployment_intent_input_authority is intent
             and self.invalidation_reasons
             == tuple(sorted(set(self.invalidation_reasons)))
         ):
@@ -521,6 +523,7 @@ class ReleaseArchiveAdmissionService:
             percentage_deployment_intent_input_authority=(
                 admitted and inactive_current
             ),
+            stable_deployment_intent_input_authority=(admitted and inactive_current),
         )
 
     async def _receipt_current(self, receipt) -> bool:

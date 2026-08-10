@@ -4,7 +4,7 @@
 
 消费 current ARC-07.5d2 `ReleaseArtifactDownloadReceipt`，把 signed archive 安全解包、重验 ARC-07.4b Build
 Attestation/manifest，并真实安装为 ARC-07.5a immutable inactive slot。最终形成可动态撤权的
-`ReleaseArchiveAdmissionReceipt`，供 percentage deployment intent 使用。
+`ReleaseArchiveAdmissionReceipt`，供 percentage 与 stable deployment intent 使用。
 
 本切片不执行 boot probe、不切换 active pointer、不启动进程，也不声称 deployment 或 rollout 已发生。
 
@@ -58,8 +58,10 @@ installed slot。若进程在 slot install 后、Receipt 写入前崩溃，重�
 - installed slot JSON、manifest、文件集合、摘要和 immutability；
 - candidate slot 是否仍为 inactive。
 
-前四类权威成立时 `archive_admission_authority=true`；candidate 仍 inactive 时才额外产生
-`percentage_deployment_intent_input_authority=true`。
+前四类权威成立时 `archive_admission_authority=true`；candidate 仍 inactive 时才额外、分别产生
+`percentage_deployment_intent_input_authority=true` 与
+`stable_deployment_intent_input_authority=true`。后者只是一项动态 View 投影，不改写 v1 Receipt 的 content identity，因而既有
+durable Receipt 仍可读取；两项权限都只允许下游绑定 exact archive，不表示已经 deployment、100% exposure 或进入 stable。
 
 ## 验收结果
 
@@ -69,6 +71,7 @@ installed slot。若进程在 slot install 后、Receipt 写入前崩溃，重�
 - path traversal、symlink escape、hardlink、大小写碰撞和错误 manifest 在安装前拒绝；
 - expansion limit、Windows reserved name、尾随空格/点、反斜杠与 `..` 路径全部拒绝；
 - Build key 撤销、download archive 篡改、installed runtime 篡改和 Receipt JSON 篡改均动态撤权或 fail closed；
+- percentage 与 stable Intent 输入权限共享同一组 admission/inactive-slot 条件，但作为独立字段输出并同步撤权；
 - ruff、compile、公共 import、静态自审及相关 release 小模块 27 项测试通过；未运行全量测试。
 
 ## 当前边界与下一步
@@ -76,5 +79,7 @@ installed slot。若进程在 slot install 后、Receipt 写入前崩溃，重�
 Admission 已产生 exact current inactive candidate slot，但没有 installation-specific population selection binding、bootability、
 activation CAS 或 exposure evidence。[EVO-05.5f5b](../self-evolution/EVO-05-5f5b-percentage-deployment-intent.md) 已组合 current
 percentage Assignment、current Archive Admission、managed installation Credential、本机 target 与当时的 previous pointer CAS，
-只签发一次 5 分钟控制面 Intent。Intent 仍不能被解释为 activation 或 rollout；下一最小切片必须先 boot candidate 并形成
-独立 Prepared Receipt，之后才能进入 CAS activation/reconciliation。
+只签发一次 5 分钟控制面 Intent。percentage 的 boot/activation/exposure 链已在 EVO-05.5f5c-5f5e 完成；新增的 stable 输入投影
+是 [EVO-05.5f5k](../self-evolution/EVO-05-5f5k-stable-deployment-intent.md) 的最小 ARC 前置。5f5k 仍必须额外绑定 current
+stable stage entry、current signed population 中的 installation 身份及 proof-of-possession、host target 与 previous pointer CAS，
+不能仅凭本 View 扩大到 100%。
