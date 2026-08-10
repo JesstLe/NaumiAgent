@@ -60,6 +60,8 @@ retention、Binding/ledger 篡改或 Deployment source 损坏会撤销 fact auth
 - 真实 signed Population → Stable Intent → boot → authority-bound activation 全链运行；
 - 生产 `TerminalRuntimeLifecycle` 形成 exact starting/running pair，八路跨 Service 并发收敛并支持幂等读取；
 - lifecycle stopped 后历史 fact 保留，current 与 observation input authority 撤销；
+- Stable Intent 过期只撤销新 runtime launch input；若 exact Deployment 仍 active 且 heartbeat current，已启动 runtime 的
+  observation authority 继续有效，使 stable observation duration 不受启动凭据 TTL 截断；
 - 合法但属于其他 release 的 managed runtime 不能绑定当前 Stable Deployment；
 - 只有 starting、没有 running 时不签发 Receipt；
 - ready observation JSON 篡改后动态撤销 fact/current authority；
