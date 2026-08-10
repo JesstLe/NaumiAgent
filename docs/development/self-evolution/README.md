@@ -208,6 +208,9 @@ population、stable completion 或 promotion authority。
 [EVO-05.5f5p](EVO-05-5f5p-durable-stable-observation-assessment.md) 已交付：从 HAR Store 有界重建 current stable window，
 append-only 持久化并在 inspect 时动态复核 active Deployment、Binding、ledger head 与 pointer；Intent TTL 只限制新启动，不截断
 已启动 exact runtime 的观察能力。它仍不授予 Population、completed-run、stable-stage、rollout 或 promotion authority。
+[EVO-05.5f5q](EVO-05-5f5q-stable-release-bound-execution-outcome.md) 已交付：将真实 ChatRun 的 release provenance、Completion
+Receipt、RunUsage 与 heartbeat coverage 绑定到 exact Stable Intent、Population member 和 durable Window；失败结果也进入 Population
+observation，只有 completed 形成单 run authority，仍不授予 stable-stage、rollout 或 promotion authority。
 [EVO-05.6a](EVO-05-6a-automatic-pause-rollback-request.md) 已让 exact breach 幂等触发或复用 HMAC kill switch，并冻结
 绑定 exact prior Rollback Plan 的只读 Request；它不写 workspace/Git，也不把请求虚报成已回滚。
 [EVO-05.6b1](EVO-05-6b1-immutable-rollback-source.md) 已从 exact Git commit/tree 读取 baseline blob，验证每个
