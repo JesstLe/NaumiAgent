@@ -2,8 +2,7 @@
 
 ## 状态
 
-部分实现。最小 ARC 前置 `ARC-07.5d3 stable_deployment_intent_input_authority` 与 5f5k1 installation
-proof-of-possession 已交付；Intent Service/Store/View 尚未实现。
+已实现。5f5k1 提供 installation proof-of-possession；5f5k2 提供 durable Intent Service/Store/View 与动态撤权。
 
 ## 目标
 
@@ -62,6 +61,22 @@ Credential 绑定的 installation private key 对 exact challenge 签名；客�
 该 primitive 尚不自行证明 Snapshot、Stage Advance、Admission 或 pointer “current”；5f5k Intent Service 必须先后动态读取这些
 authoritative source，在签名前后重验，并将 Proof 嵌入 durable Intent。UI 不得把独立 Proof 显示为可部署。
 
+## 5f5k2 已实现：Durable Stable Deployment Intent
+
+`revalidation_stable_deployment_intents.py` 已实现：
+
+- Service 在 PoP 前后读取 exact 5f5j、Plan、latest Population、Credential、Archive Admission、host target 与 active pointer，
+  任一 source 变化即拒绝签发；
+- 每次 `issue` 都必须 fresh PoP，即使 exact durable Intent 已存在也不能凭 member ID 直接取回；验签成功后，并发请求才可在 Store
+  收敛到首个一次性 Intent；
+- Intent 冻结完整 Stage Advance、Plan、Admission、PoP、Population identity/denominator/expiry、candidate slot 与 previous pointer CAS；
+- TTL 为 300 秒上限，并截断到 Stage Advance、Snapshot、Credential 最早过期时间；
+- SQLite 使用参数化 SQL 与 `BEGIN IMMEDIATE`，以 `stage_advance + credential + admission` 三元组唯一；同一 stable archive 可供
+  不同 installation 独立签发，不会被错误的 admission 全局唯一键阻断；
+- View 每次动态重验 Stage Advance/interaction/control、Plan、Population/Registry trust、Credential membership、Admission/slot、
+  host target、pointer 与 TTL；历史 Intent 保留审计但即时撤权；
+- Intent 只开放 stable deployment intent 与 boot preparation 输入权限，所有 execution/exposure/rollout/promotion/publish 权限保持 false。
+
 ## 权限边界
 
 current View 只开放 `stable_deployment_intent_authority=true` 与下一层 `boot_preparation_authority=true`。以下字段固定 false：
@@ -83,8 +98,11 @@ Population denominator 聚合；只有所有策略门槛满足后，才允许声
 - 全链路没有 boot、activation、runtime、Git 或 publish 副作用；
 - 仅运行相关 pytest 小模块、ruff、compile 与 public lazy import，不运行全量测试。
 
-5f5k1 当前验收：真实 Registry 签发的 Credential + installation Ed25519 key 验签成功；错误私钥与替换 Credential 失败；artifact 不含
-private-key material；2 项小模块测试、ruff、compile 与 public lazy import 通过。
+验收使用真实 5f5j 人工 entry、Registry-signed Population、两个 installation key、signed archive、immutable candidate slot 与
+bootable active baseline：四个 Service 并发幂等，同 archive 可为两个成员签发；非成员与错误密钥拒绝；Registry 撤权、host target
+漂移、Snapshot 换代、pointer 推进、TTL 与 SQLite JSON 篡改均撤权或 fail closed；已有 Intent 也不能绕过 fresh PoP 取回。
+相关小模块测试、ruff、compile、public lazy
+import 与 YAML 通过；未运行全量测试。
 
 ## 后续切片
 
