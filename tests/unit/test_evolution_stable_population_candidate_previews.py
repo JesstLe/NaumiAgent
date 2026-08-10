@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -14,6 +15,7 @@ from naumi_agent.evolution.revalidation_rollout_baselines import (
     EvolutionRevalidationRolloutCostSource,
 )
 from naumi_agent.evolution.revalidation_stable_stage_completions import (
+    EvolutionRevalidationStableStageCompletionView,
     _build_receipt,
 )
 from naumi_agent.evolution.revalidation_stage_completion_metrics import (
@@ -140,6 +142,96 @@ async def _record(db_path: Path, *receipts) -> None:
         await db.commit()
 
 
+def _current_view(receipt) -> EvolutionRevalidationStableStageCompletionView:
+    return EvolutionRevalidationStableStageCompletionView(
+        receipt=receipt,
+        evidence_source_current=True,
+        latest_assessment=True,
+        plan_source_current=True,
+        baseline_source_current=True,
+        liveness_source_current=True,
+        outcome_set_current=True,
+        invalidation_reasons=(),
+        stable_stage_completion_authority=True,
+        pause_input_authority=False,
+        rollback_input_authority=False,
+    )
+
+
+class _StageCompletionInspector:
+    def __init__(self, views) -> None:
+        self.views = {item.receipt.evidence_id: item for item in views}
+        self.calls: list[tuple[str, str]] = []
+
+    async def inspect(self, *, evidence_id: str, subject_id: str):
+        self.calls.append((evidence_id, subject_id))
+        return self.views[evidence_id]
+
+
+@pytest.mark.asyncio
+async def test_dynamic_inspection_is_bounded_and_rejects_identity_mismatch(
+    tmp_path: Path,
+) -> None:
+    receipt = _passing_receipt(tmp_path, 1, population_denominator=1)
+    view = _current_view(receipt)
+
+    class _BoundedInspector:
+        active = 0
+        maximum = 0
+        calls = 0
+
+        async def inspect(self, *, evidence_id: str, subject_id: str):
+            assert evidence_id == receipt.evidence_id
+            assert subject_id == receipt.subject_id
+            self.calls += 1
+            self.active += 1
+            self.maximum = max(self.maximum, self.active)
+            await asyncio.sleep(0)
+            self.active -= 1
+            return view
+
+    bounded = _BoundedInspector()
+    service = EvolutionStablePopulationCandidatePreviewService(
+        workspace_root=tmp_path,
+        db_path=tmp_path / "bounded.db",
+        stage_completion_inspector=bounded,
+    )
+    results = await service._inspect_stage_completions((receipt,) * 17)
+    assert bounded.calls == 17
+    assert bounded.maximum == 16
+    assert results[receipt.evidence_id] == (True, True, ())
+
+    other = _passing_receipt(tmp_path, 2, population_denominator=1)
+    mismatch = EvolutionStablePopulationCandidatePreviewService(
+        workspace_root=tmp_path,
+        db_path=tmp_path / "mismatch.db",
+        stage_completion_inspector=_StageCompletionInspector((_current_view(other),)),
+    )
+    mismatch.stage_completion_inspector.views[receipt.evidence_id] = _current_view(other)
+    mismatch_results = await mismatch._inspect_stage_completions((receipt,))
+    assert mismatch_results[receipt.evidence_id] == (
+        False,
+        False,
+        ("dynamic_inspection_identity_mismatch",),
+    )
+
+    class _FailingInspector:
+        async def inspect(self, *, evidence_id: str, subject_id: str):
+            raise RuntimeError(f"private path for {evidence_id} and {subject_id}")
+
+    failing = EvolutionStablePopulationCandidatePreviewService(
+        workspace_root=tmp_path,
+        db_path=tmp_path / "failing.db",
+        stage_completion_inspector=_FailingInspector(),
+    )
+    failed_results = await failing._inspect_stage_completions((receipt,))
+    assert failed_results[receipt.evidence_id] == (
+        False,
+        False,
+        ("dynamic_inspection_failed",),
+    )
+
+
 @pytest.mark.asyncio
 async def test_candidate_preview_groups_members_without_granting_authority(
     tmp_path: Path,
@@ -162,7 +254,14 @@ async def test_candidate_preview_groups_members_without_granting_authority(
     assert preview.population_denominator == 2
     assert preview.observed_members == preview.passing_members == 2
     assert preview.hidden_items == 1
+    assert not preview.dynamic_inspector_configured
+    assert preview.dynamically_revalidated_members == 0
+    assert preview.dynamic_authoritative_members == 0
+    assert preview.dynamic_non_authoritative_members == 0
     assert not preview.dynamic_revalidation_authority
+    assert preview.items[0].dynamic_invalidation_reasons == (
+        "dynamic_inspector_not_configured",
+    )
     assert not preview.population_snapshot_authority
     assert "population_store_not_configured" in (
         preview.population_invalidation_reasons
@@ -284,10 +383,12 @@ async def test_candidate_preview_reconciles_current_signed_population(
         for index, credential in enumerate(credentials, start=1)
     )
     await _record(db_path, *receipts)
+    inspector = _StageCompletionInspector(tuple(_current_view(item) for item in receipts))
     service = EvolutionStablePopulationCandidatePreviewService(
         workspace_root=tmp_path,
         db_path=db_path,
         population_store=population_store,
+        stage_completion_inspector=inspector,
         clock=lambda: T0 + timedelta(seconds=3),
     )
     evolution_before = db_path.read_bytes()
@@ -304,7 +405,14 @@ async def test_candidate_preview_reconciles_current_signed_population(
     assert current.population_membership_consistent
     assert current.population_snapshot_authority
     assert current.population_invalidation_reasons == ()
-    assert not current.dynamic_revalidation_authority
+    assert current.dynamic_inspector_configured
+    assert current.dynamically_revalidated_members == 2
+    assert current.dynamic_authoritative_members == 2
+    assert current.dynamic_non_authoritative_members == 0
+    assert current.dynamic_revalidation_authority
+    assert {item[0] for item in inspector.calls} == {
+        receipt.evidence_id for receipt in receipts
+    }
     assert not current.stable_rollout_authority
     assert not current.promotion_authority
 
@@ -400,6 +508,7 @@ async def test_candidate_preview_reads_real_stable_completion_without_mutating_d
     service = EvolutionStablePopulationCandidatePreviewService(
         workspace_root=tmp_path,
         db_path=completion_store.db_path,
+        stage_completion_inspector=completion_service,
         clock=lambda: data["runtime_now"][0] + timedelta(seconds=1),
     )
     preview = await service.preview(
@@ -410,6 +519,13 @@ async def test_candidate_preview_reads_real_stable_completion_without_mutating_d
     assert preview.observed_members == 1
     assert preview.insufficient_members == 1
     assert preview.items[0].evidence_id == completion.receipt.evidence_id
+    assert preview.dynamic_inspector_configured
+    assert preview.dynamically_revalidated_members == 1
+    assert preview.dynamic_authoritative_members == 0
+    assert preview.dynamic_non_authoritative_members == 1
+    assert preview.items[0].dynamically_revalidated
+    assert not preview.items[0].dynamic_stage_completion_authority
+    assert not preview.dynamic_revalidation_authority
     assert not preview.candidate_complete
     assert await lifecycle.close()
 
@@ -445,6 +561,7 @@ async def test_engine_composes_candidate_preview_service_and_tool(tmp_path: Path
         assert service.population_store is (
             engine.evolution_release_population_snapshot_store
         )
+        assert service.stage_completion_inspector is None
         assert "evolution_stable_population_candidate_preview" in (
             engine.tool_registry.names
         )

@@ -220,6 +220,9 @@ receipt，显示跨成员 passing/breached/insufficient、缺失与 lineage/重�
 [EVO-05.5f5t](EVO-05-5f5t-current-population-trust-reconciliation.md) 已交付：生产 Engine 按需加载 installer-owned Population
 Trust Policy，并将 current/latest/trust/expiry 与 signed credential membership 对账投影到同一预演；Snapshot current 仍不等于
 逐 member 5f5r current，因此 dynamic/rollout/promotion authority 继续关闭。
+[EVO-05.5f5u](EVO-05-5f5u-dynamic-stage-completion-inspection-port.md) 已交付：Runtime 可注入现有 5f5r Service 的只读
+`inspect()`，预演按 current member 分批动态重验并严格核对完整 receipt identity；缺端口或任一成员失权均失败关闭，且仍不授予
+stable rollout/promotion authority。
 [EVO-05.6a](EVO-05-6a-automatic-pause-rollback-request.md) 已让 exact breach 幂等触发或复用 HMAC kill switch，并冻结
 绑定 exact prior Rollback Plan 的只读 Request；它不写 workspace/Git，也不把请求虚报成已回滚。
 [EVO-05.6b1](EVO-05-6b1-immutable-rollback-source.md) 已从 exact Git commit/tree 读取 baseline blob，验证每个

@@ -355,6 +355,9 @@ def build_runtime_services(
         browser_execution_heartbeat_factory=browser_factory,
         agent_worker_process_factory=agent_worker_factory,
         agent_worker_supervisor_factory=agent_worker_supervisor_factory,
+        stable_stage_completion_inspector=(
+            resolved.stable_stage_completion_inspector
+        ),
     )
 
 
