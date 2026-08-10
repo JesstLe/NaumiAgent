@@ -94,6 +94,9 @@
 - HAR-09.6c1 已在 active baseline installed slot 上重新执行 `--version` boot probe，并重新解析 launcher identity；
   Workbench/New UI/TUI 显示同一 verification。它只证明 installed runtime 的 fresh mechanical recovery，行为级 Eval、
   长期指标、promoted Outcome 和 supersede ledger 仍未完成。
+- ARC-07.5f 已补齐 exact installed backend 的 bounded JSON Eval channel：首个 runner 为 `protocol_hello@1`，Receipt
+  绑定 Suite/fixture、slot/manifest/backend bytes 与真实子进程。它是 HAR-09.6c2a 的必要 transport，但尚未绑定
+  Outcome/H5c lane，因此 Workbench 仍必须显示“行为级 Eval 尚未记录”。
 
 EVO-02.1b 已把不可执行 Contract 包装为 workspace-bound durable Authority；HAR-09.5c 在其上补齐产品动作、
 Proposal 单飞键和历史 projection 迁移。Contract 仍不是执行或 promotion 许可。

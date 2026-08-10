@@ -109,8 +109,8 @@ Evolution/session DB 与 Release Slot DB 是不同 SQLite authority store，不�
 
 HAR-09.6 仍为 partial：
 
-1. `HAR-09.6c2 Post-Rollback Behavioral Evaluation`：在 exact installed runtime 上执行版本化、可重复、带样本覆盖的
-   行为级 Harness Eval，并与已知健康 baseline 判定恢复；
+1. `ARC-07.5f` 已提供 exact installed backend 的受限 `protocol_hello@1` Eval channel；下一步
+   `HAR-09.6c2a` 将它绑定到 6c1、原 H5c lane 与 fresh post-rollback comparison，且 unsupported runner 失败关闭；
 2. `HAR-09.6d Long-Term Outcome Window`：窗口、样本覆盖、censoring 和持续健康指标；
 3. promoted Outcome、supersede ledger；
 4. ARC-07.6 配置/数据 snapshot 恢复路径；
