@@ -82,6 +82,7 @@ current View 只开放 `stable_activation_input_authority=true`，含义是下�
 
 ## 当前边界与下一步
 
-5f5l 已证明 candidate 可在 exact stable installation 上启动，但 active pointer 仍指向 previous slot。下一最小切片是 Stable
-Activation/Reconciliation：消费 current Prepared Receipt，以 5f5k frozen previous pointer 执行 authority-bound CAS，并机械对账
-“pointer 已切换但 Deployment Receipt 尚未写入”的崩溃窗口；仍不直接声明 stable rollout 完成。
+5f5l 已证明 candidate 可在 exact stable installation 上启动，但 active pointer 仍指向 previous slot。
+[EVO-05.5f5m](EVO-05-5f5m-stable-activation-reconciliation.md) 已继续消费 current Prepared Receipt，以 5f5k frozen previous
+pointer 执行 authority-bound CAS，并可机械对账“pointer 已切换但 Deployment Receipt 尚未写入”的崩溃窗口；它仍不启动用户
+runtime 或声明 stable rollout 完成。

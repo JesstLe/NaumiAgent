@@ -939,6 +939,14 @@ if TYPE_CHECKING:
         EvolutionRevalidationStableDeploymentIntentStore,
         EvolutionRevalidationStableDeploymentIntentView,
     )
+    from naumi_agent.evolution.revalidation_stable_deployments import (
+        EVOLUTION_REVALIDATION_STABLE_DEPLOYMENT_POLICY,
+        EvolutionRevalidationStableDeploymentError,
+        EvolutionRevalidationStableDeploymentReceipt,
+        EvolutionRevalidationStableDeploymentService,
+        EvolutionRevalidationStableDeploymentStore,
+        EvolutionRevalidationStableDeploymentView,
+    )
     from naumi_agent.evolution.revalidation_stable_installation_proofs import (
         EVOLUTION_REVALIDATION_STABLE_INSTALLATION_PROOF_DOMAIN,
         EvolutionRevalidationStableInstallationProof,
@@ -1339,6 +1347,12 @@ __all__ = [
     "EvolutionRevalidationStableDeploymentIntentService",
     "EvolutionRevalidationStableDeploymentIntentStore",
     "EvolutionRevalidationStableDeploymentIntentView",
+    "EVOLUTION_REVALIDATION_STABLE_DEPLOYMENT_POLICY",
+    "EvolutionRevalidationStableDeploymentError",
+    "EvolutionRevalidationStableDeploymentReceipt",
+    "EvolutionRevalidationStableDeploymentService",
+    "EvolutionRevalidationStableDeploymentStore",
+    "EvolutionRevalidationStableDeploymentView",
     "EVOLUTION_REVALIDATION_STABLE_INSTALLATION_PROOF_DOMAIN",
     "EvolutionRevalidationStableInstallationProof",
     "EvolutionRevalidationStableInstallationProofError",
@@ -2428,6 +2442,14 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationStableDeploymentIntentStore",
         "EvolutionRevalidationStableDeploymentIntentView",
     }
+    revalidation_stable_deployment_exports = {
+        "EVOLUTION_REVALIDATION_STABLE_DEPLOYMENT_POLICY",
+        "EvolutionRevalidationStableDeploymentError",
+        "EvolutionRevalidationStableDeploymentReceipt",
+        "EvolutionRevalidationStableDeploymentService",
+        "EvolutionRevalidationStableDeploymentStore",
+        "EvolutionRevalidationStableDeploymentView",
+    }
     revalidation_stable_installation_proof_exports = {
         "EVOLUTION_REVALIDATION_STABLE_INSTALLATION_PROOF_DOMAIN",
         "EvolutionRevalidationStableInstallationProof",
@@ -3052,6 +3074,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_stable_boot_preparations"
     elif name in revalidation_stable_deployment_intent_exports:
         module_name = "revalidation_stable_deployment_intents"
+    elif name in revalidation_stable_deployment_exports:
+        module_name = "revalidation_stable_deployments"
     elif name in revalidation_stable_installation_proof_exports:
         module_name = "revalidation_stable_installation_proofs"
     elif name in revalidation_percentage_stage_completion_exports:

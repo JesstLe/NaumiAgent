@@ -161,6 +161,8 @@
   durable Intent；不执行 boot、activation、runtime 或声明 stable rollout；
 - [EVO-05.5f5l Stable Boot Preparation](EVO-05-5f5l-stable-boot-preparation.md)：已交付；
   使用跨进程 claim/lease 真实探测 exact stable candidate，形成独立 Prepared Receipt；不切换 pointer 或启动用户进程；
+- [EVO-05.5f5m Stable Activation Reconciliation](EVO-05-5f5m-stable-activation-reconciliation.md)：已交付；
+  使用 Stable Prepared authority 执行 expected-pointer CAS，并从 immutable history 恢复 Receipt；不启动 runtime 或声明 rollout；
 - [EVO-05.6a Automatic Pause and Rollback Request](EVO-05-6a-automatic-pause-rollback-request.md)：已交付；
   exact breach 会触发或复用 kill switch，并冻结只读 exact Rollback Request，不虚报执行完成。
 - [EVO-05.6b1 Immutable Rollback Source](EVO-05-6b1-immutable-rollback-source.md)：已交付；从 exact Git
