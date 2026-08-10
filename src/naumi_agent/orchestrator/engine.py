@@ -202,6 +202,10 @@ from naumi_agent.evolution.post_rollback_behavioral_lanes import (
     EvolutionPostRollbackBehavioralLaneService,
     EvolutionPostRollbackBehavioralLaneStore,
 )
+from naumi_agent.evolution.post_rollback_remote_lane_placements import (
+    EvolutionPostRollbackRemoteLanePlacementService,
+    EvolutionPostRollbackRemoteLanePlacementStore,
+)
 from naumi_agent.evolution.post_rollback_runtime_verifications import (
     EvolutionPostRollbackRuntimeVerificationService,
     EvolutionPostRollbackRuntimeVerificationStore,
@@ -2561,6 +2565,24 @@ class AgentEngine:
                 lane_store=self.evolution_post_rollback_behavioral_lane_store,
                 lane_service=self.evolution_post_rollback_behavioral_lane_service,
                 store=self.evolution_post_rollback_behavioral_coverage_store,
+            )
+        )
+        self.evolution_post_rollback_remote_lane_placement_store = (
+            EvolutionPostRollbackRemoteLanePlacementStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_post_rollback_remote_lane_placement_service = (
+            EvolutionPostRollbackRemoteLanePlacementService(
+                workspace_root=paths.workspace_root,
+                coverage_store=(
+                    self.evolution_post_rollback_behavioral_coverage_store
+                ),
+                coverage_service=(
+                    self.evolution_post_rollback_behavioral_coverage_service
+                ),
+                worker_registry=resources.worker_registry_store,
+                store=self.evolution_post_rollback_remote_lane_placement_store,
             )
         )
         self.evolution_proposal_outcome_projection_service = (

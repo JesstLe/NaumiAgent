@@ -77,6 +77,10 @@ from naumi_agent.evolution.post_rollback_behavioral_lanes import (
     EvolutionPostRollbackBehavioralLaneError,
     render_post_rollback_behavioral_lane,
 )
+from naumi_agent.evolution.post_rollback_remote_lane_placements import (
+    EvolutionPostRollbackRemoteLanePlacementError,
+    render_post_rollback_remote_lane_placement,
+)
 from naumi_agent.evolution.post_rollback_runtime_verifications import (
     EvolutionPostRollbackRuntimeVerificationError,
     render_post_rollback_runtime_verification,
@@ -2833,6 +2837,85 @@ class EvolutionPostRollbackBehavioralCoverageTool(Tool):
         return render_post_rollback_behavioral_coverage(view)
 
 
+class EvolutionPostRollbackRemoteLanePlacementTool(Tool):
+    """Bind a missing remote lane to one exact active worker incarnation."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_post_rollback_remote_lane_placement"
+
+    @property
+    def description(self) -> str:
+        return (
+            "把 Coverage Contract 中一个 missing remote lane 绑定到 exact active "
+            "Worker incarnation 和 release target；不检查健康、不预留容量、不执行任务。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "request_id": {
+                    "type": "string",
+                    "pattern": "^evrerollbackreq_[0-9a-f]{24}$",
+                },
+                "comparison_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                "worker_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                },
+            },
+            "required": ["request_id", "comparison_id", "worker_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="回滚后远端 Lane Placement",
+            search_hint=(
+                "evolution post rollback remote lane placement worker target "
+                "自进化 回滚 远端 平台 worker"
+            ),
+        )
+
+    async def execute(
+        self,
+        request_id: str,
+        comparison_id: str,
+        worker_id: str,
+    ) -> str:
+        try:
+            view = await (
+                self._engine.evolution_post_rollback_remote_lane_placement_service.place(
+                    request_id=str(request_id or "").strip(),
+                    comparison_id=str(comparison_id or "").strip(),
+                    worker_id=str(worker_id or "").strip(),
+                )
+            )
+        except (
+            AttributeError,
+            EvolutionPostRollbackRemoteLanePlacementError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "post_rollback_placement_failed")
+            return f"回滚后远端 Lane Placement 未完成（`{code}`）：{exc}"
+        return render_post_rollback_remote_lane_placement(view)
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -2878,6 +2961,7 @@ def create_evolution_review_tools(
         EvolutionPostRollbackRuntimeVerificationTool(engine),
         EvolutionPostRollbackBehavioralLaneTool(engine),
         EvolutionPostRollbackBehavioralCoverageTool(engine),
+        EvolutionPostRollbackRemoteLanePlacementTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -2907,6 +2991,7 @@ __all__ = [
     "EvolutionPromotionPackageTool",
     "EvolutionPostRollbackBehavioralLaneTool",
     "EvolutionPostRollbackBehavioralCoverageTool",
+    "EvolutionPostRollbackRemoteLanePlacementTool",
     "EvolutionPostRollbackRuntimeVerificationTool",
     "EvolutionProposalBeforeAfterEvidenceTool",
     "EvolutionRewardHackingEvidenceTool",

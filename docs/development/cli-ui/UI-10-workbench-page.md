@@ -150,6 +150,8 @@
   projection 与完整跨平台聚合仍等待 6c2b，因此总体“行为级 Eval 尚未记录”保持不变。
 - HAR-09.6c2a1 已通过 `/evolution outcome-behavior-coverage` 在三端展示完整 lane 覆盖、missing/stale 与
   目标主机调度数；typed Reviews coverage panel 仍是后续切片，当前不得把 Contract 显示为 matrix completion。
+- HAR-09.6c2a2a 已通过 `/evolution outcome-place-behavior` 在三端显示 exact Worker incarnation 与 release
+  target；回执必须保留“健康/容量未验证、无执行权”，不得显示为 queued 或 running。
 - 完整行为矩阵、长期指标、promoted Outcome 和 policy learning 仍未完成。完整边界见
   `../harness/HAR-09-6a-proposal-outcome-projection.md` 与
   `../harness/HAR-09-6b-before-after-outcome-evidence.md`、
