@@ -3789,13 +3789,38 @@ test("normalizes workbench snapshot events", () => {
     id: "proposal-1", session_id: "s", mission_id: "m1", task_id: "7",
     agent_id: "Evolution-Agent", title: "优化 footer", impact_scope: "ui:footer",
     intended_files: ["frontend/footer.js"], validation_plan: ["node --test footer"],
-    risk_level: "medium", questions: [], state: "open", decision_note: "",
+    risk_level: "medium", questions: [], state: "approved", decision_note: "",
     source_kind: "evolution_candidate", source_id: `evc_${"a".repeat(24)}`,
     source_revision: 2, source_occurrence_count: 4,
     source_proposal_id: `evp_${"b".repeat(24)}`, proposal_kind: "code",
     reviewer: "", decision_at: "", cooldown_until: "", merged_into_id: "",
     merge_target_ids: ["proposal-2"],
     governance_policy_version: "", created_at: "now", updated_at: "now",
+    outcome_status: "rolled_back", outcome_error: "", contract_issue_allowed: false,
+    outcome: {
+      schema_version: 1,
+      policy_version: "evolution-proposal-outcome-projection-v1",
+      workbench_session_id: "s",
+      workbench_proposal_id: "proposal-1",
+      governance_state_unchanged: true,
+      status: "rolled_back",
+      outcome_id: `evrerollbackout_${"1".repeat(24)}`,
+      outcome_sha256: "2".repeat(64),
+      rollback_receipt_id: `evrerollbackexec_${"3".repeat(24)}`,
+      experiment_contract_id: `evx_${"4".repeat(24)}`,
+      candidate_id: `evc_${"5".repeat(24)}`,
+      candidate_revision: 2,
+      breach_reasons: ["runtime_guardrail_breach"],
+      recorded_at: "2026-08-10T00:00:00+00:00",
+      authority_valid: true,
+      active_baseline: true,
+      contract_issue_allowed: false,
+      before_after_recorded: false,
+      long_term_metrics_recorded: false,
+      promoted: false,
+      learning_authority: false,
+      promotion_authority: false,
+    },
     private_prompt: "drop-me",
   };
   const record = normalizeServerRecord({
@@ -3843,6 +3868,9 @@ test("normalizes workbench snapshot events", () => {
   assert.equal(record.payload.active_selection.review_kind, "proposal");
   assert.equal(record.payload.proposals[0].source_revision, 2);
   assert.deepEqual(record.payload.proposals[0].merge_target_ids, ["proposal-2"]);
+  assert.equal(record.payload.proposals[0].outcome_status, "rolled_back");
+  assert.equal(record.payload.proposals[0].outcome.authority_valid, true);
+  assert.equal(record.payload.proposals[0].contract_issue_allowed, false);
   assert.equal(Object.hasOwn(record.payload.proposals[0], "private_prompt"), false);
   assert.equal(record.payload.missions[0].title, "Mac 工作台");
   assert.equal(record.payload.worktrees_status, "ready");
@@ -3868,6 +3896,26 @@ test("normalizes workbench snapshot events", () => {
       },
     }), /merge_target_ids/);
   }
+  assert.throws(() => normalizeServerRecord({
+    type: "workbench/snapshot",
+    payload: {
+      ...record.payload,
+      proposals: [{
+        ...proposal,
+        outcome: { ...proposal.outcome, workbench_proposal_id: "proposal-forged" },
+      }],
+    },
+  }), /外层绑定无效/);
+  assert.throws(() => normalizeServerRecord({
+    type: "workbench/snapshot",
+    payload: {
+      ...record.payload,
+      proposals: [{
+        ...proposal,
+        outcome: { ...proposal.outcome, promoted: true },
+      }],
+    },
+  }), /authority 字段无效/);
 });
 
 test("normalizes strict workbench proposal action results", () => {

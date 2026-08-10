@@ -137,7 +137,8 @@ function renderReviewList(reviews, selectedIndex, width, height) {
     const kind = item.review_kind === "proposal"
       ? color(ANSI.cyan, "Proposal")
       : color(ANSI.yellow, "Approval");
-    return fitAnsiWidth(`${marker} ${kind} ${title} · ${requester}`, width);
+    const outcome = item.review_kind === "proposal" ? proposalOutcomeLabel(item) : "";
+    return fitAnsiWidth(`${marker} ${kind} ${title} · ${requester}${outcome}`, width);
   });
   return [color(ANSI.cyan, `Reviews · ${reviews.length} · 当前 ${selectedIndex + 1}`), ...rows];
 }
@@ -205,6 +206,9 @@ function renderReviewDetail(snapshot, selected, width) {
 }
 
 function renderProposalDetail(snapshot, proposal, width) {
+  const outcome = object(proposal.outcome);
+  const hasOutcome = Boolean(outcome.outcome_id);
+  const outcomeUnavailable = Boolean(proposal.outcome_error);
   const lines = [
     color(ANSI.cyan, `Proposal · ${compactText(proposal.title || proposal.id, 600)}`),
     `${proposalRiskLabel(proposal.risk_level)} · 状态 ${proposal.state} · 类型 ${compactText(proposal.proposal_kind || "manual", 80)}`,
@@ -215,13 +219,36 @@ function renderProposalDetail(snapshot, proposal, width) {
     ...array(proposal.intended_files).slice(0, 8).map((path) => color(ANSI.dim, `• ${compactText(path, 900)}`)),
     color(ANSI.cyan, `验证计划 · ${array(proposal.validation_plan).length}`),
     ...array(proposal.validation_plan).slice(0, 8).map((step) => color(ANSI.dim, `• ${compactText(step, 1_000)}`)),
-    proposal.state === "approved"
+    hasOutcome
+      ? color(ANSI.yellow, "该 Proposal 已形成 rollback Outcome；approved 治理记录保持不变。")
+      : outcomeUnavailable
+        ? color(ANSI.red, "Outcome source 暂不可用；已安全阻止 Contract 签发。")
+        : proposal.state === "approved"
       ? color(ANSI.yellow, "approved 仍未执行代码；可显式签发不可执行 Experiment Contract。")
       : color(ANSI.yellow, "批准只进入下一 policy gate，不执行代码、不授予实验资格。"),
-    proposal.state === "approved"
-      ? color(ANSI.dim, "c 签发/重开 Contract · r 刷新 · Esc 返回")
-      : color(ANSI.dim, "a 批准 · x 拒绝 · d 延后 · m 合并 · r 刷新 · Esc 返回"),
+    hasOutcome || outcomeUnavailable
+      ? color(ANSI.dim, "r 刷新 · Esc 返回")
+      : proposal.state === "approved" && proposal.contract_issue_allowed === true
+        ? color(ANSI.dim, "c 签发/重开 Contract · r 刷新 · Esc 返回")
+        : proposal.state === "approved"
+          ? color(ANSI.dim, "Contract authority 未就绪 · r 刷新 · Esc 返回")
+          : color(ANSI.dim, "a 批准 · x 拒绝 · d 延后 · m 合并 · r 刷新 · Esc 返回"),
   ];
+  if (hasOutcome) {
+    const authority = outcome.authority_valid
+      ? color(ANSI.green, "authority 有效")
+      : color(ANSI.red, "authority 已失效");
+    lines.push(
+      color(ANSI.cyan, "实施 Outcome"),
+      `${color(ANSI.yellow, "rolled_back")} · ${authority}`,
+      `Outcome · ${compactText(outcome.outcome_id, 128)}`,
+      `Rollback Receipt · ${compactText(outcome.rollback_receipt_id, 128)}`,
+      `Experiment Contract · ${compactText(outcome.experiment_contract_id, 128)}`,
+      `Breach · ${compactText(array(outcome.breach_reasons).join(", ") || "-", 800)}`,
+      color(ANSI.yellow, "HAR-08 before/after · 尚未记录 · 长期指标 · 尚未记录"),
+      color(ANSI.dim, "不能再次签发 Contract、标记 promoted 或进入 policy learning。"),
+    );
+  }
   if (snapshot.action_notice) lines.push(color(ANSI.green, compactText(snapshot.action_notice, 1_000)));
   if (snapshot.action_error) lines.push(color(ANSI.red, compactText(snapshot.action_error, 1_000)));
   const action = snapshot.proposal_action;
@@ -280,6 +307,19 @@ function renderProposalDetail(snapshot, proposal, width) {
     );
   }
   return lines.filter(Boolean).flatMap((line) => wrapAnsiLine(line, Math.max(1, width)));
+}
+
+function proposalOutcomeLabel(proposal) {
+  if (proposal?.outcome_status === "rolled_back") {
+    return ` · ${color(ANSI.yellow, "rolled_back")}`;
+  }
+  if (proposal?.outcome_status === "evidence_invalid") {
+    return ` · ${color(ANSI.red, "Outcome 证据失效")}`;
+  }
+  if (proposal?.outcome_error) {
+    return ` · ${color(ANSI.red, "Outcome 不可用")}`;
+  }
+  return "";
 }
 
 function reviewItems(snapshot) {

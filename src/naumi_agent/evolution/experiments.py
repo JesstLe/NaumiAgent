@@ -545,6 +545,10 @@ class ExperimentBaselineReader(Protocol):
     def read(self, workspace_root: str | Path) -> ExperimentBaseline: ...
 
 
+class ExperimentProposalOutcomeReader(Protocol):
+    async def project_session(self, session_id: str) -> Mapping[str, Any]: ...
+
+
 class GitExperimentBaselineReader:
     """Read one bounded, non-mutating baseline from the exact repository root."""
 
@@ -611,6 +615,15 @@ class EvolutionExperimentContractIssuer:
         self._workbench_service = workbench_service
         self._store = store
         self._baseline_reader = baseline_reader or GitExperimentBaselineReader()
+        self._proposal_outcome_reader: ExperimentProposalOutcomeReader | None = None
+
+    def bind_proposal_outcome_reader(
+        self,
+        reader: ExperimentProposalOutcomeReader,
+    ) -> None:
+        if not callable(getattr(reader, "project_session", None)):
+            raise TypeError("Proposal Outcome reader 必须实现 project_session()。")
+        self._proposal_outcome_reader = reader
 
     async def issue(
         self,
@@ -630,6 +643,7 @@ class EvolutionExperimentContractIssuer:
         if proposal is None:
             raise ValueError("Workbench Proposal 不存在。")
         _require_approved_evolution_proposal(proposal)
+        await self._require_contract_issue_open(clean_session, clean_proposal)
         existing = await self._store.get_by_proposal(
             workspace_root,
             session_id=clean_session,
@@ -713,6 +727,49 @@ class EvolutionExperimentContractIssuer:
             if authority is None:
                 raise
         return authority.contract
+
+    async def _require_contract_issue_open(
+        self,
+        session_id: str,
+        proposal_id: str,
+    ) -> None:
+        reader = self._proposal_outcome_reader
+        if reader is None:
+            raise EvolutionExperimentContractStoreError(
+                "experiment_contract_outcome_source_unavailable",
+                "Proposal Outcome source 暂不可用，已安全阻止 Contract 签发。",
+            )
+        try:
+            projections = await reader.project_session(session_id)
+            if not isinstance(projections, Mapping) or len(projections) > 100:
+                raise TypeError("Proposal Outcome projection 集合无效。")
+            projection = projections.get(proposal_id)
+            if projection is None:
+                return
+            if hasattr(projection, "model_dump"):
+                payload = projection.model_dump(mode="json")
+            elif isinstance(projection, Mapping):
+                payload = dict(projection)
+            else:
+                raise TypeError("Proposal Outcome projection 类型无效。")
+            if not (
+                payload.get("workbench_session_id") == session_id
+                and payload.get("workbench_proposal_id") == proposal_id
+                and payload.get("status") == "rolled_back"
+                and payload.get("contract_issue_allowed") is False
+            ):
+                raise ValueError("Proposal Outcome projection 绑定无效。")
+        except EvolutionExperimentContractStoreError:
+            raise
+        except Exception as exc:
+            raise EvolutionExperimentContractStoreError(
+                "experiment_contract_outcome_source_unavailable",
+                "Proposal Outcome source 暂不可用，已安全阻止 Contract 签发。",
+            ) from exc
+        raise EvolutionExperimentContractStoreError(
+            "experiment_contract_outcome_terminal",
+            "该 Proposal 已形成 rollback Outcome，不能再次签发 Contract。",
+        )
 
 
 _BUDGET_CAPS: dict[str, ExperimentBudget] = {

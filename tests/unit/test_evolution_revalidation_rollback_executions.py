@@ -31,6 +31,10 @@ from naumi_agent.evolution.promotion_package_inputs import (
     _rollback_plan,
     _sha256_payload,
 )
+from naumi_agent.evolution.proposal_outcomes import (
+    EvolutionProposalOutcomeProjectionError,
+    EvolutionProposalOutcomeProjectionService,
+)
 from naumi_agent.evolution.revalidation_promotion_inputs import (
     EVOLUTION_REVALIDATION_PROMOTION_INPUT_POLICY,
     EvolutionRevalidationPromotionInput,
@@ -799,6 +803,40 @@ async def test_rollback_outcome_binds_real_receipt_to_proposal_and_fails_closed(
     assert not view.outcome.learning_authority
     assert not view.promotion_authority
 
+    projection_service = EvolutionProposalOutcomeProjectionService(
+        rollback_outcome_store=EvolutionRevalidationRollbackOutcomeStore(db_path),
+        rollback_outcome_service=outcome_service,
+    )
+    projected = await projection_service.project_session(
+        view.outcome.workbench_session_id
+    )
+    proposal_outcome = projected[view.outcome.workbench_proposal_id]
+    assert proposal_outcome.status == "rolled_back"
+    assert proposal_outcome.governance_state_unchanged
+    assert proposal_outcome.authority_valid
+    assert proposal_outcome.active_baseline
+    assert not proposal_outcome.contract_issue_allowed
+    assert not proposal_outcome.before_after_recorded
+    assert not proposal_outcome.long_term_metrics_recorded
+    assert not proposal_outcome.promoted
+    assert not proposal_outcome.learning_authority
+    assert not proposal_outcome.promotion_authority
+
+    class _AmbiguousOutcomeStore:
+        async def list_by_session(self, session_id: str):
+            return (view.outcome, view.outcome)
+
+    ambiguous_service = EvolutionProposalOutcomeProjectionService(
+        rollback_outcome_store=_AmbiguousOutcomeStore(),  # type: ignore[arg-type]
+        rollback_outcome_service=outcome_service,
+    )
+    with pytest.raises(EvolutionProposalOutcomeProjectionError) as ambiguous:
+        await ambiguous_service.project_session(view.outcome.workbench_session_id)
+    assert ambiguous.value.code == "proposal_outcome_ambiguous"
+    with pytest.raises(EvolutionProposalOutcomeProjectionError) as invalid_session:
+        await projection_service.project_session("forged\x00session")
+    assert invalid_session.value.code == "proposal_outcome_session_id_invalid"
+
     tool = EvolutionRevalidationRollbackOutcomeTool(
         SimpleNamespace(evolution_revalidation_rollback_outcome_service=outcome_service)
     )
@@ -851,6 +889,11 @@ async def test_rollback_outcome_binds_real_receipt_to_proposal_and_fails_closed(
     assert not stale.proposal_binding_valid
     assert not stale.outcome_authority
     assert not stale.long_term_metrics_authority
+    stale_projection = await projection_service.project_session(
+        view.outcome.workbench_session_id
+    )
+    assert not stale_projection[view.outcome.workbench_proposal_id].authority_valid
+    assert not stale_projection[view.outcome.workbench_proposal_id].active_baseline
     with pytest.raises(EvolutionRevalidationRollbackOutcomeError) as blocked:
         await outcome_service.record(request_id=request.request_id)
     assert blocked.value.code == "rollback_outcome_stale"

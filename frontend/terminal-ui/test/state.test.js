@@ -4441,7 +4441,7 @@ test("approved Evolution Proposal explicitly issues and displays a durable Contr
   state.workbench.proposals = [{
     id: "proposal-1", state: "approved", title: "优化 footer",
     source_kind: "evolution_candidate", intended_files: ["src/footer.js"],
-    validation_plan: ["node --test footer.test.js"],
+    validation_plan: ["node --test footer.test.js"], contract_issue_allowed: true,
   }];
   state.workbench.selected_review_id = "proposal-1";
   state.workbench.selected_review_kind = "proposal";
@@ -4497,7 +4497,7 @@ test("workbench bypass issues an approved Evolution Contract without confirmatio
   state.workbench.proposals = [{
     id: "proposal-1", state: "approved", title: "优化 footer",
     source_kind: "evolution_candidate", intended_files: ["src/footer.js"],
-    validation_plan: [],
+    validation_plan: [], contract_issue_allowed: true,
   }];
   state.workbench.selected_review_id = "proposal-1";
   state.workbench.selected_review_kind = "proposal";
@@ -4516,6 +4516,32 @@ test("workbench bypass issues an approved Evolution Contract without confirmatio
       confirmed: false,
     },
   });
+});
+
+test("workbench blocks Contract issue after rollback Outcome", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-workbench";
+  state.status.permission_mode = "bypass";
+  state.route = { name: "workbench", originAnchor: null };
+  state.workbench.selected_tab = "reviews";
+  state.workbench.proposals = [{
+    id: "proposal-1", state: "approved", title: "优化 footer",
+    source_kind: "evolution_candidate", intended_files: [], validation_plan: [],
+    contract_issue_allowed: false, outcome_status: "rolled_back",
+    outcome: { outcome_id: `evrerollbackout_${"1".repeat(24)}` },
+  }];
+  state.workbench.selected_review_id = "proposal-1";
+  state.workbench.selected_review_kind = "proposal";
+  const sent = [];
+
+  assert.equal(
+    handleWorkbenchOverviewKey(state, "c", (type, payload) => sent.push({ type, payload })),
+    true,
+  );
+
+  assert.equal(state.workbench.proposal_action, null);
+  assert.match(state.workbench.action_error, /不能再次签发 Contract/);
+  assert.equal(sent.length, 0);
 });
 
 test("session replay keeps an open Workbench route but requests new authority", () => {

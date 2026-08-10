@@ -205,6 +205,9 @@ from naumi_agent.evolution.promotion_packages import (
     EvolutionPromotionPackageStore,
     EvolutionPromotionTargetProbe,
 )
+from naumi_agent.evolution.proposal_outcomes import (
+    EvolutionProposalOutcomeProjectionService,
+)
 from naumi_agent.evolution.queue import EvolutionProposalQueueAdapter
 from naumi_agent.evolution.reflection_memories import (
     EvolutionReflectionMemoryBuilder,
@@ -2456,6 +2459,22 @@ class AgentEngine:
                 experiment_store=self.evolution_experiment_contract_store,
                 store=self.evolution_revalidation_rollback_outcome_store,
             )
+        )
+        self.evolution_proposal_outcome_projection_service = (
+            EvolutionProposalOutcomeProjectionService(
+                rollback_outcome_store=(
+                    self.evolution_revalidation_rollback_outcome_store
+                ),
+                rollback_outcome_service=(
+                    self.evolution_revalidation_rollback_outcome_service
+                ),
+            )
+        )
+        self.workbench_service.bind_proposal_outcome_reader(
+            self.evolution_proposal_outcome_projection_service
+        )
+        self.evolution_experiment_contract_issuer.bind_proposal_outcome_reader(
+            self.evolution_proposal_outcome_projection_service
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
             journal_store=self.evolution_patch_journal_store,
