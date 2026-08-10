@@ -225,7 +225,10 @@
   - HAR-10.8f2h 已实现：认证 `pending/delivered/abandoned` effective-state、有界 disposed history 与
     Goal schema v4，并同步 Agent Tool、New UI、CLI 与 Textual TUI；详见
     `HAR-10-8f2h-pursuit-terminal-outbox-effective-state-history.md`。
-  - 未完成：disposed cursor 翻页、retention preview/apply、push stream、跨 Store 原子 terminal commit
+  - HAR-10.8f2i 已实现：最旧优先的有界只读 retention preview、脱敏 protection reference graph 与
+    防篡改 preview/candidate 回执，并通过 Agent Tool、CLI、Textual TUI 和 New UI 共用 Slash 通道交付；详见
+    `HAR-10-8f2i-pursuit-terminal-outbox-retention-preview.md`。
+  - 未完成：disposed cursor 翻页、retention apply/prune、push stream、跨 Store 原子 terminal commit
     与 A5 故障/soak。
 
 ## 与 Pursuit 的合并原则

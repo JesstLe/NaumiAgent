@@ -170,6 +170,33 @@ async def test_shared_pursue_outbox_routes_exact_dead_letter_abandon(
 
 
 @pytest.mark.asyncio
+async def test_shared_pursue_outbox_routes_retention_preview(
+    rendered_console: StringIO,
+) -> None:
+    engine = _EngineFacadeFake(content="只读候选预演，不是删除授权。")
+    engine.tool_registry = {
+        "pursuit_terminal_outbox_retention_preview": engine.tool,
+    }
+
+    await commands_meta.run_pursue(
+        engine,
+        "outbox retention-preview --retention-days 45 --limit 5 "
+        "--scan-limit 10 --assessed-at 2026-08-11T08:00:00+08:00",
+    )
+
+    tool_call, agent_name = engine.calls[0]
+    assert agent_name == "cli"
+    assert tool_call.name == "pursuit_terminal_outbox_retention_preview"
+    assert json.loads(tool_call.arguments) == {
+        "retention_days": 45,
+        "limit": 5,
+        "scan_limit": 10,
+        "assessed_at": "2026-08-11T08:00:00+08:00",
+    }
+    assert "只读候选预演" in rendered_console.getvalue()
+
+
+@pytest.mark.asyncio
 async def test_delete_session_command_reports_durable_retry_request(
     rendered_console: StringIO,
 ) -> None:

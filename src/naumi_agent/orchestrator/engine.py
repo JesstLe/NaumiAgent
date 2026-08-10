@@ -577,6 +577,10 @@ from naumi_agent.orchestrator.pursuit_terminal_outbox_worker import (
     PursuitTerminalOutboxWorkerPolicy,
     PursuitTerminalOutboxWorkerSnapshot,
 )
+from naumi_agent.orchestrator.pursuit_terminal_retention import (
+    PursuitTerminalOutboxRetentionPreview,
+    build_terminal_outbox_retention_preview,
+)
 from naumi_agent.orchestrator.system_prompt import (
     PromptAssemblyInput,
     build_system_prompt,
@@ -3225,6 +3229,9 @@ class AgentEngine:
             terminal_dead_letter_abandon=(
                 self.abandon_pursuit_terminal_dead_letter
             ),
+            terminal_outbox_retention_preview=(
+                self.preview_pursuit_terminal_outbox_retention
+            ),
         ):
             self._tool_registry.register(tool)
 
@@ -4337,6 +4344,41 @@ class AgentEngine:
             now=datetime.now(UTC).timestamp(),
         )
         return receipt
+
+    async def preview_pursuit_terminal_outbox_retention(
+        self,
+        retention_days: int = 30,
+        limit: int = 20,
+        scan_limit: int = 100,
+        assessed_at: str | None = None,
+    ) -> PursuitTerminalOutboxRetentionPreview:
+        """Build a reproducible, read-only terminal outbox retention preview."""
+        if assessed_at is None:
+            assessment = datetime.now(UTC)
+        else:
+            try:
+                assessment = datetime.fromisoformat(
+                    assessed_at.replace("Z", "+00:00")
+                )
+            except (TypeError, ValueError) as exc:
+                raise ValueError("assessed_at 必须是有效的 ISO 时间。") from exc
+            if assessment.tzinfo is None or assessment.utcoffset() is None:
+                raise ValueError("assessed_at 必须包含时区。")
+            assessment = assessment.astimezone(UTC)
+        try:
+            assessed_timestamp = assessment.timestamp()
+        except (OverflowError, OSError, ValueError) as exc:
+            raise ValueError("assessed_at 超出可支持的时间范围。") from exc
+        page = self.pursuit_store.preview_terminal_outbox_retention(
+            assessed_at=assessed_timestamp,
+            retention_days=retention_days,
+            limit=limit,
+            scan_limit=scan_limit,
+        )
+        return build_terminal_outbox_retention_preview(
+            page,
+            workspace_root=str(self.workspace_root),
+        )
 
     async def run_agent_publication_recovery_once(
         self,

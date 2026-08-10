@@ -105,10 +105,31 @@ async def _run_pursue_meta(engine: Any, subcommand: str, arg: str) -> None:
     }
     tool_name = tool_map[subcommand]
     outbox_parts = arg.strip().split() if subcommand == "outbox" else []
+    retention_kwargs: dict[str, Any] | None = None
     if outbox_parts and outbox_parts[0] == "requeue":
         tool_name = "pursuit_terminal_dead_letter_requeue"
     elif outbox_parts and outbox_parts[0] == "abandon":
         tool_name = "pursuit_terminal_dead_letter_abandon"
+    elif outbox_parts and outbox_parts[0] in {
+        "retention-preview", "retention_preview",
+    }:
+        from naumi_agent.tools.pursuit import (
+            parse_terminal_outbox_retention_preview_args,
+        )
+
+        try:
+            retention_kwargs = parse_terminal_outbox_retention_preview_args(
+                outbox_parts[1:]
+            )
+        except ValueError as exc:
+            console.print(f"[yellow]{exc}[/yellow]")
+            console.print(
+                "[yellow]用法: /pursue outbox retention-preview "
+                "[--retention-days N] [--limit N] [--scan-limit N] "
+                "[--assessed-at ISO][/yellow]"
+            )
+            return
+        tool_name = "pursuit_terminal_outbox_retention_preview"
     tool = engine.tool_registry.get(tool_name)
     if not tool:
         console.print(f"[red]工具未注册: {tool_name}[/red]")
@@ -121,6 +142,7 @@ async def _run_pursue_meta(engine: Any, subcommand: str, arg: str) -> None:
         return
     if subcommand == "outbox" and not (
         arg.strip() == "run-now"
+        or retention_kwargs is not None
         or (
             len(outbox_parts) == 2
             and outbox_parts[0] == "requeue"
@@ -138,7 +160,9 @@ async def _run_pursue_meta(engine: Any, subcommand: str, arg: str) -> None:
     ):
         console.print(
             "[yellow]用法: /pursue outbox run-now | "
-            "requeue <ptfail_...> | abandon <ptfail_...> <reason>[/yellow]"
+            "requeue <ptfail_...> | abandon <ptfail_...> <reason> | "
+            "retention-preview [--retention-days N] [--limit N] "
+            "[--scan-limit N] [--assessed-at ISO][/yellow]"
         )
         return
     if subcommand == "outbox":
@@ -147,15 +171,19 @@ async def _run_pursue_meta(engine: Any, subcommand: str, arg: str) -> None:
                 engine,
                 tool_name,
                 (
-                    {"dead_letter_id": outbox_parts[1]}
-                    if outbox_parts[0] == "requeue"
+                    retention_kwargs
+                    if retention_kwargs is not None
                     else (
-                        {
-                            "dead_letter_id": outbox_parts[1],
-                            "reason": outbox_parts[2],
-                        }
-                        if outbox_parts[0] == "abandon"
-                        else {}
+                        {"dead_letter_id": outbox_parts[1]}
+                        if outbox_parts[0] == "requeue"
+                        else (
+                            {
+                                "dead_letter_id": outbox_parts[1],
+                                "reason": outbox_parts[2],
+                            }
+                            if outbox_parts[0] == "abandon"
+                            else {}
+                        )
                     )
                 ),
             ),
@@ -164,6 +192,8 @@ async def _run_pursue_meta(engine: Any, subcommand: str, arg: str) -> None:
                 if outbox_parts[0] == "requeue"
                 else "放弃 Pursuit 终态死信"
                 if outbox_parts[0] == "abandon"
+                else "预演 Pursuit 终态 Outbox 保留策略"
+                if retention_kwargs is not None
                 else "恢复 Pursuit 终态队列"
             ),
         )

@@ -76,6 +76,17 @@ async def test_run_pursue_routes_goal_through_engine_tool_executor() -> None:
             },
         ),
         (
+            "outbox retention-preview --retention-days 45 --limit 5 "
+            "--scan-limit 10 --assessed-at 2026-08-11T08:00:00+08:00",
+            "pursuit_terminal_outbox_retention_preview",
+            {
+                "retention_days": 45,
+                "limit": 5,
+                "scan_limit": 10,
+                "assessed_at": "2026-08-11T08:00:00+08:00",
+            },
+        ),
+        (
             "reconcile recovery-" + "a" * 64,
             "pursuit_reconcile",
             {"attempt_id": "recovery-" + "a" * 64},

@@ -83,8 +83,8 @@ normalizer 复验 ID、枚举、时区、数量和截断关系。
 - 本切片提供最新 20 项的有界历史和 `truncated`，尚未提供用户可导航的 cursor 翻页；不能称完整审计浏览器；
 - 全局 authority 仍以单个 SQLite Store 为信任域；若攻击者同时删除 outbox、failure head/events 与 receipt 的全部
   可发现行，当前没有外部 Merkle anchor 证明曾经存在；
-- disposed history 是 retention preview 的稳定输入，但 retention reference graph、preview receipt 与 apply 仍未实现；
+- HAR-10.8f2i 已基于 disposed history 交付 retention protection graph 与只读 preview receipt；apply 仍未实现；
 - push stream、跨 Store 原子 terminal commit、kill-at-every-write-point 与 24 小时 soak 仍未完成。
 
-下一最小切片应实现只读 retention preview：从本 catalog 构建引用保护图、明确可删除/受保护原因并签发 preview
-receipt；在 preview 和故障注入充分验证前，不得实现物理删除。
+下一最小切片应先实现 retention apply admission、引用重新认证、可恢复变更计划与逐写点故障矩阵；在这些边界
+充分验证前，不得实现物理删除。
