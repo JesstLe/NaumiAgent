@@ -348,6 +348,16 @@ if TYPE_CHECKING:
         EvolutionPatchWriter,
         EvolutionPatchWriteReceipt,
     )
+    from naumi_agent.evolution.post_rollback_runtime_verifications import (
+        EVOLUTION_POST_ROLLBACK_RUNTIME_VERIFICATION_POLICY,
+        EvolutionPostRollbackRuntimeVerification,
+        EvolutionPostRollbackRuntimeVerificationBuilder,
+        EvolutionPostRollbackRuntimeVerificationError,
+        EvolutionPostRollbackRuntimeVerificationService,
+        EvolutionPostRollbackRuntimeVerificationStore,
+        EvolutionPostRollbackRuntimeVerificationView,
+        render_post_rollback_runtime_verification,
+    )
     from naumi_agent.evolution.postflight_guards import (
         EvolutionPostflightGuard,
         EvolutionPostflightGuardError,
@@ -1774,6 +1784,14 @@ __all__ = [
     "EvolutionPromotionTargetRelation",
     "EvolutionPromotionTargetSnapshot",
     "render_evolution_promotion_package",
+    "EVOLUTION_POST_ROLLBACK_RUNTIME_VERIFICATION_POLICY",
+    "EvolutionPostRollbackRuntimeVerification",
+    "EvolutionPostRollbackRuntimeVerificationBuilder",
+    "EvolutionPostRollbackRuntimeVerificationError",
+    "EvolutionPostRollbackRuntimeVerificationService",
+    "EvolutionPostRollbackRuntimeVerificationStore",
+    "EvolutionPostRollbackRuntimeVerificationView",
+    "render_post_rollback_runtime_verification",
     "EvolutionCandidateDraft",
     "EvolutionCandidateSnapshotError",
     "EvolutionCandidateSourceBlob",
@@ -2850,6 +2868,16 @@ def __getattr__(name: str) -> object:
         "EvolutionProposalBeforeAfterLane",
         "render_proposal_before_after_evidence",
     }
+    post_rollback_runtime_verification_exports = {
+        "EVOLUTION_POST_ROLLBACK_RUNTIME_VERIFICATION_POLICY",
+        "EvolutionPostRollbackRuntimeVerification",
+        "EvolutionPostRollbackRuntimeVerificationBuilder",
+        "EvolutionPostRollbackRuntimeVerificationError",
+        "EvolutionPostRollbackRuntimeVerificationService",
+        "EvolutionPostRollbackRuntimeVerificationStore",
+        "EvolutionPostRollbackRuntimeVerificationView",
+        "render_post_rollback_runtime_verification",
+    }
     experiment_exports = {
         "EvolutionExperimentContract",
         "EvolutionExperimentContractAuthority",
@@ -3242,6 +3270,8 @@ def __getattr__(name: str) -> object:
         module_name = "proposal"
     elif name in proposal_before_after_exports:
         module_name = "proposal_before_after_evidence"
+    elif name in post_rollback_runtime_verification_exports:
+        module_name = "post_rollback_runtime_verifications"
     elif name in proposal_outcome_exports:
         module_name = "proposal_outcomes"
     elif name in experiment_exports:

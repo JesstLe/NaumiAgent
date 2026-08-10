@@ -180,6 +180,9 @@ def test_reviews_formatter_renders_rollback_outcome_without_contract_action() ->
     assert "已记录 · 2 lanes" in rendered
     assert "Before/After Evidence" in rendered
     assert "不代表回滚后评测" in rendered
+    assert "fresh boot + launch identity" in rendered
+    assert "Post-Rollback Verification" in rendered
+    assert "行为级 Eval 尚未记录" in rendered
     assert "`c` 签发" not in rendered
 
 
@@ -840,6 +843,12 @@ def _rolled_back_proposal_snapshot() -> dict[str, object]:
                 {"lane_kind": "interventional"},
                 {"lane_kind": "adversarial"},
             ],
+        },
+        "post_rollback_verification_recorded": True,
+        "post_rollback_verification": {
+            "verification_id": f"evpostrollback_{'5' * 24}",
+            "baseline_slot_id": f"relslot_{'6' * 24}",
+            "baseline_version": "0.1.214",
         },
     }
     return snapshot

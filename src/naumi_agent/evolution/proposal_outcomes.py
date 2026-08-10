@@ -8,6 +8,13 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from naumi_agent.evolution.post_rollback_runtime_verifications import (
+    EvolutionPostRollbackRuntimeVerification,
+    EvolutionPostRollbackRuntimeVerificationError,
+    EvolutionPostRollbackRuntimeVerificationService,
+    EvolutionPostRollbackRuntimeVerificationStore,
+    EvolutionPostRollbackRuntimeVerificationView,
+)
 from naumi_agent.evolution.proposal_before_after_evidence import (
     EvolutionProposalBeforeAfterEvidence,
     EvolutionProposalBeforeAfterEvidenceError,
@@ -58,7 +65,10 @@ class EvolutionProposalOutcomeProjection(_StrictModel):
     contract_issue_allowed: Literal[False] = False
     before_after_evidence: EvolutionProposalBeforeAfterEvidence | None = None
     before_after_recorded: bool = False
-    post_rollback_evaluation_recorded: Literal[False] = False
+    post_rollback_verification: EvolutionPostRollbackRuntimeVerification | None = None
+    post_rollback_verification_recorded: bool = False
+    post_rollback_evaluation_recorded: bool = False
+    post_rollback_behavioral_evaluation_recorded: Literal[False] = False
     long_term_metrics_recorded: Literal[False] = False
     promoted: Literal[False] = False
     learning_authority: Literal[False] = False
@@ -87,6 +97,29 @@ class EvolutionProposalOutcomeProjection(_StrictModel):
             and not evidence.promotion_authority
         ):
             raise ValueError("Proposal Outcome before/after evidence 绑定无效。")
+        verification = self.post_rollback_verification
+        recorded = verification is not None
+        if not (
+            self.post_rollback_verification_recorded is recorded
+            and self.post_rollback_evaluation_recorded is recorded
+        ):
+            raise ValueError("Proposal Outcome post-rollback 状态与 evidence 不一致。")
+        if verification is not None and not (
+            verification.outcome_id == self.outcome_id
+            and verification.outcome_sha256 == self.outcome_sha256
+            and verification.workbench_session_id == self.workbench_session_id
+            and verification.workbench_proposal_id == self.workbench_proposal_id
+            and verification.experiment_contract_id == self.experiment_contract_id
+            and verification.candidate_id == self.candidate_id
+            and verification.candidate_revision == self.candidate_revision
+            and verification.post_rollback_verification_recorded
+            and verification.post_rollback_evaluation_recorded
+            and not verification.behavioral_evaluation_recorded
+            and not verification.long_term_metrics_recorded
+            and not verification.learning_authority
+            and not verification.promotion_authority
+        ):
+            raise ValueError("Proposal Outcome post-rollback evidence 绑定无效。")
         return self
 
 
@@ -104,6 +137,9 @@ class EvolutionProposalOutcomeProjectionService:
         rollback_outcome_service: EvolutionRevalidationRollbackOutcomeService,
         before_after_store: EvolutionProposalBeforeAfterEvidenceStore | None = None,
         before_after_service: EvolutionProposalBeforeAfterEvidenceService | None = None,
+        post_rollback_store: EvolutionPostRollbackRuntimeVerificationStore | None = None,
+        post_rollback_service: EvolutionPostRollbackRuntimeVerificationService
+        | None = None,
     ) -> None:
         self.rollback_outcome_store = rollback_outcome_store
         self.rollback_outcome_service = rollback_outcome_service
@@ -111,6 +147,10 @@ class EvolutionProposalOutcomeProjectionService:
             raise ValueError("Before/After Store 与 Service 必须同时绑定。")
         self.before_after_store = before_after_store
         self.before_after_service = before_after_service
+        if (post_rollback_store is None) != (post_rollback_service is None):
+            raise ValueError("Post-Rollback Store 与 Service 必须同时绑定。")
+        self.post_rollback_store = post_rollback_store
+        self.post_rollback_service = post_rollback_service
 
     async def project_session(
         self,
@@ -147,16 +187,28 @@ class EvolutionProposalOutcomeProjectionService:
             return_exceptions=True,
         )
         evidence_views = await self._before_after_views(tuple(by_proposal.values()))
+        post_rollback_views = await self._post_rollback_views(
+            tuple(by_proposal.values())
+        )
         projections: dict[str, EvolutionProposalOutcomeProjection] = {}
-        for (proposal_id, outcome), result, evidence_view in zip(
-            by_proposal.items(), views, evidence_views, strict=True
+        for (proposal_id, outcome), result, evidence_view, verification_view in zip(
+            by_proposal.items(),
+            views,
+            evidence_views,
+            post_rollback_views,
+            strict=True,
         ):
             if isinstance(result, BaseException):
                 raise EvolutionProposalOutcomeProjectionError(
                     "proposal_outcome_source_unavailable",
                     "Proposal Outcome source 暂不可用。",
                 ) from result
-            projections[proposal_id] = _project(outcome, result, evidence_view)
+            projections[proposal_id] = _project(
+                outcome,
+                result,
+                evidence_view,
+                verification_view,
+            )
         return projections
 
     async def _before_after_views(
@@ -196,11 +248,49 @@ class EvolutionProposalOutcomeProjectionService:
             )
         return tuple(inspected)
 
+    async def _post_rollback_views(
+        self,
+        outcomes: tuple[EvolutionRevalidationRollbackOutcome, ...],
+    ) -> tuple[EvolutionPostRollbackRuntimeVerificationView | None, ...]:
+        if self.post_rollback_store is None or self.post_rollback_service is None:
+            return tuple(None for _ in outcomes)
+        try:
+            evidence = await asyncio.gather(*(
+                self.post_rollback_store.get_by_outcome(item.outcome_id)
+                for item in outcomes
+            ))
+            inspected = await asyncio.gather(*(
+                self.post_rollback_service.inspect(verification=item)
+                if item is not None
+                else _none()
+                for item in evidence
+            ))
+        except (
+            EvolutionPostRollbackRuntimeVerificationError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            raise EvolutionProposalOutcomeProjectionError(
+                "proposal_outcome_post_rollback_unavailable",
+                "Post-Rollback Runtime Verification source 暂不可用。",
+            ) from exc
+        if any(
+            item is not None and not item.verification_authority
+            for item in inspected
+        ):
+            raise EvolutionProposalOutcomeProjectionError(
+                "proposal_outcome_post_rollback_stale",
+                "Post-Rollback Runtime Verification authority 当前无效。",
+            )
+        return tuple(inspected)
+
 
 def _project(
     outcome: EvolutionRevalidationRollbackOutcome,
     view: EvolutionRevalidationRollbackOutcomeView,
     evidence_view: EvolutionProposalBeforeAfterEvidenceView | None = None,
+    verification_view: EvolutionPostRollbackRuntimeVerificationView | None = None,
 ) -> EvolutionProposalOutcomeProjection:
     if outcome != view.outcome:
         raise EvolutionProposalOutcomeProjectionError(
@@ -208,6 +298,9 @@ def _project(
             "Proposal Outcome 与 current view 不一致。",
         )
     evidence = evidence_view.evidence if evidence_view is not None else None
+    verification = (
+        verification_view.verification if verification_view is not None else None
+    )
     return EvolutionProposalOutcomeProjection(
         workbench_session_id=outcome.workbench_session_id,
         workbench_proposal_id=outcome.workbench_proposal_id,
@@ -226,7 +319,10 @@ def _project(
         contract_issue_allowed=False,
         before_after_evidence=evidence,
         before_after_recorded=evidence is not None,
-        post_rollback_evaluation_recorded=False,
+        post_rollback_verification=verification,
+        post_rollback_verification_recorded=verification is not None,
+        post_rollback_evaluation_recorded=verification is not None,
+        post_rollback_behavioral_evaluation_recorded=False,
         long_term_metrics_recorded=False,
         promoted=False,
         learning_authority=False,

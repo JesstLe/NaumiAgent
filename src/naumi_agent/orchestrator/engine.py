@@ -194,6 +194,10 @@ from naumi_agent.evolution.patch_recovery import (
 from naumi_agent.evolution.patch_set_writers import EvolutionPatchSetWriter
 from naumi_agent.evolution.patch_sets import EvolutionPatchSetStore
 from naumi_agent.evolution.patch_writers import EvolutionPatchWriter
+from naumi_agent.evolution.post_rollback_runtime_verifications import (
+    EvolutionPostRollbackRuntimeVerificationService,
+    EvolutionPostRollbackRuntimeVerificationStore,
+)
 from naumi_agent.evolution.promotion_package_inputs import (
     EvolutionPromotionPackageInputBuilder,
     EvolutionPromotionPackageInputExecutor,
@@ -2464,6 +2468,26 @@ class AgentEngine:
                 store=self.evolution_revalidation_rollback_outcome_store,
             )
         )
+        self.evolution_post_rollback_runtime_verification_store = (
+            EvolutionPostRollbackRuntimeVerificationStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_post_rollback_runtime_verification_service = (
+            EvolutionPostRollbackRuntimeVerificationService(
+                workspace_root=paths.workspace_root,
+                outcome_service=(
+                    self.evolution_revalidation_rollback_outcome_service
+                ),
+                rollback_service=(
+                    self.evolution_revalidation_rollback_execution_service
+                ),
+                release_slot_store=self.evolution_release_slot_store,
+                store=(
+                    self.evolution_post_rollback_runtime_verification_store
+                ),
+            )
+        )
         self.evolution_proposal_before_after_evidence_store = (
             EvolutionProposalBeforeAfterEvidenceStore(
                 config.memory.session_db_path
@@ -2500,6 +2524,12 @@ class AgentEngine:
                 ),
                 before_after_service=(
                     self.evolution_proposal_before_after_evidence_service
+                ),
+                post_rollback_store=(
+                    self.evolution_post_rollback_runtime_verification_store
+                ),
+                post_rollback_service=(
+                    self.evolution_post_rollback_runtime_verification_service
                 ),
             )
         )

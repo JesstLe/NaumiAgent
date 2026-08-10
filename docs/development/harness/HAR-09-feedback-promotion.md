@@ -90,8 +90,10 @@
   协议拒绝跨 Proposal 绑定和 `promoted/learning` 提权。详见 `HAR-09-6a-proposal-outcome-projection.md`。
 - HAR-09.6b 已把原 Promotion Input 绑定的 Final Evaluation 和全部 HAR-08 H5c RED/GREEN lane 登记为
   `implementation_before_after`，并在每次读取时复验 Outcome、Proposal、Candidate 和 H5c authority。该 evidence
-  不是 post-rollback 或长期结果，不授予 learning/promotion authority。长期指标、回滚后恢复证明、promoted
-  Outcome 和 supersede ledger 尚未完成，因此整体继续保持 partial。
+  不是 post-rollback 或长期结果，不授予 learning/promotion authority；它本身不能被后续恢复证据替代或改名。
+- HAR-09.6c1 已在 active baseline installed slot 上重新执行 `--version` boot probe，并重新解析 launcher identity；
+  Workbench/New UI/TUI 显示同一 verification。它只证明 installed runtime 的 fresh mechanical recovery，行为级 Eval、
+  长期指标、promoted Outcome 和 supersede ledger 仍未完成。
 
 EVO-02.1b 已把不可执行 Contract 包装为 workspace-bound durable Authority；HAR-09.5c 在其上补齐产品动作、
 Proposal 单飞键和历史 projection 迁移。Contract 仍不是执行或 promotion 许可。

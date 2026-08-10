@@ -3817,7 +3817,10 @@ test("normalizes workbench snapshot events", () => {
       contract_issue_allowed: false,
       before_after_recorded: false,
       before_after_evidence: null,
+      post_rollback_verification: null,
+      post_rollback_verification_recorded: false,
       post_rollback_evaluation_recorded: false,
+      post_rollback_behavioral_evaluation_recorded: false,
       long_term_metrics_recorded: false,
       promoted: false,
       learning_authority: false,
@@ -3963,6 +3966,102 @@ test("normalizes workbench snapshot events", () => {
       }],
     },
   }), /authority 字段无效/);
+
+  const baselineSlotId = `relslot_${"8".repeat(24)}`;
+  const pointerId = `relactive_${"9".repeat(24)}`;
+  const postRollback = {
+    schema_version: 1,
+    policy_version: "evolution-post-rollback-runtime-verification-v1",
+    verification_id: `evpostrollback_${"a".repeat(24)}`,
+    verification_sha256: "a".repeat(64),
+    verification_kind: "installed_runtime_recovery",
+    outcome_id: proposal.outcome.outcome_id,
+    outcome_sha256: proposal.outcome.outcome_sha256,
+    workbench_session_id: "s",
+    workbench_proposal_id: "proposal-1",
+    experiment_contract_id: proposal.outcome.experiment_contract_id,
+    candidate_id: proposal.outcome.candidate_id,
+    candidate_revision: proposal.outcome.candidate_revision,
+    baseline_slot_id: baselineSlotId,
+    baseline_slot_sha256: "b".repeat(64),
+    baseline_version: "0.1.214",
+    baseline_target: "macos-arm64",
+    rollback_pointer_id: pointerId,
+    rollback_pointer_sha256: "c".repeat(64),
+    rollback_pointer_generation: 3,
+    runtime_identity_sha256: "d".repeat(64),
+    fresh_boot_receipt: {
+      receipt_id: `relboot_${"e".repeat(24)}`,
+      receipt_sha256: "e".repeat(64),
+      slot_id: baselineSlotId,
+      slot_sha256: "b".repeat(64),
+      binary_sha256: "f".repeat(64),
+      exit_code: 0,
+      bootable: true,
+      checked_at: "2026-08-10T00:01:00+00:00",
+    },
+    fresh_launch_resolution: {
+      resolution_id: `rellaunch_${"1".repeat(24)}`,
+      resolution_sha256: "1".repeat(64),
+      pointer_id: pointerId,
+      pointer_sha256: "c".repeat(64),
+      pointer_generation: 3,
+      slot_id: baselineSlotId,
+      slot_sha256: "b".repeat(64),
+      binary_sha256: "f".repeat(64),
+      process_start_requested: false,
+      process_start_authority: false,
+      process_started: false,
+      resolved_at: "2026-08-10T00:01:01+00:00",
+    },
+    post_rollback_verification_recorded: true,
+    post_rollback_evaluation_recorded: true,
+    behavioral_evaluation_recorded: false,
+    long_term_metrics_recorded: false,
+    learning_authority: false,
+    promotion_authority: false,
+  };
+  const verified = normalizeServerRecord({
+    type: "workbench/snapshot",
+    payload: {
+      ...record.payload,
+      proposals: [{
+        ...proposal,
+        outcome: {
+          ...proposal.outcome,
+          post_rollback_verification: postRollback,
+          post_rollback_verification_recorded: true,
+          post_rollback_evaluation_recorded: true,
+        },
+      }],
+    },
+  });
+  assert.equal(
+    verified.payload.proposals[0].outcome.post_rollback_verification.runtime_identity_sha256,
+    "d".repeat(64),
+  );
+  assert.equal(verified.payload.proposals[0].outcome.post_rollback_evaluation_recorded, true);
+  assert.throws(() => normalizeServerRecord({
+    type: "workbench/snapshot",
+    payload: {
+      ...record.payload,
+      proposals: [{
+        ...proposal,
+        outcome: {
+          ...proposal.outcome,
+          post_rollback_verification: {
+            ...postRollback,
+            fresh_launch_resolution: {
+              ...postRollback.fresh_launch_resolution,
+              process_start_requested: true,
+            },
+          },
+          post_rollback_verification_recorded: true,
+          post_rollback_evaluation_recorded: true,
+        },
+      }],
+    },
+  }), /post-rollback authority 字段无效/);
 
   for (const mergeTargetIds of [
     ["proposal-2", "proposal-2"],

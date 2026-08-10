@@ -69,6 +69,10 @@ from naumi_agent.evolution.mechanical_gates import (
     EvolutionMechanicalGateError,
     render_mechanical_gate,
 )
+from naumi_agent.evolution.post_rollback_runtime_verifications import (
+    EvolutionPostRollbackRuntimeVerificationError,
+    render_post_rollback_runtime_verification,
+)
 from naumi_agent.evolution.promotion_package_inputs import (
     EvolutionPromotionPackageInputError,
     render_evolution_promotion_package_input,
@@ -2614,6 +2618,73 @@ class EvolutionProposalBeforeAfterEvidenceTool(Tool):
         return render_proposal_before_after_evidence(view)
 
 
+class EvolutionPostRollbackRuntimeVerificationTool(Tool):
+    """Run fresh installed-runtime probes after an authority-bound rollback."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_post_rollback_runtime_verification"
+
+    @property
+    def description(self) -> str:
+        return (
+            "在 rolled_back Outcome 的 active baseline slot 上重新执行受控 "
+            "--version boot probe，并重新解析 launcher identity。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "request_id": {
+                    "type": "string",
+                    "pattern": "^evrerollbackreq_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["request_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="回滚后 Runtime 验证",
+            search_hint=(
+                "evolution post rollback runtime verification boot launch "
+                "自进化 回滚 恢复 验证"
+            ),
+        )
+
+    async def execute(self, request_id: str) -> str:
+        try:
+            view = await (
+                self._engine.evolution_post_rollback_runtime_verification_service.record(
+                    request_id=str(request_id or "").strip(),
+                )
+            )
+        except (
+            AttributeError,
+            EvolutionPostRollbackRuntimeVerificationError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "post_rollback_verification_failed")
+            return f"回滚后 Runtime 验证未完成（`{code}`）：{exc}"
+        return render_post_rollback_runtime_verification(view)
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -2656,6 +2727,7 @@ def create_evolution_review_tools(
         EvolutionRevalidationRollbackExecutionTool(engine),
         EvolutionRevalidationRollbackOutcomeTool(engine),
         EvolutionProposalBeforeAfterEvidenceTool(engine),
+        EvolutionPostRollbackRuntimeVerificationTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -2683,6 +2755,7 @@ __all__ = [
     "EvolutionPromotionApprovalDecisionTool",
     "EvolutionPromotionPackageInputTool",
     "EvolutionPromotionPackageTool",
+    "EvolutionPostRollbackRuntimeVerificationTool",
     "EvolutionProposalBeforeAfterEvidenceTool",
     "EvolutionRewardHackingEvidenceTool",
     "EvolutionRevalidationRequestAuthorityTool",

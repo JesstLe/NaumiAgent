@@ -616,6 +616,12 @@ test("workbench Reviews tab renders rollback Outcome and removes Contract action
         evidence_id: `evbeforeafter_${"4".repeat(24)}`,
         lanes: [{ lane_kind: "interventional" }, { lane_kind: "adversarial" }],
       },
+      post_rollback_verification_recorded: true,
+      post_rollback_verification: {
+        verification_id: `evpostrollback_${"5".repeat(24)}`,
+        baseline_slot_id: `relslot_${"6".repeat(24)}`,
+        baseline_version: "0.1.214",
+      },
     },
   };
   const view = {
@@ -629,7 +635,7 @@ test("workbench Reviews tab renders rollback Outcome and removes Contract action
   };
 
   for (const width of [80, 120, 200]) {
-    const rendered = renderWorkbenchOverview(view, width, 30);
+    const rendered = renderWorkbenchOverview(view, width, 34);
     const plain = rendered.map(stripAnsi).join("\n");
     assert(rendered.every((line) => visibleWidth(line) <= width));
     assert(plain.includes("rolled_back"));
@@ -640,6 +646,9 @@ test("workbench Reviews tab renders rollback Outcome and removes Contract action
     assert(plain.includes("已记录 · 2 lanes"));
     assert(plain.includes(proposal.outcome.before_after_evidence.evidence_id));
     assert(plain.includes("不是回滚后评测"));
+    assert(plain.includes("fresh boot + launch identity"));
+    assert(plain.includes(proposal.outcome.post_rollback_verification.verification_id));
+    assert(plain.includes("行为级 Eval"));
     assert(!plain.includes("c 签发/重开 Contract"));
     assert(rendered.join("\n").includes(ANSI.yellow));
     assert(rendered.join("\n").includes(ANSI.green));

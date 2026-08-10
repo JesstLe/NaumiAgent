@@ -108,9 +108,10 @@ canonical absolute workspace。读取时再次执行摘要和 typed model 校验
 
 HAR-09 整体仍为 partial。后续应独立实现：
 
-1. `HAR-09.6c Post-Rollback Verification Evidence`：证明版本槽回滚后的实际运行身份与恢复评测；
-2. `HAR-09.6d Long-Term Outcome Window`：带窗口、样本覆盖与 censoring 的长期指标；
-3. 成功 rollout 的 `promoted` Outcome 与 supersede ledger；
-4. 只有长期 authority 成立后，才允许 EVO-06 消费结果进行 policy learning。
+1. `HAR-09.6c1 Post-Rollback Runtime Verification` 已证明 fresh boot 与 launcher identity；
+2. `HAR-09.6c2 Post-Rollback Behavioral Evaluation` 仍需证明行为级恢复；
+3. `HAR-09.6d Long-Term Outcome Window`：带窗口、样本覆盖与 censoring 的长期指标；
+4. 成功 rollout 的 `promoted` Outcome 与 supersede ledger；
+5. 只有长期 authority 成立后，才允许 EVO-06 消费结果进行 policy learning。
 
 本切片不能被上述模块用作替代证据。

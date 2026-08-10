@@ -242,6 +242,10 @@ function renderProposalDetail(snapshot, proposal, width) {
     const beforeAfterLabel = beforeAfter
       ? color(ANSI.green, `已记录 · ${array(beforeAfter.lanes).length} lanes`)
       : color(ANSI.yellow, "尚未记录");
+    const postRollback = outcome.post_rollback_verification;
+    const postRollbackLabel = postRollback
+      ? color(ANSI.green, "已验证 · fresh boot + launch identity")
+      : color(ANSI.yellow, "尚未记录");
     lines.push(
       color(ANSI.cyan, "实施 Outcome"),
       `${color(ANSI.yellow, "rolled_back")} · ${authority}`,
@@ -254,6 +258,14 @@ function renderProposalDetail(snapshot, proposal, width) {
         ? [
             `Before/After Evidence · ${compactText(beforeAfter.evidence_id, 128)}`,
             color(ANSI.dim, "口径 · 实施前 RED baseline → 实施后 GREEN candidate；不是回滚后评测。"),
+          ]
+        : []),
+      `回滚后 Runtime · ${postRollbackLabel}`,
+      ...(postRollback
+        ? [
+            `Post-Rollback Verification · ${compactText(postRollback.verification_id, 128)}`,
+            `Baseline · ${compactText(postRollback.baseline_slot_id, 128)} · ${compactText(postRollback.baseline_version, 128)}`,
+            color(ANSI.dim, "口径 · installed-runtime mechanical verification；行为级 Eval 尚未记录。"),
           ]
         : []),
       color(ANSI.dim, "不能再次签发 Contract、标记 promoted 或进入 policy learning。"),

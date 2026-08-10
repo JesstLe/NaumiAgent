@@ -9,6 +9,13 @@ from types import SimpleNamespace
 import aiosqlite
 import pytest
 
+from naumi_agent.evolution.post_rollback_runtime_verifications import (
+    EvolutionPostRollbackRuntimeVerification,
+    _runtime_identity,
+)
+from naumi_agent.evolution.post_rollback_runtime_verifications import (
+    _digest as _post_rollback_digest,
+)
 from naumi_agent.evolution.proposal_before_after_evidence import (
     EvolutionProposalBeforeAfterEvidence,
 )
@@ -124,6 +131,135 @@ def _before_after_evidence(*, outcome_id: str, outcome_sha256: str, proposal_id:
     })
 
 
+def _post_rollback_verification(
+    *,
+    outcome_id: str,
+    outcome_sha256: str,
+    proposal_id: str,
+):
+    slot_id = f"relslot_{'8' * 24}"
+    slot_sha256 = "8" * 64
+    manifest_sha256 = "9" * 64
+    binary_sha256 = "a" * 64
+    pointer_id = f"relactive_{'b' * 24}"
+    pointer_sha256 = "b" * 64
+    boot_core = {
+        "schema_version": 1,
+        "policy_version": "naumi-release-boot-receipt-v1",
+        "slot_id": slot_id,
+        "slot_sha256": slot_sha256,
+        "manifest_sha256": manifest_sha256,
+        "binary_sha256": binary_sha256,
+        "arguments": ["--version"],
+        "version_output": "NaumiAgent v0.1.214",
+        "output_sha256": "c" * 64,
+        "output_bytes": 20,
+        "exit_code": 0,
+        "duration_ms": 2,
+        "version_matched": True,
+        "bootable": True,
+        "activation_input_authority": True,
+        "checked_at": "2026-08-10T00:02:00+00:00",
+    }
+    boot_digest = _post_rollback_digest(boot_core)
+    boot = {
+        **boot_core,
+        "receipt_id": f"relboot_{boot_digest[:24]}",
+        "receipt_sha256": boot_digest,
+    }
+    launch_core = {
+        "schema_version": 1,
+        "policy_version": "naumi-release-launch-resolution-v1",
+        "pointer_id": pointer_id,
+        "pointer_sha256": pointer_sha256,
+        "pointer_generation": 3,
+        "slot_id": slot_id,
+        "slot_sha256": slot_sha256,
+        "version": "0.1.214",
+        "target": "macos-arm64",
+        "boot_receipt_id": f"relboot_{'d' * 24}",
+        "boot_receipt_sha256": "d" * 64,
+        "binary_sha256": binary_sha256,
+        "backend_path": str(
+            Path("/tmp/workbench-post-rollback/naumi-runtime").resolve()
+        ),
+        "argument_count": 0,
+        "arguments_persisted": False,
+        "active_chain_verified": True,
+        "manifest_verified": True,
+        "boot_receipt_verified": True,
+        "process_start_requested": False,
+        "process_start_authority": False,
+        "process_started": False,
+        "resolved_at": "2026-08-10T00:02:01+00:00",
+    }
+    launch_digest = _post_rollback_digest(launch_core)
+    launch = {
+        **launch_core,
+        "resolution_id": f"rellaunch_{launch_digest[:24]}",
+        "resolution_sha256": launch_digest,
+    }
+    payload = {
+        "schema_version": 1,
+        "policy_version": "evolution-post-rollback-runtime-verification-v1",
+        "workspace_root": str(Path("/tmp/workbench-post-rollback").resolve()),
+        "verification_kind": "installed_runtime_recovery",
+        "outcome_id": outcome_id,
+        "outcome_sha256": outcome_sha256,
+        "request_id": f"evrerollbackreq_{'8' * 24}",
+        "rollback_receipt_id": f"evrerollbackexec_{'3' * 24}",
+        "rollback_receipt_sha256": "3" * 64,
+        "workbench_session_id": "s",
+        "workbench_proposal_id": proposal_id,
+        "experiment_contract_id": f"evx_{'4' * 24}",
+        "candidate_id": f"evc_{'5' * 24}",
+        "candidate_revision": 2,
+        "baseline_slot_id": slot_id,
+        "baseline_slot_sha256": slot_sha256,
+        "baseline_manifest_sha256": manifest_sha256,
+        "baseline_version": "0.1.214",
+        "baseline_target": "macos-arm64",
+        "rollback_pointer_id": pointer_id,
+        "rollback_pointer_sha256": pointer_sha256,
+        "rollback_pointer_generation": 3,
+        "runtime_identity_sha256": _runtime_identity(
+            slot_id=slot_id,
+            slot_sha256=slot_sha256,
+            manifest_sha256=manifest_sha256,
+            version="0.1.214",
+            target="macos-arm64",
+            pointer_sha256=pointer_sha256,
+            pointer_generation=3,
+            binary_sha256=binary_sha256,
+        ),
+        "fresh_boot_receipt": boot,
+        "fresh_launch_resolution": launch,
+        "recovery_checks": [
+            "active_pointer",
+            "immutable_bundle",
+            "backend_binary",
+            "version_output",
+            "launch_resolution",
+        ],
+        "fresh_boot_probe_executed": True,
+        "active_launch_resolved": True,
+        "runtime_identity_recovered": True,
+        "post_rollback_verification_recorded": True,
+        "post_rollback_evaluation_recorded": True,
+        "behavioral_evaluation_recorded": False,
+        "long_term_metrics_recorded": False,
+        "learning_authority": False,
+        "promotion_authority": False,
+        "verified_at": "2026-08-10T00:02:01+00:00",
+    }
+    digest = _post_rollback_digest(payload)
+    return EvolutionPostRollbackRuntimeVerification.model_validate({
+        **payload,
+        "verification_id": f"evpostrollback_{digest[:24]}",
+        "verification_sha256": digest,
+    })
+
+
 @pytest.mark.asyncio
 async def test_proposal_outcome_projection_revalidates_before_after_authority() -> None:
     outcome = SimpleNamespace(
@@ -141,6 +277,11 @@ async def test_proposal_outcome_projection_revalidates_before_after_authority() 
         recorded_at="2026-08-10T00:00:00+00:00",
     )
     evidence = _before_after_evidence(
+        outcome_id=outcome.outcome_id,
+        outcome_sha256=outcome.outcome_sha256,
+        proposal_id=outcome.workbench_proposal_id,
+    )
+    post_rollback = _post_rollback_verification(
         outcome_id=outcome.outcome_id,
         outcome_sha256=outcome.outcome_sha256,
         proposal_id=outcome.workbench_proposal_id,
@@ -172,22 +313,47 @@ async def test_proposal_outcome_projection_revalidates_before_after_authority() 
             )
 
     evidence_service = _EvidenceService()
+
+    class _PostRollbackStore:
+        async def get_by_outcome(self, outcome_id):
+            return post_rollback
+
+    class _PostRollbackService:
+        verification_authority = True
+
+        async def inspect(self, *, verification):
+            return SimpleNamespace(
+                verification=verification,
+                verification_authority=self.verification_authority,
+            )
+
+    post_rollback_service = _PostRollbackService()
     service = EvolutionProposalOutcomeProjectionService(
         rollback_outcome_store=_OutcomeStore(),  # type: ignore[arg-type]
         rollback_outcome_service=_OutcomeService(),  # type: ignore[arg-type]
         before_after_store=_EvidenceStore(),  # type: ignore[arg-type]
         before_after_service=evidence_service,  # type: ignore[arg-type]
+        post_rollback_store=_PostRollbackStore(),  # type: ignore[arg-type]
+        post_rollback_service=post_rollback_service,  # type: ignore[arg-type]
     )
     projected = await service.project_session("s")
     assert projected["proposal-1"].before_after_recorded
     assert projected["proposal-1"].before_after_evidence == evidence
-    assert not projected["proposal-1"].post_rollback_evaluation_recorded
+    assert projected["proposal-1"].post_rollback_verification == post_rollback
+    assert projected["proposal-1"].post_rollback_evaluation_recorded
+    assert not projected["proposal-1"].post_rollback_behavioral_evaluation_recorded
     assert not projected["proposal-1"].learning_authority
 
     evidence_service.before_after_authority = False
     with pytest.raises(EvolutionProposalOutcomeProjectionError) as stale:
         await service.project_session("s")
     assert stale.value.code == "proposal_outcome_before_after_stale"
+
+    evidence_service.before_after_authority = True
+    post_rollback_service.verification_authority = False
+    with pytest.raises(EvolutionProposalOutcomeProjectionError) as stale_verification:
+        await service.project_session("s")
+    assert stale_verification.value.code == "proposal_outcome_post_rollback_stale"
 
 
 @pytest.mark.asyncio
@@ -411,6 +577,36 @@ async def test_dashboard_keeps_approved_evolution_proposal_actionable(tmp_path) 
     assert projected_evidence["before_after_evidence"]["lane_count"] == 2
     assert projected_evidence["post_rollback_evaluation_recorded"] is False
     assert projected_evidence["long_term_metrics_recorded"] is False
+
+    post_rollback = _post_rollback_verification(
+        outcome_id=projection.outcome_id,
+        outcome_sha256=projection.outcome_sha256,
+        proposal_id=proposal["id"],
+    )
+    fully_evidenced = EvolutionProposalOutcomeProjection.model_validate({
+        **with_evidence.model_dump(mode="json"),
+        "post_rollback_verification": post_rollback.model_dump(mode="json"),
+        "post_rollback_verification_recorded": True,
+        "post_rollback_evaluation_recorded": True,
+    })
+
+    class _PostRollbackReader:
+        async def project_session(self, session_id: str):
+            return {proposal["id"]: fully_evidenced}
+
+    service.bind_proposal_outcome_reader(_PostRollbackReader())
+    verified = await service.dashboard_snapshot("s")
+    projected_verification = verified["proposals"][0]["outcome"]
+    assert projected_verification["post_rollback_verification_recorded"] is True
+    assert projected_verification["post_rollback_evaluation_recorded"] is True
+    assert (
+        projected_verification["post_rollback_verification"]["verification_id"]
+        == post_rollback.verification_id
+    )
+    assert (
+        projected_verification["post_rollback_behavioral_evaluation_recorded"]
+        is False
+    )
 
     class _UnavailableOutcomeReader:
         async def project_session(self, session_id: str):
