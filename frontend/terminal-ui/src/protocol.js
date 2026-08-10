@@ -6076,7 +6076,7 @@ function normalizeGoalSnapshot(payload) {
 function normalizeGoalTerminalOutbox(value) {
   const item = harnessObject(value, "goals/snapshot terminal_outbox");
   const schemaVersion = Number(item.schema_version);
-  if (![1, 2].includes(schemaVersion)) {
+  if (![1, 2, 3].includes(schemaVersion)) {
     throw new Error("goals/snapshot terminal_outbox schema_version 不兼容");
   }
   const counts = harnessObject(
@@ -6164,8 +6164,84 @@ function normalizeGoalTerminalOutbox(value) {
   if (status === "degraded" && !failureCodes.length) {
     throw new Error("goals/snapshot terminal_outbox degraded 必须包含 failure_code");
   }
+  let deadLetters = [];
+  let deadLettersTruncated = normalizedCounts.dead_letter > 0;
+  if (schemaVersion === 3) {
+    if (!Array.isArray(item.dead_letters) || item.dead_letters.length > 20) {
+      throw new Error("goals/snapshot terminal_outbox dead_letters 必须是至多 20 项数组");
+    }
+    deadLetters = item.dead_letters.map((raw, index) => {
+      const entry = harnessObject(
+        raw,
+        `goals/snapshot terminal_outbox.dead_letters[${index}]`,
+      );
+      const deadLetterId = harnessText(
+        entry.dead_letter_id,
+        `goals/snapshot terminal_outbox.dead_letters[${index}].dead_letter_id`,
+      );
+      if (!/^ptfail_[0-9a-f]{24}$/.test(deadLetterId)) {
+        throw new Error("goals/snapshot terminal_outbox dead_letter_id 无效");
+      }
+      const failureCode = harnessText(
+        entry.failure_code,
+        `goals/snapshot terminal_outbox.dead_letters[${index}].failure_code`,
+      );
+      if (!/^[a-z][a-z0-9_]{0,63}$/.test(failureCode)) {
+        throw new Error("goals/snapshot terminal_outbox dead-letter failure_code 无效");
+      }
+      const failureAttempts = harnessNonnegativeInteger(
+        entry.failure_attempts,
+        `goals/snapshot terminal_outbox.dead_letters[${index}].failure_attempts`,
+      );
+      const totalClaimAttempts = harnessNonnegativeInteger(
+        entry.total_claim_attempts,
+        `goals/snapshot terminal_outbox.dead_letters[${index}].total_claim_attempts`,
+      );
+      if (
+        failureAttempts < 1
+        || failureAttempts > 1000
+        || totalClaimAttempts < failureAttempts
+        || totalClaimAttempts > 1_000_000
+      ) {
+        throw new Error("goals/snapshot terminal_outbox dead-letter 次数无效");
+      }
+      if (entry.manual_review_required !== true) {
+        throw new Error("goals/snapshot terminal_outbox dead-letter 必须人工审查");
+      }
+      return {
+        dead_letter_id: deadLetterId,
+        disposition: harnessChoice(
+          entry.disposition,
+          `goals/snapshot terminal_outbox.dead_letters[${index}].disposition`,
+          new Set(["retry_exhausted", "permanent"]),
+        ),
+        failure_code: failureCode,
+        failure_attempts: failureAttempts,
+        total_claim_attempts: totalClaimAttempts,
+        occurred_at: goalTerminalTimestamp(
+          entry.occurred_at,
+          `goals/snapshot terminal_outbox.dead_letters[${index}].occurred_at`,
+        ),
+        manual_review_required: true,
+      };
+    });
+    deadLettersTruncated = harnessBoolean(
+      item.dead_letters_truncated,
+      "goals/snapshot terminal_outbox.dead_letters_truncated",
+    );
+  }
+  if (new Set(deadLetters.map((entry) => entry.dead_letter_id)).size !== deadLetters.length) {
+    throw new Error("goals/snapshot terminal_outbox dead-letter 目标不得重复");
+  }
+  if (
+    deadLetters.length > normalizedCounts.dead_letter
+    || (deadLettersTruncated && deadLetters.length >= normalizedCounts.dead_letter)
+    || (!deadLettersTruncated && deadLetters.length !== normalizedCounts.dead_letter)
+  ) {
+    throw new Error("goals/snapshot terminal_outbox dead-letter 目录与总数不一致");
+  }
   return {
-    schema_version: 2,
+    schema_version: 3,
     enabled,
     status,
     worker_state: workerState,
@@ -6199,6 +6275,8 @@ function normalizeGoalTerminalOutbox(value) {
     next_delay_seconds: nextDelay,
     failure_codes: failureCodes,
     warning,
+    dead_letters: deadLetters,
+    dead_letters_truncated: deadLettersTruncated,
   };
 }
 

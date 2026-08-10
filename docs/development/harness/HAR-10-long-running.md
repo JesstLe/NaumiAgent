@@ -212,6 +212,9 @@
   - HAR-10.8f2d 已实现：safe-wait/可重试/永久故障机械分类、独立失败预算、append-only dead-letter
     authority、自动领取排除，以及 New UI/TUI schema v2 投影；详见
     `HAR-10-8f2d-pursuit-terminal-outbox-dead-letter.md`。
+  - HAR-10.8f2e 已实现：全 failure authority 认证后生成 bounded、identity-redacted 的 active dead-letter
+    review catalog，并同步 New UI/TUI schema v3；详见
+    `HAR-10-8f2e-pursuit-terminal-outbox-dead-letter-review.md`。
   - 未完成：权限化 dead-letter 人工处置、retention、push stream、跨 Store 原子 terminal commit 与 A5
     故障/soak。
 

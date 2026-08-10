@@ -66,6 +66,16 @@ test("Goal page renders dead-letter authority as an actionable degraded state", 
         next_delay_seconds: 30,
         failure_codes: ["dead_letter_present", "lease_missing"],
         warning: "存在 1 条终态恢复死信，自动重试已停止，请人工审查。",
+        dead_letters: [{
+          dead_letter_id: `ptfail_${"a".repeat(24)}`,
+          disposition: "permanent",
+          failure_code: "lease_missing",
+          failure_attempts: 1,
+          total_claim_attempts: 3,
+          occurred_at: "2026-08-05T00:00:10+00:00",
+          manual_review_required: true,
+        }],
+        dead_letters_truncated: false,
       },
     },
   }, 160, 20).map(stripAnsi).join("\n");
@@ -73,6 +83,7 @@ test("Goal page renders dead-letter authority as an actionable degraded state", 
   assert.match(lines, /队列 1 .* 死信 1/);
   assert.match(lines, /累计 .* 死信 1 .* 失败 1/);
   assert.match(lines, /自动重试已停止，请人工审查/);
+  assert.match(lines, /ptfail_a{24} · 机械不变量破坏 · lease_missing/);
 });
 
 test("Goal page exposes shared interaction detail command for every state", () => {

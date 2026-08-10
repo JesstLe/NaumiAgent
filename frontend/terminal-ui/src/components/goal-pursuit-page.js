@@ -130,6 +130,18 @@ function renderTerminalOutbox(value) {
   if (value.failure_codes?.length) {
     lines.push(color(ANSI.red, `最近失败 · ${value.failure_codes.join(", ")}`));
   }
+  for (const item of value.dead_letters || []) {
+    const disposition = item.disposition === "retry_exhausted"
+      ? "重试预算耗尽"
+      : "机械不变量破坏";
+    lines.push(color(
+      ANSI.red,
+      `死信 ${item.dead_letter_id} · ${disposition} · ${item.failure_code} · 失败 ${item.failure_attempts} 次 / 总认领 ${item.total_claim_attempts} 次 · ${item.occurred_at}`,
+    ));
+  }
+  if (value.dead_letters_truncated) {
+    lines.push(color(ANSI.yellow, "死信目录已按当前视图上限截断。"));
+  }
   if (value.warning) {
     lines.push(color(ANSI.yellow, `⚠ ${compactText(value.warning, 500)}`));
   }

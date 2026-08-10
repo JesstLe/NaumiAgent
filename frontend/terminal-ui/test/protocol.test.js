@@ -1952,7 +1952,7 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
         owner_id: "private-owner",
       },
       terminal_outbox: {
-        schema_version: 2,
+        schema_version: 3,
         enabled: true,
         status: "recovering",
         worker_state: "waiting",
@@ -1974,6 +1974,8 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
         next_delay_seconds: 12.5,
         failure_codes: [],
         warning: "",
+        dead_letters: [],
+        dead_letters_truncated: false,
         private_owner: "drop",
       },
     },
@@ -2019,7 +2021,7 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
   assert.equal(normalized.selected_interaction.options[0].label, "继续");
   assert.equal(normalized.terminal_outbox.status, "recovering");
   assert.equal(normalized.terminal_outbox.counts.total_pending, 3);
-  assert.equal(normalized.terminal_outbox.schema_version, 2);
+  assert.equal(normalized.terminal_outbox.schema_version, 3);
   assert.equal(normalized.terminal_outbox.counts.dead_letter, 0);
   assert.equal(Object.hasOwn(normalized.terminal_outbox, "private_owner"), false);
   assert.equal(Object.hasOwn(normalized.terminal_outbox.counts, "private_owner"), false);
@@ -2043,9 +2045,56 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
       },
     },
   }).payload.terminal_outbox;
-  assert.equal(legacyNormalized.schema_version, 2);
+  assert.equal(legacyNormalized.schema_version, 3);
   assert.equal(legacyNormalized.counts.dead_letter, 0);
   assert.equal(legacyNormalized.dead_lettered_count, 0);
+  const reviewedDeadLetter = normalizeServerRecord({
+    type: "goals/snapshot",
+    payload: {
+      ...normalized,
+      terminal_outbox: {
+        ...normalized.terminal_outbox,
+        schema_version: 3,
+        status: "degraded",
+        counts: {
+          ...normalized.terminal_outbox.counts,
+          due: 0,
+          dead_letter: 1,
+        },
+        failure_codes: ["dead_letter_present", "lease_missing"],
+        dead_letters: [{
+          dead_letter_id: `ptfail_${"a".repeat(24)}`,
+          disposition: "permanent",
+          failure_code: "lease_missing",
+          failure_attempts: 1,
+          total_claim_attempts: 3,
+          occurred_at: "2026-07-18T00:00:01+00:00",
+          manual_review_required: true,
+          outbox_id: "drop",
+        }],
+        dead_letters_truncated: false,
+      },
+    },
+  }).payload.terminal_outbox;
+  assert.equal(reviewedDeadLetter.dead_letters.length, 1);
+  assert.equal(reviewedDeadLetter.dead_letters[0].failure_code, "lease_missing");
+  assert.equal(Object.hasOwn(reviewedDeadLetter.dead_letters[0], "outbox_id"), false);
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "goals/snapshot",
+      payload: {
+        ...normalized,
+        terminal_outbox: {
+          ...reviewedDeadLetter,
+          dead_letters: [{
+            ...reviewedDeadLetter.dead_letters[0],
+            manual_review_required: false,
+          }],
+        },
+      },
+    }),
+    /必须人工审查/,
+  );
   assert.equal(
     Object.hasOwn(normalized.selected_interaction.options[0], "private_payload"),
     false,

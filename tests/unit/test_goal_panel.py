@@ -236,7 +236,7 @@ async def test_terminal_outbox_projection_is_shared_and_identity_free(tmp_path) 
     payload = snapshot.to_protocol_dict()["terminal_outbox"]
 
     assert payload == {
-        "schema_version": 2,
+        "schema_version": 3,
         "enabled": True,
         "status": "recovering",
         "worker_state": "waiting",
@@ -257,6 +257,8 @@ async def test_terminal_outbox_projection_is_shared_and_identity_free(tmp_path) 
         "next_delay_seconds": 12.5,
         "failure_codes": [],
         "warning": "",
+        "dead_letters": [],
+        "dead_letters_truncated": False,
     }
     assert "owner" not in str(payload).lower()
     rendered = render_goal_pursuit_snapshot(snapshot)
@@ -306,6 +308,18 @@ async def test_terminal_outbox_projection_surfaces_dead_letter_action(tmp_path) 
         expired_claimed=0,
         dead_letter=1,
     )
+    pursuit_store.terminal_outbox_dead_letter_catalog = lambda **_: SimpleNamespace(  # type: ignore[method-assign]
+        records=(SimpleNamespace(
+            event_id="ptfail_" + "a" * 24,
+            disposition=SimpleNamespace(value="permanent"),
+            failure_code="lease_missing",
+            sequence=1,
+            attempt_count=3,
+            occurred_at=1785888010.0,
+        ),),
+        total=1,
+        truncated=False,
+    )
     worker = PursuitTerminalOutboxWorkerSnapshot(
         state=PursuitTerminalWorkerState.WAITING,
         pass_count=2,
@@ -333,14 +347,17 @@ async def test_terminal_outbox_projection_surfaces_dead_letter_action(tmp_path) 
 
     projection = snapshot.terminal_outbox
     assert projection is not None
-    assert projection.schema_version == 2
+    assert projection.schema_version == 3
     assert projection.status == "degraded"
     assert projection.counts.dead_letter == 1
     assert "dead_letter_present" in projection.failure_codes
     assert "自动重试已停止" in projection.warning
+    assert projection.dead_letters[0].dead_letter_id == "ptfail_" + "a" * 24
+    assert projection.dead_letters[0].total_claim_attempts == 3
     rendered = render_goal_pursuit_snapshot(snapshot)
     assert "死信 1" in rendered
     assert "请人工审查" in rendered
+    assert "机械不变量破坏 · lease_missing" in rendered
 
 
 @pytest.mark.asyncio

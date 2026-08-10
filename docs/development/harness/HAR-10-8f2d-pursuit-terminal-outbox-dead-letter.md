@@ -72,5 +72,6 @@ Bridge/Python projection 是唯一事实来源；New UI 不扫描 SQLite。前�
 - explicit run v1 回执继续用 `failures + failure_codes` 表达本轮产生死信，尚未增加独立 dead-letter count；
   Goal v2 health 已提供累计和 backlog 事实。
 - HarnessStore fencing 与 PursuitStore 仍是跨库 at-least-once 收敛，而非跨库原子提交。
-- 下一切片应先实现权限化 manual dead-letter disposition/requeue 回执，再设计 retention preview/apply；不能先
+- 后续 HAR-10.8f2e 已先实现认证、identity-redacted 的死信审查目录；下一切片应以目录中的稳定
+  `dead_letter_id` 实现权限化 manual disposition/requeue 回执，再设计 retention preview/apply，不能先
   prune 尚未被运维确认的事实。
