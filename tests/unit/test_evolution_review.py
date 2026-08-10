@@ -39,6 +39,7 @@ from naumi_agent.tools.evolution_review import (
     EvolutionPostRollbackBehavioralCoverageTool,
     EvolutionPostRollbackBehavioralLaneTool,
     EvolutionPostRollbackBehavioralMatrixTool,
+    EvolutionPostRollbackLongTermObservationAssessmentTool,
     EvolutionPostRollbackLongTermObservationContractTool,
     EvolutionPostRollbackRemoteClaimTool,
     EvolutionPostRollbackRemoteDeliveryTool,
@@ -253,6 +254,7 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
         "evolution_post_rollback_behavioral_matrix",
         "evolution_post_rollback_observation_contract",
         "evolution_post_rollback_runtime_admission",
+        "evolution_post_rollback_long_term_assessment",
         "evolution_post_rollback_remote_lane_placement",
         "evolution_post_rollback_target_baseline",
         "evolution_post_rollback_remote_dispatch",
@@ -312,14 +314,15 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
     assert isinstance(tools[40], EvolutionPostRollbackBehavioralMatrixTool)
     assert isinstance(tools[41], EvolutionPostRollbackLongTermObservationContractTool)
     assert isinstance(tools[42], EvolutionPostRollbackRuntimeObservationAdmissionTool)
-    assert isinstance(tools[43], EvolutionPostRollbackRemoteLanePlacementTool)
-    assert isinstance(tools[44], EvolutionPostRollbackTargetBaselineTool)
-    assert isinstance(tools[45], EvolutionPostRollbackRemoteDispatchTool)
-    assert isinstance(tools[46], EvolutionPostRollbackRemoteClaimTool)
-    assert isinstance(tools[47], EvolutionPostRollbackRemoteDeliveryTool)
-    assert isinstance(tools[48], EvolutionPostRollbackRemoteExecutionAuthorizationTool)
-    assert isinstance(tools[49], EvolutionPostRollbackRemoteResultTool)
-    assert isinstance(tools[50], EvolutionProposalQueueTool)
+    assert isinstance(tools[43], EvolutionPostRollbackLongTermObservationAssessmentTool)
+    assert isinstance(tools[44], EvolutionPostRollbackRemoteLanePlacementTool)
+    assert isinstance(tools[45], EvolutionPostRollbackTargetBaselineTool)
+    assert isinstance(tools[46], EvolutionPostRollbackRemoteDispatchTool)
+    assert isinstance(tools[47], EvolutionPostRollbackRemoteClaimTool)
+    assert isinstance(tools[48], EvolutionPostRollbackRemoteDeliveryTool)
+    assert isinstance(tools[49], EvolutionPostRollbackRemoteExecutionAuthorizationTool)
+    assert isinstance(tools[50], EvolutionPostRollbackRemoteResultTool)
+    assert isinstance(tools[51], EvolutionProposalQueueTool)
 
 
 class _FakeEngine:

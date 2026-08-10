@@ -218,6 +218,8 @@ queued dispatch，并在 exact Worker incarnation 上预留容量。[EVO-05.3f2c
 并以 completion 门禁推动 Matrix lane 完成；远端 stable runtime、配置/数据 rollback 与完整长期 Outcome 仍未完成。
 [HAR-09.6d1](../harness/HAR-09-6d1-post-rollback-long-term-observation-contract.md) 已把 recovered Matrix、fresh
 Runtime Verification、baseline slot/pointer/binary 与长期窗口规则冻结为不可变契约；真实 runtime binding admission、
-heartbeat window 聚合、持续健康和 promoted Outcome 仍未完成。
+heartbeat window 聚合已由 6d2/6d3 继续完成，promoted Outcome 仍未完成。
 [HAR-09.6d2](../harness/HAR-09-6d2-post-rollback-runtime-observation-admission.md) 已继续将该契约逐字段绑定到 exact
-managed runtime identity 与 startup-origin Harness ledger；长期窗口评估、持续健康和 promoted Outcome 仍未完成。
+managed runtime identity 与 startup-origin Harness ledger；6d3 已完成长期窗口评估，promoted Outcome 仍未完成。
+[HAR-09.6d3](../harness/HAR-09-6d3-post-rollback-long-term-observation-assessment.md) 已完成真实 ledger 分页、head
+对账、四态长期窗口和动态撤权；6e Long-Term Outcome、supersede ledger 与 promoted Outcome 仍未完成。

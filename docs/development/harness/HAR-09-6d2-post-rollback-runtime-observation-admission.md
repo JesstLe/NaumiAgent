@@ -80,7 +80,6 @@ Artifact 只记录 `runtime_observation_input_recorded=true`。动态 view 在�
 
 ## 下一步
 
-`HAR-09.6d3` 应从 Admission 的 exact origin 开始分页读取最多 5000 个 ledger samples，验证 binding、sequence、hash、
-timeout 和不早于窗口锚点，然后按 6d1 规则机械生成 `insufficient / passing / breached / censored` 长期窗口评估。
-6d3 必须保留 `assessed_at`、verified cursor 与读取 head，支持当前 liveness 变化时动态撤权；不得仅把 admission 数量或
-进程仍存在当成长期开窗成功。
+`HAR-09.6d3` 已从 Admission 的 exact origin/suffix 分页读取最多 5000 个 ledger samples，验证 binding、sequence、
+hash、timeout、head 与窗口锚点，并机械生成 `insufficient / passing / breached / censored` 长期窗口评估。
+下一步为 6e Long-Term Outcome Authority；不得仅把 passing receipt 直接冒充 promoted Outcome。
