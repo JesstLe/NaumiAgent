@@ -24,6 +24,10 @@ from naumi_agent.daemons.authenticated_worker_identity import (
     AuthenticatedWorkerIdentityAuthority,
     AuthenticatedWorkerIdentityStore,
 )
+from naumi_agent.daemons.authenticated_worker_transport_key import (
+    AuthenticatedWorkerTransportKeyAuthority,
+    AuthenticatedWorkerTransportKeyStore,
+)
 from naumi_agent.daemons.execution_grants import ExecutionGrantAuthority
 from naumi_agent.daemons.permission_context import (
     bind_permission_receipt,
@@ -2661,6 +2665,15 @@ class AgentEngine:
             AuthenticatedWorkerIdentityAuthority(
                 worker_registry=resources.worker_registry_store,
                 store=self.authenticated_worker_identity_store,
+            )
+        )
+        self.authenticated_worker_transport_key_store = (
+            AuthenticatedWorkerTransportKeyStore(config.memory.session_db_path)
+        )
+        self.authenticated_worker_transport_key_authority = (
+            AuthenticatedWorkerTransportKeyAuthority(
+                identity_authority=self.authenticated_worker_identity_authority,
+                store=self.authenticated_worker_transport_key_store,
             )
         )
         self.evolution_post_rollback_remote_claim_store = (

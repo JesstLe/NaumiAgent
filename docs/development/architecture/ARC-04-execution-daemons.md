@@ -11,6 +11,8 @@
 - ARC-04.2 Tool job：immutable request、permission grant id、workspace lease、idempotency key。
 - ARC-04.1d 已增加通用 Authenticated Worker Identity：以 supervisor-attested Ed25519 public key 绑定 exact
   Worker incarnation，为远端 one-time claim challenge 提供签名身份；identity 本身没有 claim lease 或执行权。
+- ARC-04.1e 已增加独立 X25519 Transport Key authority：绑定 exact Identity、单调 key generation 与 supervisor
+  attestation，为远端 envelope 提供加密接收身份；key artifact 本身不证明 delivery 或执行。
 - ARC-04.3 Shell worker：PTY/非 PTY、cwd/env allowlist、process tree cancel、artifact log。
 - ARC-04.4 Browser worker：profile isolation、tab/run ownership、human takeover、cleanup。
 - ARC-04.5 Agent worker：context bundle、tool scope、budget、message channel、terminal result。
@@ -27,6 +29,9 @@
 - ARC-04.1c 已将 exact active incarnation 的 typed heartbeat、active jobs 与 accepting-jobs 纳入 Registry v5
   单调 durable authority，并提供 latest-only admission；higher epoch 自动 fencing 旧 health。详见
   `ARC-04-1c-durable-worker-health-report.md`。
+- ARC-04.1d/1e 已分别建立 Ed25519 claim-signing Identity 与 X25519 transport-encryption key；两者共享 SQLite
+  identity authority、动态消费 active incarnation，并严格分离签名和密钥协商用途。详见
+  `ARC-04-1d-authenticated-worker-identity.md` 与 `ARC-04-1e-authenticated-worker-transport-key.md`。
 - ARC-04.2a 已完成 execution-scoped grant authority：绑定参数 digest、幂等键、Tool run lease、active Worker
   epoch、权限来源与短期 expiry，并可在消费前重新 fencing，详见
   `ARC-04-2a-scoped-execution-grant-authority.md`。
