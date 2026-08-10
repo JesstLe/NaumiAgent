@@ -65,6 +65,6 @@ Evidence ID/SHA，而不仅是展开页。
 `inspect()` 动态复验 Plan、Baseline、Window、Outcome、ChatRun 与 heartbeat source，因此刻意命名“候选预演”。
 
 [EVO-05.5f5t](EVO-05-5f5t-current-population-trust-reconciliation.md) 已补生产 Population trust loader、Snapshot Store 与
-current/latest/trust/expiry/member 对账。此后仍须补 percentage/stable evidence 的生产只读组合并逐 member 动态调用 5f5r；
-只有 exact current Population 全员通过时，才可设计 Stable Population Completion Authority。在此之前不得接 promotion
-executor。
+current/latest/trust/expiry/member 对账；[EVO-05.5f5u](EVO-05-5f5u-dynamic-stage-completion-inspection-port.md) 与
+[EVO-05.5f5v](EVO-05-5f5v-default-stable-read-graph.md) 已完成逐 member 动态 5f5r 检查及默认生产只读组合。只有 exact current
+Population 全员通过时，后续模块才可签发 Stable Population Completion Authority；在此之前不得接 promotion executor。

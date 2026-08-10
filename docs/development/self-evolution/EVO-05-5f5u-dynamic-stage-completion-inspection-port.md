@@ -22,7 +22,8 @@ async def inspect(*, evidence_id: str, subject_id: str) \
 `EvolutionStablePopulationCandidatePreviewService`。这样部署组合可以复用一个已经存在的完整 5f5r Service，而预演模块无需
 反向拥有二十多个可写 release/evolution services，也不会在读取候选时意外创建发布状态。
 
-默认生产组合没有凭空构造 5f5r 写图；未注入端口时显式显示 `missing` 并失败关闭。
+5f5u 交付时默认生产组合尚未构造 5f5r 图，未注入端口会显示 `missing` 并失败关闭。后续 5f5v 已用只读、source-lazy
+factory 补齐默认端口，显式 Runtime Override 仍保持最高优先级。
 
 ## 动态重验协议
 
@@ -67,9 +68,9 @@ async def inspect(*, evidence_id: str, subject_id: str) \
 
 ## 自我审视与下一步
 
-本切片完成了“预演服务可以真实调用既有 5f5r 只读重验”的最小 ARC 组合边界，但默认生产 Engine 尚未拥有一个自动构造的
-完整只读 stable evidence graph，因此普通启动仍显示 inspection port `missing`。下一切片应设计 read-graph composition：复用既有
-Stores/Services 的只读依赖并在资源可用时注入端口，同时保持启动惰性、无凭据提示、无写副作用。
+本切片完成了“预演服务可以真实调用既有 5f5r 只读重验”的最小 ARC 组合边界。后续
+[EVO-05.5f5v](EVO-05-5f5v-default-stable-read-graph.md) 已增加默认生产 source-lazy read graph：空候选不读取任何 source，首次有
+候选时从现有 opt-in、HAR、ChatRun 与 release roots 恢复完整只读图。
 
 即使所有成员动态 authoritative，本切片也没有签发 Population Completion Receipt、执行 expected-pointer CAS 或提供发布回滚
 互锁；这些必须在后续独立模块中完成，不能把预演结果冒充真实 rollout。

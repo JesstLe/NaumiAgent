@@ -184,6 +184,9 @@
 - [EVO-05.5f5u Dynamic Stage Completion Inspection Port](EVO-05-5f5u-dynamic-stage-completion-inspection-port.md)：已交付；
   通过 Runtime 只读端口逐 current member 调用现有 5f5r `inspect()`，有界形成 dynamic authority；默认生产 read graph 尚未自动组合，
   且 stable rollout/promotion authority 仍关闭；
+- [EVO-05.5f5v Default Stable Read Graph](EVO-05-5f5v-default-stable-read-graph.md)：已交付；
+  默认 Engine source-lazy 恢复 opt-in、percentage、stable 全部 inspect 依赖，拒绝 signer/interaction 写端口；真实动态预演可用，
+  但尚未形成 durable Population Completion 或 rollout/promotion authority；
 - [EVO-05.6a Automatic Pause and Rollback Request](EVO-05-6a-automatic-pause-rollback-request.md)：已交付；
   exact breach 会触发或复用 kill switch，并冻结只读 exact Rollback Request，不虚报执行完成。
 - [EVO-05.6b1 Immutable Rollback Source](EVO-05-6b1-immutable-rollback-source.md)：已交付；从 exact Git

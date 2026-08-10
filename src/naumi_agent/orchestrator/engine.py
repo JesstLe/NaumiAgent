@@ -491,6 +491,10 @@ from naumi_agent.evolution.self_review_red_baseline import (
 from naumi_agent.evolution.stable_population_candidate_previews import (
     EvolutionStablePopulationCandidatePreviewService,
 )
+from naumi_agent.evolution.stable_read_graph import (
+    EvolutionLazyStableReadGraphInspector,
+    build_evolution_stable_read_graph_inspector,
+)
 from naumi_agent.evolution.static_guards import EvolutionStaticGuard
 from naumi_agent.evolution.validation_cohorts import (
     EvolutionBaselineCohortRequestBuilder,
@@ -2510,13 +2514,47 @@ class AgentEngine:
                 ),
             )
         )
+        self.evolution_stable_stage_completion_inspector = (
+            services.stable_stage_completion_inspector
+        )
+        if self.evolution_stable_stage_completion_inspector is None:
+
+            def build_default_stable_read_graph():
+                return build_evolution_stable_read_graph_inspector(
+                    workspace_root=paths.workspace_root,
+                    evolution_db_path=config.memory.session_db_path,
+                    release_staging_root=(
+                        release_root / "staging" / "archive-admission"
+                    ),
+                    harness_store=self._harness_store,
+                    chat_run_store=self.chat_run_store,
+                    opt_in_runtime_health_service=(
+                        self.evolution_revalidation_opt_in_runtime_health_service
+                    ),
+                    plan_service=self.evolution_revalidation_rollout_plan_service,
+                    baseline_service=(
+                        self.evolution_revalidation_rollout_baseline_service
+                    ),
+                    control_store=self.evolution_revalidation_rollout_control_store,
+                    population_store=self.evolution_release_population_snapshot_store,
+                    artifact_fetch_service=(
+                        self.evolution_release_artifact_fetch_service
+                    ),
+                    release_slot_store=self.evolution_release_slot_store,
+                )
+
+            self.evolution_stable_stage_completion_inspector = (
+                EvolutionLazyStableReadGraphInspector(
+                    build_default_stable_read_graph
+                )
+            )
         self.evolution_stable_population_candidate_preview_service = (
             EvolutionStablePopulationCandidatePreviewService(
                 workspace_root=paths.workspace_root,
                 db_path=config.memory.session_db_path,
                 population_store=self.evolution_release_population_snapshot_store,
                 stage_completion_inspector=(
-                    services.stable_stage_completion_inspector
+                    self.evolution_stable_stage_completion_inspector
                 ),
             )
         )

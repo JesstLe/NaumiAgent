@@ -300,6 +300,7 @@ def test_root_factory_preserves_service_override_in_engine(tmp_path) -> None:
     assert engine.agent_worker_supervisor_factory is supervisor_factory
     assert engine._services.agent_worker_supervisor_factory is supervisor_factory
     assert engine._services.stable_stage_completion_inspector is inspector
+    assert engine.evolution_stable_stage_completion_inspector is inspector
     assert (
         engine.evolution_stable_population_candidate_preview_service
         .stage_completion_inspector
