@@ -629,6 +629,14 @@ async def test_engine_composes_candidate_preview_service_and_tool(
         assert "evolution_stable_population_candidate_preview" in (
             engine.tool_registry.names
         )
+        assert engine.evolution_stable_population_completion_service.store is (
+            engine.evolution_stable_population_completion_store
+        )
+        assert (
+            engine.evolution_stable_population_completion_service.preview_service
+            is service
+        )
+        assert "evolution_stable_population_completion" in engine.tool_registry.names
         result = await engine.execute_tool(
             ToolCall(
                 id="stable-population-preview-engine",

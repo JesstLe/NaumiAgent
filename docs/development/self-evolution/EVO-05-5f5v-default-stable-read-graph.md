@@ -77,9 +77,9 @@ stage、执行 boot 或切换 pointer。
 
 ## 自我审视与下一步
 
-本切片解决了默认生产动态重验缺口，但 dynamic authority 仍只是一次只读预演，不是 durable Population Completion Receipt，也没有
-跨进程 fencing、签名、幂等 source-set identity 或 expected-pointer 执行互锁。下一切片应实现 EVO-05.5f5w Stable Population
-Completion Authority：冻结 exact current Population + 全成员 5f5r Views，动态撤权后禁止发布，并继续把 rollout/promotion 分开。
+本切片解决了默认生产动态重验缺口。[EVO-05.5f5w](EVO-05-5f5w-stable-population-completion-authority.md) 已进一步冻结
+exact current Population + 全成员 5f5r Views，在 SQLite writer fence 内形成幂等 durable Completion Receipt，并通过动态 View
+撤权。expected-pointer rollout execution 与 promotion 仍保持分离。
 
 默认 read graph 目前在第一次候选检查时一次性恢复完整对象链；对象构造无 I/O，但极大 Population 的逐成员读取成本仍由 5f5u 的
 16 并发上限约束。后续可以增加按 Snapshot 的短生命周期只读缓存，但缓存不得跨 trust/ledger/pointer 变更冒充 current authority。

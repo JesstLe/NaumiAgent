@@ -1111,6 +1111,7 @@ if TYPE_CHECKING:
     )
     from naumi_agent.evolution.stable_population_candidate_previews import (
         EVOLUTION_STABLE_POPULATION_CANDIDATE_PREVIEW_POLICY,
+        EvolutionStablePopulationAuthorityMaterial,
         EvolutionStablePopulationCandidateItem,
         EvolutionStablePopulationCandidatePreview,
         EvolutionStablePopulationCandidatePreviewError,
@@ -1118,6 +1119,15 @@ if TYPE_CHECKING:
         EvolutionStablePopulationCandidateStatus,
         EvolutionStableStageCompletionInspectionPort,
         render_stable_population_candidate_preview,
+    )
+    from naumi_agent.evolution.stable_population_completions import (
+        EVOLUTION_STABLE_POPULATION_COMPLETION_POLICY,
+        EvolutionStablePopulationCompletionError,
+        EvolutionStablePopulationCompletionReceipt,
+        EvolutionStablePopulationCompletionService,
+        EvolutionStablePopulationCompletionStore,
+        EvolutionStablePopulationCompletionView,
+        render_stable_population_completion,
     )
     from naumi_agent.evolution.stable_read_graph import (
         EvolutionLazyStableReadGraphInspector,
@@ -1514,8 +1524,16 @@ __all__ = [
     "EvolutionStablePopulationCandidatePreviewError",
     "EvolutionStablePopulationCandidatePreviewService",
     "EvolutionStablePopulationCandidateStatus",
+    "EvolutionStablePopulationAuthorityMaterial",
     "EvolutionStableStageCompletionInspectionPort",
     "render_stable_population_candidate_preview",
+    "EVOLUTION_STABLE_POPULATION_COMPLETION_POLICY",
+    "EvolutionStablePopulationCompletionError",
+    "EvolutionStablePopulationCompletionReceipt",
+    "EvolutionStablePopulationCompletionService",
+    "EvolutionStablePopulationCompletionStore",
+    "EvolutionStablePopulationCompletionView",
+    "render_stable_population_completion",
     "EvolutionStableReadGraphInspector",
     "EvolutionLazyStableReadGraphInspector",
     "build_evolution_stable_read_graph_inspector",
@@ -2708,8 +2726,18 @@ def __getattr__(name: str) -> object:
         "EvolutionStablePopulationCandidatePreviewError",
         "EvolutionStablePopulationCandidatePreviewService",
         "EvolutionStablePopulationCandidateStatus",
+        "EvolutionStablePopulationAuthorityMaterial",
         "EvolutionStableStageCompletionInspectionPort",
         "render_stable_population_candidate_preview",
+    }
+    stable_population_completion_exports = {
+        "EVOLUTION_STABLE_POPULATION_COMPLETION_POLICY",
+        "EvolutionStablePopulationCompletionError",
+        "EvolutionStablePopulationCompletionReceipt",
+        "EvolutionStablePopulationCompletionService",
+        "EvolutionStablePopulationCompletionStore",
+        "EvolutionStablePopulationCompletionView",
+        "render_stable_population_completion",
     }
     stable_read_graph_exports = {
         "EvolutionLazyStableReadGraphInspector",
@@ -3382,6 +3410,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_stable_stage_completions"
     elif name in stable_population_candidate_preview_exports:
         module_name = "stable_population_candidate_previews"
+    elif name in stable_population_completion_exports:
+        module_name = "stable_population_completions"
     elif name in stable_read_graph_exports:
         module_name = "stable_read_graph"
     elif name in revalidation_percentage_stage_completion_exports:

@@ -82,6 +82,32 @@ class TestPermissionChecker:
             PermissionMode.STRICT,
         ],
     )
+    def test_stable_population_completion_is_medium_without_confirmation(
+        self,
+        mode: PermissionMode,
+    ) -> None:
+        result = PermissionChecker(mode).check(
+            "evolution_stable_population_completion",
+            {"action": "inspect", "receipt_id": "evstablepopcomplete_" + "a" * 24},
+        )
+        assert result.allowed
+        assert not result.requires_confirmation
+        if mode is PermissionMode.BYPASS:
+            assert result.risk_level is PermissionRiskLevel.LOW
+            assert result.tool_family == "evolution_stable_population_completion"
+        else:
+            assert result.risk_level is PermissionRiskLevel.MEDIUM
+            assert result.tool_family == "evolution_release_completion"
+
+    @pytest.mark.parametrize(
+        "mode",
+        [
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+    )
     def test_doctor_export_uses_fixed_low_risk_preview_gate(
         self,
         mode: PermissionMode,
