@@ -64,4 +64,6 @@ sequence 2 running，形成单 installation Exposure Receipt；
 [EVO-05.5f5f](../self-evolution/EVO-05-5f5f-percentage-observation-window.md) 已进一步消费完整 sample chain，按冻结 guardrail
 机械区分 insufficient/passing/breached；
 [EVO-05.5f5g](../self-evolution/EVO-05-5f5g-durable-percentage-observation-assessment.md) 已使用本 Ledger 的 verified cursor、
-500 条分页、head/binding 二次读取与最近 5000 条 suffix 建立 durable current assessment。
+500 条分页、head/binding 二次读取与最近 5000 条 suffix 建立 durable current assessment；
+[EVO-05.5f5h](../self-evolution/EVO-05-5f5h-percentage-release-bound-execution-outcome.md) 已从 bounded ledger 选择 run-start
+predecessor 至 receipt-completion successor 的 exact slice，并在 inspect 时逐对象重验覆盖来源。

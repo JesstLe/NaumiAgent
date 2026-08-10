@@ -184,8 +184,10 @@ TerminalRuntimeLifecycle 的 managed release binding 与 starting→running obse
 按冻结 percentage guardrail 区分 insufficient/passing/breached，并在 stopped/failed/gap/stale 时停止签发 runtime-window
 authority；它仍固定 completed-run、cohort、stage-completion、stable 与 promotion authority 为 false。
 [EVO-05.5f5g](EVO-05-5f5g-durable-percentage-observation-assessment.md) 已完成该 durable assessment：支持最多 5000 条
-verified suffix、跨 Service 并发幂等，并在 failure/stale、pointer 或 Exposure 漂移时动态撤权。下一步需要独立建立 percentage
-release-bound execution outcome，而不是把 liveness 当作 completed run。
+verified suffix、跨 Service 并发幂等，并在 failure/stale、pointer 或 Exposure 漂移时动态撤权。
+[EVO-05.5f5h](EVO-05-5f5h-percentage-release-bound-execution-outcome.md) 已进一步冻结真实 terminal ChatRun 的 exact
+percentage release、Completion Receipt、Run Usage 与完整 heartbeat coverage；失败结果也保留为 cohort observation input，且
+单 Outcome 不具有 stage-completion authority。下一步需要聚合不同 run ID，而不是把 liveness 或单 Outcome 当作 rollout 完成。
 [EVO-05.6a](EVO-05-6a-automatic-pause-rollback-request.md) 已让 exact breach 幂等触发或复用 HMAC kill switch，并冻结
 绑定 exact prior Rollback Plan 的只读 Request；它不写 workspace/Git，也不把请求虚报成已回滚。
 [EVO-05.6b1](EVO-05-6b1-immutable-rollback-source.md) 已从 exact Git commit/tree 读取 baseline blob，验证每个
