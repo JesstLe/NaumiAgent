@@ -340,6 +340,10 @@ from naumi_agent.evolution.revalidation_requests import (
     EvolutionRevalidationRequestService,
     EvolutionRevalidationRequestStore,
 )
+from naumi_agent.evolution.revalidation_rollback_executions import (
+    EvolutionRevalidationRollbackExecutionService,
+    EvolutionRevalidationRollbackExecutionStore,
+)
 from naumi_agent.evolution.revalidation_rollback_requests import (
     EvolutionRevalidationRollbackRequestService,
     EvolutionRevalidationRollbackRequestStore,
@@ -2413,6 +2417,22 @@ class AgentEngine:
                 request_store=self.evolution_revalidation_rollback_request_store,
                 control_store=self.evolution_revalidation_rollout_control_store,
                 store=self.evolution_revalidation_rollback_source_store,
+            )
+        )
+        self.evolution_revalidation_rollback_execution_store = (
+            EvolutionRevalidationRollbackExecutionStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_revalidation_rollback_execution_service = (
+            EvolutionRevalidationRollbackExecutionService(
+                workspace_root=paths.workspace_root,
+                request_store=self.evolution_revalidation_rollback_request_store,
+                source_store=self.evolution_revalidation_rollback_source_store,
+                plan_store=self.evolution_revalidation_rollout_plan_store,
+                control_store=self.evolution_revalidation_rollout_control_store,
+                release_slot_store=self.evolution_release_slot_store,
+                store=self.evolution_revalidation_rollback_execution_store,
             )
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(

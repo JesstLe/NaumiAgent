@@ -78,6 +78,9 @@
   review Package；EVO-05.2a 又冻结了不可执行 Approval Requirement。但 HAR-09.6 仍需等待显式
   promotion/rollback executor 和 Outcome authority，不能把 Decision、Resolution、Reflection、Package Input、
   Package 或 Approval Requirement 直接记为 promoted outcome。
+- EVO-05.6b2a 已提供第一个真实 `rollback_executed=true` 的 authority-bound slot Receipt，并明确
+  `outcome_recorded=false`；这关闭了无数据迁移回滚的执行事实前置，但 HAR-09.6 仍需 EVO-05.7 Outcome、
+  Proposal/Contract 反向绑定与 ARC-07.6 数据恢复分支，不能直接把该 Receipt 标记为 Proposal outcome。
 - HAR-09 仍未实现 outcome tracking，因此整体继续保持 partial。
 
 EVO-02.1b 已把不可执行 Contract 包装为 workspace-bound durable Authority；HAR-09.5c 在其上补齐产品动作、

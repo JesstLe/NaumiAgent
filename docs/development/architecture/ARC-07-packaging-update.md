@@ -58,4 +58,6 @@
 - [EVO-05.6b1](../self-evolution/EVO-05-6b1-immutable-rollback-source.md) 已能冻结 exact baseline rollback
   bytes；[ARC-07.5a](ARC-07-5a-installed-version-slots.md) 已补齐 immutable version slot、原子 active pointer 与
   bootability receipt，[ARC-07.5b](ARC-07-5b-stable-slot-launcher.md) 已让稳定 launcher 启动 exact active slot。
-  EVO-05.6b2 下一步消费真实 rollback authority 和 slot，不能覆盖开发 workspace。
+  [EVO-05.6b2a](../self-evolution/EVO-05-6b2a-fenced-slot-rollback.md) 已消费真实 rollback authority，完成
+  无数据迁移场景的 fenced slot switch、崩溃恢复与 Launch Resolution；需要配置/数据恢复的请求仍由 ARC-07.6
+  失败关闭，不能覆盖开发 workspace。
