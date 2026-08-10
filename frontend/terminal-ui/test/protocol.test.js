@@ -3903,6 +3903,7 @@ test("normalizes workbench snapshot events", () => {
     workbench_proposal_id: "proposal-1",
     experiment_contract_id: proposal.outcome.experiment_contract_id,
     final_evaluation_id: `evfinal_${"7".repeat(24)}`,
+    final_evaluation_sha256: "5".repeat(64),
     candidate_id: proposal.outcome.candidate_id,
     candidate_revision: proposal.outcome.candidate_revision,
     lane_count: 2,
@@ -4041,6 +4042,121 @@ test("normalizes workbench snapshot events", () => {
     "d".repeat(64),
   );
   assert.equal(verified.payload.proposals[0].outcome.post_rollback_evaluation_recorded, true);
+  const behavioralMatrix = {
+    schema_version: 1,
+    policy_version: "evolution-post-rollback-behavioral-matrix-v1",
+    matrix_id: `evpostmatrix_${"2".repeat(24)}`,
+    matrix_sha256: "2".repeat(64),
+    workspace_root: "/workspace",
+    outcome_id: proposal.outcome.outcome_id,
+    outcome_sha256: proposal.outcome.outcome_sha256,
+    request_id: `evrerollbackreq_${"3".repeat(24)}`,
+    coverage_contract_id: `evpostcoverage_${"4".repeat(24)}`,
+    coverage_contract_sha256: "4".repeat(64),
+    runtime_verification_id: postRollback.verification_id,
+    runtime_verification_sha256: postRollback.verification_sha256,
+    before_after_evidence_id: beforeAfter.evidence_id,
+    before_after_evidence_sha256: beforeAfter.evidence_sha256,
+    final_evaluation_id: beforeAfter.final_evaluation_id,
+    final_evaluation_sha256: "5".repeat(64),
+    lane_count: 2,
+    local_lane_count: 1,
+    remote_lane_count: 1,
+    lanes: [
+      {
+        order: 1,
+        lane_kind: "interventional",
+        platform: "macos",
+        suite_id: "protocol-hello-core",
+        original_comparison_id: "1".repeat(64),
+        original_comparison_sha256: "6".repeat(64),
+        evidence_kind: "local_behavioral_lane",
+        evidence_id: `evpostbehavior_${"7".repeat(24)}`,
+        evidence_sha256: "7".repeat(64),
+        fresh_comparison_id: "8".repeat(64),
+        fresh_comparison_sha256: "8".repeat(64),
+        recovery_status: "recovered",
+        evidence_authority_verified: true,
+        evaluated_at: "2026-08-10T00:02:00+00:00",
+      },
+      {
+        order: 2,
+        lane_kind: "adversarial",
+        platform: "windows",
+        suite_id: "protocol-hello-core",
+        original_comparison_id: "2".repeat(64),
+        original_comparison_sha256: "9".repeat(64),
+        evidence_kind: "remote_result_ingestion",
+        evidence_id: `evpostresultreceipt_${"a".repeat(24)}`,
+        evidence_sha256: "a".repeat(64),
+        fresh_comparison_id: "b".repeat(64),
+        fresh_comparison_sha256: "b".repeat(64),
+        recovery_status: "recovered",
+        evidence_authority_verified: true,
+        evaluated_at: "2026-08-10T00:03:00+00:00",
+      },
+    ],
+    recovery_verdict: "recovered",
+    behavioral_evaluation_recorded: true,
+    long_term_metrics_recorded: false,
+    learning_authority: false,
+    promotion_authority: false,
+    recorded_at: "2026-08-10T00:03:00+00:00",
+  };
+  const matrixEnvelope = (matrix) => ({
+    type: "workbench/snapshot",
+    payload: {
+      ...record.payload,
+      proposals: [{
+        ...proposal,
+        outcome: {
+          ...proposal.outcome,
+          before_after_evidence: beforeAfter,
+          before_after_recorded: true,
+          post_rollback_verification: postRollback,
+          post_rollback_verification_recorded: true,
+          post_rollback_evaluation_recorded: true,
+          post_rollback_behavioral_matrix: matrix,
+          post_rollback_behavioral_evaluation_recorded: true,
+        },
+      }],
+    },
+  });
+  const matrixRecord = normalizeServerRecord(matrixEnvelope(behavioralMatrix));
+  assert.equal(
+    matrixRecord.payload.proposals[0].outcome.post_rollback_behavioral_matrix.recovery_verdict,
+    "recovered",
+  );
+  assert.equal(
+    matrixRecord.payload.proposals[0].outcome.post_rollback_behavioral_evaluation_recorded,
+    true,
+  );
+  assert.throws(() => normalizeServerRecord(matrixEnvelope({
+    ...behavioralMatrix,
+    recovery_verdict: "changed",
+  })), /Behavioral Matrix authority 字段无效/);
+  assert.throws(() => normalizeServerRecord(matrixEnvelope({
+    ...behavioralMatrix,
+    lanes: [{
+      ...behavioralMatrix.lanes[0],
+      suite_id: "Protocol-Hello-Core",
+    }, behavioralMatrix.lanes[1]],
+  })), /lane 1 authority 无效/);
+  assert.throws(() => normalizeServerRecord(matrixEnvelope({
+    ...behavioralMatrix,
+    lanes: [{
+      ...behavioralMatrix.lanes[0],
+      evidence_sha256: `${"c".repeat(64)}0`,
+    }, behavioralMatrix.lanes[1]],
+  })), /精确文本/);
+  assert.throws(() => normalizeServerRecord(matrixEnvelope({
+    ...behavioralMatrix,
+    recorded_at: "2026-08-10T00:03:00",
+  })), /带时区的 ISO 8601 时间/);
+  assert.throws(() => normalizeServerRecord(matrixEnvelope({
+    ...behavioralMatrix,
+    final_evaluation_sha256: "f".repeat(64),
+  })), /Behavioral Matrix 外层绑定无效/);
   assert.throws(() => normalizeServerRecord({
     type: "workbench/snapshot",
     payload: {

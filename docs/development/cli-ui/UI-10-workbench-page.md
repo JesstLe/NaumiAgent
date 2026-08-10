@@ -146,8 +146,8 @@
   RED baseline → 实施后 GREEN candidate”；前端拒绝把它冒充为回滚后评测。
 - HAR-09.6c1 显示新的 Post-Rollback Verification ID、baseline slot/version 和 fresh boot + launch identity；
   同时明确“行为级 Eval 尚未记录”，避免把可启动性扩大为业务恢复。
-- HAR-09.6c2a 已通过三端共享 Slash/Tool 暴露首个 fresh installed-runtime H5c 单平台 lane；Reviews typed
-  projection 与完整跨平台聚合仍等待 6c2b，因此总体“行为级 Eval 尚未记录”保持不变。
+- HAR-09.6c2a 已通过三端共享 Slash/Tool 暴露首个 fresh installed-runtime H5c 单平台 lane；该阶段仍显示
+  “行为级 Eval 尚未记录”。后续 6c2b1/6c2b2 已分别完成跨平台矩阵聚合与 typed Reviews projection。
 - HAR-09.6c2a1 已通过 `/evolution outcome-behavior-coverage` 在三端展示完整 lane 覆盖、missing/stale 与
   目标主机调度数；typed Reviews coverage panel 仍是后续切片，当前不得把 Contract 显示为 matrix completion。
 - HAR-09.6c2a2a 已通过 `/evolution outcome-place-behavior` 在三端显示 exact Worker incarnation 与 release
@@ -164,12 +164,15 @@
 - HAR-09.6c2a3e 已通过 `/evolution outcome-authorize-behavior` 在三端共享 prepare/submit/inspect：Start challenge
   显示 exact Attempt、suite/budget、deadline 与 signable digest，authorization 显示 Worker signature、Run Grant、
   Runtime lease 和 expiry；仍明确“没有真实 start/result 证据”，不投影 Matrix completed。
-- 完整行为矩阵、长期指标、promoted Outcome 和 policy learning 仍未完成。完整边界见
+- HAR-09.6c2b1/6c2b2 已完成完整行为矩阵及 typed Reviews 投影：New UI/TUI 显示 Matrix ID、总体 verdict、
+  platform、lane kind 与 local/remote evidence source；Matrix stale 或 binding/聚合篡改时失败关闭。长期指标、
+  promoted Outcome 和 policy learning 仍未完成。完整边界见
   `../harness/HAR-09-6a-proposal-outcome-projection.md` 与
   `../harness/HAR-09-6b-before-after-outcome-evidence.md`、
   `../harness/HAR-09-6c1-post-rollback-runtime-verification.md`、
   `../harness/HAR-09-6c2a-post-rollback-behavioral-lane.md`。
-  Coverage 前置见 `../harness/HAR-09-6c2a1-post-rollback-behavioral-coverage.md`。
+  Coverage 前置见 `../harness/HAR-09-6c2a1-post-rollback-behavioral-coverage.md`，Matrix UI 见
+  `../harness/HAR-09-6c2b2-post-rollback-behavioral-matrix-ui.md`。
 
 ### UI-10.6b1 已实现：Proposal defer
 

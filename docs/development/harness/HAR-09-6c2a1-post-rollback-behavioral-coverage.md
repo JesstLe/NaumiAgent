@@ -136,5 +136,5 @@ authority：
    模式并使用独立 post-rollback domain；Signed Result Ingestion 已由 6c2a3f 完成；
 5. `HAR-09.6c2b1 Post-Rollback Behavioral Matrix Core` 已完成集合完整性、跨 lane verdict、动态撤权与
    `behavioral_evaluation_recorded=true`；
-6. `HAR-09.6c2b2`：Workbench/New UI/TUI typed Matrix 详情投影；
+6. `HAR-09.6c2b2` 已完成：Workbench/New UI/TUI typed Matrix 详情投影；
 7. `HAR-09.6d Long-Term Outcome Window`。

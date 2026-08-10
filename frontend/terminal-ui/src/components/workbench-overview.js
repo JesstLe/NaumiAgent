@@ -246,6 +246,10 @@ function renderProposalDetail(snapshot, proposal, width) {
     const postRollbackLabel = postRollback
       ? color(ANSI.green, "已验证 · fresh boot + launch identity")
       : color(ANSI.yellow, "尚未记录");
+    const behavioralMatrix = outcome.post_rollback_behavioral_matrix;
+    const behavioralMatrixLabel = behavioralMatrix
+      ? `${color(ANSI.green, `已记录 · ${array(behavioralMatrix.lanes).length} lanes`)} · ${behavioralVerdictLabel(behavioralMatrix.recovery_verdict)}`
+      : color(ANSI.yellow, "尚未记录");
     lines.push(
       color(ANSI.cyan, "实施 Outcome"),
       `${color(ANSI.yellow, "rolled_back")} · ${authority}`,
@@ -265,7 +269,26 @@ function renderProposalDetail(snapshot, proposal, width) {
         ? [
             `Post-Rollback Verification · ${compactText(postRollback.verification_id, 128)}`,
             `Baseline · ${compactText(postRollback.baseline_slot_id, 128)} · ${compactText(postRollback.baseline_version, 128)}`,
-            color(ANSI.dim, "口径 · installed-runtime mechanical verification；行为级 Eval 尚未记录。"),
+            color(ANSI.dim, "口径 · installed-runtime mechanical verification；行为矩阵由独立 authority 判定。"),
+          ]
+        : []),
+      `回滚后行为矩阵 · ${behavioralMatrixLabel}`,
+      ...(behavioralMatrix
+        ? [
+            `Behavioral Matrix · ${compactText(behavioralMatrix.matrix_id, 128)}`,
+            ...array(behavioralMatrix.lanes).slice(0, 4).map((lane) => {
+              const evidence = lane.evidence_kind === "remote_result_ingestion"
+                ? color(ANSI.magenta, "remote signed")
+                : color(ANSI.cyan, "local runtime");
+              return [
+                color(ANSI.dim, `Lane #${number(lane.order)}`),
+                color(ANSI.blue, compactText(lane.platform, 24)),
+                compactText(lane.lane_kind, 32),
+                behavioralVerdictLabel(lane.recovery_status),
+                evidence,
+              ].join(" · ");
+            }),
+            color(ANSI.yellow, "长期指标 / Learning / Promotion · 未授权"),
           ]
         : []),
       color(ANSI.dim, "不能再次签发 Contract、标记 promoted 或进入 policy learning。"),
@@ -329,6 +352,15 @@ function renderProposalDetail(snapshot, proposal, width) {
     );
   }
   return lines.filter(Boolean).flatMap((line) => wrapAnsiLine(line, Math.max(1, width)));
+}
+
+function behavioralVerdictLabel(value) {
+  const verdict = compactText(value || "unknown", 32);
+  if (verdict === "recovered") return color(ANSI.green, verdict);
+  if (verdict === "changed" || verdict === "incompatible") {
+    return color(ANSI.red, verdict);
+  }
+  return color(ANSI.yellow, verdict);
 }
 
 function proposalOutcomeLabel(proposal) {

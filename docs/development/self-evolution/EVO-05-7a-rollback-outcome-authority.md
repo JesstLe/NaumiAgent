@@ -79,4 +79,5 @@ boot probe 与 launcher identity，证明 installed runtime fresh mechanical rec
 ARC-07.5f/5g 已关闭“用当前 workspace import 或父进程平台冒充 installed runtime Eval identity”的 transport
 缺口。HAR-09.6c2a 已进一步完成 Outcome/6c1/BeforeAfter/original-H5c-bound 的单平台 fresh installed-runtime
 lane。HAR-09.6c2b1 已进一步对本机 lane 与远端 signed ingestion receipt 做完整集合聚合并签发动态可撤权 Matrix；
-专用双端详情与长期指标仍未完成，继续禁止 `promoted` 与 policy learning。
+HAR-09.6c2b2 已把该 typed Matrix 同源投影到 Workbench/New UI/Textual TUI，并在 stale 或 binding 篡改时失败关闭。
+长期指标仍未完成，继续禁止 `promoted` 与 policy learning。

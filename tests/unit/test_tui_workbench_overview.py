@@ -182,7 +182,10 @@ def test_reviews_formatter_renders_rollback_outcome_without_contract_action() ->
     assert "不代表回滚后评测" in rendered
     assert "fresh boot + launch identity" in rendered
     assert "Post-Rollback Verification" in rendered
-    assert "行为级 Eval 尚未记录" in rendered
+    assert "回滚后行为矩阵：已记录 · 2 lanes · recovered" in rendered
+    assert "Behavioral Matrix" in rendered
+    assert "remote_result_ingestion" in rendered
+    assert "长期指标 / Learning / Promotion：未授权" in rendered
     assert "`c` 签发" not in rendered
 
 
@@ -849,6 +852,27 @@ def _rolled_back_proposal_snapshot() -> dict[str, object]:
             "verification_id": f"evpostrollback_{'5' * 24}",
             "baseline_slot_id": f"relslot_{'6' * 24}",
             "baseline_version": "0.1.214",
+        },
+        "post_rollback_behavioral_evaluation_recorded": True,
+        "post_rollback_behavioral_matrix": {
+            "matrix_id": f"evpostmatrix_{'7' * 24}",
+            "recovery_verdict": "recovered",
+            "lanes": [
+                {
+                    "order": 1,
+                    "lane_kind": "interventional",
+                    "platform": "macos",
+                    "recovery_status": "recovered",
+                    "evidence_kind": "local_behavioral_lane",
+                },
+                {
+                    "order": 2,
+                    "lane_kind": "adversarial",
+                    "platform": "windows",
+                    "recovery_status": "recovered",
+                    "evidence_kind": "remote_result_ingestion",
+                },
+            ],
         },
     }
     return snapshot

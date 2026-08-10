@@ -2824,6 +2824,12 @@ class AgentEngine:
                 post_rollback_service=(
                     self.evolution_post_rollback_runtime_verification_service
                 ),
+                behavioral_matrix_store=(
+                    self.evolution_post_rollback_behavioral_matrix_store
+                ),
+                behavioral_matrix_service=(
+                    self.evolution_post_rollback_behavioral_matrix_service
+                ),
             )
         )
         self.workbench_service.bind_proposal_outcome_reader(

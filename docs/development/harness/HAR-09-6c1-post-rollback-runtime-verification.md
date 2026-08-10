@@ -66,7 +66,8 @@ Verification 强制 fresh boot 与 fresh launch 具有相同 slot、slot SHA、b
 - `long_term_metrics_recorded=false`；
 - `learning_authority=false`、`promotion_authority=false`。
 
-因此 UI 必须同时显示“恢复评测已记录”和“行为级 Eval 尚未记录”，不能省略后者。
+因此在仅有本切片证据时，UI 必须同时显示“恢复评测已记录”和“行为矩阵尚未记录”，不能省略后者；
+HAR-09.6c2b2 只会在完整 Matrix authority 存在且仍有效时替换后一状态。
 
 ## 持久化、并发与双库边界
 

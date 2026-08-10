@@ -8,6 +8,13 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from naumi_agent.evolution.post_rollback_behavioral_matrix import (
+    EvolutionPostRollbackBehavioralMatrix,
+    EvolutionPostRollbackBehavioralMatrixError,
+    EvolutionPostRollbackBehavioralMatrixService,
+    EvolutionPostRollbackBehavioralMatrixStore,
+    EvolutionPostRollbackBehavioralMatrixView,
+)
 from naumi_agent.evolution.post_rollback_runtime_verifications import (
     EvolutionPostRollbackRuntimeVerification,
     EvolutionPostRollbackRuntimeVerificationError,
@@ -68,7 +75,8 @@ class EvolutionProposalOutcomeProjection(_StrictModel):
     post_rollback_verification: EvolutionPostRollbackRuntimeVerification | None = None
     post_rollback_verification_recorded: bool = False
     post_rollback_evaluation_recorded: bool = False
-    post_rollback_behavioral_evaluation_recorded: Literal[False] = False
+    post_rollback_behavioral_matrix: EvolutionPostRollbackBehavioralMatrix | None = None
+    post_rollback_behavioral_evaluation_recorded: bool = False
     long_term_metrics_recorded: Literal[False] = False
     promoted: Literal[False] = False
     learning_authority: Literal[False] = False
@@ -120,6 +128,28 @@ class EvolutionProposalOutcomeProjection(_StrictModel):
             and not verification.promotion_authority
         ):
             raise ValueError("Proposal Outcome post-rollback evidence 绑定无效。")
+        matrix = self.post_rollback_behavioral_matrix
+        matrix_recorded = matrix is not None
+        if self.post_rollback_behavioral_evaluation_recorded is not matrix_recorded:
+            raise ValueError("Proposal Outcome Behavioral Matrix 状态不一致。")
+        if matrix is not None and not (
+            evidence is not None
+            and verification is not None
+            and matrix.outcome_id == self.outcome_id
+            and matrix.outcome_sha256 == self.outcome_sha256
+            and matrix.before_after_evidence_id == evidence.evidence_id
+            and matrix.before_after_evidence_sha256 == evidence.evidence_sha256
+            and matrix.final_evaluation_id == evidence.final_evaluation_id
+            and matrix.final_evaluation_sha256 == evidence.final_evaluation_sha256
+            and matrix.runtime_verification_id == verification.verification_id
+            and matrix.runtime_verification_sha256
+            == verification.verification_sha256
+            and matrix.behavioral_evaluation_recorded
+            and not matrix.long_term_metrics_recorded
+            and not matrix.learning_authority
+            and not matrix.promotion_authority
+        ):
+            raise ValueError("Proposal Outcome Behavioral Matrix 绑定无效。")
         return self
 
 
@@ -140,6 +170,10 @@ class EvolutionProposalOutcomeProjectionService:
         post_rollback_store: EvolutionPostRollbackRuntimeVerificationStore | None = None,
         post_rollback_service: EvolutionPostRollbackRuntimeVerificationService
         | None = None,
+        behavioral_matrix_store: EvolutionPostRollbackBehavioralMatrixStore
+        | None = None,
+        behavioral_matrix_service: EvolutionPostRollbackBehavioralMatrixService
+        | None = None,
     ) -> None:
         self.rollback_outcome_store = rollback_outcome_store
         self.rollback_outcome_service = rollback_outcome_service
@@ -151,6 +185,10 @@ class EvolutionProposalOutcomeProjectionService:
             raise ValueError("Post-Rollback Store 与 Service 必须同时绑定。")
         self.post_rollback_store = post_rollback_store
         self.post_rollback_service = post_rollback_service
+        if (behavioral_matrix_store is None) != (behavioral_matrix_service is None):
+            raise ValueError("Behavioral Matrix Store 与 Service 必须同时绑定。")
+        self.behavioral_matrix_store = behavioral_matrix_store
+        self.behavioral_matrix_service = behavioral_matrix_service
 
     async def project_session(
         self,
@@ -190,12 +228,22 @@ class EvolutionProposalOutcomeProjectionService:
         post_rollback_views = await self._post_rollback_views(
             tuple(by_proposal.values())
         )
+        matrix_views = await self._behavioral_matrix_views(
+            tuple(by_proposal.values())
+        )
         projections: dict[str, EvolutionProposalOutcomeProjection] = {}
-        for (proposal_id, outcome), result, evidence_view, verification_view in zip(
+        for (
+            (proposal_id, outcome),
+            result,
+            evidence_view,
+            verification_view,
+            matrix_view,
+        ) in zip(
             by_proposal.items(),
             views,
             evidence_views,
             post_rollback_views,
+            matrix_views,
             strict=True,
         ):
             if isinstance(result, BaseException):
@@ -208,6 +256,7 @@ class EvolutionProposalOutcomeProjectionService:
                 result,
                 evidence_view,
                 verification_view,
+                matrix_view,
             )
         return projections
 
@@ -285,12 +334,50 @@ class EvolutionProposalOutcomeProjectionService:
             )
         return tuple(inspected)
 
+    async def _behavioral_matrix_views(
+        self,
+        outcomes: tuple[EvolutionRevalidationRollbackOutcome, ...],
+    ) -> tuple[EvolutionPostRollbackBehavioralMatrixView | None, ...]:
+        if self.behavioral_matrix_store is None or self.behavioral_matrix_service is None:
+            return tuple(None for _ in outcomes)
+        try:
+            matrices = await asyncio.gather(*(
+                self.behavioral_matrix_store.get_by_outcome(item.outcome_id)
+                for item in outcomes
+            ))
+            inspected = await asyncio.gather(*(
+                self.behavioral_matrix_service.inspect(matrix=item)
+                if item is not None
+                else _none()
+                for item in matrices
+            ))
+        except (
+            EvolutionPostRollbackBehavioralMatrixError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            raise EvolutionProposalOutcomeProjectionError(
+                "proposal_outcome_behavioral_matrix_unavailable",
+                "Post-Rollback Behavioral Matrix source 暂不可用。",
+            ) from exc
+        if any(
+            item is not None and not item.behavioral_evaluation_authority
+            for item in inspected
+        ):
+            raise EvolutionProposalOutcomeProjectionError(
+                "proposal_outcome_behavioral_matrix_stale",
+                "Post-Rollback Behavioral Matrix authority 当前无效。",
+            )
+        return tuple(inspected)
+
 
 def _project(
     outcome: EvolutionRevalidationRollbackOutcome,
     view: EvolutionRevalidationRollbackOutcomeView,
     evidence_view: EvolutionProposalBeforeAfterEvidenceView | None = None,
     verification_view: EvolutionPostRollbackRuntimeVerificationView | None = None,
+    matrix_view: EvolutionPostRollbackBehavioralMatrixView | None = None,
 ) -> EvolutionProposalOutcomeProjection:
     if outcome != view.outcome:
         raise EvolutionProposalOutcomeProjectionError(
@@ -301,6 +388,7 @@ def _project(
     verification = (
         verification_view.verification if verification_view is not None else None
     )
+    matrix = matrix_view.matrix if matrix_view is not None else None
     return EvolutionProposalOutcomeProjection(
         workbench_session_id=outcome.workbench_session_id,
         workbench_proposal_id=outcome.workbench_proposal_id,
@@ -322,7 +410,8 @@ def _project(
         post_rollback_verification=verification,
         post_rollback_verification_recorded=verification is not None,
         post_rollback_evaluation_recorded=verification is not None,
-        post_rollback_behavioral_evaluation_recorded=False,
+        post_rollback_behavioral_matrix=matrix,
+        post_rollback_behavioral_evaluation_recorded=matrix is not None,
         long_term_metrics_recorded=False,
         promoted=False,
         learning_authority=False,

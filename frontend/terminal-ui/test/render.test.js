@@ -622,6 +622,27 @@ test("workbench Reviews tab renders rollback Outcome and removes Contract action
         baseline_slot_id: `relslot_${"6".repeat(24)}`,
         baseline_version: "0.1.214",
       },
+      post_rollback_behavioral_evaluation_recorded: true,
+      post_rollback_behavioral_matrix: {
+        matrix_id: `evpostmatrix_${"7".repeat(24)}`,
+        recovery_verdict: "recovered",
+        lanes: [
+          {
+            order: 1,
+            lane_kind: "interventional",
+            platform: "macos",
+            recovery_status: "recovered",
+            evidence_kind: "local_behavioral_lane",
+          },
+          {
+            order: 2,
+            lane_kind: "adversarial",
+            platform: "windows",
+            recovery_status: "recovered",
+            evidence_kind: "remote_result_ingestion",
+          },
+        ],
+      },
     },
   };
   const view = {
@@ -635,7 +656,7 @@ test("workbench Reviews tab renders rollback Outcome and removes Contract action
   };
 
   for (const width of [80, 120, 200]) {
-    const rendered = renderWorkbenchOverview(view, width, 34);
+    const rendered = renderWorkbenchOverview(view, width, 44);
     const plain = rendered.map(stripAnsi).join("\n");
     assert(rendered.every((line) => visibleWidth(line) <= width));
     assert(plain.includes("rolled_back"));
@@ -648,10 +669,17 @@ test("workbench Reviews tab renders rollback Outcome and removes Contract action
     assert(plain.includes("不是回滚后评测"));
     assert(plain.includes("fresh boot + launch identity"));
     assert(plain.includes(proposal.outcome.post_rollback_verification.verification_id));
-    assert(plain.includes("行为级 Eval"));
+    assert(plain.includes("回滚后行为矩阵"));
+    assert(plain.includes(proposal.outcome.post_rollback_behavioral_matrix.matrix_id));
+    assert(plain.includes("recovered"));
+    assert(plain.includes("local runtime"));
+    assert(plain.includes("remote signed"));
+    assert(plain.includes("长期指标 / Learning / Promotion"));
     assert(!plain.includes("c 签发/重开 Contract"));
     assert(rendered.join("\n").includes(ANSI.yellow));
     assert(rendered.join("\n").includes(ANSI.green));
+    assert(rendered.join("\n").includes(ANSI.blue));
+    assert(rendered.join("\n").includes(ANSI.magenta));
   }
 });
 
