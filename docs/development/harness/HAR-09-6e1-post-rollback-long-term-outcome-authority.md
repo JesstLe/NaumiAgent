@@ -109,5 +109,6 @@ durable source 变化或篡改都会动态撤销当前 Outcome authority。撤�
 3. 配置/数据 rollback、真实 Windows/Linux daemon 生产证据仍需独立完成；
 4. policy learning 必须等待独立 promotion policy、approval 与长期效果反馈门禁，不能由本 artifact 直接触发。
 
-下一独立切片为 `HAR-09.6e2 Long-Term Outcome Projection Parity`：把 root + supersede ledger + current revision
-统一投影到 Workbench/New UI/Textual TUI，并在 head 不唯一、event chain 损坏或 authority 撤销时失败关闭。
+下一独立切片 [HAR-09.6e2](HAR-09-6e2-long-term-outcome-projection-parity.md) 已把 root + supersede ledger + current
+revision 统一投影到 Workbench/New UI/Textual TUI，并在 head/pair 不一致、event chain 损坏或 authority 撤销时
+失败关闭。它仍不是 promoted Outcome。

@@ -384,16 +384,31 @@ def _append_proposal_review(
             and behavioral_matrix
             else "尚未记录"
         )
+        long_term = _mapping(outcome.get("long_term_outcome"))
+        supersede_event = _mapping(outcome.get("long_term_supersede_event"))
+        metrics_label = (
+            "已记录" if outcome.get("long_term_metrics_recorded") is True else "尚未记录"
+        )
         lines.extend(
             [
                 "",
                 "### 实施 Outcome",
                 f"- 终态：{_plain(outcome_status or outcome.get('status'))} · {authority}",
                 f"- Outcome：`{_code(outcome.get('outcome_id'))}`",
+                *(
+                    [
+                        "- Rollback Root："
+                        f"`{_code(outcome.get('root_rollback_outcome_id'))}`"
+                    ]
+                    if _normalized(outcome.get("root_rollback_outcome_id"))
+                    != _normalized(outcome.get("outcome_id"))
+                    else []
+                ),
                 f"- Rollback Receipt：`{_code(outcome.get('rollback_receipt_id'))}`",
                 f"- Experiment Contract：`{_code(outcome.get('experiment_contract_id'))}`",
                 f"- Breach：{', '.join(_strings(outcome.get('breach_reasons'))) or '-'}",
-                f"- HAR-08 before/after：{before_after_label}；长期指标：尚未记录",
+                f"- HAR-08 before/after：{before_after_label}；"
+                f"长期指标：{metrics_label}",
             ]
         )
         if before_after:
@@ -436,6 +451,33 @@ def _append_proposal_review(
                     f"{_normalized(item.get('recovery_status'))} · "
                     f"{_normalized(item.get('evidence_kind'))}"
                 )
+        if long_term:
+            lines.extend(
+                [
+                    "",
+                    "### 长期恢复观察",
+                    "- Long-Term Outcome："
+                    f"`{_code(long_term.get('outcome_id'))}` · "
+                    f"revision {_integer(long_term.get('revision_sequence'))}",
+                    "- Assessment："
+                    f"`{_code(long_term.get('assessment_id'))}` · "
+                    f"head #{_integer(long_term.get('assessment_head_sequence'))}",
+                    "- Runtime："
+                    f"{_plain(long_term.get('runtime_subject_id'))} · "
+                    f"`{_code(long_term.get('runtime_binding_id'))}`",
+                    "- 持续健康："
+                    f"{_integer(long_term.get('observation_seconds'))}s · "
+                    f"{_integer(long_term.get('operational_sample_count'))} samples",
+                    "- Supersede Event："
+                    f"`{_code(supersede_event.get('event_id'))}` · "
+                    "历史 rollback fact 保留",
+                    "- Authority："
+                    "health="
+                    f"{str(outcome.get('current_long_term_health_authority') is True).lower()} · "
+                    f"head={str(outcome.get('projection_head_authority') is True).lower()} · "
+                    f"outcome={str(outcome.get('long_term_outcome_authority') is True).lower()}",
+                ]
+            )
     elif proposal.get("outcome_error"):
         lines.extend(
             [
@@ -457,7 +499,8 @@ def _append_proposal_review(
             [
                 "",
                 (
-                    "> 该 Proposal 已形成历史 rollback Outcome；治理状态仍保留 approved 审计，"
+                    "> 该 Proposal 已形成历史 rollback / recovery-observed Outcome；"
+                    "治理状态仍保留 approved 审计，"
                     "但不能再次签发 Experiment Contract，也不能标记 promoted 或进入 "
                     "policy learning。"
                 ),

@@ -15,6 +15,14 @@ from naumi_agent.evolution.post_rollback_behavioral_matrix import (
     EvolutionPostRollbackBehavioralMatrixStore,
     EvolutionPostRollbackBehavioralMatrixView,
 )
+from naumi_agent.evolution.post_rollback_long_term_outcomes import (
+    EvolutionPostRollbackLongTermOutcome,
+    EvolutionPostRollbackLongTermOutcomeError,
+    EvolutionPostRollbackLongTermOutcomeService,
+    EvolutionPostRollbackLongTermOutcomeStore,
+    EvolutionPostRollbackLongTermOutcomeView,
+    EvolutionPostRollbackOutcomeSupersedeEvent,
+)
 from naumi_agent.evolution.post_rollback_runtime_verifications import (
     EvolutionPostRollbackRuntimeVerification,
     EvolutionPostRollbackRuntimeVerificationError,
@@ -37,7 +45,7 @@ from naumi_agent.evolution.revalidation_rollback_outcomes import (
     EvolutionRevalidationRollbackOutcomeView,
 )
 
-EVOLUTION_PROPOSAL_OUTCOME_PROJECTION_POLICY = "evolution-proposal-outcome-projection-v1"
+EVOLUTION_PROPOSAL_OUTCOME_PROJECTION_POLICY = "evolution-proposal-outcome-projection-v2"
 _SAFE_BINDING_RE = r"^[^\x00\r\n]{1,128}$"
 _SHA256_RE = r"^[0-9a-f]{64}$"
 
@@ -51,16 +59,22 @@ class _StrictModel(BaseModel):
 class EvolutionProposalOutcomeProjection(_StrictModel):
     """Dynamic display projection; never a replacement for Proposal governance state."""
 
-    schema_version: Literal[1] = 1
-    policy_version: Literal["evolution-proposal-outcome-projection-v1"] = (
+    schema_version: Literal[2] = 2
+    policy_version: Literal["evolution-proposal-outcome-projection-v2"] = (
         EVOLUTION_PROPOSAL_OUTCOME_PROJECTION_POLICY
     )
     workbench_session_id: str = Field(pattern=_SAFE_BINDING_RE)
     workbench_proposal_id: str = Field(pattern=_SAFE_BINDING_RE)
     governance_state_unchanged: Literal[True] = True
-    status: Literal["rolled_back"] = "rolled_back"
-    outcome_id: str = Field(pattern=r"^evrerollbackout_[0-9a-f]{24}$")
+    status: Literal["rolled_back", "rollback_recovery_observed"] = "rolled_back"
+    outcome_id: str = Field(
+        pattern=r"^(?:evrerollbackout|evpostlongout)_[0-9a-f]{24}$"
+    )
     outcome_sha256: str = Field(pattern=_SHA256_RE)
+    root_rollback_outcome_id: str = Field(
+        pattern=r"^evrerollbackout_[0-9a-f]{24}$"
+    )
+    root_rollback_outcome_sha256: str = Field(pattern=_SHA256_RE)
     rollback_receipt_id: str = Field(pattern=r"^evrerollbackexec_[0-9a-f]{24}$")
     experiment_contract_id: str = Field(pattern=r"^evx_[0-9a-f]{24}$")
     candidate_id: str = Field(pattern=r"^evc_[0-9a-f]{24}$")
@@ -68,6 +82,7 @@ class EvolutionProposalOutcomeProjection(_StrictModel):
     breach_reasons: tuple[str, ...] = Field(min_length=1, max_length=16)
     recorded_at: str = Field(min_length=1, max_length=100)
     authority_valid: bool
+    rollback_outcome_authority: bool
     active_baseline: bool
     contract_issue_allowed: Literal[False] = False
     before_after_evidence: EvolutionProposalBeforeAfterEvidence | None = None
@@ -77,10 +92,33 @@ class EvolutionProposalOutcomeProjection(_StrictModel):
     post_rollback_evaluation_recorded: bool = False
     post_rollback_behavioral_matrix: EvolutionPostRollbackBehavioralMatrix | None = None
     post_rollback_behavioral_evaluation_recorded: bool = False
-    long_term_metrics_recorded: Literal[False] = False
+    long_term_outcome: EvolutionPostRollbackLongTermOutcome | None = None
+    long_term_supersede_event: EvolutionPostRollbackOutcomeSupersedeEvent | None = None
+    long_term_metrics_recorded: bool = False
+    long_term_outcome_authority: bool = False
+    current_long_term_health_authority: bool = False
+    projection_head_authority: bool = False
     promoted: Literal[False] = False
     learning_authority: Literal[False] = False
     promotion_authority: Literal[False] = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _root_defaults(cls, value):
+        if not isinstance(value, dict):
+            return value
+        payload = dict(value)
+        if str(payload.get("status") or "rolled_back") == "rolled_back":
+            payload.setdefault("root_rollback_outcome_id", payload.get("outcome_id"))
+            payload.setdefault(
+                "root_rollback_outcome_sha256",
+                payload.get("outcome_sha256"),
+            )
+            payload.setdefault(
+                "rollback_outcome_authority",
+                payload.get("authority_valid"),
+            )
+        return payload
 
     @model_validator(mode="after")
     def _projection(self) -> Self:
@@ -90,8 +128,8 @@ class EvolutionProposalOutcomeProjection(_StrictModel):
             raise ValueError("Proposal Outcome before/after 状态与 evidence 不一致。")
         evidence = self.before_after_evidence
         if evidence is not None and not (
-            evidence.outcome_id == self.outcome_id
-            and evidence.outcome_sha256 == self.outcome_sha256
+            evidence.outcome_id == self.root_rollback_outcome_id
+            and evidence.outcome_sha256 == self.root_rollback_outcome_sha256
             and evidence.workbench_session_id == self.workbench_session_id
             and evidence.workbench_proposal_id == self.workbench_proposal_id
             and evidence.experiment_contract_id == self.experiment_contract_id
@@ -113,8 +151,8 @@ class EvolutionProposalOutcomeProjection(_StrictModel):
         ):
             raise ValueError("Proposal Outcome post-rollback 状态与 evidence 不一致。")
         if verification is not None and not (
-            verification.outcome_id == self.outcome_id
-            and verification.outcome_sha256 == self.outcome_sha256
+            verification.outcome_id == self.root_rollback_outcome_id
+            and verification.outcome_sha256 == self.root_rollback_outcome_sha256
             and verification.workbench_session_id == self.workbench_session_id
             and verification.workbench_proposal_id == self.workbench_proposal_id
             and verification.experiment_contract_id == self.experiment_contract_id
@@ -135,8 +173,8 @@ class EvolutionProposalOutcomeProjection(_StrictModel):
         if matrix is not None and not (
             evidence is not None
             and verification is not None
-            and matrix.outcome_id == self.outcome_id
-            and matrix.outcome_sha256 == self.outcome_sha256
+            and matrix.outcome_id == self.root_rollback_outcome_id
+            and matrix.outcome_sha256 == self.root_rollback_outcome_sha256
             and matrix.before_after_evidence_id == evidence.evidence_id
             and matrix.before_after_evidence_sha256 == evidence.evidence_sha256
             and matrix.final_evaluation_id == evidence.final_evaluation_id
@@ -150,6 +188,63 @@ class EvolutionProposalOutcomeProjection(_StrictModel):
             and not matrix.promotion_authority
         ):
             raise ValueError("Proposal Outcome Behavioral Matrix 绑定无效。")
+        long_term = self.long_term_outcome
+        event = self.long_term_supersede_event
+        has_long_term = long_term is not None and event is not None
+        if (long_term is None) is not (event is None):
+            raise ValueError("Proposal Outcome Long-Term pair 不完整。")
+        if self.long_term_metrics_recorded is not has_long_term:
+            raise ValueError("Proposal Outcome 长期指标状态与 Outcome 不一致。")
+        if not has_long_term:
+            if not (
+                self.status == "rolled_back"
+                and self.outcome_id == self.root_rollback_outcome_id
+                and self.outcome_sha256 == self.root_rollback_outcome_sha256
+                and self.authority_valid is self.rollback_outcome_authority
+                and not self.long_term_outcome_authority
+                and not self.current_long_term_health_authority
+                and not self.projection_head_authority
+            ):
+                raise ValueError("Proposal Outcome rollback-root projection 无效。")
+            return self
+        assert long_term is not None and event is not None
+        if not (
+            self.status == "rollback_recovery_observed"
+            and self.outcome_id == long_term.outcome_id == event.successor_outcome_id
+            and self.outcome_sha256
+            == long_term.outcome_sha256
+            == event.successor_outcome_sha256
+            and long_term.root_rollback_outcome_id
+            == event.root_rollback_outcome_id
+            == self.root_rollback_outcome_id
+            and long_term.root_rollback_outcome_sha256
+            == event.root_rollback_outcome_sha256
+            == self.root_rollback_outcome_sha256
+            and long_term.workspace_root == event.workspace_root
+            and long_term.request_id == event.request_id
+            and long_term.revision_sequence == event.sequence
+            and long_term.prior_outcome_kind == event.prior_outcome_kind
+            and long_term.prior_outcome_id == event.prior_outcome_id
+            and long_term.prior_outcome_sha256 == event.prior_outcome_sha256
+            and long_term.recorded_at == event.recorded_at
+            and self.recorded_at == long_term.recorded_at
+            and long_term.workbench_session_id == self.workbench_session_id
+            and long_term.workbench_proposal_id == self.workbench_proposal_id
+            and long_term.candidate_id == self.candidate_id
+            and long_term.candidate_revision == self.candidate_revision
+            and long_term.long_term_metrics_recorded
+            and not long_term.promoted
+            and self.long_term_outcome_authority is self.authority_valid
+            and (
+                not self.long_term_outcome_authority
+                or (
+                    self.rollback_outcome_authority
+                    and self.current_long_term_health_authority
+                    and self.projection_head_authority
+                )
+            )
+        ):
+            raise ValueError("Proposal Outcome Long-Term lineage 无效。")
         return self
 
 
@@ -174,6 +269,10 @@ class EvolutionProposalOutcomeProjectionService:
         | None = None,
         behavioral_matrix_service: EvolutionPostRollbackBehavioralMatrixService
         | None = None,
+        long_term_outcome_store: EvolutionPostRollbackLongTermOutcomeStore
+        | None = None,
+        long_term_outcome_service: EvolutionPostRollbackLongTermOutcomeService
+        | None = None,
     ) -> None:
         self.rollback_outcome_store = rollback_outcome_store
         self.rollback_outcome_service = rollback_outcome_service
@@ -189,6 +288,18 @@ class EvolutionProposalOutcomeProjectionService:
             raise ValueError("Behavioral Matrix Store 与 Service 必须同时绑定。")
         self.behavioral_matrix_store = behavioral_matrix_store
         self.behavioral_matrix_service = behavioral_matrix_service
+        if (long_term_outcome_store is None) != (long_term_outcome_service is None):
+            raise ValueError("Long-Term Outcome Store 与 Service 必须同时绑定。")
+        if long_term_outcome_store is not None and not (
+            long_term_outcome_store.rollback_outcome_store is rollback_outcome_store
+            and long_term_outcome_service is not None
+            and long_term_outcome_service.store is long_term_outcome_store
+            and long_term_outcome_service.rollback_outcome_store
+            is rollback_outcome_store
+        ):
+            raise ValueError("Long-Term Outcome projection dependency 不一致。")
+        self.long_term_outcome_store = long_term_outcome_store
+        self.long_term_outcome_service = long_term_outcome_service
 
     async def project_session(
         self,
@@ -231,6 +342,9 @@ class EvolutionProposalOutcomeProjectionService:
         matrix_views = await self._behavioral_matrix_views(
             tuple(by_proposal.values())
         )
+        long_term_views = await self._long_term_outcome_views(
+            tuple(by_proposal.values())
+        )
         projections: dict[str, EvolutionProposalOutcomeProjection] = {}
         for (
             (proposal_id, outcome),
@@ -238,12 +352,14 @@ class EvolutionProposalOutcomeProjectionService:
             evidence_view,
             verification_view,
             matrix_view,
+            long_term_view,
         ) in zip(
             by_proposal.items(),
             views,
             evidence_views,
             post_rollback_views,
             matrix_views,
+            long_term_views,
             strict=True,
         ):
             if isinstance(result, BaseException):
@@ -257,6 +373,7 @@ class EvolutionProposalOutcomeProjectionService:
                 evidence_view,
                 verification_view,
                 matrix_view,
+                long_term_view,
             )
         return projections
 
@@ -294,6 +411,53 @@ class EvolutionProposalOutcomeProjectionService:
             raise EvolutionProposalOutcomeProjectionError(
                 "proposal_outcome_before_after_stale",
                 "Proposal Before/After Evidence authority 当前无效。",
+            )
+        return tuple(inspected)
+
+    async def _long_term_outcome_views(
+        self,
+        outcomes: tuple[EvolutionRevalidationRollbackOutcome, ...],
+    ) -> tuple[EvolutionPostRollbackLongTermOutcomeView | None, ...]:
+        if self.long_term_outcome_store is None or self.long_term_outcome_service is None:
+            return tuple(None for _ in outcomes)
+        try:
+            heads = await asyncio.gather(*(
+                self.long_term_outcome_store.head(item.request_id)
+                for item in outcomes
+            ))
+            pairs = await asyncio.gather(*(
+                self.long_term_outcome_store.get_by_assessment(item.assessment_id)
+                if item is not None
+                else _none()
+                for item in heads
+            ))
+            inspected = await asyncio.gather(*(
+                self.long_term_outcome_service.inspect(
+                    outcome=pair[0],
+                    event=pair[1],
+                )
+                if pair is not None
+                else _none()
+                for pair in pairs
+            ))
+        except (
+            EvolutionPostRollbackLongTermOutcomeError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            raise EvolutionProposalOutcomeProjectionError(
+                "proposal_outcome_long_term_unavailable",
+                "Post-Rollback Long-Term Outcome source 暂不可用。",
+            ) from exc
+        if any(
+            head is not None
+            and (pair is None or pair[0] != head)
+            for head, pair in zip(heads, pairs, strict=True)
+        ):
+            raise EvolutionProposalOutcomeProjectionError(
+                "proposal_outcome_long_term_mismatch",
+                "Post-Rollback Long-Term Outcome head/pair 不一致。",
             )
         return tuple(inspected)
 
@@ -378,6 +542,7 @@ def _project(
     evidence_view: EvolutionProposalBeforeAfterEvidenceView | None = None,
     verification_view: EvolutionPostRollbackRuntimeVerificationView | None = None,
     matrix_view: EvolutionPostRollbackBehavioralMatrixView | None = None,
+    long_term_view: EvolutionPostRollbackLongTermOutcomeView | None = None,
 ) -> EvolutionProposalOutcomeProjection:
     if outcome != view.outcome:
         raise EvolutionProposalOutcomeProjectionError(
@@ -389,21 +554,36 @@ def _project(
         verification_view.verification if verification_view is not None else None
     )
     matrix = matrix_view.matrix if matrix_view is not None else None
+    long_term = long_term_view.outcome if long_term_view is not None else None
+    supersede_event = (
+        long_term_view.supersede_event if long_term_view is not None else None
+    )
+    current_outcome = long_term if long_term is not None else outcome
+    authority = (
+        long_term_view.outcome_authority
+        if long_term_view is not None
+        else view.outcome_authority
+    )
     return EvolutionProposalOutcomeProjection(
         workbench_session_id=outcome.workbench_session_id,
         workbench_proposal_id=outcome.workbench_proposal_id,
         governance_state_unchanged=True,
-        status="rolled_back",
-        outcome_id=outcome.outcome_id,
-        outcome_sha256=outcome.outcome_sha256,
+        status=(
+            "rollback_recovery_observed" if long_term is not None else "rolled_back"
+        ),
+        outcome_id=current_outcome.outcome_id,
+        outcome_sha256=current_outcome.outcome_sha256,
+        root_rollback_outcome_id=outcome.outcome_id,
+        root_rollback_outcome_sha256=outcome.outcome_sha256,
         rollback_receipt_id=outcome.rollback_receipt_id,
         experiment_contract_id=outcome.experiment_contract_id,
         candidate_id=outcome.candidate_id,
         candidate_revision=outcome.candidate_revision,
         breach_reasons=outcome.breach_reasons,
-        recorded_at=outcome.recorded_at,
-        authority_valid=view.outcome_authority,
-        active_baseline=view.active_baseline_authority,
+        recorded_at=current_outcome.recorded_at,
+        authority_valid=authority,
+        rollback_outcome_authority=view.outcome_authority,
+        active_baseline=view.active_baseline_authority and authority,
         contract_issue_allowed=False,
         before_after_evidence=evidence,
         before_after_recorded=evidence is not None,
@@ -412,7 +592,24 @@ def _project(
         post_rollback_evaluation_recorded=verification is not None,
         post_rollback_behavioral_matrix=matrix,
         post_rollback_behavioral_evaluation_recorded=matrix is not None,
-        long_term_metrics_recorded=False,
+        long_term_outcome=long_term,
+        long_term_supersede_event=supersede_event,
+        long_term_metrics_recorded=long_term is not None,
+        long_term_outcome_authority=(
+            long_term_view.outcome_authority
+            if long_term_view is not None
+            else False
+        ),
+        current_long_term_health_authority=(
+            long_term_view.current_long_term_health_authority
+            if long_term_view is not None
+            else False
+        ),
+        projection_head_authority=(
+            long_term_view.projection_head_authority
+            if long_term_view is not None
+            else False
+        ),
         promoted=False,
         learning_authority=False,
         promotion_authority=False,

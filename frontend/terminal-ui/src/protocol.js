@@ -1207,7 +1207,7 @@ function normalizeWorkbenchProposal(value) {
   const outcomeStatus = harnessChoice(
     item.outcome_status ?? "",
     "workbench proposal.outcome_status",
-    new Set(["", "rolled_back", "evidence_invalid"]),
+    new Set(["", "rolled_back", "rollback_recovery_observed", "evidence_invalid"]),
   );
   const outcomeError = workbenchText(
     item.outcome_error ?? "",
@@ -1279,7 +1279,7 @@ function normalizeWorkbenchProposal(value) {
     updated_at: workbenchText(item.updated_at, "workbench proposal.updated_at", 100),
   };
   if (outcome) {
-    const expectedStatus = outcome.authority_valid ? "rolled_back" : "evidence_invalid";
+    const expectedStatus = outcome.authority_valid ? outcome.status : "evidence_invalid";
     if (
       outcome.workbench_session_id !== normalized.session_id
       || outcome.workbench_proposal_id !== normalized.id
@@ -1921,9 +1921,163 @@ function normalizeWorkbenchBehavioralMatrix(value) {
   return normalized;
 }
 
+function normalizeWorkbenchLongTermOutcome(value) {
+  const item = harnessObject(value, "workbench Long-Term Outcome");
+  if (Number(item.schema_version) !== 1) {
+    throw new Error("workbench Long-Term Outcome schema_version 不兼容");
+  }
+  const textFields = [
+    "outcome_id", "outcome_sha256", "workspace_root", "root_rollback_outcome_id",
+    "root_rollback_outcome_sha256", "request_id", "prior_outcome_id",
+    "prior_outcome_sha256", "observation_contract_id", "observation_contract_sha256",
+    "behavioral_matrix_id", "behavioral_matrix_sha256", "assessment_id",
+    "assessment_sha256", "admission_id", "admission_sha256", "workbench_session_id",
+    "workbench_proposal_id", "proposal_id", "candidate_id", "candidate_sha256",
+    "baseline_slot_id", "baseline_slot_sha256", "baseline_version", "baseline_target",
+    "runtime_subject_id", "runtime_binding_id", "runtime_identity_id", "recorded_at",
+  ];
+  const normalized = Object.fromEntries(textFields.map((field) => [
+    field,
+    workbenchText(item[field], `workbench Long-Term Outcome.${field}`, field === "workspace_root" ? 4096 : 128),
+  ]));
+  Object.assign(normalized, {
+    schema_version: 1,
+    policy_version: workbenchText(item.policy_version, "workbench Long-Term Outcome.policy_version", 80),
+    status: harnessChoice(item.status, "workbench Long-Term Outcome.status", new Set(["rollback_recovery_observed"])),
+    revision_sequence: harnessNonnegativeInteger(item.revision_sequence, "workbench Long-Term Outcome.revision_sequence"),
+    prior_outcome_kind: harnessChoice(item.prior_outcome_kind, "workbench Long-Term Outcome.prior_outcome_kind", new Set(["rollback_outcome", "long_term_outcome"])),
+    proposal_kind: harnessChoice(item.proposal_kind, "workbench Long-Term Outcome.proposal_kind", new Set(["knowledge", "profile", "prompt", "tool", "test", "code"])),
+    candidate_revision: harnessNonnegativeInteger(item.candidate_revision, "workbench Long-Term Outcome.candidate_revision"),
+    assessment_head_sequence: harnessNonnegativeInteger(item.assessment_head_sequence, "workbench Long-Term Outcome.assessment_head_sequence"),
+    observation_seconds: harnessNonnegativeInteger(item.observation_seconds, "workbench Long-Term Outcome.observation_seconds"),
+    operational_sample_count: harnessNonnegativeInteger(item.operational_sample_count, "workbench Long-Term Outcome.operational_sample_count"),
+    rollback_fact_preserved: harnessBoolean(item.rollback_fact_preserved, "workbench Long-Term Outcome.rollback_fact_preserved"),
+    behavioral_recovery_verified: harnessBoolean(item.behavioral_recovery_verified, "workbench Long-Term Outcome.behavioral_recovery_verified"),
+    long_term_metrics_recorded: harnessBoolean(item.long_term_metrics_recorded, "workbench Long-Term Outcome.long_term_metrics_recorded"),
+    baseline_sustained_health_verified: harnessBoolean(item.baseline_sustained_health_verified, "workbench Long-Term Outcome.baseline_sustained_health_verified"),
+    candidate_promoted: harnessBoolean(item.candidate_promoted, "workbench Long-Term Outcome.candidate_promoted"),
+    promoted: harnessBoolean(item.promoted, "workbench Long-Term Outcome.promoted"),
+    learning_authority: harnessBoolean(item.learning_authority, "workbench Long-Term Outcome.learning_authority"),
+    promotion_authority: harnessBoolean(item.promotion_authority, "workbench Long-Term Outcome.promotion_authority"),
+    execution_authority: harnessBoolean(item.execution_authority, "workbench Long-Term Outcome.execution_authority"),
+  });
+  if (
+    normalized.policy_version !== "evolution-post-rollback-long-term-outcome-v1"
+    || normalized.revision_sequence < 1
+    || normalized.candidate_revision < 1
+    || normalized.assessment_head_sequence < 1
+    || normalized.observation_seconds < 3600
+    || normalized.observation_seconds > 604_800
+    || normalized.operational_sample_count < 12
+    || normalized.operational_sample_count > 5000
+    || normalized.rollback_fact_preserved !== true
+    || normalized.behavioral_recovery_verified !== true
+    || normalized.long_term_metrics_recorded !== true
+    || normalized.baseline_sustained_health_verified !== true
+    || normalized.candidate_promoted !== false
+    || normalized.promoted !== false
+    || normalized.learning_authority !== false
+    || normalized.promotion_authority !== false
+    || normalized.execution_authority !== false
+  ) {
+    throw new Error("workbench Long-Term Outcome authority 字段无效");
+  }
+  const identities = [
+    [normalized.outcome_id, /^evpostlongout_[0-9a-f]{24}$/],
+    [normalized.outcome_sha256, /^[0-9a-f]{64}$/],
+    [normalized.root_rollback_outcome_id, /^evrerollbackout_[0-9a-f]{24}$/],
+    [normalized.root_rollback_outcome_sha256, /^[0-9a-f]{64}$/],
+    [normalized.request_id, /^evrerollbackreq_[0-9a-f]{24}$/],
+    [normalized.observation_contract_id, /^evpostobservecontract_[0-9a-f]{24}$/],
+    [normalized.observation_contract_sha256, /^[0-9a-f]{64}$/],
+    [normalized.behavioral_matrix_id, /^evpostmatrix_[0-9a-f]{24}$/],
+    [normalized.behavioral_matrix_sha256, /^[0-9a-f]{64}$/],
+    [normalized.assessment_id, /^evpostobservewindow_[0-9a-f]{24}$/],
+    [normalized.assessment_sha256, /^[0-9a-f]{64}$/],
+    [normalized.admission_id, /^evpostobserveadmit_[0-9a-f]{24}$/],
+    [normalized.admission_sha256, /^[0-9a-f]{64}$/],
+    [normalized.proposal_id, /^evp_[0-9a-f]{24}$/],
+    [normalized.candidate_id, /^evc_[0-9a-f]{24}$/],
+    [normalized.candidate_sha256, /^[0-9a-f]{64}$/],
+    [normalized.baseline_slot_id, /^relslot_[0-9a-f]{24}$/],
+    [normalized.baseline_slot_sha256, /^[0-9a-f]{64}$/],
+    [normalized.runtime_binding_id, /^hrreleasebinding_[0-9a-f]{24}$/],
+    [normalized.runtime_identity_id, /^relruntimeidentity_[0-9a-f]{24}$/],
+  ];
+  if (
+    identities.some(([identity, pattern]) => !pattern.test(identity))
+    || (normalized.prior_outcome_kind === "rollback_outcome"
+      ? !/^evrerollbackout_[0-9a-f]{24}$/.test(normalized.prior_outcome_id)
+      : !/^evpostlongout_[0-9a-f]{24}$/.test(normalized.prior_outcome_id))
+    || !/^[0-9a-f]{64}$/.test(normalized.prior_outcome_sha256)
+  ) {
+    throw new Error("workbench Long-Term Outcome identity 无效");
+  }
+  return normalized;
+}
+
+function normalizeWorkbenchOutcomeSupersedeEvent(value) {
+  const item = harnessObject(value, "workbench Outcome Supersede Event");
+  if (Number(item.schema_version) !== 1) {
+    throw new Error("workbench Outcome Supersede Event schema_version 不兼容");
+  }
+  const textFields = [
+    "event_id", "event_sha256", "workspace_root", "request_id",
+    "root_rollback_outcome_id", "root_rollback_outcome_sha256", "previous_event_id",
+    "previous_event_sha256", "prior_outcome_id", "prior_outcome_sha256",
+    "successor_outcome_id", "successor_outcome_sha256", "recorded_at",
+  ];
+  const normalized = Object.fromEntries(textFields.map((field) => [
+    field,
+    workbenchText(item[field], `workbench Outcome Supersede Event.${field}`, field === "workspace_root" ? 4096 : 128),
+  ]));
+  Object.assign(normalized, {
+    schema_version: 1,
+    policy_version: workbenchText(item.policy_version, "workbench Outcome Supersede Event.policy_version", 80),
+    sequence: harnessNonnegativeInteger(item.sequence, "workbench Outcome Supersede Event.sequence"),
+    prior_outcome_kind: harnessChoice(item.prior_outcome_kind, "workbench Outcome Supersede Event.prior_outcome_kind", new Set(["rollback_outcome", "long_term_outcome"])),
+    transition: harnessChoice(item.transition, "workbench Outcome Supersede Event.transition", new Set(["rollback_recovery_observed"])),
+    reason: harnessChoice(item.reason, "workbench Outcome Supersede Event.reason", new Set(["behavioral_and_long_term_baseline_recovery_verified"])),
+    projection_head_changed: harnessBoolean(item.projection_head_changed, "workbench Outcome Supersede Event.projection_head_changed"),
+    rollback_fact_deleted: harnessBoolean(item.rollback_fact_deleted, "workbench Outcome Supersede Event.rollback_fact_deleted"),
+    candidate_promoted: harnessBoolean(item.candidate_promoted, "workbench Outcome Supersede Event.candidate_promoted"),
+    learning_authority: harnessBoolean(item.learning_authority, "workbench Outcome Supersede Event.learning_authority"),
+    promotion_authority: harnessBoolean(item.promotion_authority, "workbench Outcome Supersede Event.promotion_authority"),
+    execution_authority: harnessBoolean(item.execution_authority, "workbench Outcome Supersede Event.execution_authority"),
+  });
+  if (
+    normalized.policy_version !== "evolution-post-rollback-outcome-supersede-v1"
+    || normalized.sequence < 1
+    || normalized.projection_head_changed !== true
+    || normalized.rollback_fact_deleted !== false
+    || normalized.candidate_promoted !== false
+    || normalized.learning_authority !== false
+    || normalized.promotion_authority !== false
+    || normalized.execution_authority !== false
+  ) {
+    throw new Error("workbench Outcome Supersede Event authority 字段无效");
+  }
+  const first = normalized.sequence === 1;
+  if (
+    !/^evpostoutsup_[0-9a-f]{24}$/.test(normalized.event_id)
+    || !/^[0-9a-f]{64}$/.test(normalized.event_sha256)
+    || !/^evrerollbackout_[0-9a-f]{24}$/.test(normalized.root_rollback_outcome_id)
+    || !/^[0-9a-f]{64}$/.test(normalized.root_rollback_outcome_sha256)
+    || !/^evpostlongout_[0-9a-f]{24}$/.test(normalized.successor_outcome_id)
+    || !/^[0-9a-f]{64}$/.test(normalized.successor_outcome_sha256)
+    || (first !== (!normalized.previous_event_id && !normalized.previous_event_sha256))
+    || (!first && !/^evpostoutsup_[0-9a-f]{24}$/.test(normalized.previous_event_id))
+    || (!first && !/^[0-9a-f]{64}$/.test(normalized.previous_event_sha256))
+  ) {
+    throw new Error("workbench Outcome Supersede Event identity 无效");
+  }
+  return normalized;
+}
+
 function normalizeWorkbenchProposalOutcome(value) {
   const item = harnessObject(value, "workbench proposal outcome");
-  if (Number(item.schema_version) !== 1) {
+  const schemaVersion = Number(item.schema_version);
+  if (![1, 2].includes(schemaVersion)) {
     throw new Error(`workbench proposal outcome schema_version 不兼容: ${item.schema_version}`);
   }
   const policy = workbenchText(
@@ -1931,7 +2085,10 @@ function normalizeWorkbenchProposalOutcome(value) {
     "workbench proposal outcome.policy_version",
     80,
   );
-  if (policy !== "evolution-proposal-outcome-projection-v1") {
+  const expectedPolicy = schemaVersion === 1
+    ? "evolution-proposal-outcome-projection-v1"
+    : "evolution-proposal-outcome-projection-v2";
+  if (policy !== expectedPolicy) {
     throw new Error(`workbench proposal outcome policy_version 不兼容: ${policy}`);
   }
   const beforeAfter = item.before_after_evidence == null
@@ -1943,8 +2100,24 @@ function normalizeWorkbenchProposalOutcome(value) {
   const behavioralMatrix = item.post_rollback_behavioral_matrix == null
     ? null
     : normalizeWorkbenchBehavioralMatrix(item.post_rollback_behavioral_matrix);
+  const longTermOutcome = item.long_term_outcome == null
+    ? null
+    : normalizeWorkbenchLongTermOutcome(item.long_term_outcome);
+  const supersedeEvent = item.long_term_supersede_event == null
+    ? null
+    : normalizeWorkbenchOutcomeSupersedeEvent(item.long_term_supersede_event);
+  const rootOutcomeId = workbenchText(
+    item.root_rollback_outcome_id ?? item.outcome_id,
+    "workbench proposal outcome.root_rollback_outcome_id",
+    128,
+  );
+  const rootOutcomeSha256 = workbenchText(
+    item.root_rollback_outcome_sha256 ?? item.outcome_sha256,
+    "workbench proposal outcome.root_rollback_outcome_sha256",
+    64,
+  );
   const normalized = {
-    schema_version: 1,
+    schema_version: schemaVersion,
     policy_version: policy,
     workbench_session_id: workbenchText(
       item.workbench_session_id,
@@ -1963,7 +2136,7 @@ function normalizeWorkbenchProposalOutcome(value) {
     status: harnessChoice(
       item.status,
       "workbench proposal outcome.status",
-      new Set(["rolled_back"]),
+      new Set(["rolled_back", "rollback_recovery_observed"]),
     ),
     outcome_id: workbenchText(item.outcome_id, "workbench proposal outcome.outcome_id", 128),
     outcome_sha256: workbenchText(
@@ -1971,6 +2144,8 @@ function normalizeWorkbenchProposalOutcome(value) {
       "workbench proposal outcome.outcome_sha256",
       64,
     ),
+    root_rollback_outcome_id: rootOutcomeId,
+    root_rollback_outcome_sha256: rootOutcomeSha256,
     rollback_receipt_id: workbenchText(
       item.rollback_receipt_id,
       "workbench proposal outcome.rollback_receipt_id",
@@ -1993,6 +2168,10 @@ function normalizeWorkbenchProposalOutcome(value) {
     ),
     recorded_at: workbenchText(item.recorded_at, "workbench proposal outcome.recorded_at", 100),
     authority_valid: harnessBoolean(item.authority_valid, "workbench proposal outcome.authority_valid"),
+    rollback_outcome_authority: harnessBoolean(
+      item.rollback_outcome_authority ?? item.authority_valid,
+      "workbench proposal outcome.rollback_outcome_authority",
+    ),
     active_baseline: harnessBoolean(item.active_baseline, "workbench proposal outcome.active_baseline"),
     contract_issue_allowed: harnessBoolean(
       item.contract_issue_allowed,
@@ -2021,6 +2200,20 @@ function normalizeWorkbenchProposalOutcome(value) {
       item.long_term_metrics_recorded,
       "workbench proposal outcome.long_term_metrics_recorded",
     ),
+    long_term_outcome: longTermOutcome,
+    long_term_supersede_event: supersedeEvent,
+    long_term_outcome_authority: harnessBoolean(
+      item.long_term_outcome_authority ?? false,
+      "workbench proposal outcome.long_term_outcome_authority",
+    ),
+    current_long_term_health_authority: harnessBoolean(
+      item.current_long_term_health_authority ?? false,
+      "workbench proposal outcome.current_long_term_health_authority",
+    ),
+    projection_head_authority: harnessBoolean(
+      item.projection_head_authority ?? false,
+      "workbench proposal outcome.projection_head_authority",
+    ),
     promoted: harnessBoolean(item.promoted, "workbench proposal outcome.promoted"),
     learning_authority: harnessBoolean(
       item.learning_authority,
@@ -2031,6 +2224,19 @@ function normalizeWorkbenchProposalOutcome(value) {
       "workbench proposal outcome.promotion_authority",
     ),
   };
+  const v2Fields = [
+    "root_rollback_outcome_id",
+    "root_rollback_outcome_sha256",
+    "rollback_outcome_authority",
+    "long_term_outcome",
+    "long_term_supersede_event",
+    "long_term_outcome_authority",
+    "current_long_term_health_authority",
+    "projection_head_authority",
+  ];
+  if (schemaVersion === 2 && v2Fields.some((field) => !Object.hasOwn(item, field))) {
+    throw new Error("workbench proposal outcome v2 字段不完整");
+  }
   if (
     normalized.governance_state_unchanged !== true
     || normalized.contract_issue_allowed !== false
@@ -2038,7 +2244,6 @@ function normalizeWorkbenchProposalOutcome(value) {
     || normalized.post_rollback_verification_recorded !== (postRollback !== null)
     || normalized.post_rollback_evaluation_recorded !== (postRollback !== null)
     || normalized.post_rollback_behavioral_evaluation_recorded !== (behavioralMatrix !== null)
-    || normalized.long_term_metrics_recorded !== false
     || normalized.promoted !== false
     || normalized.learning_authority !== false
     || normalized.promotion_authority !== false
@@ -2048,11 +2253,59 @@ function normalizeWorkbenchProposalOutcome(value) {
   ) {
     throw new Error("workbench proposal outcome authority 字段无效");
   }
+  const hasLongTerm = longTermOutcome !== null && supersedeEvent !== null;
+  if ((longTermOutcome === null) !== (supersedeEvent === null)) {
+    throw new Error("workbench proposal Long-Term pair 不完整");
+  }
+  if (
+    normalized.long_term_metrics_recorded !== hasLongTerm
+    || (!hasLongTerm && (
+      normalized.status !== "rolled_back"
+      || normalized.outcome_id !== rootOutcomeId
+      || normalized.outcome_sha256 !== rootOutcomeSha256
+      || normalized.authority_valid !== normalized.rollback_outcome_authority
+      || normalized.long_term_outcome_authority
+      || normalized.current_long_term_health_authority
+      || normalized.projection_head_authority
+    ))
+    || (hasLongTerm && (
+      normalized.status !== "rollback_recovery_observed"
+      || normalized.outcome_id !== longTermOutcome.outcome_id
+      || normalized.outcome_sha256 !== longTermOutcome.outcome_sha256
+      || rootOutcomeId !== longTermOutcome.root_rollback_outcome_id
+      || rootOutcomeSha256 !== longTermOutcome.root_rollback_outcome_sha256
+      || normalized.outcome_id !== supersedeEvent.successor_outcome_id
+      || normalized.outcome_sha256 !== supersedeEvent.successor_outcome_sha256
+      || rootOutcomeId !== supersedeEvent.root_rollback_outcome_id
+      || rootOutcomeSha256 !== supersedeEvent.root_rollback_outcome_sha256
+      || longTermOutcome.workspace_root !== supersedeEvent.workspace_root
+      || longTermOutcome.request_id !== supersedeEvent.request_id
+      || longTermOutcome.revision_sequence !== supersedeEvent.sequence
+      || longTermOutcome.prior_outcome_kind !== supersedeEvent.prior_outcome_kind
+      || longTermOutcome.prior_outcome_id !== supersedeEvent.prior_outcome_id
+      || longTermOutcome.prior_outcome_sha256 !== supersedeEvent.prior_outcome_sha256
+      || longTermOutcome.recorded_at !== supersedeEvent.recorded_at
+      || normalized.recorded_at !== longTermOutcome.recorded_at
+      || normalized.workbench_session_id !== longTermOutcome.workbench_session_id
+      || normalized.workbench_proposal_id !== longTermOutcome.workbench_proposal_id
+      || normalized.candidate_id !== longTermOutcome.candidate_id
+      || normalized.candidate_revision !== longTermOutcome.candidate_revision
+      || normalized.long_term_outcome_authority !== normalized.authority_valid
+      || (normalized.long_term_outcome_authority && (
+        !normalized.rollback_outcome_authority
+        || !normalized.current_long_term_health_authority
+        || !normalized.projection_head_authority
+      ))
+    ))
+    || (schemaVersion === 1 && hasLongTerm)
+  ) {
+    throw new Error("workbench proposal Long-Term authority 字段无效");
+  }
   if (
     beforeAfter
     && (
-      beforeAfter.outcome_id !== normalized.outcome_id
-      || beforeAfter.outcome_sha256 !== normalized.outcome_sha256
+      beforeAfter.outcome_id !== rootOutcomeId
+      || beforeAfter.outcome_sha256 !== rootOutcomeSha256
       || beforeAfter.workbench_session_id !== normalized.workbench_session_id
       || beforeAfter.workbench_proposal_id !== normalized.workbench_proposal_id
       || beforeAfter.experiment_contract_id !== normalized.experiment_contract_id
@@ -2065,8 +2318,8 @@ function normalizeWorkbenchProposalOutcome(value) {
   if (
     postRollback
     && (
-      postRollback.outcome_id !== normalized.outcome_id
-      || postRollback.outcome_sha256 !== normalized.outcome_sha256
+      postRollback.outcome_id !== rootOutcomeId
+      || postRollback.outcome_sha256 !== rootOutcomeSha256
       || postRollback.workbench_session_id !== normalized.workbench_session_id
       || postRollback.workbench_proposal_id !== normalized.workbench_proposal_id
       || postRollback.experiment_contract_id !== normalized.experiment_contract_id
@@ -2081,8 +2334,8 @@ function normalizeWorkbenchProposalOutcome(value) {
     && (
       beforeAfter == null
       || postRollback == null
-      || behavioralMatrix.outcome_id !== normalized.outcome_id
-      || behavioralMatrix.outcome_sha256 !== normalized.outcome_sha256
+      || behavioralMatrix.outcome_id !== rootOutcomeId
+      || behavioralMatrix.outcome_sha256 !== rootOutcomeSha256
       || behavioralMatrix.before_after_evidence_id !== beforeAfter.evidence_id
       || behavioralMatrix.before_after_evidence_sha256 !== beforeAfter.evidence_sha256
       || behavioralMatrix.final_evaluation_id !== beforeAfter.final_evaluation_id
@@ -2094,8 +2347,10 @@ function normalizeWorkbenchProposalOutcome(value) {
     throw new Error("workbench Behavioral Matrix 外层绑定无效");
   }
   const identities = [
-    [normalized.outcome_id, /^evrerollbackout_[0-9a-f]{24}$/, "outcome_id"],
+    [normalized.outcome_id, /^(?:evrerollbackout|evpostlongout)_[0-9a-f]{24}$/, "outcome_id"],
     [normalized.outcome_sha256, /^[0-9a-f]{64}$/, "outcome_sha256"],
+    [rootOutcomeId, /^evrerollbackout_[0-9a-f]{24}$/, "root_rollback_outcome_id"],
+    [rootOutcomeSha256, /^[0-9a-f]{64}$/, "root_rollback_outcome_sha256"],
     [normalized.rollback_receipt_id, /^evrerollbackexec_[0-9a-f]{24}$/, "rollback_receipt_id"],
     [normalized.experiment_contract_id, /^evx_[0-9a-f]{24}$/, "experiment_contract_id"],
     [normalized.candidate_id, /^evc_[0-9a-f]{24}$/, "candidate_id"],

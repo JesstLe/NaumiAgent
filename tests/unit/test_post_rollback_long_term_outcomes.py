@@ -17,6 +17,9 @@ from naumi_agent.evolution.post_rollback_long_term_outcomes import (
     EvolutionPostRollbackLongTermOutcomeStore,
     render_post_rollback_long_term_outcome,
 )
+from naumi_agent.evolution.proposal_outcomes import (
+    EvolutionProposalOutcomeProjectionService,
+)
 from naumi_agent.evolution.revalidation_rollback_outcomes import (
     EVOLUTION_REVALIDATION_ROLLBACK_OUTCOME_POLICY,
     EvolutionRevalidationRollbackOutcome,
@@ -138,6 +141,7 @@ class _RollbackOutcomeService:
         return SimpleNamespace(
             outcome=self.outcome,
             outcome_authority=self.authority,
+            active_baseline_authority=self.authority,
         )
 
 
@@ -536,3 +540,74 @@ async def test_long_term_outcome_tool_and_slash_share_service(tmp_path: Path) ->
     )
     assert "Post-Rollback Long-Term Outcome" in slash
     assert root.outcome_id in slash
+
+
+@pytest.mark.asyncio
+async def test_proposal_projection_uses_current_long_term_head(tmp_path: Path) -> None:
+    (
+        service,
+        store,
+        root,
+        root_store,
+        root_service,
+        _assessment_service,
+        admission,
+        harness,
+        binding,
+        origin,
+        now,
+    ) = await _fixture(tmp_path)
+    latest = await _pass_window(harness, binding, origin, now)
+    outcome_view = await service.record(
+        request_id=root.request_id,
+        subject_id=admission.subject_id,
+    )
+    with pytest.raises(ValueError, match="projection dependency"):
+        EvolutionProposalOutcomeProjectionService(
+            rollback_outcome_store=root_store,
+            rollback_outcome_service=root_service,  # type: ignore[arg-type]
+            long_term_outcome_store=store,
+            long_term_outcome_service=SimpleNamespace(
+                store=store,
+                rollback_outcome_store=object(),
+            ),  # type: ignore[arg-type]
+        )
+    projection_service = EvolutionProposalOutcomeProjectionService(
+        rollback_outcome_store=root_store,
+        rollback_outcome_service=root_service,  # type: ignore[arg-type]
+        long_term_outcome_store=store,
+        long_term_outcome_service=service,
+    )
+
+    projected = await projection_service.project_session(root.workbench_session_id)
+    projection = projected[root.workbench_proposal_id]
+    assert projection.schema_version == 2
+    assert projection.status == "rollback_recovery_observed"
+    assert projection.outcome_id == outcome_view.outcome.outcome_id
+    assert projection.root_rollback_outcome_id == root.outcome_id
+    assert projection.root_rollback_outcome_sha256 == root.outcome_sha256
+    assert projection.long_term_outcome == outcome_view.outcome
+    assert projection.long_term_supersede_event == outcome_view.supersede_event
+    assert projection.long_term_metrics_recorded
+    assert projection.long_term_outcome_authority
+    assert projection.current_long_term_health_authority
+    assert projection.projection_head_authority
+    assert projection.authority_valid
+    assert projection.rollback_outcome_authority
+    assert not projection.promoted
+    assert not projection.learning_authority
+    assert not projection.promotion_authority
+    forged_authority = projection.model_dump(mode="json")
+    forged_authority["current_long_term_health_authority"] = False
+    with pytest.raises(ValueError, match="Long-Term lineage 无效"):
+        type(projection).model_validate(forged_authority)
+
+    now[0] = latest + timedelta(seconds=301)
+    stale = await projection_service.project_session(root.workbench_session_id)
+    stale_projection = stale[root.workbench_proposal_id]
+    assert stale_projection.status == "rollback_recovery_observed"
+    assert stale_projection.long_term_metrics_recorded
+    assert not stale_projection.current_long_term_health_authority
+    assert not stale_projection.long_term_outcome_authority
+    assert not stale_projection.authority_valid
+    assert stale_projection.rollback_outcome_authority

@@ -2948,6 +2948,12 @@ class AgentEngine:
                 behavioral_matrix_service=(
                     self.evolution_post_rollback_behavioral_matrix_service
                 ),
+                long_term_outcome_store=(
+                    self.evolution_post_rollback_long_term_outcome_store
+                ),
+                long_term_outcome_service=(
+                    self.evolution_post_rollback_long_term_outcome_service
+                ),
             )
         )
         self.workbench_service.bind_proposal_outcome_reader(

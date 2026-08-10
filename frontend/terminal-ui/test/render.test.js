@@ -681,6 +681,47 @@ test("workbench Reviews tab renders rollback Outcome and removes Contract action
     assert(rendered.join("\n").includes(ANSI.blue));
     assert(rendered.join("\n").includes(ANSI.magenta));
   }
+
+  const recoveredProposal = {
+    ...proposal,
+    outcome_status: "rollback_recovery_observed",
+    outcome: {
+      ...proposal.outcome,
+      status: "rollback_recovery_observed",
+      root_rollback_outcome_id: proposal.outcome.outcome_id,
+      outcome_id: `evpostlongout_${"8".repeat(24)}`,
+      long_term_metrics_recorded: true,
+      long_term_outcome_authority: true,
+      current_long_term_health_authority: true,
+      projection_head_authority: true,
+      long_term_outcome: {
+        outcome_id: `evpostlongout_${"8".repeat(24)}`,
+        revision_sequence: 1,
+        assessment_id: `evpostobservewindow_${"9".repeat(24)}`,
+        assessment_head_sequence: 14,
+        runtime_subject_id: "runtime-long-term",
+        runtime_binding_id: `hrreleasebinding_${"a".repeat(24)}`,
+        observation_seconds: 3600,
+        operational_sample_count: 13,
+      },
+      long_term_supersede_event: {
+        event_id: `evpostoutsup_${"b".repeat(24)}`,
+      },
+    },
+  };
+  const recoveredRendered = renderWorkbenchOverview({
+    ...view,
+    proposals: [recoveredProposal],
+  }, 120, 80);
+  const recoveredPlain = recoveredRendered.map(stripAnsi).join("\n");
+  assert(recoveredPlain.includes("recovery observed"));
+  assert(recoveredPlain.includes("长期恢复观察"));
+  assert(recoveredPlain.includes("长期指标 · 已记录"));
+  assert(recoveredPlain.includes("revision"));
+  assert(recoveredPlain.includes(recoveredProposal.outcome.long_term_outcome.assessment_id));
+  assert(recoveredPlain.includes("3600s · 13 samples"));
+  assert(recoveredPlain.includes("Supersede Event"));
+  assert(recoveredPlain.includes("preserved"));
 });
 
 test("markdown code blocks show a bounded excerpt with lightweight highlighting", () => {
