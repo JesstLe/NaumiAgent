@@ -2919,7 +2919,7 @@ def _print_help() -> None:
             "revalidation-rollback-execute|revalidation-rollback-outcome|"
             "outcome-before-after|outcome-verify-runtime|"
             "outcome-verify-behavior|outcome-behavior-coverage|"
-            "outcome-place-behavior|enqueue]",
+            "outcome-place-behavior|outcome-resolve-behavior|enqueue]",
             "审查 Candidate、执行回滚，并记录 Outcome、实施前后、Runtime 与行为证据",
         ),
         (
@@ -3805,6 +3805,24 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 arg="",
             )
             return
+        if action == "outcome-resolve-behavior":
+            if len(parts) != 4:
+                raise ValueError(
+                    "outcome-resolve-behavior 需要 Rollback Request ID、"
+                    "Comparison ID 和 release channel。"
+                )
+            await _run_tool_slash_command(
+                engine,
+                slash_command="/evolution",
+                tool_name="evolution_post_rollback_target_baseline",
+                parse_args=lambda _arg: {
+                    "request_id": parts[1],
+                    "comparison_id": parts[2],
+                    "channel": parts[3],
+                },
+                arg="",
+            )
+            return
         service = engine.evolution_review_service
         if action == "detail":
             if len(parts) != 2:
@@ -3841,7 +3859,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "revalidation-rollback-execute、revalidation-rollback-outcome、"
                 "outcome-before-after、outcome-verify-runtime、"
                 "outcome-verify-behavior、outcome-behavior-coverage、"
-                "outcome-place-behavior 或 enqueue。"
+                "outcome-place-behavior、outcome-resolve-behavior 或 enqueue。"
             )
     except ValueError as exc:
         if action == "enqueue":
@@ -4034,6 +4052,8 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution outcome-behavior-coverage <rollback-request-id>；"
             "/evolution outcome-place-behavior <rollback-request-id> "
             "<final-evaluation-comparison-id> <worker-id>；"
+            "/evolution outcome-resolve-behavior <rollback-request-id> "
+            "<final-evaluation-comparison-id> <channel>；"
             "/evolution enqueue <candidate-id> --mission <id> --task <id> "
             "[--agent <name>]",
             style="yellow",

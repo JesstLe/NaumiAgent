@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import base64
+import json
 import sqlite3
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -28,17 +31,39 @@ from naumi_agent.evolution.post_rollback_remote_lane_placements import (
     EvolutionPostRollbackRemoteLanePlacementStore,
     render_post_rollback_remote_lane_placement,
 )
+from naumi_agent.evolution.post_rollback_target_baselines import (
+    EvolutionPostRollbackTargetBaselineError,
+    EvolutionPostRollbackTargetBaselineService,
+    EvolutionPostRollbackTargetBaselineStore,
+    render_post_rollback_target_baseline,
+)
 from naumi_agent.evolution.proposal_before_after_evidence import (
     EvolutionProposalBeforeAfterCohort,
     EvolutionProposalBeforeAfterLane,
+)
+from naumi_agent.release.build_attestations import (
+    ReleaseBuildContext,
+    ReleaseBuildSigner,
+    ReleaseTrustedBuilderKey,
+    create_release_build_attestation,
+    create_release_build_trust_policy,
+)
+from naumi_agent.release.channel_catalog import (
+    ReleaseChannelCatalogSigner,
+    ReleaseChannelCatalogStore,
+    ReleaseChannelEntry,
+    ReleaseTrustedChannelKey,
+    create_release_channel_trust_policy,
 )
 from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
 from naumi_agent.tools.base import ToolCall, ToolRegistry, ToolResult
 from naumi_agent.tools.evolution_review import (
     EvolutionPostRollbackRemoteLanePlacementTool,
+    EvolutionPostRollbackTargetBaselineTool,
 )
 
 NOW = "2026-08-10T08:00:00+00:00"
+T0 = datetime(2026, 8, 10, 8, 0, tzinfo=UTC)
 
 
 def _cohort(batch: str, marker: str) -> EvolutionProposalBeforeAfterCohort:
@@ -230,6 +255,112 @@ async def _fixture(tmp_path: Path):
     return service, worker_registry, contract, coverage_view, windows
 
 
+async def _catalog(
+    tmp_path: Path,
+    *,
+    source_commit: str = "9" * 40,
+    source_tree_sha256: str = "a" * 64,
+):
+    def encode(value: bytes) -> str:
+        return base64.b64encode(value).decode("ascii")
+
+    channel_signer = ReleaseChannelCatalogSigner.from_private_key_base64(
+        signer_id="naumi-release-channel",
+        key_id="channel-2026-q3",
+        key_generation=1,
+        private_key_base64=encode(bytes(range(32))),
+    )
+    build_signer = ReleaseBuildSigner.from_private_key_base64(
+        builder_id="naumi-github-release",
+        key_id="release-2026-q3",
+        key_generation=1,
+        private_key_base64=encode(b"b" * 32),
+    )
+    channel_key = ReleaseTrustedChannelKey(
+        identity=channel_signer.identity,
+        state="active",
+        channels=("stable",),
+        valid_from=(T0 - timedelta(days=1)).isoformat(),
+        valid_until=(T0 + timedelta(days=7)).isoformat(),
+    )
+    build_key = ReleaseTrustedBuilderKey(
+        identity=build_signer.identity,
+        state="active",
+        valid_from=(T0 - timedelta(days=1)).isoformat(),
+        valid_until=(T0 + timedelta(days=7)).isoformat(),
+    )
+    policies = [
+        create_release_channel_trust_policy(
+            (channel_key,),
+            archive_origins=("https://downloads.naumi.dev",),
+        ),
+        create_release_build_trust_policy((build_key,)),
+    ]
+    target = "windows-x64"
+    root = tmp_path / "catalog-source"
+    root.mkdir()
+    archive = root / "naumi-1.2.3-windows-x64.zip"
+    archive.write_bytes(b"source-free-windows-x64")
+    manifest = root / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "product": "NaumiAgent",
+                "version": "1.2.3",
+                "target": target,
+                "source_commit": source_commit,
+                "source_tree_sha256": source_tree_sha256,
+                "files": [],
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    attestation = create_release_build_attestation(
+        signer=build_signer,
+        context=ReleaseBuildContext(
+            repository="JesstLe/NaumiAgent",
+            workflow_ref=(
+                "JesstLe/NaumiAgent/.github/workflows/"
+                "release-binaries.yml@refs/tags/v1.2.3"
+            ),
+            run_id="123",
+            run_attempt=1,
+            built_at=(T0 - timedelta(hours=1)).isoformat(),
+        ),
+        manifest_path=manifest,
+        archive_path=archive,
+    )
+    entry = ReleaseChannelEntry(
+        target=target,
+        version="1.2.3",
+        release_generation=123,
+        archive_path=f"releases/v1.2.3/{archive.name}",
+        archive_name=archive.name,
+        archive_sha256=attestation.payload.archive_sha256,
+        archive_size_bytes=archive.stat().st_size,
+        manifest_sha256=attestation.payload.manifest_sha256,
+        build_attestation=attestation,
+    )
+    catalog = channel_signer.issue(
+        channel="stable",
+        entries=(entry,),
+        previous=None,
+        generated_at=T0.isoformat(),
+        valid_from=(T0 + timedelta(seconds=1)).isoformat(),
+        expires_at=(T0 + timedelta(days=1)).isoformat(),
+    )
+    store = ReleaseChannelCatalogStore(
+        tmp_path / "release-channel.db",
+        channel_trust_policy_provider=lambda: policies[0],
+        build_trust_policy_provider=lambda: policies[1],
+        clock=lambda: T0 + timedelta(seconds=2),
+    )
+    await store.record(catalog)
+    return store, policies, channel_signer, build_signer
+
+
 @pytest.mark.asyncio
 async def test_remote_lane_placement_binds_exact_active_worker_target(
     tmp_path: Path,
@@ -364,3 +495,169 @@ async def test_remote_lane_placement_rejects_local_or_wrong_platform(
             worker_id=unsupported.worker_id,
         )
     assert architecture.value.code == "post_rollback_placement_worker_incompatible"
+
+
+@pytest.mark.asyncio
+async def test_target_baseline_resolves_exact_source_and_revokes_with_catalog(
+    tmp_path: Path,
+) -> None:
+    placement_service, _, contract, coverage, worker = await _fixture(tmp_path)
+    remote = coverage.contract.lanes[1]
+    placement = await placement_service.place(
+        request_id=contract.request_id,
+        comparison_id=remote.original_comparison_id,
+        worker_id=worker.worker_id,
+        placed_at="2026-08-10T08:01:00+00:00",
+    )
+    catalog_store, policies, channel_signer, build_signer = await _catalog(tmp_path)
+    service = EvolutionPostRollbackTargetBaselineService(
+        workspace_root=Path(contract.workspace_root),
+        coverage_service=placement_service.coverage_service,
+        placement_store=placement_service.store,
+        placement_service=placement_service,
+        catalog_store=catalog_store,
+        store=EvolutionPostRollbackTargetBaselineStore(placement_service.store.db_path),
+    )
+
+    first = await service.resolve(
+        request_id=contract.request_id,
+        comparison_id=remote.original_comparison_id,
+        channel="stable",
+        resolved_at="2026-08-10T08:03:00+00:00",
+    )
+    repeated = await service.resolve(
+        request_id=contract.request_id,
+        comparison_id=remote.original_comparison_id,
+        channel="stable",
+    )
+
+    assert repeated == first
+    assert first.baseline_resolution_authority
+    assert first.download_input_authority
+    assert first.baseline.release_target == "windows-x64"
+    assert first.baseline.local_baseline_version == "1.2.3"
+    build = first.baseline.channel_resolution.entry.build_attestation.payload
+    assert build.source_commit == contract.baseline_source_commit
+    assert build.source_tree_sha256 == contract.baseline_source_tree_sha256
+    encoded_baseline = first.baseline.model_dump_json()
+    assert "private_key_base64" not in encoded_baseline
+    assert base64.b64encode(b"b" * 32).decode("ascii") not in encoded_baseline
+    assert not first.baseline.transport_delivered
+    assert not first.execution_authority
+    rendered = render_post_rollback_target_baseline(first)
+    assert "windows-x64" in rendered
+    assert "未下载、未安装" in rendered
+
+    tool = EvolutionPostRollbackTargetBaselineTool(
+        SimpleNamespace(evolution_post_rollback_target_baseline_service=service)
+    )
+    arguments = {
+        "request_id": contract.request_id,
+        "comparison_id": remote.original_comparison_id,
+        "channel": "stable",
+    }
+    for mode in (PermissionMode.MODERATE, PermissionMode.BYPASS):
+        decision = PermissionChecker(mode).check(tool.name, arguments, tool=tool)
+        assert decision.allowed
+        assert not decision.requires_confirmation
+    assert await tool.execute(**arguments) == rendered
+    tool_registry = ToolRegistry()
+    tool_registry.register(tool)
+
+    class _SlashEngine:
+        def __init__(self) -> None:
+            self.tool_registry = tool_registry
+
+        async def execute_tool(self, call: ToolCall, *, agent_name=None):
+            registered = self.tool_registry.get(call.name)
+            assert registered is not None and agent_name == "cli"
+            parsed = registered.parse_arguments(call.arguments)
+            return ToolResult(
+                call_id=call.id,
+                status="success",
+                content=await registered.execute(**parsed),
+            )
+
+    slash = await execute_slash_command(
+        _SlashEngine(),
+        f"/evolution outcome-resolve-behavior {contract.request_id} "
+        f"{remote.original_comparison_id} stable",
+    )
+    assert first.baseline.baseline_resolution_id in slash
+
+    revoked_channel_key = ReleaseTrustedChannelKey(
+        identity=channel_signer.identity,
+        state="revoked",
+        channels=("stable",),
+        valid_from=(T0 - timedelta(days=1)).isoformat(),
+        valid_until=(T0 + timedelta(days=7)).isoformat(),
+        revoked_at=(T0 + timedelta(seconds=3)).isoformat(),
+    )
+    policies[0] = create_release_channel_trust_policy(
+        (revoked_channel_key,),
+        archive_origins=("https://downloads.naumi.dev",),
+    )
+    stale = await service.inspect(baseline=first.baseline)
+    assert not stale.catalog_authority
+    assert not stale.baseline_resolution_authority
+    assert not stale.download_input_authority
+
+    # Keep the builder object live to prove no private key was persisted in the artifact.
+    assert build_signer.identity == build.builder
+    assert placement.placement.placement_id == first.baseline.placement_id
+
+
+@pytest.mark.asyncio
+async def test_target_baseline_rejects_same_version_with_different_source(
+    tmp_path: Path,
+) -> None:
+    placement_service, _, contract, coverage, worker = await _fixture(tmp_path)
+    remote = coverage.contract.lanes[1]
+    await placement_service.place(
+        request_id=contract.request_id,
+        comparison_id=remote.original_comparison_id,
+        worker_id=worker.worker_id,
+        placed_at="2026-08-10T08:01:00+00:00",
+    )
+    catalog_store, _, _, _ = await _catalog(
+        tmp_path,
+        source_commit="f" * 40,
+        source_tree_sha256="e" * 64,
+    )
+    other_workspace = tmp_path / "other-workspace"
+    other_workspace.mkdir()
+    wrong_workspace_service = EvolutionPostRollbackTargetBaselineService(
+        workspace_root=other_workspace,
+        coverage_service=placement_service.coverage_service,
+        placement_store=placement_service.store,
+        placement_service=placement_service,
+        catalog_store=catalog_store,
+        store=EvolutionPostRollbackTargetBaselineStore(placement_service.store.db_path),
+    )
+    with pytest.raises(EvolutionPostRollbackTargetBaselineError) as workspace_mismatch:
+        await wrong_workspace_service.resolve(
+            request_id=contract.request_id,
+            comparison_id=remote.original_comparison_id,
+            channel="stable",
+        )
+    assert (
+        workspace_mismatch.value.code
+        == "post_rollback_target_baseline_workspace_mismatch"
+    )
+
+    service = EvolutionPostRollbackTargetBaselineService(
+        workspace_root=Path(contract.workspace_root),
+        coverage_service=placement_service.coverage_service,
+        placement_store=placement_service.store,
+        placement_service=placement_service,
+        catalog_store=catalog_store,
+        store=EvolutionPostRollbackTargetBaselineStore(placement_service.store.db_path),
+    )
+
+    with pytest.raises(EvolutionPostRollbackTargetBaselineError) as mismatch:
+        await service.resolve(
+            request_id=contract.request_id,
+            comparison_id=remote.original_comparison_id,
+            channel="stable",
+        )
+    assert mismatch.value.code == "post_rollback_target_baseline_not_equivalent"
