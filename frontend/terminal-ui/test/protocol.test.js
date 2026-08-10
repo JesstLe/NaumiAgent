@@ -1952,7 +1952,7 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
         owner_id: "private-owner",
       },
       terminal_outbox: {
-        schema_version: 1,
+        schema_version: 2,
         enabled: true,
         status: "recovering",
         worker_state: "waiting",
@@ -1963,11 +1963,13 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
           backoff: 1,
           live_claimed: 1,
           expired_claimed: 0,
+          dead_letter: 0,
           private_owner: "drop",
         },
         pass_count: 8,
         delivered_count: 4,
         retry_scheduled_count: 2,
+        dead_lettered_count: 0,
         failure_count: 0,
         next_delay_seconds: 12.5,
         failure_codes: [],
@@ -2017,9 +2019,33 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
   assert.equal(normalized.selected_interaction.options[0].label, "继续");
   assert.equal(normalized.terminal_outbox.status, "recovering");
   assert.equal(normalized.terminal_outbox.counts.total_pending, 3);
+  assert.equal(normalized.terminal_outbox.schema_version, 2);
+  assert.equal(normalized.terminal_outbox.counts.dead_letter, 0);
   assert.equal(Object.hasOwn(normalized.terminal_outbox, "private_owner"), false);
   assert.equal(Object.hasOwn(normalized.terminal_outbox.counts, "private_owner"), false);
   assert.equal(Object.hasOwn(normalized.selected_interaction, "owner_id"), false);
+  const {
+    dead_letter: _legacyDeadLetter,
+    ...legacyCounts
+  } = normalized.terminal_outbox.counts;
+  const {
+    dead_lettered_count: _legacyDeadLetteredCount,
+    ...legacyTerminalOutbox
+  } = normalized.terminal_outbox;
+  const legacyNormalized = normalizeServerRecord({
+    type: "goals/snapshot",
+    payload: {
+      ...normalized,
+      terminal_outbox: {
+        ...legacyTerminalOutbox,
+        schema_version: 1,
+        counts: legacyCounts,
+      },
+    },
+  }).payload.terminal_outbox;
+  assert.equal(legacyNormalized.schema_version, 2);
+  assert.equal(legacyNormalized.counts.dead_letter, 0);
+  assert.equal(legacyNormalized.dead_lettered_count, 0);
   assert.equal(
     Object.hasOwn(normalized.selected_interaction.options[0], "private_payload"),
     false,

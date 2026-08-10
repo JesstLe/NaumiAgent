@@ -17,6 +17,9 @@ from naumi_agent.orchestrator.pursuit_recovery_reconcile import (
     reconcile_pursuit_recovery_attempt,
 )
 from naumi_agent.orchestrator.pursuit_store import PursuitStore
+from naumi_agent.orchestrator.pursuit_terminal_dead_letter import (
+    PursuitTerminalOutboxFailureDisposition,
+)
 from naumi_agent.orchestrator.pursuit_terminal_outbox import (
     PursuitTerminalOutboxState,
 )
@@ -29,6 +32,30 @@ class PursuitTerminalWorkerState(StrEnum):
     STOPPING = "stopping"
 
 
+class PursuitTerminalFailureClass(StrEnum):
+    SAFE_WAIT = "safe_wait"
+    RETRYABLE = "retryable"
+    PERMANENT = "permanent"
+
+
+_SAFE_WAIT_CODES = frozenset({
+    "grace_period_active",
+    "live_heartbeat",
+    "live_lease",
+    "lease_claim_conflict",
+})
+_RETRYABLE_FAILURE_CODES = frozenset({
+    "attempt_ledger_unavailable",
+    "authority_unavailable",
+    "authority_read_failed",
+    "authority_mutation_failed",
+    "clock_regression",
+    "dispatch_reconcile_failed",
+    "reconcile_store_failed",
+    "terminal_evidence_from_future",
+})
+
+
 @dataclass(frozen=True, slots=True)
 class PursuitTerminalOutboxWorkerPolicy:
     interval_seconds: float = 30.0
@@ -38,6 +65,7 @@ class PursuitTerminalOutboxWorkerPolicy:
     reconcile_grace_seconds: float = 30.0
     retry_base_seconds: float = 5.0
     retry_max_seconds: float = 300.0
+    max_attempts: int = 8
     jitter_ratio: float = 0.1
 
     def __post_init__(self) -> None:
@@ -79,6 +107,12 @@ class PursuitTerminalOutboxWorkerPolicy:
             raise ValueError("terminal worker retry 退避无效。")
         if not _finite_number(self.jitter_ratio, minimum=0, maximum=0.5):
             raise ValueError("terminal worker jitter 无效。")
+        if (
+            isinstance(self.max_attempts, bool)
+            or not isinstance(self.max_attempts, int)
+            or not 1 <= self.max_attempts <= 1000
+        ):
+            raise ValueError("terminal worker 最大失败次数无效。")
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +120,7 @@ class PursuitTerminalOutboxPassResult:
     claimed: int = 0
     delivered: int = 0
     retry_scheduled: int = 0
+    dead_lettered: int = 0
     failures: int = 0
     failure_codes: tuple[str, ...] = ()
 
@@ -97,6 +132,7 @@ class PursuitTerminalOutboxWorkerSnapshot:
     claimed_count: int
     delivered_count: int
     retry_scheduled_count: int
+    dead_lettered_count: int
     failure_count: int
     consecutive_empty_passes: int
     next_delay_seconds: float
@@ -137,6 +173,7 @@ class PursuitTerminalOutboxWorker:
         self._claimed_count = 0
         self._delivered_count = 0
         self._retry_scheduled_count = 0
+        self._dead_lettered_count = 0
         self._failure_count = 0
         self._consecutive_empty_passes = 0
         self._next_delay_seconds = policy.interval_seconds
@@ -182,7 +219,7 @@ class PursuitTerminalOutboxWorker:
     async def _run_once_locked(self) -> PursuitTerminalOutboxPassResult:
         self._state = PursuitTerminalWorkerState.RUNNING
         self._last_pass_at = self._timestamp()
-        claimed = delivered = retry_scheduled = failures = 0
+        claimed = delivered = retry_scheduled = dead_lettered = failures = 0
         failure_codes: list[str] = []
         for _ in range(self._policy.scan_limit):
             if self._stop_event.is_set():
@@ -222,15 +259,38 @@ class PursuitTerminalOutboxWorker:
                 failure_code = result.code or "reconcile_incomplete"
                 delay = self._retry_delay(claim.dispatch.attempt_count)
                 release_now = self._now_value().timestamp()
-                self._store.release_terminal_outbox_claim(
-                    claim.outbox.outbox_id,
-                    owner_id=self._owner_id,
-                    claim_epoch=claim.dispatch.claim_epoch,
-                    now=release_now,
-                    retry_delay_seconds=delay,
-                    failure_code=failure_code,
-                )
-                retry_scheduled += 1
+                failure_class = classify_terminal_outbox_failure(failure_code)
+                if failure_class is PursuitTerminalFailureClass.SAFE_WAIT:
+                    self._store.release_terminal_outbox_claim(
+                        claim.outbox.outbox_id,
+                        owner_id=self._owner_id,
+                        claim_epoch=claim.dispatch.claim_epoch,
+                        now=release_now,
+                        retry_delay_seconds=delay,
+                        failure_code=failure_code,
+                    )
+                    retry_scheduled += 1
+                else:
+                    event, _ = self._store.record_terminal_outbox_failure(
+                        claim.outbox.outbox_id,
+                        owner_id=self._owner_id,
+                        claim_epoch=claim.dispatch.claim_epoch,
+                        now=release_now,
+                        retry_delay_seconds=delay,
+                        failure_code=failure_code,
+                        max_failures=self._policy.max_attempts,
+                        permanent=(
+                            failure_class is PursuitTerminalFailureClass.PERMANENT
+                        ),
+                    )
+                    failures += 1
+                    if (
+                        event.disposition
+                        is PursuitTerminalOutboxFailureDisposition.RETRYABLE
+                    ):
+                        retry_scheduled += 1
+                    else:
+                        dead_lettered += 1
                 failure_codes.append(failure_code)
             except asyncio.CancelledError:
                 raise
@@ -239,7 +299,7 @@ class PursuitTerminalOutboxWorker:
                 failure_codes.append("dispatch_reconcile_failed")
                 try:
                     release_now = self._now_value().timestamp()
-                    self._store.release_terminal_outbox_claim(
+                    event, _ = self._store.record_terminal_outbox_failure(
                         claim.outbox.outbox_id,
                         owner_id=self._owner_id,
                         claim_epoch=claim.dispatch.claim_epoch,
@@ -248,15 +308,23 @@ class PursuitTerminalOutboxWorker:
                             claim.dispatch.attempt_count
                         ),
                         failure_code="dispatch_reconcile_failed",
+                        max_failures=self._policy.max_attempts,
                     )
-                    retry_scheduled += 1
+                    if (
+                        event.disposition
+                        is PursuitTerminalOutboxFailureDisposition.RETRYABLE
+                    ):
+                        retry_scheduled += 1
+                    else:
+                        dead_lettered += 1
                 except Exception:
-                    failure_codes.append("dispatch_release_failed")
+                    failure_codes.append("dispatch_failure_record_failed")
 
         result = PursuitTerminalOutboxPassResult(
             claimed=claimed,
             delivered=delivered,
             retry_scheduled=retry_scheduled,
+            dead_lettered=dead_lettered,
             failures=failures,
             failure_codes=tuple(sorted(set(failure_codes))),
         )
@@ -264,6 +332,7 @@ class PursuitTerminalOutboxWorker:
         self._claimed_count += claimed
         self._delivered_count += delivered
         self._retry_scheduled_count += retry_scheduled
+        self._dead_lettered_count += dead_lettered
         self._failure_count += failures
         self._last_failure_codes = result.failure_codes
         if claimed == 0:
@@ -291,6 +360,7 @@ class PursuitTerminalOutboxWorker:
             claimed_count=self._claimed_count,
             delivered_count=self._delivered_count,
             retry_scheduled_count=self._retry_scheduled_count,
+            dead_lettered_count=self._dead_lettered_count,
             failure_count=self._failure_count,
             consecutive_empty_passes=self._consecutive_empty_passes,
             next_delay_seconds=self._next_delay_seconds,
@@ -363,10 +433,22 @@ def _finite_number(value: object, *, minimum: float, maximum: float) -> bool:
     )
 
 
+def classify_terminal_outbox_failure(code: str) -> PursuitTerminalFailureClass:
+    """Classify known reconcile outcomes without consuming budget for safe waits."""
+    normalized = str(code or "").strip()
+    if normalized in _SAFE_WAIT_CODES:
+        return PursuitTerminalFailureClass.SAFE_WAIT
+    if normalized in _RETRYABLE_FAILURE_CODES:
+        return PursuitTerminalFailureClass.RETRYABLE
+    return PursuitTerminalFailureClass.PERMANENT
+
+
 __all__ = [
+    "PursuitTerminalFailureClass",
     "PursuitTerminalOutboxPassResult",
     "PursuitTerminalOutboxWorker",
     "PursuitTerminalOutboxWorkerPolicy",
     "PursuitTerminalOutboxWorkerSnapshot",
     "PursuitTerminalWorkerState",
+    "classify_terminal_outbox_failure",
 ]

@@ -117,11 +117,11 @@ function renderTerminalOutbox(value) {
     ),
     color(
       ANSI.dim,
-      `队列 ${counts.total_pending} · 到期 ${counts.due} · 退避 ${counts.backoff} · 认领 ${counts.live_claimed} · 过期认领 ${counts.expired_claimed}`,
+      `队列 ${counts.total_pending} · 到期 ${counts.due} · 退避 ${counts.backoff} · 认领 ${counts.live_claimed} · 过期认领 ${counts.expired_claimed} · 死信 ${counts.dead_letter || 0}`,
     ),
     color(
       ANSI.dim,
-      `累计 · 轮次 ${value.pass_count} · 已收口 ${value.delivered_count} · 已退避 ${value.retry_scheduled_count} · 失败 ${value.failure_count}`,
+      `累计 · 轮次 ${value.pass_count} · 已收口 ${value.delivered_count} · 已退避 ${value.retry_scheduled_count} · 死信 ${value.dead_lettered_count || 0} · 失败 ${value.failure_count}`,
     ),
   ];
   if (value.enabled && ["running", "waiting"].includes(value.worker_state)) {

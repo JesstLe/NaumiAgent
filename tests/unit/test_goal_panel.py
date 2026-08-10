@@ -207,6 +207,7 @@ async def test_terminal_outbox_projection_is_shared_and_identity_free(tmp_path) 
         backoff=1,
         live_claimed=1,
         expired_claimed=0,
+        dead_letter=0,
     )
     worker = PursuitTerminalOutboxWorkerSnapshot(
         state=PursuitTerminalWorkerState.WAITING,
@@ -214,6 +215,7 @@ async def test_terminal_outbox_projection_is_shared_and_identity_free(tmp_path) 
         claimed_count=4,
         delivered_count=2,
         retry_scheduled_count=1,
+        dead_lettered_count=0,
         failure_count=0,
         consecutive_empty_passes=0,
         next_delay_seconds=12.5,
@@ -234,7 +236,7 @@ async def test_terminal_outbox_projection_is_shared_and_identity_free(tmp_path) 
     payload = snapshot.to_protocol_dict()["terminal_outbox"]
 
     assert payload == {
-        "schema_version": 1,
+        "schema_version": 2,
         "enabled": True,
         "status": "recovering",
         "worker_state": "waiting",
@@ -245,10 +247,12 @@ async def test_terminal_outbox_projection_is_shared_and_identity_free(tmp_path) 
             "backoff": 1,
             "live_claimed": 1,
             "expired_claimed": 0,
+            "dead_letter": 0,
         },
         "pass_count": 7,
         "delivered_count": 2,
         "retry_scheduled_count": 1,
+        "dead_lettered_count": 0,
         "failure_count": 0,
         "next_delay_seconds": 12.5,
         "failure_codes": [],
@@ -281,6 +285,62 @@ async def test_terminal_outbox_projection_fails_closed_when_authority_missing(
     assert projection.worker_state == "unavailable"
     assert "authority 未接入" in projection.warning
     assert not pursuit_store.base_dir.exists()
+
+
+@pytest.mark.asyncio
+async def test_terminal_outbox_projection_surfaces_dead_letter_action(tmp_path) -> None:
+    pursuit_store = PursuitStore(tmp_path / "pursuit")
+    pursuit_store.save_run(PursuitRun(
+        id="pursuit-dead-letter-view",
+        goal="审查终态恢复死信",
+        status=PursuitRunStatus.WAITING,
+        phase="waiting",
+        started_at=1.0,
+        updated_at=2.0,
+    ))
+    pursuit_store.terminal_outbox_backlog = lambda **_: SimpleNamespace(  # type: ignore[method-assign]
+        total_pending=1,
+        due=0,
+        backoff=0,
+        live_claimed=0,
+        expired_claimed=0,
+        dead_letter=1,
+    )
+    worker = PursuitTerminalOutboxWorkerSnapshot(
+        state=PursuitTerminalWorkerState.WAITING,
+        pass_count=2,
+        claimed_count=1,
+        delivered_count=0,
+        retry_scheduled_count=0,
+        dead_lettered_count=1,
+        failure_count=1,
+        consecutive_empty_passes=0,
+        next_delay_seconds=30,
+        last_failure_codes=("lease_missing",),
+        started_at="2026-08-05T00:00:00+00:00",
+        last_pass_at="2026-08-05T00:00:10+00:00",
+    )
+
+    snapshot = await build_goal_pursuit_snapshot_with_recovery(
+        GoalStore(tmp_path / "goals"),
+        pursuit_store,
+        None,
+        workspace_root=tmp_path,
+        terminal_outbox_enabled=True,
+        terminal_outbox_worker_snapshot=lambda: worker,
+        assessed_at="2026-08-05T00:00:20+00:00",
+    )
+
+    projection = snapshot.terminal_outbox
+    assert projection is not None
+    assert projection.schema_version == 2
+    assert projection.status == "degraded"
+    assert projection.counts.dead_letter == 1
+    assert "dead_letter_present" in projection.failure_codes
+    assert "自动重试已停止" in projection.warning
+    rendered = render_goal_pursuit_snapshot(snapshot)
+    assert "死信 1" in rendered
+    assert "请人工审查" in rendered
 
 
 @pytest.mark.asyncio

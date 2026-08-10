@@ -126,6 +126,7 @@ async def test_goal_status_renders_terminal_outbox_for_tui_fallback(tmp_path) ->
         claimed_count=0,
         delivered_count=0,
         retry_scheduled_count=0,
+        dead_lettered_count=0,
         failure_count=0,
         consecutive_empty_passes=2,
         next_delay_seconds=60,
