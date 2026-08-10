@@ -151,8 +151,9 @@ ARC-07.5f/5g 已提供 exact installed backend 的首个 `protocol_hello@1` Eval
 HAR-09.6c2a 已将其绑定到 Outcome、6c1、Before/After 原 H5c lane 与原 baseline cohort，形成首个真实
 installed-runtime fresh H5a/H5c 单平台 lane，并通过共享 Tool/Slash 同步终端三端。HAR-09.6c2a1 又冻结完整
 Final Evaluation lane 覆盖契约，明确区分本机 installed baseline 与必须由目标主机重新证明的 lane，避免把
-macOS slot 冒充为 Linux/Windows evidence。目标平台 baseline 解析、远程授权与签名结果摄入已完成；完整跨平台行为矩阵、
-长期指标与 promoted Outcome 仍未完成。
+macOS slot 冒充为 Linux/Windows evidence。目标平台 baseline 解析、远程授权与签名结果摄入已完成；HAR-09.6c2b1
+又提供完整矩阵聚合能力和动态可撤权总体 verdict。专用双端详情、真实 Windows/Linux daemon 生产证据、长期指标与
+promoted Outcome 仍待后续验收。
 HAR-09.6c2a2a 已进一步将 missing remote lane 绑定到 exact active Worker incarnation，并机械导出
 `macos/linux/windows-{arm64|x64}` target。HAR-09.6c2a2b 又从 current signed Release Channel Catalog 解析
 同 version/source commit/source tree 的 target-specific Build Attestation，并动态绑定 Channel/Builder trust；健康、

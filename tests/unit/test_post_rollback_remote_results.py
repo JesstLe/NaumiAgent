@@ -346,6 +346,10 @@ async def test_signed_result_is_atomically_admitted_and_ingested_idempotently(
     assert not first.behavioral_matrix_authority
     assert behavioral.validated == 1
     assert await store.get_admitted_at(manifest.manifest_id) is not None
+    assert await store.list_by_lane(
+        outcome_id=manifest.payload.outcome_id,
+        comparison_id=manifest.payload.comparison_id,
+    ) == (manifest,)
 
 
 @pytest.mark.asyncio
@@ -466,6 +470,61 @@ async def test_admission_tamper_and_incomplete_cohort_fail_closed(tmp_path: Path
     with pytest.raises(EvolutionPostRollbackRemoteResultError) as tampered:
         await store.get_manifest(manifest.manifest_id)
     assert tampered.value.code == "post_rollback_remote_result_admission_tampered"
+
+
+@pytest.mark.asyncio
+async def test_remote_result_lane_index_tamper_fails_closed(tmp_path: Path) -> None:
+    service, manifest, _key, _behavioral, store = await _fixture(tmp_path)
+    await service.submit(
+        manifest=manifest,
+        received_at="2026-08-10T08:03:10+00:00",
+    )
+    with sqlite3.connect(store.db_path) as db:
+        db.execute(
+            "UPDATE evolution_post_rollback_remote_result_lane_index "
+            "SET suite_id = ? WHERE manifest_id = ?",
+            ("tampered-suite", manifest.manifest_id),
+        )
+    with pytest.raises(EvolutionPostRollbackRemoteResultError) as tampered:
+        await store.list_by_lane(
+            outcome_id=manifest.payload.outcome_id,
+            comparison_id=manifest.payload.comparison_id,
+        )
+    assert tampered.value.code == "post_rollback_remote_result_lane_index_tampered"
+
+
+@pytest.mark.asyncio
+async def test_remote_result_lane_index_backfill_converges_concurrently(
+    tmp_path: Path,
+) -> None:
+    service, manifest, _key, _behavioral, store = await _fixture(tmp_path)
+    await service.submit(
+        manifest=manifest,
+        received_at="2026-08-10T08:03:10+00:00",
+    )
+    with sqlite3.connect(store.db_path) as db:
+        db.execute(
+            "DELETE FROM evolution_post_rollback_remote_result_lane_index "
+            "WHERE manifest_id = ?",
+            (manifest.manifest_id,),
+        )
+    peer = EvolutionPostRollbackRemoteResultStore(
+        store.db_path,
+        control_plane_key_provider=lambda: b"remote-result-control-plane-key-32",
+    )
+    kwargs = {
+        "outcome_id": manifest.payload.outcome_id,
+        "comparison_id": manifest.payload.comparison_id,
+    }
+    left, right = await asyncio.gather(
+        store.list_by_lane(**kwargs),
+        peer.list_by_lane(**kwargs),
+    )
+    assert left == right == (manifest,)
+    with sqlite3.connect(store.db_path) as db:
+        assert db.execute(
+            "SELECT COUNT(*) FROM evolution_post_rollback_remote_result_lane_index"
+        ).fetchone() == (1,)
 
 
 @pytest.mark.asyncio

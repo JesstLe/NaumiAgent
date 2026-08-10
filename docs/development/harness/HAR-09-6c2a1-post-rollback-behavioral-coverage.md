@@ -134,7 +134,7 @@ authority：
 3. `HAR-09.6c2a3 Remote Lane Dispatch + Claim`：绑定容量、健康、身份和 lease；
 4. `HAR-09.6c2a3e Remote Execution Authorization` 已复用远程 revalidation 的 permission/run-grant/Ed25519
    模式并使用独立 post-rollback domain；Signed Result Ingestion 已由 6c2a3f 完成；
-5. `HAR-09.6c2b Post-Rollback Behavioral Matrix`：集合完整性、跨 lane verdict 与
+5. `HAR-09.6c2b1 Post-Rollback Behavioral Matrix Core` 已完成集合完整性、跨 lane verdict、动态撤权与
    `behavioral_evaluation_recorded=true`；
-6. Workbench/New UI/TUI typed coverage 详情投影；
+6. `HAR-09.6c2b2`：Workbench/New UI/TUI typed Matrix 详情投影；
 7. `HAR-09.6d Long-Term Outcome Window`。

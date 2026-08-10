@@ -131,5 +131,6 @@ signature、authorization window、Target Baseline lineage、bounded validation�
 archive 与 manifest digest，尚未提供可由 Control Plane 独立比较的顶层 backend binary digest。后续 Release Catalog schema
 演进应把 backend digest 提升为签名字段，从而把“Worker 记录”升级为“Control Plane 与 signed build manifest 双向比对”。
 
-下一步 `HAR-09.6c2b` 实现 Behavioral Matrix：聚合本机 lane 与各 target 的 signed ingestion receipt，处理 missing/stale/
-conflict lane，形成完整矩阵 readiness；在矩阵完整前仍不得进入 learning 或 promotion。
+`HAR-09.6c2b1` 已实现 Behavioral Matrix Core：聚合本机 lane 与各 target 的 signed ingestion receipt，处理
+missing/stale/conflict lane，并签发动态可撤权的总体 verdict。下一步 6c2b2 完成 Workbench/New UI/TUI typed 详情；
+长期指标完成前仍不得进入 learning 或 promotion。

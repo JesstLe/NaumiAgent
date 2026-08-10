@@ -78,6 +78,10 @@ from naumi_agent.evolution.post_rollback_behavioral_lanes import (
     EvolutionPostRollbackBehavioralLaneError,
     render_post_rollback_behavioral_lane,
 )
+from naumi_agent.evolution.post_rollback_behavioral_matrix import (
+    EvolutionPostRollbackBehavioralMatrixError,
+    render_post_rollback_behavioral_matrix,
+)
 from naumi_agent.evolution.post_rollback_remote_claims import (
     EvolutionPostRollbackRemoteClaimError,
     render_post_rollback_remote_claim,
@@ -2867,6 +2871,73 @@ class EvolutionPostRollbackBehavioralCoverageTool(Tool):
         return render_post_rollback_behavioral_coverage(view)
 
 
+class EvolutionPostRollbackBehavioralMatrixTool(Tool):
+    """Record the exact complete matrix over local and signed remote lanes."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_post_rollback_behavioral_matrix"
+
+    @property
+    def description(self) -> str:
+        return (
+            "聚合 rolled_back Outcome 的完整本机与远端签名 Behavioral Lane，"
+            "动态复验 H5c authority 并签发总体恢复判定；不授予长期、学习或推广权限。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "request_id": {
+                    "type": "string",
+                    "pattern": "^evrerollbackreq_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["request_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="回滚后行为矩阵",
+            search_hint=(
+                "evolution post rollback behavioral matrix verdict local remote "
+                "自进化 回滚 行为 矩阵 判定"
+            ),
+        )
+
+    async def execute(self, request_id: str) -> str:
+        try:
+            view = await (
+                self._engine.evolution_post_rollback_behavioral_matrix_service.record(
+                    request_id=str(request_id or "").strip(),
+                )
+            )
+        except (
+            AttributeError,
+            EvolutionPostRollbackBehavioralMatrixError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "post_rollback_behavioral_matrix_failed")
+            return f"回滚后行为矩阵未完成（`{code}`）：{exc}"
+        return render_post_rollback_behavioral_matrix(view)
+
+
 class EvolutionPostRollbackRemoteLanePlacementTool(Tool):
     """Bind a missing remote lane to one exact active worker incarnation."""
 
@@ -3564,6 +3635,7 @@ def create_evolution_review_tools(
         EvolutionPostRollbackRuntimeVerificationTool(engine),
         EvolutionPostRollbackBehavioralLaneTool(engine),
         EvolutionPostRollbackBehavioralCoverageTool(engine),
+        EvolutionPostRollbackBehavioralMatrixTool(engine),
         EvolutionPostRollbackRemoteLanePlacementTool(engine),
         EvolutionPostRollbackTargetBaselineTool(engine),
         EvolutionPostRollbackRemoteDispatchTool(engine),
@@ -3600,6 +3672,7 @@ __all__ = [
     "EvolutionPromotionPackageTool",
     "EvolutionPostRollbackBehavioralLaneTool",
     "EvolutionPostRollbackBehavioralCoverageTool",
+    "EvolutionPostRollbackBehavioralMatrixTool",
     "EvolutionPostRollbackRemoteLanePlacementTool",
     "EvolutionPostRollbackRemoteDispatchTool",
     "EvolutionPostRollbackRemoteClaimTool",
