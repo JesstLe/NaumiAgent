@@ -28,6 +28,11 @@ from naumi_agent.evolution.stable_population_candidate_previews import (
     EvolutionStablePopulationCandidateStatus,
     render_stable_population_candidate_preview,
 )
+from naumi_agent.evolution.stable_read_graph import (
+    EvolutionLazyStableReadGraphInspector,
+    EvolutionStableReadGraphInspector,
+    build_evolution_stable_read_graph_inspector,
+)
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.release.population_registry import ReleasePopulationSnapshotStore
 from naumi_agent.tools.base import ToolCall, ToolRegistry, ToolResult
@@ -504,17 +509,57 @@ async def test_candidate_preview_reads_real_stable_completion_without_mutating_d
         subject_id=subject_id,
     )
     assert completion.receipt.metrics.status.value == "insufficient"
+    stable_intent_service = (
+        completion_service.window_service.exposure_service.deployment_service.intent_service
+    )
+    percentage_advance_service = stable_intent_service.store.stage_advance_service
+    percentage_intent_service = (
+        percentage_advance_service.completion_service.window_service.exposure_service
+        .deployment_service.intent_service
+    )
+    opt_in_advance_service = percentage_intent_service.assignment_service.advance_service
+    opt_in_runtime_health_service = (
+        opt_in_advance_service.completion_service.window_service.runtime_health_service
+    )
+    archive_service = stable_intent_service.store.archive_service
+    read_graph = build_evolution_stable_read_graph_inspector(
+        workspace_root=tmp_path,
+        evolution_db_path=completion_store.db_path,
+        release_staging_root=archive_service.staging_root,
+        harness_store=completion_service.window_service.harness_store,
+        chat_run_store=completion_service.outcome_service.chat_run_store,
+        opt_in_runtime_health_service=opt_in_runtime_health_service,
+        plan_service=completion_service.plan_service,
+        baseline_service=completion_service.baseline_service,
+        control_store=percentage_advance_service.control_store,
+        population_store=stable_intent_service.store.population_store,
+        artifact_fetch_service=archive_service.fetch_service,
+        release_slot_store=archive_service.slot_store,
+    )
+    assert isinstance(read_graph, EvolutionStableReadGraphInspector)
+    assert not hasattr(read_graph, "assess")
+    factory_calls = 0
+
+    def read_graph_factory():
+        nonlocal factory_calls
+        factory_calls += 1
+        return read_graph
+
+    lazy_read_graph = EvolutionLazyStableReadGraphInspector(read_graph_factory)
+    assert not lazy_read_graph.initialized
     before = completion_store.db_path.read_bytes()
     service = EvolutionStablePopulationCandidatePreviewService(
         workspace_root=tmp_path,
         db_path=completion_store.db_path,
-        stage_completion_inspector=completion_service,
+        stage_completion_inspector=lazy_read_graph,
         clock=lambda: data["runtime_now"][0] + timedelta(seconds=1),
     )
     preview = await service.preview(
         snapshot_id=completion.receipt.population_snapshot_id,
     )
     assert completion_store.db_path.read_bytes() == before
+    assert lazy_read_graph.initialized
+    assert factory_calls == 1
     assert preview.status is EvolutionStablePopulationCandidateStatus.PARTIAL
     assert preview.observed_members == 1
     assert preview.insufficient_members == 1
@@ -546,7 +591,17 @@ async def test_candidate_preview_empty_and_input_bounds(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_engine_composes_candidate_preview_service_and_tool(tmp_path: Path) -> None:
+async def test_engine_composes_candidate_preview_service_and_tool(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unexpected_trust_read(_path):
+        raise AssertionError("空候选启动不应读取 Population trust artifact")
+
+    monkeypatch.setattr(
+        "naumi_agent.orchestrator.engine.load_release_population_trust_policy",
+        unexpected_trust_read,
+    )
     db_path = tmp_path / "runtime" / "sessions.db"
     engine = AgentEngine(
         AppConfig(
@@ -561,7 +616,16 @@ async def test_engine_composes_candidate_preview_service_and_tool(tmp_path: Path
         assert service.population_store is (
             engine.evolution_release_population_snapshot_store
         )
-        assert service.stage_completion_inspector is None
+        assert service.stage_completion_inspector is (
+            engine.evolution_stable_stage_completion_inspector
+        )
+        assert service.stage_completion_inspector is not None
+        assert isinstance(
+            service.stage_completion_inspector,
+            EvolutionLazyStableReadGraphInspector,
+        )
+        assert not hasattr(service.stage_completion_inspector, "assess")
+        assert not service.stage_completion_inspector.initialized
         assert "evolution_stable_population_candidate_preview" in (
             engine.tool_registry.names
         )
@@ -575,6 +639,8 @@ async def test_engine_composes_candidate_preview_service_and_tool(tmp_path: Path
         )
         assert result.status == "success"
         assert "状态：**暂无候选**" in result.content
+        assert "端口 `configured`" in result.content
         assert "Promotion authority：`false`" in result.content
+        assert not service.stage_completion_inspector.initialized
     finally:
         await engine.shutdown()

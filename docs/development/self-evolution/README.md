@@ -223,6 +223,8 @@ Trust Policy，并将 current/latest/trust/expiry 与 signed credential membersh
 [EVO-05.5f5u](EVO-05-5f5u-dynamic-stage-completion-inspection-port.md) 已交付：Runtime 可注入现有 5f5r Service 的只读
 `inspect()`，预演按 current member 分批动态重验并严格核对完整 receipt identity；缺端口或任一成员失权均失败关闭，且仍不授予
 stable rollout/promotion authority。
+[EVO-05.5f5v](EVO-05-5f5v-default-stable-read-graph.md) 已交付：默认 Engine 以 source-lazy factory 恢复完整 opt-in → percentage
+→ stable 只读 evidence graph；空候选不读 trust/DB，外层不暴露 assess/write，真实 candidate 使用原 5f5r `inspect()` 动态重验。
 [EVO-05.6a](EVO-05-6a-automatic-pause-rollback-request.md) 已让 exact breach 幂等触发或复用 HMAC kill switch，并冻结
 绑定 exact prior Rollback Plan 的只读 Request；它不写 workspace/Git，也不把请求虚报成已回滚。
 [EVO-05.6b1](EVO-05-6b1-immutable-rollback-source.md) 已从 exact Git commit/tree 读取 baseline blob，验证每个

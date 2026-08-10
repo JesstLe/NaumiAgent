@@ -1119,6 +1119,11 @@ if TYPE_CHECKING:
         EvolutionStableStageCompletionInspectionPort,
         render_stable_population_candidate_preview,
     )
+    from naumi_agent.evolution.stable_read_graph import (
+        EvolutionLazyStableReadGraphInspector,
+        EvolutionStableReadGraphInspector,
+        build_evolution_stable_read_graph_inspector,
+    )
     from naumi_agent.evolution.static_guards import (
         EvolutionStaticGuard,
         EvolutionStaticGuardPolicy,
@@ -1511,6 +1516,9 @@ __all__ = [
     "EvolutionStablePopulationCandidateStatus",
     "EvolutionStableStageCompletionInspectionPort",
     "render_stable_population_candidate_preview",
+    "EvolutionStableReadGraphInspector",
+    "EvolutionLazyStableReadGraphInspector",
+    "build_evolution_stable_read_graph_inspector",
     "EVOLUTION_REVALIDATION_PERCENTAGE_DEPLOYMENT_POLICY",
     "EvolutionRevalidationPercentageDeploymentError",
     "EvolutionRevalidationPercentageDeploymentReceipt",
@@ -2703,6 +2711,11 @@ def __getattr__(name: str) -> object:
         "EvolutionStableStageCompletionInspectionPort",
         "render_stable_population_candidate_preview",
     }
+    stable_read_graph_exports = {
+        "EvolutionLazyStableReadGraphInspector",
+        "EvolutionStableReadGraphInspector",
+        "build_evolution_stable_read_graph_inspector",
+    }
     revalidation_percentage_stage_completion_exports = {
         "EVOLUTION_REVALIDATION_PERCENTAGE_STAGE_COMPLETION_POLICY",
         "EvolutionRevalidationPercentageStageCompletion",
@@ -3369,6 +3382,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_stable_stage_completions"
     elif name in stable_population_candidate_preview_exports:
         module_name = "stable_population_candidate_previews"
+    elif name in stable_read_graph_exports:
+        module_name = "stable_read_graph"
     elif name in revalidation_percentage_stage_completion_exports:
         module_name = "revalidation_percentage_stage_completions"
     elif name in revalidation_opt_in_observation_assessment_exports:
