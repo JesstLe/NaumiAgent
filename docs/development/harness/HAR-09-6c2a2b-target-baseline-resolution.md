@@ -47,5 +47,5 @@ authority，并明确标注“未下载、未安装、未下发、无执行/结�
 
 1. `HAR-09.6c2a3a` 已先把 exact incarnation heartbeat/accepting/active jobs 纳入 Registry v5 durable authority；
 2. `HAR-09.6c2a3b Remote Dispatch`：同时消费 fresh health 与 atomic capacity reservation；
-3. `HAR-09.6c2a3e Execution Authorization` 已完成；Signed Result Ingestion 由 6c2a3f 继续；
+3. `HAR-09.6c2a3e Execution Authorization` 与 `6c2a3f Signed Result Ingestion` 已完成；
 4. `HAR-09.6c2b Post-Rollback Behavioral Matrix`。

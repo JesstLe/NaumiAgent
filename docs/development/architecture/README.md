@@ -57,4 +57,5 @@ ARC-06 保持 partial。
 ARC-04.1d/1e 已为跨主机 Harness 链分别建立 supervisor-attested Ed25519 Worker Identity 与独立 X25519
 Transport Key：exact incarnation、同库持久化、代际轮换和动态 fencing 已完成，但 key artifact 不冒充 baseline
 delivery。HAR-09.6c2a3d/3e 已进一步完成远端 encrypted envelope、Worker ACK 与 Worker-signed Start
-authorization；自动 remote transport、真实进程 start/result ingestion 仍未完成。
+authorization，HAR-09.6c2a3f 已补齐 current-window signed result admission 与 canonical H5a/H5c ingestion；
+自动 remote transport、独立真实进程 start receipt 与取消传播仍未完成。

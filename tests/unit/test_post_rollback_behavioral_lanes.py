@@ -19,7 +19,7 @@ from naumi_agent.evolution.post_rollback_behavioral_lanes import (
     EvolutionPostRollbackBehavioralLaneError,
     EvolutionPostRollbackBehavioralLaneService,
     EvolutionPostRollbackBehavioralLaneStore,
-    _load_suite_request,
+    load_post_rollback_runtime_eval_request,
     render_post_rollback_behavioral_lane,
 )
 from naumi_agent.evolution.proposal_before_after_evidence import (
@@ -272,7 +272,7 @@ def test_post_rollback_behavioral_lane_rejects_unsupported_runner(
     )
 
     with pytest.raises(EvolutionPostRollbackBehavioralLaneError) as exc_info:
-        _load_suite_request(workspace, "protocol-hello-core")
+        load_post_rollback_runtime_eval_request(workspace, "protocol-hello-core")
 
     assert exc_info.value.code == "post_rollback_suite_unsupported"
 
@@ -414,6 +414,23 @@ async def test_post_rollback_behavioral_lane_runs_real_installed_h5c_and_revalid
     rendered = render_post_rollback_behavioral_lane(view)
     assert "exact installed baseline" in rendered
     assert "行为级总体评测：尚未完成" in rendered
+
+    await restarted_service.validate_remote_runtime_receipts(
+        request_id=outcome.request_id,
+        comparison_id=lane.comparison_id,
+        receipts=view.lane.runtime_eval_receipts,
+    )
+    remote_records, remote_comparison = (
+        await restarted_service.record_remote_runtime_receipts(
+            request_id=outcome.request_id,
+            comparison_id=lane.comparison_id,
+            batch_id="postrollback-remote-unit",
+            receipts=view.lane.runtime_eval_receipts,
+        )
+    )
+    assert len(remote_records) == 5
+    assert remote_comparison.current_batch_id == "postrollback-remote-unit"
+    assert remote_comparison.current_samples == 5
 
     tool = EvolutionPostRollbackBehavioralLaneTool(
         SimpleNamespace(evolution_post_rollback_behavioral_lane_service=restarted_service)

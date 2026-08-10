@@ -151,7 +151,7 @@ ARC-07.5f/5g 已提供 exact installed backend 的首个 `protocol_hello@1` Eval
 HAR-09.6c2a 已将其绑定到 Outcome、6c1、Before/After 原 H5c lane 与原 baseline cohort，形成首个真实
 installed-runtime fresh H5a/H5c 单平台 lane，并通过共享 Tool/Slash 同步终端三端。HAR-09.6c2a1 又冻结完整
 Final Evaluation lane 覆盖契约，明确区分本机 installed baseline 与必须由目标主机重新证明的 lane，避免把
-macOS slot 冒充为 Linux/Windows evidence。目标平台 baseline 解析、远程授权/结果摄入、完整跨平台行为矩阵、
+macOS slot 冒充为 Linux/Windows evidence。目标平台 baseline 解析、远程授权与签名结果摄入已完成；完整跨平台行为矩阵、
 长期指标与 promoted Outcome 仍未完成。
 HAR-09.6c2a2a 已进一步将 missing remote lane 绑定到 exact active Worker incarnation，并机械导出
 `macos/linux/windows-{arm64|x64}` target。HAR-09.6c2a2b 又从 current signed Release Channel Catalog 解析
@@ -160,16 +160,16 @@ HAR-09.6c2a2a 已进一步将 missing remote lane 绑定到 exact active Worker 
 HAR-09.6c2a3a / ARC-04.1c 已进一步交付 Worker Registry v5 durable Health Report：exact active incarnation 的
 heartbeat、accepting-jobs 与 active-jobs 单调持久化，并可关闭重开后驱动 admission。HAR-09.6c2a3b 又把
 current Target Baseline、exact Placement、durable Health、原 Before/After lane 与 workspace Eval suite 组合为
-tamper-evident queued Dispatch，并在 Registry 中原子预留 exact incarnation capacity；claim/lease、传输、执行授权
-和结果摄取仍未完成。
+tamper-evident queued Dispatch，并在 Registry 中原子预留 exact incarnation capacity。
 ARC-04.1d 已补齐通用 supervisor-attested Ed25519 Worker Identity，为 claim challenge 提供 exact incarnation
 签名身份。HAR-09.6c2a3c 已进一步完成 one-time challenge、Ed25519 verification、单调 lease receipt、bounded
 renewal 与动态 fencing。ARC-04.1e 又补齐独立 X25519 Transport Key、连续 generation rotation、同库 Identity
 绑定和动态 fencing。HAR-09.6c2a3d 已进一步完成 signed Catalog artifact 的控制面流式验证、X25519+HKDF+
 AES-GCM descriptor、exact Worker Ed25519 ACK 与 durable delivery receipt；它只授予 transport delivery，自动
 远端 push 仍未完成。HAR-09.6c2a3e 又以 Worker-signed Start challenge、持久父权限、Runtime lease、bash_run-only
-Run Grant、exact Eval budget 与跨 Store 补偿 Saga 建立短期 installation/execution authority；真实进程 start receipt、
-result ingestion 和矩阵收口仍未完成。
+Run Grant、exact Eval budget 与跨 Store 补偿 Saga 建立短期 installation/execution authority。HAR-09.6c2a3f 已在
+authorization window 内原子准入完整 Ed25519-signed Runtime Eval cohort，支持过期后的幂等 H5a/H5c 恢复和动态
+stale 检查；自动 remote daemon push、独立 start receipt/取消传播和完整矩阵收口仍未完成。
 HAR-07.5b 已为 New UI 增加 `v` Evidence 焦点和 `/harness evidence`，并让 CLI/Textual TUI 复用相同
 Explain authority；HAR-07.4b1 已补齐空闲 Bridge 有界重启、重新协商和精确 session 回执恢复。
 ARC-02.5a 又补齐两类安全回执的持久事件身份与 session cursor；ARC-02.5b 已补齐 New UI 持久 ACK、

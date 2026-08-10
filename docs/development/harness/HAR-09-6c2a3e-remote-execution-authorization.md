@@ -109,8 +109,8 @@ Current authorization 只表示 exact Worker 可在受限环境中安装已交�
 - `result_authority=false`、`result_received=false`；
 - `learning_authority=false`、`promotion_authority=false`。
 
-自动远端 daemon push、Worker 侧 lease/Grant enforcement RPC、真实进程 start receipt、取消传播和结果摄入仍是后续切片；当前
-协议对象通过共享 Tool/Slash 传递，不宣称生产级远端执行集群已完成。
+自动远端 daemon push、Worker 侧 lease/Grant enforcement RPC、真实进程 start receipt 和取消传播仍是后续切片；
+签名结果摄入已由 HAR-09.6c2a3f 独立完成。当前协议对象通过共享 Tool/Slash 传递，不宣称生产级远端执行集群已完成。
 
 ## 双通道入口
 
@@ -140,8 +140,9 @@ Run Grant Store、Harness lease 与 SQLite 验证：
 10. session authority Store split 在构造期失败，challenge SQLite 篡改读取时失败关闭；
 11. 默认 AgentEngine 构造不获取 lease、不签发 Grant、不读取 Worker private key。
 
-## 下一切片
+## 后续状态
 
-`HAR-09.6c2a3f` 实现 signed result ingestion：Worker 必须在本 authorization/Attempt 下提交 bounded typed Runtime Eval
-result manifest、进程平台身份与逐 repetition 证据，Control Plane 重算内容摘要并写入既有 H5a/H5c 权威。本授权过期不应
-抹除已在 current window 原子保存的真实 start/result admission，但无 durable admission 的迟到自报必须失败关闭。
+`HAR-09.6c2a3f` 已实现 signed result ingestion：Worker 在本 authorization/Attempt 下提交 bounded typed Runtime Eval
+manifest、进程平台身份与逐 repetition 证据，Control Plane 在 current window 原子准入并写入既有 H5a/H5c 权威。
+已准入结果支持授权过期后的幂等恢复；无 durable admission 的迟到自报失败关闭。下一步由 `HAR-09.6c2b` 聚合完整
+Behavioral Matrix。
