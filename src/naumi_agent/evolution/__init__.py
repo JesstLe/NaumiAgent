@@ -1143,6 +1143,16 @@ if TYPE_CHECKING:
         EvolutionStableRollbackReadinessService,
         render_stable_rollback_readiness,
     )
+    from naumi_agent.evolution.stable_rollout_authorizations import (
+        EVOLUTION_STABLE_ROLLOUT_AUTHORIZATION_POLICY,
+        EvolutionStableRolloutAuthorization,
+        EvolutionStableRolloutAuthorizationError,
+        EvolutionStableRolloutAuthorizationService,
+        EvolutionStableRolloutAuthorizationStore,
+        EvolutionStableRolloutAuthorizationView,
+        EvolutionStableRolloutConsumptionReceipt,
+        render_stable_rollout_authorization,
+    )
     from naumi_agent.evolution.static_guards import (
         EvolutionStaticGuard,
         EvolutionStaticGuardPolicy,
@@ -1553,6 +1563,14 @@ __all__ = [
     "EvolutionStableRollbackReadinessError",
     "EvolutionStableRollbackReadinessService",
     "render_stable_rollback_readiness",
+    "EVOLUTION_STABLE_ROLLOUT_AUTHORIZATION_POLICY",
+    "EvolutionStableRolloutAuthorization",
+    "EvolutionStableRolloutAuthorizationError",
+    "EvolutionStableRolloutAuthorizationService",
+    "EvolutionStableRolloutAuthorizationStore",
+    "EvolutionStableRolloutAuthorizationView",
+    "EvolutionStableRolloutConsumptionReceipt",
+    "render_stable_rollout_authorization",
     "EVOLUTION_REVALIDATION_PERCENTAGE_DEPLOYMENT_POLICY",
     "EvolutionRevalidationPercentageDeploymentError",
     "EvolutionRevalidationPercentageDeploymentReceipt",
@@ -2769,6 +2787,16 @@ def __getattr__(name: str) -> object:
         "EvolutionStableRollbackReadinessService",
         "render_stable_rollback_readiness",
     }
+    stable_rollout_authorization_exports = {
+        "EVOLUTION_STABLE_ROLLOUT_AUTHORIZATION_POLICY",
+        "EvolutionStableRolloutAuthorization",
+        "EvolutionStableRolloutAuthorizationError",
+        "EvolutionStableRolloutAuthorizationService",
+        "EvolutionStableRolloutAuthorizationStore",
+        "EvolutionStableRolloutAuthorizationView",
+        "EvolutionStableRolloutConsumptionReceipt",
+        "render_stable_rollout_authorization",
+    }
     revalidation_percentage_stage_completion_exports = {
         "EVOLUTION_REVALIDATION_PERCENTAGE_STAGE_COMPLETION_POLICY",
         "EvolutionRevalidationPercentageStageCompletion",
@@ -3441,6 +3469,8 @@ def __getattr__(name: str) -> object:
         module_name = "stable_read_graph"
     elif name in stable_rollback_readiness_exports:
         module_name = "stable_rollback_readiness"
+    elif name in stable_rollout_authorization_exports:
+        module_name = "stable_rollout_authorizations"
     elif name in revalidation_percentage_stage_completion_exports:
         module_name = "revalidation_percentage_stage_completions"
     elif name in revalidation_opt_in_observation_assessment_exports:

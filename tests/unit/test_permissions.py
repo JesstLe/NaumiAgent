@@ -82,6 +82,36 @@ class TestPermissionChecker:
             PermissionMode.STRICT,
         ],
     )
+    def test_stable_rollout_authorization_is_medium_without_confirmation(
+        self,
+        mode: PermissionMode,
+    ) -> None:
+        result = PermissionChecker(mode).check(
+            "evolution_stable_rollout_authorization",
+            {
+                "action": "inspect",
+                "authorization_id": "evstablerolloutauth_" + "a" * 24,
+            },
+        )
+        assert result.allowed
+        assert not result.requires_confirmation
+        assert result.risk_level is (
+            PermissionRiskLevel.LOW
+            if mode is PermissionMode.BYPASS
+            else PermissionRiskLevel.MEDIUM
+        )
+        if mode is not PermissionMode.BYPASS:
+            assert result.tool_family == "evolution_release_authorization"
+
+    @pytest.mark.parametrize(
+        "mode",
+        [
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+    )
     def test_stable_population_completion_is_medium_without_confirmation(
         self,
         mode: PermissionMode,

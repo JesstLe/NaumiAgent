@@ -2918,6 +2918,7 @@ def _print_help() -> None:
             "/evolution [list|detail|experiment-contract|evaluation|"
             "stable-population-preview|stable-population-completion|"
             "stable-rollback-readiness|"
+            "stable-rollout-authorization|"
             "revalidation-rollback-execute|revalidation-rollback-outcome|"
             "outcome-before-after|outcome-verify-runtime|"
             "outcome-verify-behavior|outcome-behavior-coverage|"
@@ -3786,6 +3787,31 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 arg="",
             )
             return
+        if action == "stable-rollout-authorization":
+            if len(parts) == 4 and parts[1] == "issue":
+                arguments = {
+                    "action": "issue",
+                    "completion_receipt_id": parts[2],
+                    "intent_id": parts[3],
+                }
+            elif len(parts) == 3 and parts[1] == "inspect":
+                arguments = {
+                    "action": "inspect",
+                    "authorization_id": parts[2],
+                }
+            else:
+                raise ValueError(
+                    "stable-rollout-authorization 需要 issue <completion-id> "
+                    "<intent-id> 或 inspect <authorization-id>。"
+                )
+            await _run_tool_slash_command(
+                engine,
+                slash_command="/evolution",
+                tool_name="evolution_stable_rollout_authorization",
+                parse_args=lambda _arg: arguments,
+                arg="",
+            )
+            return
         if action == "revalidation-rollback-outcome":
             if len(parts) != 2:
                 raise ValueError(
@@ -4121,6 +4147,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "approval-signature、approval-decision、revalidation-request、"
                 "stable-population-preview、stable-population-completion、"
                 "stable-rollback-readiness、"
+                "stable-rollout-authorization、"
                 "revalidation-rollback-execute、revalidation-rollback-outcome、"
                 "outcome-before-after、outcome-verify-runtime、"
                 "outcome-verify-behavior、outcome-behavior-coverage、"
@@ -4321,6 +4348,8 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "<completion-receipt-id>；"
             "/evolution stable-rollback-readiness <completion-receipt-id> "
             "<stable-intent-id>；"
+            "/evolution stable-rollout-authorization issue <completion-receipt-id> "
+            "<stable-intent-id>；inspect <authorization-id>；"
             "/evolution revalidation-rollback-execute <rollback-request-id>；"
             "/evolution revalidation-rollback-outcome <rollback-request-id>；"
             "/evolution outcome-before-after <rollback-request-id>；"
