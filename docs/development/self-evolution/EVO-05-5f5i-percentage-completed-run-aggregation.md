@@ -70,7 +70,7 @@ Evidence 不复制 prompt、工具参数、工具输出、完整 assistant 正�
 
 ## 当前边界与下一步
 
-5f5i 已形成 percentage 阶段完成证据，但当前真实 fixture 因成本基线不可比不会虚报 passing。下一最小切片应为
-`EVO-05.5f5j Percentage-to-Stable Stage Advance Authorization`：消费 current passing 5f5i、exact Plan/control state 与
-`manual_advance_required`，通过 durable user interaction 或明确 automatic policy 签发短期、一次性的 stable entry authority。
-在 5f5j 和后续 stable deployment 完成前，任何 UI 都不得显示“已进入稳定发布”。
+5f5i 已形成 percentage 阶段完成证据，但当前真实 fixture 因成本基线不可比不会虚报 passing。
+[EVO-05.5f5j](EVO-05-5f5j-percentage-to-stable-stage-advance.md) 已消费 current passing 5f5i、exact Plan/control state 与
+stable mandatory manual policy，通过 durable user interaction 签发短期、一次性的 stable entry authority。在后续 stable
+deployment 完成前，任何 UI 都不得显示“已进入稳定发布”。

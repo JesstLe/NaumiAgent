@@ -80,6 +80,7 @@ Harness interaction authority 与 PursuitStore 目前不是同一个事务域。
 - cancelled authority 已由 UI-18.4c 开放 sequence-fenced 显式用户动作；
 - EVO-04.6b 已通过本 adapter 完成 escalated Decision 的 create-before-display、answer-before-resolution、
   pending 重启复用与 answered authority 重读；Resolution 不授予 Candidate accept/promotion；
+- EVO-05.5f5j 已通过同一 adapter 收敛并发 stable-entry 交互，并在用户回答后重验 Completion/Plan/control；
 - HAR-10.6c 已补齐四级不可变优先级、4:2:1:1 公平调度、v1 哈希兼容与 New UI/TUI 同源展示；
   pending recovery 仍上限 50 且无独立 cursor；
 - 跨 Store 原子提交、at-rest encryption 和多实例通知仍分别属于 ARC-05/08、ARC-08 与 ARC-06。
