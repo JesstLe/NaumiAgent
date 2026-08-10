@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from naumi_agent import __version__
+from naumi_agent.harness.eval_identity import HarnessEvalPlatformIdentity
 from naumi_agent.release.artifact import assemble_release_artifact
 from naumi_agent.release.runtime_eval import (
     MAX_RUNTIME_EVAL_INPUT_BYTES,
@@ -46,7 +48,7 @@ def _runtime_bundle(root: Path) -> Path:
             "import sys\n"
             f"sys.path.insert(0, {str(source_root)!r})\n"
             "if sys.argv[1:] == ['--version']:\n"
-            "    print('naumi 1.0.0')\n"
+            f"    print('naumi {__version__}')\n"
             "elif sys.argv[1:] == ['--runtime-eval-json']:\n"
             "    from naumi_agent.release.runtime_eval import parse_and_execute_runtime_eval\n"
             "    sys.stdout.buffer.write(parse_and_execute_runtime_eval(sys.stdin.buffer.read()))\n"
@@ -64,7 +66,7 @@ def _runtime_bundle(root: Path) -> Path:
         ui_binary=ui,
         config_example=config,
         output_dir=root / "release",
-        version="1.0.0",
+        version=__version__,
         target=target,
         source_commit="a" * 40,
         source_tree_sha256="b" * 64,
@@ -95,6 +97,7 @@ def test_runtime_eval_request_executes_all_real_protocol_fixtures() -> None:
     assert request.suite_id == "protocol-hello-core"
     assert len(request.cases) == 6
     assert len(response.results) == 6
+    assert response.runtime_platform.naumi_version == __version__
     assert decoded.authority_request_sha256 == request.request_sha256
     assert '"expected"' not in process_request.model_dump_json()
     with pytest.raises(ReleaseRuntimeEvalError) as oversized:
@@ -168,6 +171,7 @@ def test_installed_slot_executes_and_persists_binary_bound_runtime_eval(
     assert receipt.all_cases_passed
     assert receipt.request == request
     assert len(receipt.response.results) == 6
+    assert receipt.response.runtime_platform.naumi_version == slot.version
     assert restored == receipt
     assert os.environ.get("NAUMI_RELEASE_RUNTIME_EVAL") is None
 
@@ -241,3 +245,62 @@ def test_runtime_eval_rejects_unknown_slot_before_process(tmp_path: Path) -> Non
         store.evaluate_runtime_protocol("relslot_" + "0" * 24, request)
     assert missing.value.code == "release_slot_missing"
     assert store.get_slot(slot.slot_id) == slot
+
+
+def test_runtime_eval_rejects_runtime_identity_that_disagrees_with_slot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if os.name == "nt":
+        pytest.skip("fixture is a POSIX executable")
+    workspace = Path(__file__).resolve().parents[2]
+    store = ReleaseSlotStore(tmp_path / "installed")
+    slot = store.install(_runtime_bundle(tmp_path))
+    request = _request(workspace)
+    original = execute_runtime_eval_request(request)
+    forged = original.model_dump(mode="json")
+    platform = original.runtime_platform.model_dump(mode="json")
+    platform["naumi_version"] = "9.9.9"
+    forged["runtime_platform"] = HarnessEvalPlatformIdentity.model_validate(
+        platform
+    ).model_dump(mode="json")
+    core = {
+        key: value
+        for key, value in forged.items()
+        if key not in {"response_id", "response_sha256"}
+    }
+    digest = hashlib.sha256(
+        json.dumps(
+            core,
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    forged_response = ReleaseRuntimeEvalResponse.model_validate({
+        **core,
+        "response_id": f"relruntimeevalresp_{digest[:24]}",
+        "response_sha256": digest,
+    })
+
+    from naumi_agent.release import slots as slots_module
+
+    monkeypatch.setattr(
+        slots_module.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args=args[0],
+            returncode=0,
+            stdout=forged_response.model_dump_json().encode("utf-8"),
+            stderr=b"",
+        ),
+    )
+    with pytest.raises(ReleaseSlotError) as mismatch:
+        store.evaluate_runtime_protocol(slot.slot_id, request)
+    assert mismatch.value.code == "release_runtime_eval_identity_mismatch"
+    with sqlite3.connect(store.db_path) as db:
+        stored = db.execute(
+            "SELECT COUNT(*) FROM release_runtime_eval_receipts"
+        ).fetchone()
+    assert stored == (0,)

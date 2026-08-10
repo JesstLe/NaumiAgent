@@ -14,6 +14,10 @@ from typing import Any, Literal, Self
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from naumi_agent.harness.eval_identity import (
+    HarnessEvalPlatformIdentity,
+    capture_eval_platform_identity,
+)
 from naumi_agent.harness.eval_models import (
     HarnessEvalSuite,
     HarnessProtocolActual,
@@ -185,6 +189,7 @@ class ReleaseRuntimeEvalResponse(_StrictModel):
     authority_request_id: str = Field(pattern=r"^relruntimeevalreq_[0-9a-f]{24}$")
     authority_request_sha256: str = Field(pattern=_SHA256_RE)
     runner_version: Literal["protocol_hello@1"] = RELEASE_RUNTIME_EVAL_RUNNER
+    runtime_platform: HarnessEvalPlatformIdentity
     results: tuple[ReleaseRuntimeEvalCaseResult, ...] = Field(
         min_length=1,
         max_length=MAX_RUNTIME_EVAL_CASES,
@@ -435,6 +440,7 @@ def execute_runtime_eval_process_request(
         "authority_request_id": item.authority_request_id,
         "authority_request_sha256": item.authority_request_sha256,
         "runner_version": RELEASE_RUNTIME_EVAL_RUNNER,
+        "runtime_platform": capture_eval_platform_identity().model_dump(mode="json"),
         "results": results,
         "evaluated_at": _aware(evaluated_at or datetime.now(UTC).isoformat()).isoformat(),
     }

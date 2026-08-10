@@ -21,6 +21,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal, Self
 
 if TYPE_CHECKING:
+    from naumi_agent.harness.eval_identity import HarnessEvalPlatformIdentity
     from naumi_agent.release.launcher import ReleaseLaunchResolution
     from naumi_agent.release.runtime_eval import (
         ReleaseRuntimeEvalReceipt,
@@ -517,6 +518,11 @@ class ReleaseSlotStore:
             raise ReleaseSlotError(
                 "release_runtime_eval_response_mismatch",
                 "Installed Runtime Eval 响应未绑定当前 Request。",
+            )
+        if not _runtime_eval_platform_matches_slot(slot, response.runtime_platform):
+            raise ReleaseSlotError(
+                "release_runtime_eval_identity_mismatch",
+                "Installed Runtime Eval 自报平台或版本与 slot manifest 不一致。",
             )
         process_finished_at = datetime.now(UTC)
         evaluated_at = _aware(response.evaluated_at)
@@ -1407,6 +1413,24 @@ def _runtime_eval_environment() -> dict[str, str]:
         "PYTHONNOUSERSITE": "1",
     })
     return environment
+
+
+def _runtime_eval_platform_matches_slot(
+    slot: ReleaseInstalledSlot,
+    runtime_platform: HarnessEvalPlatformIdentity,
+) -> bool:
+    system = str(runtime_platform.system).casefold()
+    machine = str(runtime_platform.machine).casefold()
+    if machine in {"arm64", "aarch64"}:
+        arch = "arm64"
+    elif machine in {"x86_64", "amd64"}:
+        arch = "x64"
+    else:
+        return False
+    return bool(
+        slot.target == f"{system}-{arch}"
+        and runtime_platform.naumi_version == slot.version
+    )
 
 
 def _digest(payload) -> str:

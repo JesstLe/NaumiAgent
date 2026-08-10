@@ -36,7 +36,7 @@ modules:
   - {id: ARC-04, status: partial, path: architecture/ARC-04-execution-daemons.md, depends_on: [ARC-02, ARC-03], implemented_slices: [ARC-04.1a, ARC-04.1b, ARC-04.2a, ARC-04.2b, ARC-04.2c, ARC-04.3a, ARC-04.3b, ARC-04.3c, ARC-04.5a, ARC-04.5b1, ARC-04.5b1a, ARC-04.5b2, ARC-04.5c, ARC-04.5d1, ARC-04.5d2a, ARC-04.5d2b, ARC-04.5d2c, ARC-04.5e1, ARC-04.5e2, ARC-04.5e3a, ARC-04.5e3b1, ARC-04.5e3b2, ARC-04.6a]}
   - {id: ARC-05, status: partial, path: architecture/ARC-05-state-migrations.md, depends_on: [ARC-01], implemented_slices: [ARC-05.1, ARC-05.2a, ARC-05.3a]}
   - {id: ARC-06, status: partial, path: architecture/ARC-06-concurrency-cluster.md, depends_on: [ARC-02, ARC-04], implemented_slices: [ARC-06.1a, ARC-06.1b, ARC-06.2a, ARC-06.2b1, ARC-06.2b2, ARC-06.2c]}
-  - {id: ARC-07, status: partial, path: architecture/ARC-07-packaging-update.md, depends_on: [ARC-02, UI-17], implemented_slices: [ARC-07.4a, ARC-07.4b, ARC-07.5a, ARC-07.5b, ARC-07.5c, ARC-07.5d1, ARC-07.5d2, ARC-07.5d3, ARC-07.5e, ARC-07.5f]}
+  - {id: ARC-07, status: partial, path: architecture/ARC-07-packaging-update.md, depends_on: [ARC-02, UI-17], implemented_slices: [ARC-07.4a, ARC-07.4b, ARC-07.5a, ARC-07.5b, ARC-07.5c, ARC-07.5d1, ARC-07.5d2, ARC-07.5d3, ARC-07.5e, ARC-07.5f, ARC-07.5g]}
   - {id: ARC-07.4a, status: implemented, path: architecture/ARC-07-4a-exact-source-provenance.md, depends_on: [ARC-07.1, ARC-07.2]}
   - {id: ARC-07.4b, status: implemented, path: architecture/ARC-07-4b-trusted-build-attestation.md, depends_on: [ARC-07.4a]}
   - {id: ARC-07.5a, status: implemented, path: architecture/ARC-07-5a-installed-version-slots.md, depends_on: [ARC-07.1, ARC-07.2]}
@@ -47,6 +47,7 @@ modules:
   - {id: ARC-07.5d3, status: implemented, path: architecture/ARC-07-5d3-verified-archive-admission.md, depends_on: [ARC-07.5d2, ARC-07.5a]}
   - {id: ARC-07.5e, status: implemented, path: architecture/ARC-07-5e-terminal-runtime-identity.md, depends_on: [ARC-07.5b]}
   - {id: ARC-07.5f, status: implemented, path: architecture/ARC-07-5f-installed-runtime-eval-channel.md, depends_on: [ARC-07.5a, HAR-08-H5c]}
+  - {id: ARC-07.5g, status: implemented, path: architecture/ARC-07-5g-installed-runtime-eval-identity.md, depends_on: [ARC-07.5f, HAR-08.6a]}
   - {id: ARC-08, status: planned, path: architecture/ARC-08-reliability.md, depends_on: [ARC-02, ARC-05]}
   - {id: EVO-01, status: partial, path: self-evolution/EVO-01-review-candidates.md, depends_on: [HAR-05]}
   - {id: EVO-02, status: partial, path: self-evolution/EVO-02-isolated-mutation.md, depends_on: [EVO-01]}

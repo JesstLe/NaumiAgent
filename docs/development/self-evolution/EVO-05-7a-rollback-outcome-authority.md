@@ -76,5 +76,5 @@ Outcome 固定：
 前提下显示 `rolled_back`，并在服务端禁止再次签发 Contract。`HAR-09.6b Before/After Outcome Evidence`
 现已把原 Final Evaluation 的 RED/GREEN 实施比较绑定回 Proposal。HAR-09.6c1 又在 active baseline 上产生新的
 boot probe 与 launcher identity，证明 installed runtime fresh mechanical recovery；它仍不是行为级或长期结果。
-ARC-07.5f 已关闭“用当前 workspace import 冒充 installed runtime Eval”的 transport 缺口。下一切片是
-HAR-09.6c2a Outcome/H5c lane binding；长期指标缺失时仍禁止 `promoted` 与 policy learning。
+ARC-07.5f/5g 已关闭“用当前 workspace import 或父进程平台冒充 installed runtime Eval identity”的 transport
+缺口。下一切片是 HAR-09.6c2a Outcome/H5c lane binding；长期指标缺失时仍禁止 `promoted` 与 policy learning。
