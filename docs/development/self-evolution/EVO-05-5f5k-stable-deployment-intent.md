@@ -2,7 +2,8 @@
 
 ## 状态
 
-设计冻结，待实现。最小 ARC 前置 `ARC-07.5d3 stable_deployment_intent_input_authority` 已交付。
+部分实现。最小 ARC 前置 `ARC-07.5d3 stable_deployment_intent_input_authority` 与 5f5k1 installation
+proof-of-possession 已交付；Intent Service/Store/View 尚未实现。
 
 ## 目标
 
@@ -46,6 +47,21 @@ Credential 绑定的 installation private key 对 exact challenge 签名；客�
   host target 改变或 TTL 到期都会撤销 authority；
 - artifact 大小有界，SQLite JSON 篡改 fail closed，不持久化任何 private key、下载 token 或原始机器标识。
 
+## 5f5k1 已实现：Stable Installation Proof
+
+`revalidation_stable_installation_proofs.py` 已实现独立的 strict/frozen Ed25519 proof primitive：
+
+- domain-separated canonical challenge 冻结 Stage Advance、Population、Credential、Plan、Admission、slot、channel、host target、
+  previous pointer generation/digest、100% exposure 与签发时间；
+- proof 嵌入 Credential，仅使用其中 installation public key 验签；独立 primitive 不验证 Registry Trust Policy 或 current
+  Snapshot membership，并将 `population_membership_verified` 固定为 false；
+- Credential ID/digest/member/channel 与 challenge 必须完全一致，错误 key、替换 Credential 或修改任一 challenge 字段均失败；
+- `percentage_selection_required=false`，避免把 limited cohort 误作 stable population；
+- private key 只存在于注入的异步 signer port，不进入 artifact；Proof 固定所有 deployment/rollout authority 为 false。
+
+该 primitive 尚不自行证明 Snapshot、Stage Advance、Admission 或 pointer “current”；5f5k Intent Service 必须先后动态读取这些
+authoritative source，在签名前后重验，并将 Proof 嵌入 durable Intent。UI 不得把独立 Proof 显示为可部署。
+
 ## 权限边界
 
 current View 只开放 `stable_deployment_intent_authority=true` 与下一层 `boot_preparation_authority=true`。以下字段固定 false：
@@ -66,6 +82,9 @@ Population denominator 聚合；只有所有策略门槛满足后，才允许声
 - Intent 过期不可直接重放，durable JSON 篡改 fail closed；
 - 全链路没有 boot、activation、runtime、Git 或 publish 副作用；
 - 仅运行相关 pytest 小模块、ruff、compile 与 public lazy import，不运行全量测试。
+
+5f5k1 当前验收：真实 Registry 签发的 Credential + installation Ed25519 key 验签成功；错误私钥与替换 Credential 失败；artifact 不含
+private-key material；2 项小模块测试、ruff、compile 与 public lazy import 通过。
 
 ## 后续切片
 
