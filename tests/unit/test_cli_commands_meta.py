@@ -128,6 +128,26 @@ async def test_shared_pursue_outbox_routes_empty_bounded_action(
 
 
 @pytest.mark.asyncio
+async def test_shared_pursue_outbox_routes_exact_dead_letter_requeue(
+    rendered_console: StringIO,
+) -> None:
+    engine = _EngineFacadeFake(content="死信已重新加入恢复队列。")
+    engine.tool_registry = {"pursuit_terminal_dead_letter_requeue": engine.tool}
+    dead_letter_id = "ptfail_" + "a" * 24
+
+    await commands_meta.run_pursue(
+        engine,
+        f"outbox requeue {dead_letter_id}",
+    )
+
+    tool_call, agent_name = engine.calls[0]
+    assert agent_name == "cli"
+    assert tool_call.name == "pursuit_terminal_dead_letter_requeue"
+    assert json.loads(tool_call.arguments) == {"dead_letter_id": dead_letter_id}
+    assert "重新加入恢复队列" in rendered_console.getvalue()
+
+
+@pytest.mark.asyncio
 async def test_delete_session_command_reports_durable_retry_request(
     rendered_console: StringIO,
 ) -> None:

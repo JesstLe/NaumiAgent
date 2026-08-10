@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import uuid
 from pathlib import Path
@@ -103,6 +104,9 @@ async def _run_pursue_meta(engine: Any, subcommand: str, arg: str) -> None:
         "outbox": "pursuit_terminal_outbox_run_now",
     }
     tool_name = tool_map[subcommand]
+    outbox_parts = arg.strip().split(maxsplit=1) if subcommand == "outbox" else []
+    if outbox_parts and outbox_parts[0] == "requeue":
+        tool_name = "pursuit_terminal_dead_letter_requeue"
     tool = engine.tool_registry.get(tool_name)
     if not tool:
         console.print(f"[red]工具未注册: {tool_name}[/red]")
@@ -113,13 +117,33 @@ async def _run_pursue_meta(engine: Any, subcommand: str, arg: str) -> None:
             f"[yellow]用法: /pursue {subcommand} <{identifier}>[/yellow]"
         )
         return
-    if subcommand == "outbox" and arg.strip() != "run-now":
-        console.print("[yellow]用法: /pursue outbox run-now[/yellow]")
+    if subcommand == "outbox" and not (
+        arg.strip() == "run-now"
+        or (
+            len(outbox_parts) == 2
+            and outbox_parts[0] == "requeue"
+            and re.fullmatch(r"ptfail_[0-9a-f]{24}", outbox_parts[1])
+        )
+    ):
+        console.print(
+            "[yellow]用法: /pursue outbox run-now | "
+            "requeue <ptfail_...>[/yellow]"
+        )
         return
     if subcommand == "outbox":
         result = _successful_tool_content(
-            await _execute_tool_result(engine, tool_name, {}),
-            "恢复 Pursuit 终态队列",
+            await _execute_tool_result(
+                engine,
+                tool_name,
+                (
+                    {"dead_letter_id": outbox_parts[1]}
+                    if outbox_parts[0] == "requeue"
+                    else {}
+                ),
+            ),
+            "重入队 Pursuit 终态死信"
+            if outbox_parts[0] == "requeue"
+            else "恢复 Pursuit 终态队列",
         )
     elif subcommand == "list":
         result = _successful_tool_content(

@@ -215,8 +215,11 @@
   - HAR-10.8f2e 已实现：全 failure authority 认证后生成 bounded、identity-redacted 的 active dead-letter
     review catalog，并同步 New UI/TUI schema v3；详见
     `HAR-10-8f2e-pursuit-terminal-outbox-dead-letter-review.md`。
-  - 未完成：权限化 dead-letter 人工处置、retention、push stream、跨 Store 原子 terminal commit 与 A5
-    故障/soak。
+  - HAR-10.8f2f 已实现：按公开 `ptfail_...` 精确复验 active head，经 ToolExecution 追加不可变 requeue
+    receipt，以原子 dispatch/head 转换立即恢复领取，并按处置点重置失败预算段；New UI `d/u`、CLI 与
+    Textual TUI 共用 `/pursue outbox requeue <ptfail_...>`。详见
+    `HAR-10-8f2f-pursuit-terminal-outbox-dead-letter-requeue.md`。
+  - 未完成：exact accept/abandon、retention、push stream、跨 Store 原子 terminal commit 与 A5 故障/soak。
 
 ## 与 Pursuit 的合并原则
 

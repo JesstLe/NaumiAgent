@@ -2481,6 +2481,66 @@ test("Goal terminal outbox key sends one typed action and consumes its receipt",
   assert.match(state.goalPanel.terminalOutboxActionNotice, /暂无到期记录/);
 });
 
+test("Goal dead-letter selection sends exact requeue and consumes its receipt", () => {
+  const state = createInitialState();
+  state.route = { name: "goals", originAnchor: null };
+  state.protocolNegotiated = true;
+  state.protocolNegotiation = { capabilities: ["pursuit_recovery_actions"] };
+  const first = `ptfail_${"a".repeat(24)}`;
+  const second = `ptfail_${"b".repeat(24)}`;
+  state.goalPanel.snapshot = {
+    current_goal_id: "",
+    goals: [],
+    interactions: [],
+    terminal_outbox: {
+      enabled: true,
+      status: "degraded",
+      warning: "存在死信。",
+      dead_letters: [
+        { dead_letter_id: first },
+        { dead_letter_id: second },
+      ],
+    },
+  };
+  const sent = [];
+  const send = (type, payload) => {
+    sent.push({ type, payload });
+    return "requeue-request-1";
+  };
+
+  assert.equal(handleGoalPanelKey(state, "d", send), true);
+  assert.equal(state.goalPanel.selectedDeadLetterIndex, 1);
+  assert.equal(handleGoalPanelKey(state, "u", send), true);
+  assert.deepEqual(sent, [{
+    type: "pursuit/terminal-outbox/dead-letter/requeue",
+    payload: { dead_letter_id: second },
+  }]);
+  assert.equal(state.goalPanel.terminalOutboxActionPending, true);
+
+  reduceServerEvent(state, {
+    type: "pursuit/terminal-outbox/dead-letter/requeue_result",
+    request_id: "requeue-request-1",
+    payload: {
+      schema_version: 1,
+      dead_letter_id: second,
+      status: "requeued",
+      code: "requeued",
+      message: "死信已重新加入自动恢复队列。",
+      receipt: {
+        schema_version: 1,
+        receipt_id: `ptreq_${"c".repeat(24)}`,
+        dead_letter_id: second,
+        failure_sequence: 2,
+        requeued_at: 1785888010,
+        next_attempt_at: 1785888010,
+        receipt_sha256: "d".repeat(64),
+      },
+    },
+  });
+  assert.equal(state.goalPanel.terminalOutboxActionPending, false);
+  assert.match(state.goalPanel.terminalOutboxActionNotice, /重新加入/);
+});
+
 test("evolution command opens typed review route and navigates to detail", () => {
   const state = createInitialState();
   const sent = [];

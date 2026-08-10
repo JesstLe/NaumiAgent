@@ -78,6 +78,9 @@ class ClientEventType(StrEnum):
     WORKBENCH_PROPOSAL_ACTION = "workbench/proposal/action"
     PURSUIT_RECOVERY_RESUME = "pursuit/recovery/resume"
     PURSUIT_TERMINAL_OUTBOX_RUN_NOW = "pursuit/terminal-outbox/run_now"
+    PURSUIT_TERMINAL_DEAD_LETTER_REQUEUE = (
+        "pursuit/terminal-outbox/dead-letter/requeue"
+    )
     EVOLUTION_REVIEW_REQUEST = "evolution/review/request"
     EVOLUTION_EVALUATION_LANE_REQUEST = "evolution/evaluation-lane/request"
     SET_MODE = "set_mode"
@@ -171,6 +174,9 @@ class ServerEventType(StrEnum):
     WORKBENCH_PROPOSAL_ACTION_RESULT = "workbench/proposal/action_result"
     PURSUIT_RECOVERY_ACTION_RESULT = "pursuit/recovery/action_result"
     PURSUIT_TERMINAL_OUTBOX_ACTION_RESULT = "pursuit/terminal-outbox/action_result"
+    PURSUIT_TERMINAL_DEAD_LETTER_REQUEUE_RESULT = (
+        "pursuit/terminal-outbox/dead-letter/requeue_result"
+    )
     EVOLUTION_REVIEW = "evolution/review"
     EVOLUTION_EVALUATION_LANE = "evolution/evaluation-lane"
     SHUTDOWN = "shutdown"

@@ -66,12 +66,12 @@ Bridge/Python projection 是唯一事实来源；New UI 不扫描 SQLite。前�
 
 ## 自我审视与后续边界
 
-- 本切片只建立“停止自动重试并可见”的 durable authority；尚未提供 manual requeue、accept/abandon、
-  operator note 或权限化处置回执。
+- 本切片只建立“停止自动重试并可见”的 durable authority；后续 HAR-10.8f2f 已提供 manual requeue 与
+  权限化处置回执，accept/abandon 和 operator note 仍未实现。
 - pending outbox 与 failure history 尚无 retention/prune；在受控处置和引用完整性设计完成前不能删除。
 - explicit run v1 回执继续用 `failures + failure_codes` 表达本轮产生死信，尚未增加独立 dead-letter count；
   Goal v2 health 已提供累计和 backlog 事实。
 - HarnessStore fencing 与 PursuitStore 仍是跨库 at-least-once 收敛，而非跨库原子提交。
-- 后续 HAR-10.8f2e 已先实现认证、identity-redacted 的死信审查目录；下一切片应以目录中的稳定
-  `dead_letter_id` 实现权限化 manual disposition/requeue 回执，再设计 retention preview/apply，不能先
-  prune 尚未被运维确认的事实。
+- 后续 HAR-10.8f2e 已先实现认证、identity-redacted 的死信审查目录，HAR-10.8f2f 再以稳定
+  `dead_letter_id` 实现权限化 exact requeue 回执。retention preview/apply 仍须等待 accept/abandon 权威，
+  不能先 prune 尚未被运维确认的事实。

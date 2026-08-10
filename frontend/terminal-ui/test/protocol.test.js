@@ -2415,6 +2415,50 @@ test("Pursuit terminal outbox action requires a public immutable receipt", () =>
   );
 });
 
+test("Pursuit terminal dead-letter requeue requires an exact public receipt", () => {
+  const deadLetterId = `ptfail_${"a".repeat(24)}`;
+  const normalized = normalizeServerRecord({
+    v: PROTOCOL_VERSION,
+    type: "pursuit/terminal-outbox/dead-letter/requeue_result",
+    payload: {
+      schema_version: 1,
+      dead_letter_id: deadLetterId,
+      status: "requeued",
+      code: "requeued",
+      message: "死信已重新加入自动恢复队列。",
+      receipt: {
+        schema_version: 1,
+        receipt_id: `ptreq_${"b".repeat(24)}`,
+        dead_letter_id: deadLetterId,
+        failure_sequence: 2,
+        requeued_at: 10,
+        next_attempt_at: 10,
+        receipt_sha256: "c".repeat(64),
+        source_request_sha256: "drop",
+        dispatch_before_sha256: "drop",
+      },
+    },
+  });
+
+  assert.equal(normalized.payload.status, "requeued");
+  assert.equal(normalized.payload.receipt.dead_letter_id, deadLetterId);
+  assert.equal("source_request_sha256" in normalized.payload.receipt, false);
+  assert.equal("dispatch_before_sha256" in normalized.payload.receipt, false);
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "pursuit/terminal-outbox/dead-letter/requeue_result",
+      payload: {
+        ...normalized.payload,
+        receipt: {
+          ...normalized.payload.receipt,
+          dead_letter_id: `ptfail_${"d".repeat(24)}`,
+        },
+      },
+    }),
+    /回执与状态不一致/,
+  );
+});
+
 test("evolution review snapshot is strict and drops private fields", () => {
   const item = {
     candidate_id: `evc_${"a".repeat(24)}`, finding_code: "user_reported_defect",

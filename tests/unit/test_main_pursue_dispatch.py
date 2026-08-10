@@ -63,6 +63,11 @@ async def test_run_pursue_routes_goal_through_engine_tool_executor() -> None:
         ("resume run-1", "pursuit_resume", {"run_id": "run-1"}),
         ("outbox run-now", "pursuit_terminal_outbox_run_now", {}),
         (
+            "outbox requeue ptfail_" + "a" * 24,
+            "pursuit_terminal_dead_letter_requeue",
+            {"dead_letter_id": "ptfail_" + "a" * 24},
+        ),
+        (
             "reconcile recovery-" + "a" * 64,
             "pursuit_reconcile",
             {"attempt_id": "recovery-" + "a" * 64},

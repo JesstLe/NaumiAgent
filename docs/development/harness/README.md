@@ -47,7 +47,9 @@ shutdown drain；HAR-10.8f2b 又把有界 backlog 与 worker health 同源投影
 Goal Tool/Textual TUI fallback。HAR-10.8f2c 增加 due-only 显式恢复、统一 ToolExecution 权限链和
 不可变 pass 回执；HAR-10.8f2d 又补齐独立失败预算、append-only dead-letter authority、领取排除和
 New UI/TUI schema v2 告警；HAR-10.8f2e 再提供全 authority 认证、identity-redacted 的 bounded 死信审查目录
-和 schema v3 三端投影。权限化人工处置、retention 与 push stream 仍未完成。
+和 schema v3 三端投影；HAR-10.8f2f 进一步通过 ToolExecution、不可变 receipt 与原子 head/dispatch 转换交付
+exact requeue，并同步 New UI `d/u` 与 CLI/Textual TUI fallback。exact accept/abandon、retention 与 push stream
+仍未完成。
 UI-18.5b1 已让 New UI 通过 typed ToolExecution 消费该账本，并让 TUI fallback 显示同源动作、共享命令
 和最近 attempt；前端不解析工具文案生成结果状态。
 HAR-10.2a 在 Harness DB v12 建立 typed heartbeat，并接入 Pursuit lease worker 的 acquire/renew/release；
