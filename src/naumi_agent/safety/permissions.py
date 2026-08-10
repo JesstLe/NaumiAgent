@@ -910,6 +910,19 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         risk_level=PermissionRiskLevel.MEDIUM,
         tool_family="evolution_evaluation_artifact",
     ),
+    "evolution_post_rollback_observation_contract": PermissionRule(
+        tool_name="evolution_post_rollback_observation_contract",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+        max_calls_per_session=20,
+        risk_level=PermissionRiskLevel.MEDIUM,
+        tool_family="evolution_evaluation_artifact",
+    ),
     "evolution_post_rollback_remote_lane_placement": PermissionRule(
         tool_name="evolution_post_rollback_remote_lane_placement",
         allowed_modes=[

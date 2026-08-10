@@ -216,3 +216,6 @@ queued dispatch，并在 exact Worker incarnation 上预留容量。[EVO-05.3f2c
 已接收 exact Worker Ed25519-signed typed result prefix，并在本地重算后幂等写入 H5a/pair Store。
 [EVO-05.3f2c3b2b3](EVO-05-3f2c3b2b3-remote-platform-completion.md) 已原子收口 authorization/capacity、生成 cohort，
 并以 completion 门禁推动 Matrix lane 完成；远端 stable runtime、配置/数据 rollback 与完整长期 Outcome 仍未完成。
+[HAR-09.6d1](../harness/HAR-09-6d1-post-rollback-long-term-observation-contract.md) 已把 recovered Matrix、fresh
+Runtime Verification、baseline slot/pointer/binary 与长期窗口规则冻结为不可变契约；真实 runtime binding admission、
+heartbeat window 聚合、持续健康和 promoted Outcome 仍未完成。

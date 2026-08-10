@@ -130,6 +130,7 @@ Matrix 缺失时明确显示“尚未记录”；不会把 Runtime Verification 
 
 1. 当前主机仍没有真实 Windows/Linux daemon 的生产级执行证据；自动化 fixture 只能证明协议和 authority 链；
 2. Matrix 没有 remote retry/supersede ledger，同一 lane 多 admission 仍失败关闭；
-3. `HAR-09.6d` 长期 Outcome window、coverage/censoring、持续健康与动态撤权尚未实现；
+3. `HAR-09.6d1` 已冻结长期观察契约；6d2/6d3 的 runtime admission、真实 Outcome window、
+   coverage/censoring、持续健康与动态撤权尚未实现；
 4. `promoted` Outcome、Outcome supersede、配置/数据 rollback 和最终 policy learning 闭环仍未完成；
 5. 后续 UI 应消费 6d 的独立长期 authority，不得扩充 Matrix 字段来冒充长期观察。

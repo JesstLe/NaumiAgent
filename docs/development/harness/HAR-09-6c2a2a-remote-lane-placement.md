@@ -116,4 +116,5 @@ Worker revoke、更高 epoch takeover、Coverage lane 已被填充、active base
    target-specific Build Attestation，并保持未下载、未安装、无执行权；
 2. `HAR-09.6c2a3 Remote Dispatch/Claim`：验证 fresh health、容量与 lease；
 3. `HAR-09.6c2a3e Execution Authorization` 与 `6c2a3f Signed Result Ingestion` 已完成；
-4. `HAR-09.6c2b1 Post-Rollback Behavioral Matrix Core` 与 6c2b2 typed 双端详情均已完成；下一步为 6d 长期 Outcome window。
+4. `HAR-09.6c2b1/6c2b2` Matrix Core 与 typed 双端详情、`HAR-09.6d1` 长期观察契约均已完成；
+   下一步为 6d2 managed runtime admission。

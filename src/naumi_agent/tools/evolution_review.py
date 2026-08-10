@@ -82,6 +82,10 @@ from naumi_agent.evolution.post_rollback_behavioral_matrix import (
     EvolutionPostRollbackBehavioralMatrixError,
     render_post_rollback_behavioral_matrix,
 )
+from naumi_agent.evolution.post_rollback_long_term_observation_contracts import (
+    EvolutionPostRollbackLongTermObservationContractError,
+    render_post_rollback_long_term_observation_contract,
+)
 from naumi_agent.evolution.post_rollback_remote_claims import (
     EvolutionPostRollbackRemoteClaimError,
     render_post_rollback_remote_claim,
@@ -2938,6 +2942,73 @@ class EvolutionPostRollbackBehavioralMatrixTool(Tool):
         return render_post_rollback_behavioral_matrix(view)
 
 
+class EvolutionPostRollbackLongTermObservationContractTool(Tool):
+    """Freeze exact lineage and policy for a future long-term window."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_post_rollback_observation_contract"
+
+    @property
+    def description(self) -> str:
+        return (
+            "为 recovered Behavioral Matrix 冻结长期观察 lineage、窗口、样本、"
+            "间隙与 censoring 规则；不计算指标，不授予学习、推广或执行权限。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "request_id": {
+                    "type": "string",
+                    "pattern": "^evrerollbackreq_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["request_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="回滚后长期观察契约",
+            search_hint=(
+                "evolution post rollback long term observation contract window "
+                "自进化 回滚 长期 观察 契约"
+            ),
+        )
+
+    async def execute(self, request_id: str) -> str:
+        try:
+            view = await (
+                self._engine.evolution_post_rollback_observation_contract_service.record(
+                    request_id=str(request_id or "").strip(),
+                )
+            )
+        except (
+            AttributeError,
+            EvolutionPostRollbackLongTermObservationContractError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "post_rollback_observation_contract_failed")
+            return f"回滚后长期观察契约未完成（`{code}`）：{exc}"
+        return render_post_rollback_long_term_observation_contract(view)
+
+
 class EvolutionPostRollbackRemoteLanePlacementTool(Tool):
     """Bind a missing remote lane to one exact active worker incarnation."""
 
@@ -3636,6 +3707,7 @@ def create_evolution_review_tools(
         EvolutionPostRollbackBehavioralLaneTool(engine),
         EvolutionPostRollbackBehavioralCoverageTool(engine),
         EvolutionPostRollbackBehavioralMatrixTool(engine),
+        EvolutionPostRollbackLongTermObservationContractTool(engine),
         EvolutionPostRollbackRemoteLanePlacementTool(engine),
         EvolutionPostRollbackTargetBaselineTool(engine),
         EvolutionPostRollbackRemoteDispatchTool(engine),
@@ -3673,6 +3745,7 @@ __all__ = [
     "EvolutionPostRollbackBehavioralLaneTool",
     "EvolutionPostRollbackBehavioralCoverageTool",
     "EvolutionPostRollbackBehavioralMatrixTool",
+    "EvolutionPostRollbackLongTermObservationContractTool",
     "EvolutionPostRollbackRemoteLanePlacementTool",
     "EvolutionPostRollbackRemoteDispatchTool",
     "EvolutionPostRollbackRemoteClaimTool",
