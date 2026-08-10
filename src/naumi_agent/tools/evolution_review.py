@@ -115,6 +115,10 @@ from naumi_agent.evolution.post_rollback_remote_results import (
     EvolutionPostRollbackRemoteResultManifest,
     render_post_rollback_remote_result,
 )
+from naumi_agent.evolution.post_rollback_runtime_observation_admissions import (
+    EvolutionPostRollbackRuntimeObservationAdmissionError,
+    render_post_rollback_runtime_observation_admission,
+)
 from naumi_agent.evolution.post_rollback_runtime_verifications import (
     EvolutionPostRollbackRuntimeVerificationError,
     render_post_rollback_runtime_verification,
@@ -3009,6 +3013,78 @@ class EvolutionPostRollbackLongTermObservationContractTool(Tool):
         return render_post_rollback_long_term_observation_contract(view)
 
 
+class EvolutionPostRollbackRuntimeObservationAdmissionTool(Tool):
+    """Admit one exact managed runtime startup chain for observation."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_post_rollback_runtime_admission"
+
+    @property
+    def description(self) -> str:
+        return (
+            "把长期观察契约逐字段绑定到 exact managed New UI/TUI runtime identity "
+            "与 startup origin sample；不聚合长期指标，不启动任何进程。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "request_id": {
+                    "type": "string",
+                    "pattern": "^evrerollbackreq_[0-9a-f]{24}$",
+                },
+                "subject_id": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_-]{0,95}$",
+                },
+            },
+            "required": ["request_id", "subject_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="回滚后 Runtime 观察准入",
+            search_hint=(
+                "evolution post rollback runtime observation admission binding "
+                "startup 自进化 回滚 运行时 观察 准入"
+            ),
+        )
+
+    async def execute(self, request_id: str, subject_id: str) -> str:
+        try:
+            view = await (
+                self._engine.evolution_post_rollback_runtime_admission_service.record(
+                    request_id=str(request_id or "").strip(),
+                    subject_id=str(subject_id or "").strip(),
+                )
+            )
+        except (
+            AttributeError,
+            EvolutionPostRollbackRuntimeObservationAdmissionError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "post_rollback_runtime_admission_failed")
+            return f"回滚后 Runtime 观察准入未完成（`{code}`）：{exc}"
+        return render_post_rollback_runtime_observation_admission(view)
+
+
 class EvolutionPostRollbackRemoteLanePlacementTool(Tool):
     """Bind a missing remote lane to one exact active worker incarnation."""
 
@@ -3708,6 +3784,7 @@ def create_evolution_review_tools(
         EvolutionPostRollbackBehavioralCoverageTool(engine),
         EvolutionPostRollbackBehavioralMatrixTool(engine),
         EvolutionPostRollbackLongTermObservationContractTool(engine),
+        EvolutionPostRollbackRuntimeObservationAdmissionTool(engine),
         EvolutionPostRollbackRemoteLanePlacementTool(engine),
         EvolutionPostRollbackTargetBaselineTool(engine),
         EvolutionPostRollbackRemoteDispatchTool(engine),
@@ -3746,6 +3823,7 @@ __all__ = [
     "EvolutionPostRollbackBehavioralCoverageTool",
     "EvolutionPostRollbackBehavioralMatrixTool",
     "EvolutionPostRollbackLongTermObservationContractTool",
+    "EvolutionPostRollbackRuntimeObservationAdmissionTool",
     "EvolutionPostRollbackRemoteLanePlacementTool",
     "EvolutionPostRollbackRemoteDispatchTool",
     "EvolutionPostRollbackRemoteClaimTool",

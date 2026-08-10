@@ -145,4 +145,5 @@ Run Grant Store、Harness lease 与 SQLite 验证：
 `HAR-09.6c2a3f` 已实现 signed result ingestion：Worker 在本 authorization/Attempt 下提交 bounded typed Runtime Eval
 manifest、进程平台身份与逐 repetition 证据，Control Plane 在 current window 原子准入并写入既有 H5a/H5c 权威。
 已准入结果支持授权过期后的幂等恢复；无 durable admission 的迟到自报失败关闭。`HAR-09.6c2b1` 已进一步聚合完整
-Behavioral Matrix Core、6c2b2 typed 双端详情与 6d1 长期观察契约均已完成；下一步为 6d2 managed runtime admission。
+Behavioral Matrix Core、6c2b2 typed 双端详情、6d1 长期观察契约与 6d2 managed runtime admission 均已完成；
+下一步为 6d3 长期窗口评估。

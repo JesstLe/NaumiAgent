@@ -83,7 +83,7 @@ Service 在记录前后动态调用 Matrix/Runtime Verification 的 `inspect()`�
 - `promotion_authority=false`；
 - `execution_authority=false`。
 
-下一独立切片 `HAR-09.6d2` 应建立 managed runtime admission：把契约 baseline 逐字段绑定到 exact
-`HarnessRuntimeReleaseBinding`，只接纳 startup-origin 的 append-only heartbeat chain，并生成可撤权 window input。
-`HAR-09.6d3` 再按本契约聚合 duration、coverage、gap、breach/censoring 与 sustained-health verdict；任何长期结论都不得
+`HAR-09.6d2` 已建立 managed runtime admission：把契约 baseline 逐字段绑定到 exact
+`HarnessRuntimeReleaseBinding`，只接纳 startup-origin 的 append-only heartbeat chain，并生成可撤权 observation input。
+下一独立切片 `HAR-09.6d3` 再按本契约聚合 duration、coverage、gap、breach/censoring 与 sustained-health verdict；任何长期结论都不得
 回写或扩大原 Behavioral Matrix。

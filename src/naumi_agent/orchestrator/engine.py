@@ -242,6 +242,10 @@ from naumi_agent.evolution.post_rollback_remote_results import (
     EvolutionPostRollbackRemoteResultService,
     EvolutionPostRollbackRemoteResultStore,
 )
+from naumi_agent.evolution.post_rollback_runtime_observation_admissions import (
+    EvolutionPostRollbackRuntimeObservationAdmissionService,
+    EvolutionPostRollbackRuntimeObservationAdmissionStore,
+)
 from naumi_agent.evolution.post_rollback_runtime_verifications import (
     EvolutionPostRollbackRuntimeVerificationService,
     EvolutionPostRollbackRuntimeVerificationStore,
@@ -2825,6 +2829,24 @@ class AgentEngine:
                     self.evolution_post_rollback_runtime_verification_service
                 ),
                 store=self.evolution_post_rollback_observation_contract_store,
+            )
+        )
+        self.evolution_post_rollback_runtime_admission_store = (
+            EvolutionPostRollbackRuntimeObservationAdmissionStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_post_rollback_runtime_admission_service = (
+            EvolutionPostRollbackRuntimeObservationAdmissionService(
+                workspace_root=paths.workspace_root,
+                contract_store=(
+                    self.evolution_post_rollback_observation_contract_store
+                ),
+                contract_service=(
+                    self.evolution_post_rollback_observation_contract_service
+                ),
+                harness_store=self._harness_store,
+                store=self.evolution_post_rollback_runtime_admission_store,
             )
         )
         self.evolution_proposal_outcome_projection_service = (
