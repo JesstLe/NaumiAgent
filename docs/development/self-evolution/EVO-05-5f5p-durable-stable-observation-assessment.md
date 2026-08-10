@@ -69,6 +69,6 @@ current runtime authority 已撤销就丢失故障证据。`inspect()` 每次重
 5f5p 仍只证明一个 installation 的 liveness，`completed_runs_observed=0`，Population、completed-run、stable-stage、stable-rollout 和
 promotion authority 固定为 false。
 
-下一独立切片应建立 Stable Release-bound Execution Outcome：复用 [HAR-10.2k](../harness/HAR-10-2k-release-bound-chat-run-provenance.md)
-将真实用户 run 绑定到 exact Stable Intent、Exposure 与 durable Window。它只形成单 run evidence，不能从单 Outcome 推断 stable rollout
-完成。
+[EVO-05.5f5q](EVO-05-5f5q-stable-release-bound-execution-outcome.md) 已建立 Stable Release-bound Execution Outcome：复用
+[HAR-10.2k](../harness/HAR-10-2k-release-bound-chat-run-provenance.md) 将真实用户 run 绑定到 exact Stable Intent、Population member、
+Exposure 与 durable Window。它只形成单 run evidence，不能从单 Outcome 推断 stable rollout 完成。

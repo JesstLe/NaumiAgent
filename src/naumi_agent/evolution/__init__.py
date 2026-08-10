@@ -993,6 +993,19 @@ if TYPE_CHECKING:
         EvolutionRevalidationStableDeploymentStore,
         EvolutionRevalidationStableDeploymentView,
     )
+    from naumi_agent.evolution.revalidation_stable_execution_outcome_ledger import (
+        EVOLUTION_REVALIDATION_STABLE_EXECUTION_OUTCOME_LEDGER_POLICY,
+        EvolutionRevalidationStableExecutionOutcomeLedgerService,
+        EvolutionRevalidationStableExecutionOutcomeLedgerStore,
+        EvolutionRevalidationStableExecutionOutcomeView,
+    )
+    from naumi_agent.evolution.revalidation_stable_execution_outcomes import (
+        EVOLUTION_REVALIDATION_STABLE_EXECUTION_OUTCOME_POLICY,
+        EvolutionRevalidationStableExecutionOutcome,
+        EvolutionRevalidationStableExecutionOutcomeError,
+        EvolutionRevalidationStableLivenessSourceRef,
+        build_stable_execution_outcome,
+    )
     from naumi_agent.evolution.revalidation_stable_installation_proofs import (
         EVOLUTION_REVALIDATION_STABLE_INSTALLATION_PROOF_DOMAIN,
         EvolutionRevalidationStableInstallationProof,
@@ -1447,6 +1460,15 @@ __all__ = [
     "EvolutionRevalidationStableInstallationProofPayload",
     "SignStableInstallationChallenge",
     "build_stable_installation_proof",
+    "EVOLUTION_REVALIDATION_STABLE_EXECUTION_OUTCOME_LEDGER_POLICY",
+    "EvolutionRevalidationStableExecutionOutcomeLedgerService",
+    "EvolutionRevalidationStableExecutionOutcomeLedgerStore",
+    "EvolutionRevalidationStableExecutionOutcomeView",
+    "EVOLUTION_REVALIDATION_STABLE_EXECUTION_OUTCOME_POLICY",
+    "EvolutionRevalidationStableExecutionOutcome",
+    "EvolutionRevalidationStableExecutionOutcomeError",
+    "EvolutionRevalidationStableLivenessSourceRef",
+    "build_stable_execution_outcome",
     "EVOLUTION_REVALIDATION_STABLE_OBSERVATION_WINDOW_POLICY",
     "EvolutionRevalidationStableObservationWindow",
     "EvolutionRevalidationStableObservationWindowError",
@@ -2604,6 +2626,19 @@ def __getattr__(name: str) -> object:
         "SignStableInstallationChallenge",
         "build_stable_installation_proof",
     }
+    revalidation_stable_execution_outcome_ledger_exports = {
+        "EVOLUTION_REVALIDATION_STABLE_EXECUTION_OUTCOME_LEDGER_POLICY",
+        "EvolutionRevalidationStableExecutionOutcomeLedgerService",
+        "EvolutionRevalidationStableExecutionOutcomeLedgerStore",
+        "EvolutionRevalidationStableExecutionOutcomeView",
+    }
+    revalidation_stable_execution_outcome_exports = {
+        "EVOLUTION_REVALIDATION_STABLE_EXECUTION_OUTCOME_POLICY",
+        "EvolutionRevalidationStableExecutionOutcome",
+        "EvolutionRevalidationStableExecutionOutcomeError",
+        "EvolutionRevalidationStableLivenessSourceRef",
+        "build_stable_execution_outcome",
+    }
     revalidation_stable_observation_window_exports = {
         "EVOLUTION_REVALIDATION_STABLE_OBSERVATION_WINDOW_POLICY",
         "EvolutionRevalidationStableObservationWindow",
@@ -3270,6 +3305,10 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_stable_deployments"
     elif name in revalidation_stable_runtime_exposure_exports:
         module_name = "revalidation_stable_runtime_exposures"
+    elif name in revalidation_stable_execution_outcome_ledger_exports:
+        module_name = "revalidation_stable_execution_outcome_ledger"
+    elif name in revalidation_stable_execution_outcome_exports:
+        module_name = "revalidation_stable_execution_outcomes"
     elif name in revalidation_stable_installation_proof_exports:
         module_name = "revalidation_stable_installation_proofs"
     elif name in revalidation_stable_observation_assessment_exports:

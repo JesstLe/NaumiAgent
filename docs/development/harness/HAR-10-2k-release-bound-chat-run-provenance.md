@@ -54,3 +54,5 @@ content-addressed Opt-in Outcome。
 provenance authority，并绑定 exact Assignment/Exposure/Window。下一步仍需对不同 run ID 动态重验并聚合
 `minimum_completed_runs`；[EVO-05.5f5i](../self-evolution/EVO-05-5f5i-percentage-completed-run-aggregation.md) 已完成该聚合，
 但本 provenance、单个 Outcome 与 Stage Completion 都不能直接成为 stable entry authority。
+[EVO-05.5f5q](../self-evolution/EVO-05-5f5q-stable-release-bound-execution-outcome.md) 已在 stable 路线绑定 exact Intent、
+Population Snapshot/member、Exposure 与 durable Window；单 Outcome 仍须由后续聚合按不同 run ID 和 stable guardrail 收口。
