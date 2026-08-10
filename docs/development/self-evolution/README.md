@@ -219,3 +219,5 @@ queued dispatch，并在 exact Worker incarnation 上预留容量。[EVO-05.3f2c
 [HAR-09.6d1](../harness/HAR-09-6d1-post-rollback-long-term-observation-contract.md) 已把 recovered Matrix、fresh
 Runtime Verification、baseline slot/pointer/binary 与长期窗口规则冻结为不可变契约；真实 runtime binding admission、
 heartbeat window 聚合、持续健康和 promoted Outcome 仍未完成。
+[HAR-09.6d2](../harness/HAR-09-6d2-post-rollback-runtime-observation-admission.md) 已继续将该契约逐字段绑定到 exact
+managed runtime identity 与 startup-origin Harness ledger；长期窗口评估、持续健康和 promoted Outcome 仍未完成。

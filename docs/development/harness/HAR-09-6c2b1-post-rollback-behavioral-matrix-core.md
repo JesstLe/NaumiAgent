@@ -127,6 +127,6 @@ SQLite/Harness authority 对象与 typed 两 lane 场景，但当前开发主机
 1. `HAR-09.6c2b2` 已完成：Matrix/Lane authority 已作为 typed Workbench Reviews 详情投影到 New UI 与 Textual TUI fallback；
 2. Remote retry/supersede：显式决定旧 admission 的撤权与替代关系，之后才能接受同 lane 多 attempt；
 3. 真实 Windows/Linux runner 验收与 signed build manifest 顶层 binary digest 双向比对；
-4. `HAR-09.6d1` 已冻结长期观察契约；下一独立切片为 6d2 managed runtime admission，之后再建立
+4. `HAR-09.6d1` 已冻结长期观察契约，6d2 已完成 managed runtime admission；下一独立切片为 6d3
    Outcome window、覆盖率、censoring、持续健康与动态撤权；
 5. promoted Outcome、supersede ledger、配置/数据 rollback 与最终 policy learning 闭环。

@@ -49,4 +49,4 @@ authority，并明确标注“未下载、未安装、未下发、无执行/结�
 2. `HAR-09.6c2a3b Remote Dispatch`：同时消费 fresh health 与 atomic capacity reservation；
 3. `HAR-09.6c2a3e Execution Authorization` 与 `6c2a3f Signed Result Ingestion` 已完成；
 4. `HAR-09.6c2b1/6c2b2` Matrix Core 与 typed 双端详情、`HAR-09.6d1` 长期观察契约均已完成；
-   下一步为 6d2 managed runtime admission。
+   6d2 managed runtime admission 也已完成，下一步为 6d3 长期窗口评估。
