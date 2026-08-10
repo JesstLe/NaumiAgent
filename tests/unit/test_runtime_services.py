@@ -116,6 +116,11 @@ def _agent_worker_supervisor_factory(tmp_path) -> AgentWorkerSupervisorFactory:
     )
 
 
+class _StableStageCompletionInspector:
+    async def inspect(self, *, evidence_id: str, subject_id: str):
+        raise AssertionError((evidence_id, subject_id))
+
+
 def test_agent_worker_factory_bounds_per_process_capacity(tmp_path) -> None:
     factory = _agent_worker_factory(tmp_path)
 
@@ -181,6 +186,7 @@ def test_service_override_identity_and_invalid_bundle_fail_closed(tmp_path) -> N
     browser_factory = _browser_factory(tmp_path)
     agent_worker_factory = _agent_worker_factory(tmp_path)
     supervisor_factory = _agent_worker_supervisor_factory(tmp_path)
+    inspector = _StableStageCompletionInspector()
 
     services = build_runtime_services(
         config,
@@ -192,6 +198,7 @@ def test_service_override_identity_and_invalid_bundle_fail_closed(tmp_path) -> N
             browser_execution_heartbeat_factory=browser_factory,
             agent_worker_process_factory=agent_worker_factory,
             agent_worker_supervisor_factory=supervisor_factory,
+            stable_stage_completion_inspector=inspector,
         ),
     )
     assert services.terminal_runtime_lifecycle_factory is factory
@@ -199,6 +206,7 @@ def test_service_override_identity_and_invalid_bundle_fail_closed(tmp_path) -> N
     assert services.browser_execution_heartbeat_factory is browser_factory
     assert services.agent_worker_process_factory is agent_worker_factory
     assert services.agent_worker_supervisor_factory is supervisor_factory
+    assert services.stable_stage_completion_inspector is inspector
 
     with pytest.raises(TypeError, match="TerminalRuntimeLifecycleFactory"):
         RuntimeServices(
@@ -240,6 +248,15 @@ def test_service_override_identity_and_invalid_bundle_fail_closed(tmp_path) -> N
             agent_worker_process_factory=agent_worker_factory,
             agent_worker_supervisor_factory=object(),  # type: ignore[arg-type]
         )
+    with pytest.raises(TypeError, match="5f5r inspect"):
+        RuntimeServices(
+            terminal_runtime_lifecycle_factory=factory,
+            agent_execution_heartbeat_factory=agent_factory,
+            browser_execution_heartbeat_factory=browser_factory,
+            agent_worker_process_factory=agent_worker_factory,
+            agent_worker_supervisor_factory=supervisor_factory,
+            stable_stage_completion_inspector=object(),  # type: ignore[arg-type]
+        )
     with pytest.raises(TypeError, match="RuntimeServiceOverrides"):
         build_runtime_services(
             config,
@@ -255,6 +272,7 @@ def test_root_factory_preserves_service_override_in_engine(tmp_path) -> None:
     browser_factory = _browser_factory(tmp_path)
     agent_worker_factory = _agent_worker_factory(tmp_path)
     supervisor_factory = _agent_worker_supervisor_factory(tmp_path)
+    inspector = _StableStageCompletionInspector()
     engine = create_agent_engine(
         _config(tmp_path),
         service_overrides=RuntimeServiceOverrides(
@@ -263,6 +281,7 @@ def test_root_factory_preserves_service_override_in_engine(tmp_path) -> None:
             browser_execution_heartbeat_factory=browser_factory,
             agent_worker_process_factory=agent_worker_factory,
             agent_worker_supervisor_factory=supervisor_factory,
+            stable_stage_completion_inspector=inspector,
         ),
     )
 
@@ -280,6 +299,12 @@ def test_root_factory_preserves_service_override_in_engine(tmp_path) -> None:
     )
     assert engine.agent_worker_supervisor_factory is supervisor_factory
     assert engine._services.agent_worker_supervisor_factory is supervisor_factory
+    assert engine._services.stable_stage_completion_inspector is inspector
+    assert (
+        engine.evolution_stable_population_candidate_preview_service
+        .stage_completion_inspector
+        is inspector
+    )
 
 
 @pytest.mark.asyncio

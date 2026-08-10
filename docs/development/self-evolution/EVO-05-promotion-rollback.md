@@ -181,6 +181,9 @@
 - [EVO-05.5f5t Current Population Trust Reconciliation](EVO-05-5f5t-current-population-trust-reconciliation.md)：已交付；
   生产按需加载 Population Registry trust artifact，动态核对 Snapshot latest/trust/expiry 与 signed credential membership；仍不把
   current Population 冒充逐成员 5f5r current 或 stable rollout；
+- [EVO-05.5f5u Dynamic Stage Completion Inspection Port](EVO-05-5f5u-dynamic-stage-completion-inspection-port.md)：已交付；
+  通过 Runtime 只读端口逐 current member 调用现有 5f5r `inspect()`，有界形成 dynamic authority；默认生产 read graph 尚未自动组合，
+  且 stable rollout/promotion authority 仍关闭；
 - [EVO-05.6a Automatic Pause and Rollback Request](EVO-05-6a-automatic-pause-rollback-request.md)：已交付；
   exact breach 会触发或复用 kill switch，并冻结只读 exact Rollback Request，不虚报执行完成。
 - [EVO-05.6b1 Immutable Rollback Source](EVO-05-6b1-immutable-rollback-source.md)：已交付；从 exact Git

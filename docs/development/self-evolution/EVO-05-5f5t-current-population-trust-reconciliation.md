@@ -61,9 +61,9 @@
 
 ## 自我审视与下一步
 
-本切片证明“历史候选引用的 Population 当前可信”，但仍没有证明每条 5f5r Completion 的 Plan、Baseline、Window、Outcome、
-ChatRun、usage、Binding 与 heartbeat source 当前有效。下一步必须组合只读 stable evidence graph，并对每个 member 调用 5f5r
-`inspect()`；只有 current Population 全覆盖且逐成员 authority 为 true 时，才能设计 Stable Population Completion Authority。
+本切片证明“历史候选引用的 Population 当前可信”。后续
+[EVO-05.5f5u](EVO-05-5f5u-dynamic-stage-completion-inspection-port.md) 已增加只读组合端口，对每个 current member 调用现有
+5f5r `inspect()` 并形成动态 authority；默认生产 read graph 的自动构造仍是下一独立切片。
 
 远端 Registry HTTP 分发、key rotation channel、credential renewal/revocation API 和 10,000 以上 Merkle 分页仍属于 ARC-07
 后续工作，不在本切片伪装完成。

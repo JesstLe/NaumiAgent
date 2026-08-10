@@ -1116,6 +1116,7 @@ if TYPE_CHECKING:
         EvolutionStablePopulationCandidatePreviewError,
         EvolutionStablePopulationCandidatePreviewService,
         EvolutionStablePopulationCandidateStatus,
+        EvolutionStableStageCompletionInspectionPort,
         render_stable_population_candidate_preview,
     )
     from naumi_agent.evolution.static_guards import (
@@ -1508,6 +1509,7 @@ __all__ = [
     "EvolutionStablePopulationCandidatePreviewError",
     "EvolutionStablePopulationCandidatePreviewService",
     "EvolutionStablePopulationCandidateStatus",
+    "EvolutionStableStageCompletionInspectionPort",
     "render_stable_population_candidate_preview",
     "EVOLUTION_REVALIDATION_PERCENTAGE_DEPLOYMENT_POLICY",
     "EvolutionRevalidationPercentageDeploymentError",
@@ -2698,6 +2700,7 @@ def __getattr__(name: str) -> object:
         "EvolutionStablePopulationCandidatePreviewError",
         "EvolutionStablePopulationCandidatePreviewService",
         "EvolutionStablePopulationCandidateStatus",
+        "EvolutionStableStageCompletionInspectionPort",
         "render_stable_population_candidate_preview",
     }
     revalidation_percentage_stage_completion_exports = {

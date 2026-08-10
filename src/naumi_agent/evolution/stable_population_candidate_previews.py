@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
@@ -9,13 +10,14 @@ from collections import Counter, defaultdict
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Literal, Self
+from typing import Literal, Protocol, Self, runtime_checkable
 
 import aiosqlite
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from naumi_agent.evolution.revalidation_stable_stage_completions import (
     EvolutionRevalidationStableStageCompletion,
+    EvolutionRevalidationStableStageCompletionView,
 )
 from naumi_agent.release.population_registry import (
     ReleasePopulationRegistryError,
@@ -24,13 +26,26 @@ from naumi_agent.release.population_registry import (
 )
 
 EVOLUTION_STABLE_POPULATION_CANDIDATE_PREVIEW_POLICY = (
-    "evolution-stable-population-candidate-preview-v2"
+    "evolution-stable-population-candidate-preview-v3"
 )
 _SNAPSHOT_RE = re.compile(r"^relpopsnapshot_[0-9a-f]{24}$")
 _MAX_POPULATION = 10_000
 _MAX_SOURCE_BYTES = 64 * 1024 * 1024
 _MAX_DISPLAY_ITEMS = 100
 _MAX_CONFLICTS = 20
+_MAX_DYNAMIC_INSPECTIONS = 16
+
+
+@runtime_checkable
+class EvolutionStableStageCompletionInspectionPort(Protocol):
+    """Read-only port implemented by the existing 5f5r Service."""
+
+    async def inspect(
+        self,
+        *,
+        evidence_id: str,
+        subject_id: str,
+    ) -> EvolutionRevalidationStableStageCompletionView: ...
 
 
 class _StrictModel(BaseModel):
@@ -61,7 +76,9 @@ class EvolutionStablePopulationCandidateItem(_StrictModel):
     assessed_at: str = Field(min_length=1, max_length=100)
     duplicate_intents: int = Field(ge=0, le=_MAX_POPULATION)
     recorded_stage_completion: bool
-    dynamically_revalidated: Literal[False] = False
+    dynamically_revalidated: bool
+    dynamic_stage_completion_authority: bool
+    dynamic_invalidation_reasons: tuple[str, ...] = Field(max_length=16)
 
     @model_validator(mode="after")
     def _project(self) -> Self:
@@ -69,13 +86,22 @@ class EvolutionStablePopulationCandidateItem(_StrictModel):
         expected_stage_completion = self.recorded_status == "passing"
         if self.recorded_stage_completion is not expected_stage_completion:
             raise ValueError("Stable Population candidate status projection 不一致。")
+        if not (
+            self.dynamic_invalidation_reasons
+            == tuple(sorted(set(self.dynamic_invalidation_reasons)))
+            and (
+                self.dynamically_revalidated
+                or not self.dynamic_stage_completion_authority
+            )
+        ):
+            raise ValueError("Stable Population candidate dynamic projection 不一致。")
         return self
 
 
 class EvolutionStablePopulationCandidatePreview(_StrictModel):
-    schema_version: Literal[2] = 2
+    schema_version: Literal[3] = 3
     policy_version: Literal[
-        "evolution-stable-population-candidate-preview-v2"
+        "evolution-stable-population-candidate-preview-v3"
     ] = EVOLUTION_STABLE_POPULATION_CANDIDATE_PREVIEW_POLICY
     preview_id: str = Field(pattern=r"^evstablepoppreview_[0-9a-f]{24}$")
     preview_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -113,11 +139,15 @@ class EvolutionStablePopulationCandidatePreview(_StrictModel):
     population_membership_consistent: bool
     population_invalidation_reasons: tuple[str, ...] = Field(max_length=16)
     population_snapshot_authority: bool
+    dynamic_inspector_configured: bool
+    dynamically_revalidated_members: int = Field(ge=0, le=_MAX_POPULATION)
+    dynamic_authoritative_members: int = Field(ge=0, le=_MAX_POPULATION)
+    dynamic_non_authoritative_members: int = Field(ge=0, le=_MAX_POPULATION)
     items: tuple[EvolutionStablePopulationCandidateItem, ...] = Field(
         max_length=_MAX_DISPLAY_ITEMS
     )
     candidate_complete: bool
-    dynamic_revalidation_authority: Literal[False] = False
+    dynamic_revalidation_authority: bool
     stable_rollout_authority: Literal[False] = False
     promotion_authority: Literal[False] = False
     generated_at: str = Field(min_length=1, max_length=100)
@@ -153,6 +183,22 @@ class EvolutionStablePopulationCandidatePreview(_StrictModel):
             == tuple(sorted(set(self.population_invalidation_reasons)))
         ):
             raise ValueError("Stable Population Preview trust projection 不一致。")
+        dynamic_authority = bool(
+            self.dynamic_inspector_configured
+            and self.population_snapshot_authority
+            and self.candidate_complete
+            and self.dynamically_revalidated_members == self.population_denominator
+            and self.dynamic_authoritative_members == self.population_denominator
+            and self.dynamic_non_authoritative_members == 0
+        )
+        if not (
+            self.dynamically_revalidated_members
+            == self.dynamic_authoritative_members
+            + self.dynamic_non_authoritative_members
+            and self.dynamically_revalidated_members <= self.observed_members
+            and self.dynamic_revalidation_authority is dynamic_authority
+        ):
+            raise ValueError("Stable Population Preview dynamic authority 投影不一致。")
         complete = bool(
             self.population_denominator > 0
             and self.observed_members == self.population_denominator
@@ -194,6 +240,8 @@ class EvolutionStablePopulationCandidatePreviewService:
         workspace_root: str | Path,
         db_path: str | Path,
         population_store: ReleasePopulationSnapshotStore | None = None,
+        stage_completion_inspector: EvolutionStableStageCompletionInspectionPort
+        | None = None,
         clock=None,
     ) -> None:
         self.workspace_root = Path(workspace_root).expanduser().resolve(strict=True)
@@ -203,6 +251,12 @@ class EvolutionStablePopulationCandidatePreviewService:
         ):
             raise TypeError("Stable Population Preview 需要 Population Snapshot Store。")
         self.population_store = population_store
+        if stage_completion_inspector is not None and not isinstance(
+            stage_completion_inspector,
+            EvolutionStableStageCompletionInspectionPort,
+        ):
+            raise TypeError("Stable Population Preview 需要 5f5r 只读 inspection port。")
+        self.stage_completion_inspector = stage_completion_inspector
         self.clock = clock or (lambda: datetime.now(UTC))
 
     async def preview(
@@ -221,6 +275,9 @@ class EvolutionStablePopulationCandidatePreviewService:
         selected_receipts = tuple(
             item for item in receipts if item.population_snapshot_id == selected
         )
+        dynamic_results = await self._inspect_stage_completions(
+            _current_member_receipts(selected_receipts)
+        )
         population_view, population_error = await self._inspect_population(selected)
         return _build_preview(
             workspace_root=self.workspace_root,
@@ -230,9 +287,55 @@ class EvolutionStablePopulationCandidatePreviewService:
             population_store_configured=self.population_store is not None,
             population_view=population_view,
             population_error=population_error,
+            dynamic_inspector_configured=self.stage_completion_inspector is not None,
+            dynamic_results=dynamic_results,
             limit=bounded_limit,
             generated_at=_aware(self.clock()).isoformat(),
         )
+
+    async def _inspect_stage_completions(
+        self,
+        receipts: tuple[EvolutionRevalidationStableStageCompletion, ...],
+    ) -> dict[str, tuple[bool, bool, tuple[str, ...]]]:
+        inspector = self.stage_completion_inspector
+        if inspector is None:
+            return {
+                item.evidence_id: (
+                    False,
+                    False,
+                    ("dynamic_inspector_not_configured",),
+                )
+                for item in receipts
+            }
+
+        async def inspect_one(item):
+            try:
+                view = await inspector.inspect(
+                    evidence_id=item.evidence_id,
+                    subject_id=item.subject_id,
+                )
+                if not isinstance(
+                    view, EvolutionRevalidationStableStageCompletionView
+                ) or view.receipt != item:
+                    return False, False, ("dynamic_inspection_identity_mismatch",)
+                return (
+                    True,
+                    view.stable_stage_completion_authority,
+                    view.invalidation_reasons,
+                )
+            except (OSError, RuntimeError, TypeError, ValueError) as exc:
+                code = getattr(exc, "code", "dynamic_inspection_failed")
+                return False, False, (_safe_reason_code(code),)
+
+        results: dict[str, tuple[bool, bool, tuple[str, ...]]] = {}
+        for offset in range(0, len(receipts), _MAX_DYNAMIC_INSPECTIONS):
+            batch = receipts[offset : offset + _MAX_DYNAMIC_INSPECTIONS]
+            inspected = await asyncio.gather(*(inspect_one(item) for item in batch))
+            results.update(
+                (item.evidence_id, result)
+                for item, result in zip(batch, inspected, strict=True)
+            )
+        return results
 
     async def _inspect_population(
         self,
@@ -324,6 +427,8 @@ def _build_preview(
     population_store_configured: bool,
     population_view: ReleasePopulationSnapshotView | None,
     population_error: str,
+    dynamic_inspector_configured: bool,
+    dynamic_results: dict[str, tuple[bool, bool, tuple[str, ...]]],
     limit: int,
     generated_at: str,
 ) -> EvolutionStablePopulationCandidatePreview:
@@ -397,6 +502,10 @@ def _build_preview(
                 ),
                 "population_invalidation_reasons": sorted(population_reasons),
                 "population_snapshot_authority": population_authority,
+                "dynamic_inspector_configured": dynamic_inspector_configured,
+                "dynamically_revalidated_members": 0,
+                "dynamic_authoritative_members": 0,
+                "dynamic_non_authoritative_members": 0,
                 "items": [],
                 "candidate_complete": False,
                 "dynamic_revalidation_authority": False,
@@ -469,14 +578,29 @@ def _build_preview(
     items: list[EvolutionStablePopulationCandidateItem] = []
     conflicting_members = 0
     counts: Counter[str] = Counter()
+    dynamic_revalidated_members = 0
+    dynamic_authoritative_members = 0
+    dynamic_non_authoritative_members = 0
     for member_id, member_receipts in grouped.items():
         current = max(member_receipts, key=_receipt_order)
+        dynamically_revalidated, dynamic_authority, dynamic_reasons = (
+            dynamic_results.get(
+                current.evidence_id,
+                (False, False, ("dynamic_inspection_result_missing",)),
+            )
+        )
         duplicate_intents = len({item.intent_id for item in member_receipts}) - 1
         if duplicate_intents:
             conflicting_members += 1
             conflicts.add("duplicate_member_intents")
         else:
             counts[current.metrics.status.value] += 1
+        if dynamically_revalidated:
+            dynamic_revalidated_members += 1
+            if dynamic_authority:
+                dynamic_authoritative_members += 1
+            else:
+                dynamic_non_authoritative_members += 1
         items.append(
             EvolutionStablePopulationCandidateItem(
                 installation_member_id=member_id,
@@ -489,6 +613,9 @@ def _build_preview(
                 assessed_at=current.assessed_at,
                 duplicate_intents=max(0, duplicate_intents),
                 recorded_stage_completion=(current.metrics.status.value == "passing"),
+                dynamically_revalidated=dynamically_revalidated,
+                dynamic_stage_completion_authority=dynamic_authority,
+                dynamic_invalidation_reasons=tuple(sorted(set(dynamic_reasons))),
             )
         )
     status_rank = {"breached": 0, "insufficient": 1, "passing": 2}
@@ -513,6 +640,14 @@ def _build_preview(
         and passing == denominator
         and conflicting_members == 0
         and not conflicts
+    )
+    dynamic_revalidation_authority = bool(
+        dynamic_inspector_configured
+        and population_authority
+        and candidate_complete
+        and dynamic_revalidated_members == denominator
+        and dynamic_authoritative_members == denominator
+        and dynamic_non_authoritative_members == 0
     )
     preview_status = _preview_status(
         durable_receipts=len(receipts),
@@ -554,9 +689,13 @@ def _build_preview(
             "population_membership_consistent": membership_consistent,
             "population_invalidation_reasons": sorted(population_reasons),
             "population_snapshot_authority": population_authority,
+            "dynamic_inspector_configured": dynamic_inspector_configured,
+            "dynamically_revalidated_members": dynamic_revalidated_members,
+            "dynamic_authoritative_members": dynamic_authoritative_members,
+            "dynamic_non_authoritative_members": dynamic_non_authoritative_members,
             "items": [item.model_dump(mode="json") for item in visible],
             "candidate_complete": candidate_complete,
-            "dynamic_revalidation_authority": False,
+            "dynamic_revalidation_authority": dynamic_revalidation_authority,
             "stable_rollout_authority": False,
             "promotion_authority": False,
             "generated_at": generated_at,
@@ -586,7 +725,12 @@ def render_stable_population_candidate_preview(
             f"insufficient {preview.insufficient_members}、冲突 {preview.conflicting_members}、"
             f"缺失 {preview.missing_members}"
         ),
-        "- 动态重验：**尚未接入生产组合**",
+        (
+            "- 动态 5f5r 重验："
+            f"{preview.dynamic_authoritative_members}/"
+            f"{preview.population_denominator or 0} authoritative；"
+            f"端口 `{'configured' if preview.dynamic_inspector_configured else 'missing'}`"
+        ),
         (
             "- Current Population："
             f"`{'authoritative' if preview.population_snapshot_authority else 'unavailable'}`"
@@ -616,6 +760,9 @@ def render_stable_population_candidate_preview(
             lines.append(
                 f"- `{item.installation_member_id}`：**{item.recorded_status}**；"
                 f"运行 {item.successful_runs}/{item.observed_runs}{duplicate}；"
+                "动态 `"
+                f"{'authoritative' if item.dynamic_stage_completion_authority else 'denied'}"
+                "`；"
                 f"Evidence `{item.evidence_id}`"
             )
     if preview.hidden_items:
@@ -658,7 +805,7 @@ def _restore_row(row: tuple) -> EvolutionRevalidationStableStageCompletion:
 
 def _finalize_preview(payload: dict) -> EvolutionStablePopulationCandidatePreview:
     core = {
-        "schema_version": 2,
+        "schema_version": 3,
         "policy_version": EVOLUTION_STABLE_POPULATION_CANDIDATE_PREVIEW_POLICY,
         **payload,
     }
@@ -708,6 +855,24 @@ def _receipt_order(item: EvolutionRevalidationStableStageCompletion) -> tuple:
     return (_aware(item.assessed_at), item.evidence_id)
 
 
+def _current_member_receipts(
+    receipts: tuple[EvolutionRevalidationStableStageCompletion, ...],
+) -> tuple[EvolutionRevalidationStableStageCompletion, ...]:
+    grouped: dict[str, list[EvolutionRevalidationStableStageCompletion]] = defaultdict(
+        list
+    )
+    for item in receipts:
+        grouped[item.installation_member_id].append(item)
+    return tuple(
+        max(grouped[member_id], key=_receipt_order) for member_id in sorted(grouped)
+    )
+
+
+def _safe_reason_code(value: object) -> str:
+    normalized = re.sub(r"[^a-z0-9_.-]+", "_", str(value).strip().lower())
+    return normalized[:128] or "dynamic_inspection_failed"
+
+
 def _aware(value: str | datetime) -> datetime:
     parsed = datetime.fromisoformat(value) if isinstance(value, str) else value
     if parsed.tzinfo is None or parsed.utcoffset() is None:
@@ -734,5 +899,6 @@ __all__ = [
     "EvolutionStablePopulationCandidatePreviewError",
     "EvolutionStablePopulationCandidatePreviewService",
     "EvolutionStablePopulationCandidateStatus",
+    "EvolutionStableStageCompletionInspectionPort",
     "render_stable_population_candidate_preview",
 ]

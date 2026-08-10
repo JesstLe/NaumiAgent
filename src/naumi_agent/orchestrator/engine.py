@@ -2515,6 +2515,9 @@ class AgentEngine:
                 workspace_root=paths.workspace_root,
                 db_path=config.memory.session_db_path,
                 population_store=self.evolution_release_population_snapshot_store,
+                stage_completion_inspector=(
+                    services.stable_stage_completion_inspector
+                ),
             )
         )
         self.evolution_revalidation_rollback_request_store = (
