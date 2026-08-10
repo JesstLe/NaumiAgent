@@ -148,11 +148,14 @@
   同时明确“行为级 Eval 尚未记录”，避免把可启动性扩大为业务恢复。
 - HAR-09.6c2a 已通过三端共享 Slash/Tool 暴露首个 fresh installed-runtime H5c 单平台 lane；Reviews typed
   projection 与完整跨平台聚合仍等待 6c2b，因此总体“行为级 Eval 尚未记录”保持不变。
+- HAR-09.6c2a1 已通过 `/evolution outcome-behavior-coverage` 在三端展示完整 lane 覆盖、missing/stale 与
+  目标主机调度数；typed Reviews coverage panel 仍是后续切片，当前不得把 Contract 显示为 matrix completion。
 - 完整行为矩阵、长期指标、promoted Outcome 和 policy learning 仍未完成。完整边界见
   `../harness/HAR-09-6a-proposal-outcome-projection.md` 与
   `../harness/HAR-09-6b-before-after-outcome-evidence.md`、
   `../harness/HAR-09-6c1-post-rollback-runtime-verification.md`、
   `../harness/HAR-09-6c2a-post-rollback-behavioral-lane.md`。
+  Coverage 前置见 `../harness/HAR-09-6c2a1-post-rollback-behavioral-coverage.md`。
 
 ### UI-10.6b1 已实现：Proposal defer
 

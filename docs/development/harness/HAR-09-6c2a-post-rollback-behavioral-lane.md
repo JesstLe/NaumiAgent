@@ -153,9 +153,12 @@ Evolution、Harness、Release 分属三个 SQLite authority store，不宣称跨
 
 ## 后续切片
 
-1. `HAR-09.6c2b Post-Rollback Behavioral Matrix`：收集原 Final Evaluation 的全部平台/lane，验证集合完整性，
-   聚合后才能令 `behavioral_evaluation_recorded=true`；
-2. `HAR-09.6d Long-Term Outcome Window`：定义窗口、覆盖率、censoring、持续健康和撤权；
-3. Workbench typed projection：在 Reviews 详情展示各 lane 与总体矩阵，但继续复用本 authority；
-4. promoted Outcome、supersede ledger 与 ARC-07.6 配置/数据恢复；
-5. 三库未引用竞争事实的 retention/reference scan。
+1. `HAR-09.6c2a1 Post-Rollback Behavioral Coverage Contract` 已冻结原 Final Evaluation 的完整 lane 集，
+   区分本机 installed baseline 与必须由目标主机执行的 lane；它不授予远程执行或总体评测权限；
+2. `HAR-09.6c2a2-6c2a4`：目标平台等价 baseline 解析、远程调度/认领、执行授权与签名结果摄入；
+3. `HAR-09.6c2b Post-Rollback Behavioral Matrix`：验证集合完整性并聚合，之后才能令
+   `behavioral_evaluation_recorded=true`；
+4. `HAR-09.6d Long-Term Outcome Window`：定义窗口、覆盖率、censoring、持续健康和撤权；
+5. Workbench typed projection：在 Reviews 详情展示各 lane 与总体矩阵，但继续复用本 authority；
+6. promoted Outcome、supersede ledger 与 ARC-07.6 配置/数据恢复；
+7. 三库未引用竞争事实的 retention/reference scan。

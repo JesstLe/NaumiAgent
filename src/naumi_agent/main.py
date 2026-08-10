@@ -2918,7 +2918,7 @@ def _print_help() -> None:
             "/evolution [list|detail|experiment-contract|evaluation|"
             "revalidation-rollback-execute|revalidation-rollback-outcome|"
             "outcome-before-after|outcome-verify-runtime|"
-            "outcome-verify-behavior|enqueue]",
+            "outcome-verify-behavior|outcome-behavior-coverage|enqueue]",
             "审查 Candidate、执行回滚，并记录 Outcome、实施前后、Runtime 与行为证据",
         ),
         (
@@ -3773,6 +3773,19 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 arg="",
             )
             return
+        if action == "outcome-behavior-coverage":
+            if len(parts) != 2:
+                raise ValueError(
+                    "outcome-behavior-coverage 需要一个 Rollback Request ID。"
+                )
+            await _run_tool_slash_command(
+                engine,
+                slash_command="/evolution",
+                tool_name="evolution_post_rollback_behavioral_coverage",
+                parse_args=lambda _arg: {"request_id": parts[1]},
+                arg="",
+            )
+            return
         service = engine.evolution_review_service
         if action == "detail":
             if len(parts) != 2:
@@ -3808,7 +3821,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "approval-signature、approval-decision、revalidation-request、"
                 "revalidation-rollback-execute、revalidation-rollback-outcome、"
                 "outcome-before-after、outcome-verify-runtime、"
-                "outcome-verify-behavior 或 enqueue。"
+                "outcome-verify-behavior、outcome-behavior-coverage 或 enqueue。"
             )
     except ValueError as exc:
         if action == "enqueue":
@@ -3998,6 +4011,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution outcome-verify-runtime <rollback-request-id>；"
             "/evolution outcome-verify-behavior <rollback-request-id> "
             "<final-evaluation-comparison-id>；"
+            "/evolution outcome-behavior-coverage <rollback-request-id>；"
             "/evolution enqueue <candidate-id> --mission <id> --task <id> "
             "[--agent <name>]",
             style="yellow",

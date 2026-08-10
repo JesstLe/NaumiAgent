@@ -149,8 +149,10 @@ Service 重验、CAS 与审计保持不变。HAR-09.6a 已补齐 `rolled_back` O
 回滚后行为恢复证明。HAR-09.6c1 已新增 fresh baseline boot 与 launcher identity verification，并同步三端；
 ARC-07.5f/5g 已提供 exact installed backend 的首个 `protocol_hello@1` Eval transport 和 runtime-side identity，
 HAR-09.6c2a 已将其绑定到 Outcome、6c1、Before/After 原 H5c lane 与原 baseline cohort，形成首个真实
-installed-runtime fresh H5a/H5c 单平台 lane，并通过共享 Tool/Slash 同步终端三端。完整跨平台行为矩阵、长期指标
-与 promoted Outcome 仍未完成。
+installed-runtime fresh H5a/H5c 单平台 lane，并通过共享 Tool/Slash 同步终端三端。HAR-09.6c2a1 又冻结完整
+Final Evaluation lane 覆盖契约，明确区分本机 installed baseline 与必须由目标主机重新证明的 lane，避免把
+macOS slot 冒充为 Linux/Windows evidence。目标平台 baseline 解析、远程授权/结果摄入、完整跨平台行为矩阵、
+长期指标与 promoted Outcome 仍未完成。
 HAR-07.5b 已为 New UI 增加 `v` Evidence 焦点和 `/harness evidence`，并让 CLI/Textual TUI 复用相同
 Explain authority；HAR-07.4b1 已补齐空闲 Bridge 有界重启、重新协商和精确 session 回执恢复。
 ARC-02.5a 又补齐两类安全回执的持久事件身份与 session cursor；ARC-02.5b 已补齐 New UI 持久 ACK、

@@ -69,6 +69,10 @@ from naumi_agent.evolution.mechanical_gates import (
     EvolutionMechanicalGateError,
     render_mechanical_gate,
 )
+from naumi_agent.evolution.post_rollback_behavioral_coverage import (
+    EvolutionPostRollbackBehavioralCoverageError,
+    render_post_rollback_behavioral_coverage,
+)
 from naumi_agent.evolution.post_rollback_behavioral_lanes import (
     EvolutionPostRollbackBehavioralLaneError,
     render_post_rollback_behavioral_lane,
@@ -2762,6 +2766,73 @@ class EvolutionPostRollbackBehavioralLaneTool(Tool):
         return render_post_rollback_behavioral_lane(view)
 
 
+class EvolutionPostRollbackBehavioralCoverageTool(Tool):
+    """Freeze and inspect the exact post-rollback lane coverage requirement."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_post_rollback_behavioral_coverage"
+
+    @property
+    def description(self) -> str:
+        return (
+            "冻结 rolled_back Outcome 的完整 Final Evaluation lane 集，区分本机 "
+            "installed baseline 可执行 lane 与必须由目标主机执行的 lane，并动态检查覆盖状态。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "request_id": {
+                    "type": "string",
+                    "pattern": "^evrerollbackreq_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["request_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="回滚后行为覆盖契约",
+            search_hint=(
+                "evolution post rollback behavioral coverage matrix lanes target host "
+                "自进化 回滚 行为 覆盖 平台"
+            ),
+        )
+
+    async def execute(self, request_id: str) -> str:
+        try:
+            view = await (
+                self._engine.evolution_post_rollback_behavioral_coverage_service.record(
+                    request_id=str(request_id or "").strip(),
+                )
+            )
+        except (
+            AttributeError,
+            EvolutionPostRollbackBehavioralCoverageError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "post_rollback_coverage_failed")
+            return f"回滚后行为覆盖契约未完成（`{code}`）：{exc}"
+        return render_post_rollback_behavioral_coverage(view)
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -2806,6 +2877,7 @@ def create_evolution_review_tools(
         EvolutionProposalBeforeAfterEvidenceTool(engine),
         EvolutionPostRollbackRuntimeVerificationTool(engine),
         EvolutionPostRollbackBehavioralLaneTool(engine),
+        EvolutionPostRollbackBehavioralCoverageTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -2834,6 +2906,7 @@ __all__ = [
     "EvolutionPromotionPackageInputTool",
     "EvolutionPromotionPackageTool",
     "EvolutionPostRollbackBehavioralLaneTool",
+    "EvolutionPostRollbackBehavioralCoverageTool",
     "EvolutionPostRollbackRuntimeVerificationTool",
     "EvolutionProposalBeforeAfterEvidenceTool",
     "EvolutionRewardHackingEvidenceTool",
