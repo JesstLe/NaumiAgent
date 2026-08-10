@@ -77,6 +77,10 @@ from naumi_agent.evolution.post_rollback_behavioral_lanes import (
     EvolutionPostRollbackBehavioralLaneError,
     render_post_rollback_behavioral_lane,
 )
+from naumi_agent.evolution.post_rollback_remote_dispatches import (
+    EvolutionPostRollbackRemoteDispatchError,
+    render_post_rollback_remote_dispatch,
+)
 from naumi_agent.evolution.post_rollback_remote_lane_placements import (
     EvolutionPostRollbackRemoteLanePlacementError,
     render_post_rollback_remote_lane_placement,
@@ -2999,6 +3003,85 @@ class EvolutionPostRollbackTargetBaselineTool(Tool):
         return render_post_rollback_target_baseline(view)
 
 
+class EvolutionPostRollbackRemoteDispatchTool(Tool):
+    """Queue one exact remote evaluation after health and capacity admission."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_post_rollback_remote_dispatch"
+
+    @property
+    def description(self) -> str:
+        return (
+            "消费 current Target Baseline、durable Worker Health 与 exact incarnation "
+            "capacity，为远端行为 lane 原子预留一个 queued job；不授予 claim 或执行权限。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "request_id": {
+                    "type": "string",
+                    "pattern": "^evrerollbackreq_[0-9a-f]{24}$",
+                },
+                "comparison_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                "channel": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9._-]{0,63}$",
+                },
+            },
+            "required": ["request_id", "comparison_id", "channel"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="回滚后远端 Dispatch",
+            search_hint=(
+                "evolution post rollback remote dispatch health capacity reservation "
+                "自进化 回滚 远端 派发 容量"
+            ),
+        )
+
+    async def execute(
+        self,
+        request_id: str,
+        comparison_id: str,
+        channel: str,
+    ) -> str:
+        try:
+            view = await (
+                self._engine.evolution_post_rollback_remote_dispatch_service.queue(
+                    request_id=str(request_id or "").strip(),
+                    comparison_id=str(comparison_id or "").strip(),
+                    channel=str(channel or "").strip(),
+                )
+            )
+        except (
+            AttributeError,
+            EvolutionPostRollbackRemoteDispatchError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "post_rollback_remote_dispatch_failed")
+            return f"回滚后远端 Dispatch 未完成（`{code}`）：{exc}"
+        return render_post_rollback_remote_dispatch(view)
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -3046,6 +3129,7 @@ def create_evolution_review_tools(
         EvolutionPostRollbackBehavioralCoverageTool(engine),
         EvolutionPostRollbackRemoteLanePlacementTool(engine),
         EvolutionPostRollbackTargetBaselineTool(engine),
+        EvolutionPostRollbackRemoteDispatchTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -3076,6 +3160,7 @@ __all__ = [
     "EvolutionPostRollbackBehavioralLaneTool",
     "EvolutionPostRollbackBehavioralCoverageTool",
     "EvolutionPostRollbackRemoteLanePlacementTool",
+    "EvolutionPostRollbackRemoteDispatchTool",
     "EvolutionPostRollbackTargetBaselineTool",
     "EvolutionPostRollbackRuntimeVerificationTool",
     "EvolutionProposalBeforeAfterEvidenceTool",

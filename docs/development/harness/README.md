@@ -158,8 +158,10 @@ HAR-09.6c2a2a 已进一步将 missing remote lane 绑定到 exact active Worker 
 同 version/source commit/source tree 的 target-specific Build Attestation，并动态绑定 Channel/Builder trust；健康、
 容量、下载交付和执行权仍明确为未完成。
 HAR-09.6c2a3a / ARC-04.1c 已进一步交付 Worker Registry v5 durable Health Report：exact active incarnation 的
-heartbeat、accepting-jobs 与 active-jobs 单调持久化，并可关闭重开后驱动 admission。post-rollback Dispatch、
-capacity reservation、claim/lease 和执行仍未完成。
+heartbeat、accepting-jobs 与 active-jobs 单调持久化，并可关闭重开后驱动 admission。HAR-09.6c2a3b 又把
+current Target Baseline、exact Placement、durable Health、原 Before/After lane 与 workspace Eval suite 组合为
+tamper-evident queued Dispatch，并在 Registry 中原子预留 exact incarnation capacity；claim/lease、传输、执行授权
+和结果摄取仍未完成。
 HAR-07.5b 已为 New UI 增加 `v` Evidence 焦点和 `/harness evidence`，并让 CLI/Textual TUI 复用相同
 Explain authority；HAR-07.4b1 已补齐空闲 Bridge 有界重启、重新协商和精确 session 回执恢复。
 ARC-02.5a 又补齐两类安全回执的持久事件身份与 session cursor；ARC-02.5b 已补齐 New UI 持久 ACK、
