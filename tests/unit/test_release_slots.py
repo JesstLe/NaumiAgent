@@ -154,11 +154,23 @@ def test_activation_event_binds_exact_external_authority_without_changing_v1(
         authority_sha256="4" * 64,
     )
     assert percentage_authority.authority_id.startswith("evrepercentboot_")
+    stable_authority = ReleaseActivationAuthority(
+        kind="evolution_stable_boot_preparation",
+        authority_id="evrestableboot_" + "5" * 24,
+        authority_sha256="6" * 64,
+    )
+    assert stable_authority.authority_id.startswith("evrestableboot_")
     with pytest.raises(ValueError):
         ReleaseActivationAuthority(
             kind="evolution_percentage_boot_preparation",
             authority_id="evredeployintent_" + "3" * 24,
             authority_sha256="4" * 64,
+        )
+    with pytest.raises(ValueError):
+        ReleaseActivationAuthority(
+            kind="evolution_stable_boot_preparation",
+            authority_id="evrepercentboot_" + "5" * 24,
+            authority_sha256="6" * 64,
         )
 
     with pytest.raises(ReleaseSlotError) as blocked:

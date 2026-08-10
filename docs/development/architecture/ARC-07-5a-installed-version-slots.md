@@ -29,7 +29,8 @@ manifest，以检测新增、删除或替换。
 4096 字符的 UTF-8 version output，并绑定 slot/manifest/binary digest、参数、output digest、duration 与检查时间；失败
 不产生 activation authority。subprocess timeout 使用独立 `release_slot_boot_timeout` 错误，不与执行失败或版本不匹配混淆；
 [EVO-05.5f5c](../self-evolution/EVO-05-5f5c-percentage-boot-preparation.md) 已在该固定探测之上增加跨进程 claim/lease 和
-Prepared Receipt，但仍不切换 active pointer。
+Prepared Receipt；[EVO-05.5f5l](../self-evolution/EVO-05-5f5l-stable-boot-preparation.md) 为 Stable 路线提供独立 Prepared
+Receipt。两者在 preparation 阶段都不切换 active pointer。
 
 ## Atomic Active Pointer
 
@@ -40,7 +41,8 @@ Active Pointer 和 append-only event 在同一 SQLite FULL-synchronous 事务中
 - `get_activation_event(generation)` 只在完整重放并验证 event chain 后返回指定 immutable generation，
   供部署/回滚崩溃对账读取已经不再是 tail 的历史切换；
 - 受外部授权的 activate 使用 v2 pointer event，把 authority kind、content-addressed ID 与 SHA-256 写进
-  event digest；authority 闭集支持 opt-in Intent 与 percentage Prepared Receipt，并机械校验 kind/ID prefix；
+  event digest；authority 闭集支持 opt-in Intent、percentage Prepared Receipt 与 stable Prepared Receipt，并机械校验
+  kind/ID prefix；
   旧 v1 event 不序列化空字段、摘要保持兼容，rollback 拒绝携带 activation authority；
 - activation 前重新验证目标 slot、Boot Receipt 的 binary digest，以及当前旧 slot 仍存在且不可写；
 - rollback 只能选择 current pointer 的 exact previous slot，并用 expected pointer digest 防止并发误回滚；
@@ -55,7 +57,7 @@ SQLite pointer 是权威，避免 Windows 不可靠 symlink/junction 语义；
 - 两个 slot 均保留，generation 为 1/2/3，rollback previous 指向 v2；
 - 完整链验证后可精确读取 generation 1/2/3，越过 tail 返回 missing，链中缺口失败关闭；
 - v2 activation event 绑定 exact 外部 authority，v1 event 仍按原 JSON/digest 恢复；
-- percentage Prepared-bound activation 与既有 opt-in v2 authority 可同时恢复，kind/ID mismatch 失败关闭；
+- percentage/stable Prepared-bound activation 与既有 opt-in v2 authority 可同时恢复，kind/ID mismatch 失败关闭；
 - 八线程并发安装同一 bundle 只形成一个 slot；
 - 未 boot、版本输出不匹配、文件篡改、源码泄漏全部失败关闭；
 - target 由 macOS/Linux/Windows 与 arm64/x64 机械映射；

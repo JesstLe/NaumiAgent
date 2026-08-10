@@ -118,21 +118,22 @@ class ReleaseActivationAuthority(_StrictModel):
     kind: Literal[
         "evolution_opt_in_deployment_intent",
         "evolution_percentage_boot_preparation",
+        "evolution_stable_boot_preparation",
     ]
     authority_id: str = Field(
         pattern=(
-            r"^(?:evredeployintent|evrepercentboot)_[0-9a-f]{24}$"
+            r"^(?:evredeployintent|evrepercentboot|evrestableboot)_[0-9a-f]{24}$"
         )
     )
     authority_sha256: str = Field(pattern=_SHA256_RE)
 
     @model_validator(mode="after")
     def _kind_matches_id(self) -> Self:
-        expected_prefix = (
-            "evredeployintent_"
-            if self.kind == "evolution_opt_in_deployment_intent"
-            else "evrepercentboot_"
-        )
+        expected_prefix = {
+            "evolution_opt_in_deployment_intent": "evredeployintent_",
+            "evolution_percentage_boot_preparation": "evrepercentboot_",
+            "evolution_stable_boot_preparation": "evrestableboot_",
+        }[self.kind]
         if not self.authority_id.startswith(expected_prefix):
             raise ValueError("Release activation authority kind/identifier 不一致。")
         return self
