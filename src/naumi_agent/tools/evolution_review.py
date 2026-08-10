@@ -219,6 +219,10 @@ from naumi_agent.evolution.stable_rollout_authorizations import (
     EvolutionStableRolloutAuthorizationError,
     render_stable_rollout_authorization,
 )
+from naumi_agent.evolution.stable_rollout_finalizations import (
+    EvolutionStableRolloutFinalizationError,
+    render_stable_rollout_finalization,
+)
 from naumi_agent.evolution.store import EvolutionStoreError
 from naumi_agent.tools.base import Tool, ToolMetadata
 
@@ -2887,6 +2891,71 @@ class EvolutionStableRolloutAuthorizationTool(Tool):
         return render_stable_rollout_authorization(view)
 
 
+class EvolutionStableRolloutFinalizationTool(Tool):
+    """Execute or inspect one authority-bound stable member finalization."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_stable_rollout_finalization"
+
+    @property
+    def description(self) -> str:
+        return (
+            "消费 exact Stable Rollout Authorization，以 release-store pointer CAS "
+            "完成单 installation member 的 binary-only stable finalization；支持崩溃恢复，"
+            "不执行配置/数据迁移，也不授予 Population rollout 或 promotion 权限。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["execute", "inspect"]},
+                "authorization_id": {"type": "string"},
+            },
+            "required": ["action", "authorization_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="Stable Rollout 成员最终化",
+            search_hint="evolution stable rollout finalization completion 稳定发布 最终化",
+        )
+
+    async def execute(self, action: str, authorization_id: str) -> str:
+        try:
+            service = self._engine.evolution_stable_rollout_finalization_service
+            if action == "execute":
+                view = await service.execute(authorization_id=authorization_id)
+            elif action == "inspect":
+                view = await service.inspect(authorization_id=authorization_id)
+            else:
+                raise ValueError("action 必须是 execute 或 inspect。")
+        except (
+            AttributeError,
+            EvolutionStableRolloutFinalizationError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "stable_rollout_finalization_failed")
+            return f"Stable Rollout Finalization 不可用（`{code}`）：{exc}"
+        return render_stable_rollout_finalization(view)
+
+
 class EvolutionRevalidationRollbackOutcomeTool(Tool):
     """Record one proposal-bound historical rollback Outcome."""
 
@@ -4290,6 +4359,7 @@ def create_evolution_review_tools(
         EvolutionStablePopulationCompletionTool(engine),
         EvolutionStableRollbackReadinessTool(engine),
         EvolutionStableRolloutAuthorizationTool(engine),
+        EvolutionStableRolloutFinalizationTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -4346,6 +4416,7 @@ __all__ = [
     "EvolutionStablePopulationCompletionTool",
     "EvolutionStableRollbackReadinessTool",
     "EvolutionStableRolloutAuthorizationTool",
+    "EvolutionStableRolloutFinalizationTool",
     "EvolutionRevalidationRollbackExecutionTool",
     "EvolutionRevalidationRollbackOutcomeTool",
     "EvolutionRevalidationReplayTool",

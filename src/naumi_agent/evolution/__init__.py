@@ -1153,6 +1153,15 @@ if TYPE_CHECKING:
         EvolutionStableRolloutConsumptionReceipt,
         render_stable_rollout_authorization,
     )
+    from naumi_agent.evolution.stable_rollout_finalizations import (
+        EVOLUTION_STABLE_ROLLOUT_FINALIZATION_POLICY,
+        EvolutionStableRolloutFinalizationError,
+        EvolutionStableRolloutFinalizationReceipt,
+        EvolutionStableRolloutFinalizationService,
+        EvolutionStableRolloutFinalizationStore,
+        EvolutionStableRolloutFinalizationView,
+        render_stable_rollout_finalization,
+    )
     from naumi_agent.evolution.static_guards import (
         EvolutionStaticGuard,
         EvolutionStaticGuardPolicy,
@@ -1571,6 +1580,13 @@ __all__ = [
     "EvolutionStableRolloutAuthorizationView",
     "EvolutionStableRolloutConsumptionReceipt",
     "render_stable_rollout_authorization",
+    "EVOLUTION_STABLE_ROLLOUT_FINALIZATION_POLICY",
+    "EvolutionStableRolloutFinalizationError",
+    "EvolutionStableRolloutFinalizationReceipt",
+    "EvolutionStableRolloutFinalizationService",
+    "EvolutionStableRolloutFinalizationStore",
+    "EvolutionStableRolloutFinalizationView",
+    "render_stable_rollout_finalization",
     "EVOLUTION_REVALIDATION_PERCENTAGE_DEPLOYMENT_POLICY",
     "EvolutionRevalidationPercentageDeploymentError",
     "EvolutionRevalidationPercentageDeploymentReceipt",
@@ -2797,6 +2813,15 @@ def __getattr__(name: str) -> object:
         "EvolutionStableRolloutConsumptionReceipt",
         "render_stable_rollout_authorization",
     }
+    stable_rollout_finalization_exports = {
+        "EVOLUTION_STABLE_ROLLOUT_FINALIZATION_POLICY",
+        "EvolutionStableRolloutFinalizationError",
+        "EvolutionStableRolloutFinalizationReceipt",
+        "EvolutionStableRolloutFinalizationService",
+        "EvolutionStableRolloutFinalizationStore",
+        "EvolutionStableRolloutFinalizationView",
+        "render_stable_rollout_finalization",
+    }
     revalidation_percentage_stage_completion_exports = {
         "EVOLUTION_REVALIDATION_PERCENTAGE_STAGE_COMPLETION_POLICY",
         "EvolutionRevalidationPercentageStageCompletion",
@@ -3471,6 +3496,8 @@ def __getattr__(name: str) -> object:
         module_name = "stable_rollback_readiness"
     elif name in stable_rollout_authorization_exports:
         module_name = "stable_rollout_authorizations"
+    elif name in stable_rollout_finalization_exports:
+        module_name = "stable_rollout_finalizations"
     elif name in revalidation_percentage_stage_completion_exports:
         module_name = "revalidation_percentage_stage_completions"
     elif name in revalidation_opt_in_observation_assessment_exports:

@@ -653,6 +653,15 @@ async def test_engine_composes_candidate_preview_service_and_tool(
             is engine.evolution_stable_rollout_authorization_store
         )
         assert "evolution_stable_rollout_authorization" in engine.tool_registry.names
+        assert (
+            engine.evolution_stable_rollout_finalization_service.store
+            is engine.evolution_stable_rollout_finalization_store
+        )
+        assert (
+            engine.evolution_stable_rollout_finalization_service.release_slot_store
+            is engine.evolution_release_slot_store
+        )
+        assert "evolution_stable_rollout_finalization" in engine.tool_registry.names
         result = await engine.execute_tool(
             ToolCall(
                 id="stable-population-preview-engine",

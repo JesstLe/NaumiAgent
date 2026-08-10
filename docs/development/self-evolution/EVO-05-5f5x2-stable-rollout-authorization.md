@@ -65,6 +65,6 @@ promotion_authority = false
 - expiry 后旧票保持撤权，新票形成 attempt/previous chain；
 - Engine、Tool、Slash、权限、public exports、Ruff、compile/YAML 与相关小测试通过；不运行全量测试。
 
-当前尚无 `finalize_stable_population_member` executor，因此本切片没有谎称 stable rollout 已完成。下一最小切片必须由 executor
-消费 exact nonce/Authorization，在动作前重验 expected pointer，并形成独立 Completion Receipt；配置/数据 finalization 继续等待
-ARC-07.6，Promotion authority 继续独立。
+[EVO-05.5f5x3](EVO-05-5f5x3-stable-rollout-member-finalization.md) 已消费 exact nonce/Authorization，在 ARC-07 release store
+中以 writer-fenced expected-pointer CAS 完成单 member binary finalization，并形成可崩溃恢复的独立 Completion Receipt。它仍不把
+单 member 冒充完整 Population rollout；配置/数据 finalization 继续等待 ARC-07.6，Promotion authority 继续独立。

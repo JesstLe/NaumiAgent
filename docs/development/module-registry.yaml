@@ -111,6 +111,7 @@ modules:
   - {id: EVO-05.5f5w, status: implemented, path: self-evolution/EVO-05-5f5w-stable-population-completion-authority.md, depends_on: [EVO-05.5f5v, UI-10]}
   - {id: EVO-05.5f5x1, status: implemented, path: self-evolution/EVO-05-5f5x1-stable-rollback-readiness.md, depends_on: [EVO-05.5f5w, EVO-05.5f5m, ARC-07.5a, UI-10]}
   - {id: EVO-05.5f5x2, status: implemented, path: self-evolution/EVO-05-5f5x2-stable-rollout-authorization.md, depends_on: [EVO-05.5f5x1, EVO-05.1a, UI-10]}
+  - {id: EVO-05.5f5x3, status: implemented, path: self-evolution/EVO-05-5f5x3-stable-rollout-member-finalization.md, depends_on: [EVO-05.5f5x2, ARC-07.5a, UI-10]}
   - {id: EVO-05.6a, status: implemented, path: self-evolution/EVO-05-6a-automatic-pause-rollback-request.md, depends_on: [EVO-05.5b, EVO-05.1a]}
   - {id: EVO-05.6b1, status: implemented, path: self-evolution/EVO-05-6b1-immutable-rollback-source.md, depends_on: [EVO-05.6a]}
   - {id: EVO-05.6b2a, status: implemented, path: self-evolution/EVO-05-6b2a-fenced-slot-rollback.md, depends_on: [EVO-05.6b1, ARC-07.5a, ARC-07.5b]}
