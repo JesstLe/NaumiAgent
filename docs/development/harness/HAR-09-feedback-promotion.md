@@ -81,6 +81,8 @@
 - EVO-05.6b2a 已提供第一个真实 `rollback_executed=true` 的 authority-bound slot Receipt，并明确
   `outcome_recorded=false`；这关闭了无数据迁移回滚的执行事实前置，但 HAR-09.6 仍需 EVO-05.7 Outcome、
   Proposal/Contract 反向绑定与 ARC-07.6 数据恢复分支，不能直接把该 Receipt 标记为 Proposal outcome。
+- EVO-05.6b2a1 已把该事实接到受权限治理的 Agent Tool 与共享 Slash Router；normal 只有一次高风险确认，bypass
+  不确认，New UI/TUI 回显同一 durable Receipt。该产品入口仍不改变 `outcome_recorded=false`。
 - HAR-09 仍未实现 outcome tracking，因此整体继续保持 partial。
 
 EVO-02.1b 已把不可执行 Contract 包装为 workspace-bound durable Authority；HAR-09.5c 在其上补齐产品动作、

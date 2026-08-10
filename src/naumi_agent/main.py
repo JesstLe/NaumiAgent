@@ -2888,8 +2888,9 @@ def _print_help() -> None:
             "记录隐私安全的反馈候选；偏好、取消和赞扬不会计入缺陷",
         ),
         (
-            "/evolution [list|detail|experiment-contract|evaluation|enqueue]",
-            "审查 Candidate、实验约束 authority、评测回执或 Workbench 队列",
+            "/evolution [list|detail|experiment-contract|evaluation|"
+            "revalidation-rollback-execute|enqueue]",
+            "审查 Candidate、评测证据、执行受控版本槽回滚或加入 Workbench 队列",
         ),
         (
             "/copy [all|last|error|receipt [receipt-id|latest]]",
@@ -3674,6 +3675,19 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 Markdown(render_evolution_revalidation_runtime_contract(view))
             )
             return
+        if action == "revalidation-rollback-execute":
+            if len(parts) != 2:
+                raise ValueError(
+                    "revalidation-rollback-execute 需要一个 Rollback Request ID。"
+                )
+            await _run_tool_slash_command(
+                engine,
+                slash_command="/evolution",
+                tool_name="evolution_revalidation_rollback_execute",
+                parse_args=lambda _arg: {"request_id": parts[1]},
+                arg="",
+            )
+            return
         service = engine.evolution_review_service
         if action == "detail":
             if len(parts) != 2:
@@ -3706,7 +3720,8 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "decision-state、decision-resolve、reflection、"
                 "reflection-revoke、promotion-input、promotion-package、"
                 "approval-requirement、approval-request、approval-principal、"
-                "approval-signature、approval-decision、revalidation-request 或 enqueue。"
+                "approval-signature、approval-decision、revalidation-request、"
+                "revalidation-rollback-execute 或 enqueue。"
             )
     except ValueError as exc:
         if action == "enqueue":
@@ -3890,6 +3905,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution revalidation-evaluation-source <fresh-evaluation-plan-id>；"
             "/evolution revalidation-validation-plan <immutable-source-id>；"
             "/evolution revalidation-runtime-contract <validation-plan-id>；"
+            "/evolution revalidation-rollback-execute <rollback-request-id>；"
             "/evolution enqueue <candidate-id> --mission <id> --task <id> "
             "[--agent <name>]",
             style="yellow",

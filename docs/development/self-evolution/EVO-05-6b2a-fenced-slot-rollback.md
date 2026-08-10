@@ -77,8 +77,8 @@ Launch Resolution。`rollback_fact_authority` 表示历史事实仍可证明；�
 
 - ARC-07.6 配置 snapshot、数据备份/恢复、migration compatibility 与 forward recovery；
 - Windows 真实 `.exe` rollback runner；当前 POSIX 真实启动链与跨平台 schema/target 单测不能替代 Windows 验收；
-- 用户/Agent 双通道的显式 rollback action 与 New UI/TUI 进度页；当前仅完成 Engine 内部 authority composition；
+- 用户/Agent 双通道的显式 rollback action 与共享 Receipt 已由
+  [EVO-05.6b2a1](EVO-05-6b2a1-explicit-rollback-action.md) 补齐；独立长任务进度页仍留待执行时长需要时再引入；
 - EVO-05.7 `rolled_back/superseded` Outcome 与 HAR-09.6 Proposal before/after 回注。
 
-下一最小切片应先把本执行服务接入共享显式交互（normal 单次确认、bypass 直接执行）并显示 durable Receipt；随后
-EVO-05.7 才能消费真实 rollback fact，HAR-09.6 才能关联 Proposal 实施后的 HAR-08 before/after 与最终状态。
+下一最小切片是 EVO-05.7 消费真实 rollback fact；随后 HAR-09.6 才能关联 Proposal 实施后的 HAR-08 before/after 与最终状态。

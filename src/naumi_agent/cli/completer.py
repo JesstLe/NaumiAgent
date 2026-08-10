@@ -70,7 +70,7 @@ def _build_commands() -> list[CommandMeta]:
             "/evolution",
             "审查 Candidate、签发评测/决策证据或加入 Workbench 队列",
             takes_arg=True,
-            arg_hint="[list|detail|evaluation|decision-state|decision-resolve|reflection|reflection-revoke|promotion-input|promotion-package|approval-requirement|approval-request|approval-principal|approval-signature|approval-decision|revalidation-request|revalidation-replay|enqueue]",
+            arg_hint="[list|detail|evaluation|decision-state|decision-resolve|reflection|reflection-revoke|promotion-input|promotion-package|approval-requirement|approval-request|approval-principal|approval-signature|approval-decision|revalidation-request|revalidation-replay|revalidation-rollback-execute|enqueue]",
             readonly=False,
             category="基础",
         ),
