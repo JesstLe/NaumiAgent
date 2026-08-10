@@ -202,6 +202,9 @@ Admission、host target 与 previous pointer CAS，仍不执行 boot 或声明 s
 [EVO-05.5f5n](EVO-05-5f5n-stable-runtime-exposure.md) 已交付：将 current Stable Deployment 与 ARC-07.5e managed runtime
 identity、HAR starting/running ledger exact 绑定，形成单 installation startup exposure；runtime stopped 后保留历史 fact 并动态
 撤销 observation input，仍不声明持续健康、完整 population rollout 或 promotion。
+[EVO-05.5f5o](EVO-05-5f5o-stable-observation-window.md) 已交付：从 exact Exposure 与 HAR sample chain 机械计算 stable 阶段
+持续时长、样本、gap 和 stale，区分 insufficient/passing/breached；它仍是单 installation artifact，不授予 completed-run、
+population、stable completion 或 promotion authority。
 [EVO-05.6a](EVO-05-6a-automatic-pause-rollback-request.md) 已让 exact breach 幂等触发或复用 HMAC kill switch，并冻结
 绑定 exact prior Rollback Plan 的只读 Request；它不写 workspace/Git，也不把请求虚报成已回滚。
 [EVO-05.6b1](EVO-05-6b1-immutable-rollback-source.md) 已从 exact Git commit/tree 读取 baseline blob，验证每个
