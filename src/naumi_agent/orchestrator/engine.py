@@ -222,6 +222,10 @@ from naumi_agent.evolution.post_rollback_long_term_observation_contracts import 
     EvolutionPostRollbackLongTermObservationContractService,
     EvolutionPostRollbackLongTermObservationContractStore,
 )
+from naumi_agent.evolution.post_rollback_long_term_outcomes import (
+    EvolutionPostRollbackLongTermOutcomeService,
+    EvolutionPostRollbackLongTermOutcomeStore,
+)
 from naumi_agent.evolution.post_rollback_remote_claims import (
     EvolutionPostRollbackRemoteClaimService,
     EvolutionPostRollbackRemoteClaimStore,
@@ -2878,6 +2882,44 @@ class AgentEngine:
                 ),
                 harness_store=self._harness_store,
                 store=self.evolution_post_rollback_long_term_assessment_store,
+            )
+        )
+        self.evolution_post_rollback_long_term_outcome_store = (
+            EvolutionPostRollbackLongTermOutcomeStore(
+                config.memory.session_db_path,
+                rollback_outcome_store=(
+                    self.evolution_revalidation_rollback_outcome_store
+                ),
+                contract_store=(
+                    self.evolution_post_rollback_observation_contract_store
+                ),
+                assessment_store=(
+                    self.evolution_post_rollback_long_term_assessment_store
+                ),
+            )
+        )
+        self.evolution_post_rollback_long_term_outcome_service = (
+            EvolutionPostRollbackLongTermOutcomeService(
+                workspace_root=paths.workspace_root,
+                rollback_outcome_store=(
+                    self.evolution_revalidation_rollback_outcome_store
+                ),
+                rollback_outcome_service=(
+                    self.evolution_revalidation_rollback_outcome_service
+                ),
+                contract_store=(
+                    self.evolution_post_rollback_observation_contract_store
+                ),
+                contract_service=(
+                    self.evolution_post_rollback_observation_contract_service
+                ),
+                assessment_store=(
+                    self.evolution_post_rollback_long_term_assessment_store
+                ),
+                assessment_service=(
+                    self.evolution_post_rollback_long_term_assessment_service
+                ),
+                store=self.evolution_post_rollback_long_term_outcome_store,
             )
         )
         self.evolution_proposal_outcome_projection_service = (

@@ -222,4 +222,6 @@ heartbeat window 聚合已由 6d2/6d3 继续完成，promoted Outcome 仍未完�
 [HAR-09.6d2](../harness/HAR-09-6d2-post-rollback-runtime-observation-admission.md) 已继续将该契约逐字段绑定到 exact
 managed runtime identity 与 startup-origin Harness ledger；6d3 已完成长期窗口评估，promoted Outcome 仍未完成。
 [HAR-09.6d3](../harness/HAR-09-6d3-post-rollback-long-term-observation-assessment.md) 已完成真实 ledger 分页、head
-对账、四态长期窗口和动态撤权；6e Long-Term Outcome、supersede ledger 与 promoted Outcome 仍未完成。
+对账、四态长期窗口和动态撤权。[HAR-09.6e1](../harness/HAR-09-6e1-post-rollback-long-term-outcome-authority.md)
+已进一步签发 rollback-recovery-observed Outcome revision 与 append-only supersede event，保留 immutable rollback fact；
+统一 UI 投影、promoted Outcome、配置/数据 rollback 与 policy learning authority 仍未完成。

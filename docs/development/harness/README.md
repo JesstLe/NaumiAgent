@@ -160,7 +160,9 @@ Tool/Slash 暴露；它尚不读取 observation ledger，也不授予长期、�
 HAR-09.6d2 已把该契约逐字段绑定到 exact managed New UI/TUI `ReleaseRuntimeIdentity`、Harness Binding 与原子
 startup sequence-1 origin sample，生成动态可撤权的 observation input；长期窗口聚合和 sustained-health verdict
 已由 HAR-09.6d3 继续完成：真实 ledger 分页、head 二次读取和 insufficient/passing/breached/censored 四态评估均已
-落地。6e Long-Term Outcome Authority、promoted Outcome 与配置/数据 rollback 仍未完成。
+落地。HAR-09.6e1 又把 current passing Assessment 与 immutable rolled_back root 组合为内容寻址 Long-Term Outcome
+revision，并用同事务 append-only supersede event 推进投影 head；历史 rollback fact 保留，learning/promotion/execution
+authority 均保持关闭。Workbench/New UI/TUI 的统一 Outcome 投影、promoted Outcome 与配置/数据 rollback 仍未完成。
 HAR-09.6c2a2a 已进一步将 missing remote lane 绑定到 exact active Worker incarnation，并机械导出
 `macos/linux/windows-{arm64|x64}` target。HAR-09.6c2a2b 又从 current signed Release Channel Catalog 解析
 同 version/source commit/source tree 的 target-specific Build Attestation，并动态绑定 Channel/Builder trust；健康、
