@@ -90,4 +90,6 @@ launcher 启动一个完整交互式子进程；Windows 真 `.exe` 与 packaged 
 5f5e 只形成单 installation 的一条 exact startup exposure；它没有跨所有 Harness subject 排序，因此不声称这是全局时间上
 最早的 runtime。[EVO-05.5f5f](EVO-05-5f5f-percentage-observation-window.md) 已消费 Exposure、后续 append-only
 heartbeat samples 与 Plan guardrails，机械检查 minimum duration、sample count 与 maximum gap；它仍不会把单 installation
-window 冒充整个 cohort 的 rollout completion。下一步由 5f5g 补 durable paging 与 current-source 动态重验。
+window 冒充整个 cohort 的 rollout completion。
+[EVO-05.5f5g](EVO-05-5f5g-durable-percentage-observation-assessment.md) 已进一步补齐 durable paging、长生命周期 suffix 与
+current-source 动态重验；下一步必须独立建立 percentage release-bound outcome。

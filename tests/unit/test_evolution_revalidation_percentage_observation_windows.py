@@ -81,6 +81,8 @@ async def test_percentage_window_uses_exact_exposure_chain_and_runtime_duration(
         "minimum_sample_count",
     }
     assert insufficient.installation_exposure_binding_authority
+    assert insufficient.sample_scope == "origin"
+    assert insufficient.suffix_anchor_sha256 == ""
     assert not insufficient.completed_run_evidence_authority
     assert not insufficient.percentage_stage_completion_authority
     with pytest.raises(EvolutionRevalidationPercentageObservationWindowError) as bounded:
@@ -109,6 +111,7 @@ async def test_percentage_window_uses_exact_exposure_chain_and_runtime_duration(
         assessed_at=samples[-1].observed_at,
     )
     assert window.status is EvolutionRevalidationPercentageObservationWindowStatus.PASSING
+    assert window.sample_scope == "origin"
     assert window.percentage_runtime_window_authority
     assert window.operational_sample_count == minimum_samples
     assert window.observation_seconds == stage.minimum_observation_seconds
@@ -193,7 +196,7 @@ async def test_percentage_window_rejects_other_runtime_and_breaches_on_failure(
     )
     with pytest.raises(
         EvolutionRevalidationPercentageObservationWindowError,
-        match="exact Exposure startup pair",
+        match="exact Exposure startup pair 或连续 suffix",
     ) as mismatch:
         build_percentage_observation_window(
             exposure=exposure,

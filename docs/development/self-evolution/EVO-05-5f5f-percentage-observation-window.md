@@ -17,9 +17,11 @@ percentage rollout stage/assignment guardrail，形成 content-addressed
 1. Exposure 必须已具有 installation exposure 与 percentage observation input authority；
 2. Plan 的第三阶段必须是 `percentage/limited`，Assignment 必须仍精确绑定同一 Plan、exposure percent、population
    denominator、target member count 与 member rank；
-3. sample 1/2 必须逐对象等于 Exposure 冻结的 startup/ready pair；
+3. `origin` scope 的 sample 1/2 必须逐对象等于 Exposure 冻结的 startup/ready pair；`suffix` scope 必须来自 startup
+   origin、位于 ready 之后并保存首样本 previous digest；
 4. 每个 sample 必须绑定同一 canonical workspace、Binding、Runtime Identity、surface、subject、instance、epoch 与 timeout；
-5. 只接受 startup origin、从 sequence 1 开始的连续 sequence/SHA-256 链，拒绝 legacy snapshot、缺页、拼接与时钟倒退；
+5. 只接受 startup origin 的连续 sequence/SHA-256 链，拒绝 legacy snapshot、缺页、拼接与时钟倒退；suffix 的缺失前缀
+   必须由 5f5g Harness cursor 路径验证后才能获得 durable authority；
 6. 输入最多 5000 个样本，策略所需样本超过该界限时失败关闭。
 
 调用方不能覆盖 observation duration、sample count、最大 gap、cohort 参数、状态或任何 authority。所有投影均由冻结
@@ -50,8 +52,9 @@ artifact 与 Harness evidence 机械重算，Window ID/SHA-256 覆盖完整内�
 
 ## 当前边界与下一步
 
-本构建器不读取 Store，因此传入旧 Exposure 或旧 sample tuple 时不会自行发现 pointer/Deployment 漂移，也不负责跨 500 条分页。
-下一最小切片为 `EVO-05.5f5g Durable Percentage Observation Assessment`：以 bounded HAR paging 重建并持久化 Window，
+本构建器不读取 Store，因此传入旧 Exposure 或旧 sample tuple 时不会自行发现 pointer/Deployment 漂移；suffix 也只有局部
+continuity，不应脱离 durable source 直接用于生产决策。
+[EVO-05.5f5g](EVO-05-5f5g-durable-percentage-observation-assessment.md) 已以 bounded HAR paging 重建并持久化 Window，
 在 inspect 时重验 current Exposure/Deployment/Binding 与新增 terminal sample，从而动态撤销旧 passing authority。
 
-群体 completed-run outcome、percentage cohort aggregation 与 stage completion 必须在 5f5g 之后另建 evidence，不能合并进本切片。
+下一步必须另建 percentage release-bound outcome，再聚合 cohort completed runs；不能从 liveness 直接推断 stage completion。
