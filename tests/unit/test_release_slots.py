@@ -11,6 +11,7 @@ import pytest
 from naumi_agent.release.artifact import assemble_release_artifact
 from naumi_agent.release.slots import (
     ReleaseActivationAuthority,
+    ReleaseRollbackAuthority,
     ReleaseSlotError,
     ReleaseSlotStore,
     host_release_target,
@@ -180,6 +181,60 @@ def test_activation_event_binds_exact_external_authority_without_changing_v1(
             _activation_authority=authority,
         )
     assert blocked.value.code == "release_activation_authority_forbidden"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="fixture is a POSIX executable")
+def test_rollback_event_binds_distinct_authority_without_changing_legacy_rollback(
+    tmp_path: Path,
+) -> None:
+    store = ReleaseSlotStore(tmp_path / "installed")
+    baseline = store.install(_bundle(tmp_path, version="1.0.0", output_name="release-v1"))
+    store.verify_bootable(baseline.slot_id)
+    store.activate(baseline.slot_id)
+    candidate = store.install(_bundle(tmp_path, version="1.1.0", output_name="release-v2"))
+    store.verify_bootable(candidate.slot_id)
+    active = store.activate(candidate.slot_id)
+    authority = ReleaseRollbackAuthority(
+        kind="evolution_revalidation_rollback_source",
+        authority_id="evrerollbacksrc_" + "1" * 24,
+        authority_sha256="2" * 64,
+    )
+
+    rolled_back = store.activate(
+        baseline.slot_id,
+        action="rollback",
+        _expected_pointer_sha256=active.pointer_sha256,
+        _rollback_authority=authority,
+    )
+
+    assert rolled_back.schema_version == 3
+    assert rolled_back.rollback_authority == authority
+    assert rolled_back.activation_authority is None
+    assert store.get_rollback_event_by_authority(authority) == rolled_back
+    with pytest.raises(ReleaseSlotError) as blocked:
+        store.activate(candidate.slot_id, _rollback_authority=authority)
+    assert blocked.value.code == "release_rollback_authority_forbidden"
+    unrelated = ReleaseRollbackAuthority(
+        kind="evolution_revalidation_rollback_source",
+        authority_id="evrerollbacksrc_" + "3" * 24,
+        authority_sha256="4" * 64,
+    )
+    with pytest.raises(ReleaseSlotError) as conflict:
+        store.activate(
+            baseline.slot_id,
+            action="rollback",
+            _rollback_authority=unrelated,
+        )
+    assert conflict.value.code == "release_rollback_authority_conflict"
+    reactivated = store.activate(candidate.slot_id)
+    with pytest.raises(ReleaseSlotError) as reused:
+        store.activate(
+            baseline.slot_id,
+            action="rollback",
+            _expected_pointer_sha256=reactivated.pointer_sha256,
+            _rollback_authority=authority,
+        )
+    assert reused.value.code == "release_rollback_authority_reused"
 
 
 def test_install_is_cross_thread_idempotent(tmp_path: Path) -> None:

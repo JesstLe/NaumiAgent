@@ -167,8 +167,10 @@
   exact breach 会触发或复用 kill switch，并冻结只读 exact Rollback Request，不虚报执行完成。
 - [EVO-05.6b1 Immutable Rollback Source](EVO-05-6b1-immutable-rollback-source.md)：已交付；从 exact Git
   baseline 冻结只读 content-addressed bytes，检测 tree/blob 漂移，但不覆盖未部署 workspace。
-- EVO-05.6b2 Rollback Executor：消费 ARC-07 version slot，执行 binary/config/schema/patch 的 crash-safe 兼容回滚、
-  数据保护和启动验证。
+- [EVO-05.6b2a Fenced Installed-Slot Rollback](EVO-05-6b2a-fenced-slot-rollback.md)：已交付；消费 exact
+  Request/Source/Plan，以 v3 authority-bound pointer 和 expected-pointer CAS 回滚 binary bundle，支持 Receipt 写入
+  崩溃恢复与 post-rollback Launch Resolution；需要配置/数据恢复时等待 ARC-07.6 并失败关闭。
+- EVO-05.6b2b Config/Data Rollback：消费 ARC-07.6 snapshot/migration authority，完成需要数据保护的兼容回滚。
 - EVO-05.7 Outcome record：promoted/rolled_back/superseded 与长期指标。
 
 ## 验收标准
@@ -189,6 +191,6 @@ Authority、版本化 Fresh Promotion Input、新 Approval Requirement/Response�
 已实现签名 result manifest、本地 H5a/pair prefix 摄取、remote cohort/Matrix 收口、immutable rollout plan、fenced local-canary entry、
 真实 local-canary executor、可信 monitor baseline、runtime observation、显式本机 opt-in Intent、authority-bound pointer
 activation/crash reconcile、percentage assignment/runtime/window/outcome aggregation、stable entry authorization、逐安装 stable
-Deployment Intent/Boot Preparation 与 automatic pause/rollback request，但尚未实现 stable activation/runtime execution、version-slot rollback
-executor 或最终 Outcome 回注。任何界面不得把 stable entry 或 Deployment Intent authority 宣称为已进入 stable rollout，
+Deployment Intent/Boot Preparation/Activation 与 automatic pause/rollback request；无数据迁移的 version-slot rollback 已能
+authority-bound 执行和崩溃对账，但尚未实现 stable runtime execution、配置/数据 rollback 或最终 Outcome 回注。任何界面不得把 stable entry 或 Deployment Intent authority 宣称为已进入 stable rollout，
 也不得把 rollback source 冻结宣称为已回滚。

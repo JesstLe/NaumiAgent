@@ -173,6 +173,10 @@ from naumi_agent.evolution.revalidation_requests import (
     EvolutionRevalidationRequestService,
     EvolutionRevalidationRequestStore,
 )
+from naumi_agent.evolution.revalidation_rollback_executions import (
+    EvolutionRevalidationRollbackExecutionService,
+    EvolutionRevalidationRollbackExecutionStore,
+)
 from naumi_agent.evolution.reward_hacking_evidence import (
     EvolutionRewardHackingEvidenceBuilder,
     EvolutionRewardHackingEvidenceExecutor,
@@ -653,6 +657,18 @@ def test_engine_composes_experiment_contract_and_worktree_lease_services(
         EvolutionPatchSetRecoveryCoordinator,
     )
     assert isinstance(engine.evolution_patch_writer, EvolutionPatchWriter)
+    assert isinstance(
+        engine.evolution_revalidation_rollback_execution_store,
+        EvolutionRevalidationRollbackExecutionStore,
+    )
+    assert isinstance(
+        engine.evolution_revalidation_rollback_execution_service,
+        EvolutionRevalidationRollbackExecutionService,
+    )
+    assert (
+        engine.evolution_revalidation_rollback_execution_service.release_slot_store
+        is engine.evolution_release_slot_store
+    )
     assert isinstance(
         engine.evolution_revalidation_candidate_bundle_admission_service,
         EvolutionRevalidationCandidateBundleAdmissionService,

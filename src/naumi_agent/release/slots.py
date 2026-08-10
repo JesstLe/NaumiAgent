@@ -139,8 +139,14 @@ class ReleaseActivationAuthority(_StrictModel):
         return self
 
 
+class ReleaseRollbackAuthority(_StrictModel):
+    kind: Literal["evolution_revalidation_rollback_source"]
+    authority_id: str = Field(pattern=r"^evrerollbacksrc_[0-9a-f]{24}$")
+    authority_sha256: str = Field(pattern=_SHA256_RE)
+
+
 class ReleaseActivePointer(_StrictModel):
-    schema_version: Literal[1, 2] = 1
+    schema_version: Literal[1, 2, 3] = 1
     policy_version: Literal["naumi-release-active-pointer-v1"] = RELEASE_ACTIVE_POINTER_POLICY
     pointer_id: str = Field(pattern=r"^relactive_[0-9a-f]{24}$")
     pointer_sha256: str = Field(pattern=_SHA256_RE)
@@ -157,16 +163,37 @@ class ReleaseActivePointer(_StrictModel):
         default=None,
         exclude_if=lambda value: value is None,
     )
+    rollback_authority: ReleaseRollbackAuthority | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
     atomic_switch_satisfied: Literal[True] = True
     old_slot_retained: Literal[True] = True
     activated_at: str = Field(min_length=1, max_length=100)
 
     @model_validator(mode="after")
     def _exact(self) -> Self:
-        if (self.schema_version == 1) is not (self.activation_authority is None):
+        authority_shape = (
+            (
+                self.schema_version == 1
+                and self.activation_authority is None
+                and self.rollback_authority is None
+            )
+            or (
+                self.schema_version == 2
+                and self.action == "activate"
+                and self.activation_authority is not None
+                and self.rollback_authority is None
+            )
+            or (
+                self.schema_version == 3
+                and self.action == "rollback"
+                and self.activation_authority is None
+                and self.rollback_authority is not None
+            )
+        )
+        if not authority_shape:
             raise ValueError("Release Active Pointer authority schema 不一致。")
-        if self.activation_authority is not None and self.action != "activate":
-            raise ValueError("Release Active Pointer rollback 不得携带 activation authority。")
         if (self.previous_slot_id is None) is not (self.previous_slot_sha256 is None):
             raise ValueError("Release Active Pointer previous slot 投影不一致。")
         if self.generation == 1 and (
@@ -414,15 +441,25 @@ class ReleaseSlotStore:
         action: Literal["activate", "rollback"] = "activate",
         _expected_pointer_sha256: str | None = None,
         _activation_authority: ReleaseActivationAuthority | None = None,
+        _rollback_authority: ReleaseRollbackAuthority | None = None,
     ) -> ReleaseActivePointer:
         if _activation_authority is not None:
             _activation_authority = ReleaseActivationAuthority.model_validate_json(
                 _activation_authority.model_dump_json()
             )
+        if _rollback_authority is not None:
+            _rollback_authority = ReleaseRollbackAuthority.model_validate_json(
+                _rollback_authority.model_dump_json()
+            )
         if action == "rollback" and _activation_authority is not None:
             raise ReleaseSlotError(
                 "release_activation_authority_forbidden",
                 "Rollback 不接受 activation authority。",
+            )
+        if action == "activate" and _rollback_authority is not None:
+            raise ReleaseSlotError(
+                "release_rollback_authority_forbidden",
+                "Activate 不接受 rollback authority。",
             )
         slot = self._require_slot(slot_id)
         _require_host_target(slot.target)
@@ -440,8 +477,41 @@ class ReleaseSlotStore:
                     "Active version pointer 已被其他执行者推进。",
                 )
             if current is not None and current.current_slot_id == slot.slot_id:
+                if (
+                    _activation_authority is not None
+                    and current.activation_authority != _activation_authority
+                ):
+                    db.rollback()
+                    raise ReleaseSlotError(
+                        "release_activation_authority_conflict",
+                        "Current slot 未绑定本次 activation authority。",
+                    )
+                if (
+                    _rollback_authority is not None
+                    and current.rollback_authority != _rollback_authority
+                ):
+                    db.rollback()
+                    raise ReleaseSlotError(
+                        "release_rollback_authority_conflict",
+                        "Current slot 未绑定本次 rollback authority。",
+                    )
                 db.rollback()
                 return current
+            if _rollback_authority is not None:
+                prior_authority_use = any(
+                    ReleaseActivePointer.model_validate_json(row["pointer_json"])
+                    .rollback_authority
+                    == _rollback_authority
+                    for row in db.execute(
+                        "SELECT pointer_json FROM release_active_events"
+                    ).fetchall()
+                )
+                if prior_authority_use:
+                    db.rollback()
+                    raise ReleaseSlotError(
+                        "release_rollback_authority_reused",
+                        "Rollback authority 已被历史 activation event 消费。",
+                    )
             if action == "rollback" and (
                 current is None or current.previous_slot_id != slot.slot_id
             ):
@@ -475,7 +545,13 @@ class ReleaseSlotStore:
                     "版本槽缺少 current bootability receipt。",
                 )
             core = {
-                "schema_version": 2 if _activation_authority is not None else 1,
+                "schema_version": (
+                    3
+                    if _rollback_authority is not None
+                    else 2
+                    if _activation_authority is not None
+                    else 1
+                ),
                 "policy_version": RELEASE_ACTIVE_POINTER_POLICY,
                 "generation": 1 if current is None else current.generation + 1,
                 "previous_pointer_sha256": None if current is None else current.pointer_sha256,
@@ -493,6 +569,11 @@ class ReleaseSlotStore:
                         )
                     }
                     if _activation_authority is not None
+                    else {}
+                ),
+                **(
+                    {"rollback_authority": _rollback_authority.model_dump(mode="json")}
+                    if _rollback_authority is not None
                     else {}
                 ),
                 "atomic_switch_satisfied": True,
@@ -567,6 +648,36 @@ class ReleaseSlotStore:
             if row is None
             else ReleaseActivePointer.model_validate_json(row["pointer_json"])
         )
+
+    def get_rollback_event_by_authority(
+        self,
+        authority: ReleaseRollbackAuthority,
+    ) -> ReleaseActivePointer | None:
+        """Resolve one authority-bound rollback after validating the complete chain."""
+        typed = ReleaseRollbackAuthority.model_validate_json(authority.model_dump_json())
+        if not self.db_path.is_file():
+            return None
+        with self._connect() as db:
+            db.execute("BEGIN")
+            self._validated_active(db)
+            rows = db.execute(
+                "SELECT pointer_json FROM release_active_events ORDER BY generation"
+            ).fetchall()
+            db.rollback()
+        matches = tuple(
+            item
+            for row in rows
+            if (
+                item := ReleaseActivePointer.model_validate_json(row["pointer_json"])
+            ).rollback_authority
+            == typed
+        )
+        if len(matches) > 1:
+            raise ReleaseSlotError(
+                "release_rollback_authority_conflict",
+                "同一 rollback authority 绑定了多个 activation event。",
+            )
+        return None if not matches else matches[0]
 
     def resolve_active_backend(self) -> ResolvedReleaseSlot:
         with self._connect() as db:
@@ -1127,6 +1238,7 @@ __all__ = [
     "RELEASE_BOOT_RECEIPT_POLICY",
     "RELEASE_SLOT_POLICY",
     "ReleaseActivationAuthority",
+    "ReleaseRollbackAuthority",
     "ReleaseActivePointer",
     "ReleaseInstalledSlot",
     "ReleaseSlotBootReceipt",

@@ -44,6 +44,8 @@ Active Pointer 和 append-only event 在同一 SQLite FULL-synchronous 事务中
   event digest；authority 闭集支持 opt-in Intent、percentage Prepared Receipt 与 stable Prepared Receipt，并机械校验
   kind/ID prefix；
   旧 v1 event 不序列化空字段、摘要保持兼容，rollback 拒绝携带 activation authority；
+- [EVO-05.6b2a](../self-evolution/EVO-05-6b2a-fenced-slot-rollback.md) 增加独立 v3 rollback event，绑定
+  exact immutable Rollback Source authority；它与 v2 activation authority 互斥，普通 v1 rollback 保持兼容；
 - activation 前重新验证目标 slot、Boot Receipt 的 binary digest，以及当前旧 slot 仍存在且不可写；
 - rollback 只能选择 current pointer 的 exact previous slot，并用 expected pointer digest 防止并发误回滚；
 - 切换永不删除旧 slot，因此进程崩溃时数据库只会呈现完整旧 generation 或完整新 generation。
@@ -57,6 +59,7 @@ SQLite pointer 是权威，避免 Windows 不可靠 symlink/junction 语义；
 - 两个 slot 均保留，generation 为 1/2/3，rollback previous 指向 v2；
 - 完整链验证后可精确读取 generation 1/2/3，越过 tail 返回 missing，链中缺口失败关闭；
 - v2 activation event 绑定 exact 外部 authority，v1 event 仍按原 JSON/digest 恢复；
+- v3 rollback event 可按 exact Source authority 从完整 history 唯一恢复，重复或冒名 authority 失败关闭；
 - percentage/stable Prepared-bound activation 与既有 opt-in v2 authority 可同时恢复，kind/ID mismatch 失败关闭；
 - 八线程并发安装同一 bundle 只形成一个 slot；
 - 未 boot、版本输出不匹配、文件篡改、源码泄漏全部失败关闭；
@@ -68,4 +71,5 @@ SQLite pointer 是权威，避免 Windows 不可靠 symlink/junction 语义；
 - ARC-07.4 仍需为 manifest/build provenance 增加发行签名；本切片的 SHA-256 只证明本地一致性；
 - ARC-07.5b 已让稳定 launcher 从 SQLite active pointer 启动 exact slot，并失败关闭损坏状态；
 - ARC-07.6 仍需配置/数据 snapshot 与 migration compatibility；
-- EVO-05.6b2 仍须把 exact rollback authority 与本启动链连接，并验证回滚后的新 Launch Resolution。
+- EVO-05.6b2a 已把 exact rollback authority 与本启动链连接并验证回滚后的 Launch Resolution；ARC-07.6
+  仍需为需要配置/数据恢复的 rollback 提供 snapshot/migration authority。
