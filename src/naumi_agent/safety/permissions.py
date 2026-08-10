@@ -845,6 +845,32 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         risk_level=PermissionRiskLevel.MEDIUM,
         tool_family="evolution_evaluation_artifact",
     ),
+    "evolution_proposal_before_after_evidence": PermissionRule(
+        tool_name="evolution_proposal_before_after_evidence",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+        max_calls_per_session=50,
+        risk_level=PermissionRiskLevel.MEDIUM,
+        tool_family="evolution_evaluation_artifact",
+    ),
+    "evolution_post_rollback_runtime_verification": PermissionRule(
+        tool_name="evolution_post_rollback_runtime_verification",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+        max_calls_per_session=20,
+        risk_level=PermissionRiskLevel.MEDIUM,
+        tool_family="evolution_runtime_verification",
+    ),
     "workbench_govern_proposal": PermissionRule(
         tool_name="workbench_govern_proposal",
         allowed_modes=[

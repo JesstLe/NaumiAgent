@@ -135,7 +135,7 @@
 - 完整用户状态机见 `UI-10-6c-experiment-contract-action.md`，后端契约见
   `../harness/HAR-09-5c-explicit-experiment-contract-issuance.md`。
 
-### UI-10.6d/HAR-09.6a-6b 已实现：Proposal Outcome 与实施前后证据
+### UI-10.6d/HAR-09.6a-6c1 已实现：Proposal Outcome 与分阶段结果证据
 
 - Reviews 同时保留 `approved` 治理事实和 `rolled_back` 实施终态，不把两种状态压成一个枚举。
 - New UI/TUI 显示 Outcome、Rollback Receipt、Contract、breach 与 authority；黄色表示 rollback，绿色表示
@@ -144,9 +144,12 @@
   因此前端事件、Agent Tool 或 Slash 都不能绕过。
 - HAR-09.6b 让 Reviews 显示 proposal-bound Before/After Evidence ID 和 lane count，口径固定为“实施前
   RED baseline → 实施后 GREEN candidate”；前端拒绝把它冒充为回滚后评测。
-- 回滚后恢复证明、长期指标、promoted Outcome 和 policy learning 仍未完成。完整边界见
+- HAR-09.6c1 显示新的 Post-Rollback Verification ID、baseline slot/version 和 fresh boot + launch identity；
+  同时明确“行为级 Eval 尚未记录”，避免把可启动性扩大为业务恢复。
+- 行为级恢复评测、长期指标、promoted Outcome 和 policy learning 仍未完成。完整边界见
   `../harness/HAR-09-6a-proposal-outcome-projection.md` 与
-  `../harness/HAR-09-6b-before-after-outcome-evidence.md`。
+  `../harness/HAR-09-6b-before-after-outcome-evidence.md`、
+  `../harness/HAR-09-6c1-post-rollback-runtime-verification.md`。
 
 ### UI-10.6b1 已实现：Proposal defer
 

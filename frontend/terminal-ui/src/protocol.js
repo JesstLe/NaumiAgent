@@ -1494,6 +1494,180 @@ function normalizeWorkbenchBeforeAfterEvidence(value) {
   return normalized;
 }
 
+function normalizeWorkbenchPostRollbackVerification(value) {
+  const item = harnessObject(value, "workbench post-rollback verification");
+  if (Number(item.schema_version) !== 1) {
+    throw new Error("workbench post-rollback schema_version 不兼容");
+  }
+  const policy = workbenchText(
+    item.policy_version,
+    "workbench post-rollback policy_version",
+    80,
+  );
+  const boot = harnessObject(item.fresh_boot_receipt, "workbench post-rollback fresh boot");
+  const launch = harnessObject(
+    item.fresh_launch_resolution,
+    "workbench post-rollback fresh launch",
+  );
+  const normalized = {
+    schema_version: 1,
+    policy_version: policy,
+    verification_id: workbenchText(item.verification_id, "post-rollback verification_id", 128),
+    verification_sha256: workbenchText(
+      item.verification_sha256,
+      "post-rollback verification_sha256",
+      64,
+    ),
+    verification_kind: harnessChoice(
+      item.verification_kind,
+      "post-rollback verification_kind",
+      new Set(["installed_runtime_recovery"]),
+    ),
+    outcome_id: workbenchText(item.outcome_id, "post-rollback outcome_id", 128),
+    outcome_sha256: workbenchText(item.outcome_sha256, "post-rollback outcome_sha256", 64),
+    workbench_session_id: workbenchText(
+      item.workbench_session_id,
+      "post-rollback workbench_session_id",
+      128,
+    ),
+    workbench_proposal_id: workbenchText(
+      item.workbench_proposal_id,
+      "post-rollback workbench_proposal_id",
+      128,
+    ),
+    experiment_contract_id: workbenchText(
+      item.experiment_contract_id,
+      "post-rollback experiment_contract_id",
+      128,
+    ),
+    candidate_id: workbenchText(item.candidate_id, "post-rollback candidate_id", 128),
+    candidate_revision: harnessNonnegativeInteger(
+      item.candidate_revision,
+      "post-rollback candidate_revision",
+    ),
+    baseline_slot_id: workbenchText(item.baseline_slot_id, "post-rollback baseline_slot_id", 128),
+    baseline_slot_sha256: workbenchText(
+      item.baseline_slot_sha256,
+      "post-rollback baseline_slot_sha256",
+      64,
+    ),
+    baseline_version: workbenchText(item.baseline_version, "post-rollback baseline_version", 128),
+    baseline_target: workbenchText(item.baseline_target, "post-rollback baseline_target", 128),
+    rollback_pointer_id: workbenchText(
+      item.rollback_pointer_id,
+      "post-rollback rollback_pointer_id",
+      128,
+    ),
+    rollback_pointer_sha256: workbenchText(
+      item.rollback_pointer_sha256,
+      "post-rollback rollback_pointer_sha256",
+      64,
+    ),
+    rollback_pointer_generation: harnessNonnegativeInteger(
+      item.rollback_pointer_generation,
+      "post-rollback rollback_pointer_generation",
+    ),
+    runtime_identity_sha256: workbenchText(
+      item.runtime_identity_sha256,
+      "post-rollback runtime_identity_sha256",
+      64,
+    ),
+    fresh_boot_receipt: {
+      receipt_id: workbenchText(boot.receipt_id, "post-rollback boot.receipt_id", 128),
+      receipt_sha256: workbenchText(boot.receipt_sha256, "post-rollback boot.receipt_sha256", 64),
+      slot_id: workbenchText(boot.slot_id, "post-rollback boot.slot_id", 128),
+      slot_sha256: workbenchText(boot.slot_sha256, "post-rollback boot.slot_sha256", 64),
+      binary_sha256: workbenchText(boot.binary_sha256, "post-rollback boot.binary_sha256", 64),
+      exit_code: harnessNonnegativeInteger(boot.exit_code, "post-rollback boot.exit_code"),
+      bootable: harnessBoolean(boot.bootable, "post-rollback boot.bootable"),
+      checked_at: workbenchText(boot.checked_at, "post-rollback boot.checked_at", 100),
+    },
+    fresh_launch_resolution: {
+      resolution_id: workbenchText(launch.resolution_id, "post-rollback launch.resolution_id", 128),
+      resolution_sha256: workbenchText(
+        launch.resolution_sha256,
+        "post-rollback launch.resolution_sha256",
+        64,
+      ),
+      pointer_id: workbenchText(launch.pointer_id, "post-rollback launch.pointer_id", 128),
+      pointer_sha256: workbenchText(launch.pointer_sha256, "post-rollback launch.pointer_sha256", 64),
+      pointer_generation: harnessNonnegativeInteger(
+        launch.pointer_generation,
+        "post-rollback launch.pointer_generation",
+      ),
+      slot_id: workbenchText(launch.slot_id, "post-rollback launch.slot_id", 128),
+      slot_sha256: workbenchText(launch.slot_sha256, "post-rollback launch.slot_sha256", 64),
+      binary_sha256: workbenchText(launch.binary_sha256, "post-rollback launch.binary_sha256", 64),
+      process_start_requested: harnessBoolean(
+        launch.process_start_requested,
+        "post-rollback launch.process_start_requested",
+      ),
+      process_start_authority: harnessBoolean(
+        launch.process_start_authority,
+        "post-rollback launch.process_start_authority",
+      ),
+      process_started: harnessBoolean(launch.process_started, "post-rollback launch.process_started"),
+      resolved_at: workbenchText(launch.resolved_at, "post-rollback launch.resolved_at", 100),
+    },
+    post_rollback_verification_recorded: harnessBoolean(
+      item.post_rollback_verification_recorded,
+      "post-rollback post_rollback_verification_recorded",
+    ),
+    post_rollback_evaluation_recorded: harnessBoolean(
+      item.post_rollback_evaluation_recorded,
+      "post-rollback post_rollback_evaluation_recorded",
+    ),
+    behavioral_evaluation_recorded: harnessBoolean(
+      item.behavioral_evaluation_recorded,
+      "post-rollback behavioral_evaluation_recorded",
+    ),
+    long_term_metrics_recorded: harnessBoolean(
+      item.long_term_metrics_recorded,
+      "post-rollback long_term_metrics_recorded",
+    ),
+    learning_authority: harnessBoolean(item.learning_authority, "post-rollback learning_authority"),
+    promotion_authority: harnessBoolean(item.promotion_authority, "post-rollback promotion_authority"),
+  };
+  const freshBoot = normalized.fresh_boot_receipt;
+  const freshLaunch = normalized.fresh_launch_resolution;
+  if (
+    policy !== "evolution-post-rollback-runtime-verification-v1"
+    || !/^evpostrollback_[0-9a-f]{24}$/.test(normalized.verification_id)
+    || !/^[0-9a-f]{64}$/.test(normalized.verification_sha256)
+    || !/^evx_[0-9a-f]{24}$/.test(normalized.experiment_contract_id)
+    || !/^evc_[0-9a-f]{24}$/.test(normalized.candidate_id)
+    || normalized.candidate_revision < 1
+    || !/^relslot_[0-9a-f]{24}$/.test(normalized.baseline_slot_id)
+    || !/^[0-9a-f]{64}$/.test(normalized.baseline_slot_sha256)
+    || !/^relactive_[0-9a-f]{24}$/.test(normalized.rollback_pointer_id)
+    || !/^[0-9a-f]{64}$/.test(normalized.rollback_pointer_sha256)
+    || normalized.rollback_pointer_generation < 1
+    || !/^[0-9a-f]{64}$/.test(normalized.runtime_identity_sha256)
+    || freshBoot.slot_id !== normalized.baseline_slot_id
+    || freshBoot.slot_sha256 !== normalized.baseline_slot_sha256
+    || freshBoot.exit_code !== 0
+    || freshBoot.bootable !== true
+    || freshLaunch.pointer_id !== normalized.rollback_pointer_id
+    || freshLaunch.pointer_sha256 !== normalized.rollback_pointer_sha256
+    || freshLaunch.pointer_generation !== normalized.rollback_pointer_generation
+    || freshLaunch.slot_id !== normalized.baseline_slot_id
+    || freshLaunch.slot_sha256 !== normalized.baseline_slot_sha256
+    || freshLaunch.binary_sha256 !== freshBoot.binary_sha256
+    || freshLaunch.process_start_requested !== false
+    || freshLaunch.process_start_authority !== false
+    || freshLaunch.process_started !== false
+    || normalized.post_rollback_verification_recorded !== true
+    || normalized.post_rollback_evaluation_recorded !== true
+    || normalized.behavioral_evaluation_recorded !== false
+    || normalized.long_term_metrics_recorded !== false
+    || normalized.learning_authority !== false
+    || normalized.promotion_authority !== false
+  ) {
+    throw new Error("workbench post-rollback authority 字段无效");
+  }
+  return normalized;
+}
+
 function normalizeWorkbenchProposalOutcome(value) {
   const item = harnessObject(value, "workbench proposal outcome");
   if (Number(item.schema_version) !== 1) {
@@ -1510,6 +1684,9 @@ function normalizeWorkbenchProposalOutcome(value) {
   const beforeAfter = item.before_after_evidence == null
     ? null
     : normalizeWorkbenchBeforeAfterEvidence(item.before_after_evidence);
+  const postRollback = item.post_rollback_verification == null
+    ? null
+    : normalizeWorkbenchPostRollbackVerification(item.post_rollback_verification);
   const normalized = {
     schema_version: 1,
     policy_version: policy,
@@ -1570,9 +1747,18 @@ function normalizeWorkbenchProposalOutcome(value) {
       "workbench proposal outcome.before_after_recorded",
     ),
     before_after_evidence: beforeAfter,
+    post_rollback_verification: postRollback,
+    post_rollback_verification_recorded: harnessBoolean(
+      item.post_rollback_verification_recorded,
+      "workbench proposal outcome.post_rollback_verification_recorded",
+    ),
     post_rollback_evaluation_recorded: harnessBoolean(
       item.post_rollback_evaluation_recorded,
       "workbench proposal outcome.post_rollback_evaluation_recorded",
+    ),
+    post_rollback_behavioral_evaluation_recorded: harnessBoolean(
+      item.post_rollback_behavioral_evaluation_recorded,
+      "workbench proposal outcome.post_rollback_behavioral_evaluation_recorded",
     ),
     long_term_metrics_recorded: harnessBoolean(
       item.long_term_metrics_recorded,
@@ -1592,7 +1778,9 @@ function normalizeWorkbenchProposalOutcome(value) {
     normalized.governance_state_unchanged !== true
     || normalized.contract_issue_allowed !== false
     || normalized.before_after_recorded !== (beforeAfter !== null)
-    || normalized.post_rollback_evaluation_recorded !== false
+    || normalized.post_rollback_verification_recorded !== (postRollback !== null)
+    || normalized.post_rollback_evaluation_recorded !== (postRollback !== null)
+    || normalized.post_rollback_behavioral_evaluation_recorded !== false
     || normalized.long_term_metrics_recorded !== false
     || normalized.promoted !== false
     || normalized.learning_authority !== false
@@ -1616,6 +1804,20 @@ function normalizeWorkbenchProposalOutcome(value) {
     )
   ) {
     throw new Error("workbench proposal before/after 外层绑定无效");
+  }
+  if (
+    postRollback
+    && (
+      postRollback.outcome_id !== normalized.outcome_id
+      || postRollback.outcome_sha256 !== normalized.outcome_sha256
+      || postRollback.workbench_session_id !== normalized.workbench_session_id
+      || postRollback.workbench_proposal_id !== normalized.workbench_proposal_id
+      || postRollback.experiment_contract_id !== normalized.experiment_contract_id
+      || postRollback.candidate_id !== normalized.candidate_id
+      || postRollback.candidate_revision !== normalized.candidate_revision
+    )
+  ) {
+    throw new Error("workbench post-rollback 外层绑定无效");
   }
   const identities = [
     [normalized.outcome_id, /^evrerollbackout_[0-9a-f]{24}$/, "outcome_id"],

@@ -18,6 +18,12 @@ from naumi_agent.evolution.experiments import (
     EvolutionExperimentContractStore,
     _manifest_digest,
 )
+from naumi_agent.evolution.post_rollback_runtime_verifications import (
+    EvolutionPostRollbackRuntimeVerificationError,
+    EvolutionPostRollbackRuntimeVerificationService,
+    EvolutionPostRollbackRuntimeVerificationStore,
+    render_post_rollback_runtime_verification,
+)
 from naumi_agent.evolution.promotion_package_inputs import (
     EVOLUTION_PROMOTION_ROLLBACK_PLAN_POLICY,
     EvolutionPromotionEvidenceKind,
@@ -83,6 +89,7 @@ from naumi_agent.safety.permissions import (
 )
 from naumi_agent.tools.base import ToolCall, ToolRegistry, ToolResult
 from naumi_agent.tools.evolution_review import (
+    EvolutionPostRollbackRuntimeVerificationTool,
     EvolutionRevalidationRollbackExecutionTool,
     EvolutionRevalidationRollbackOutcomeTool,
 )
@@ -757,6 +764,25 @@ def test_rollback_tool_permission_is_one_confirmation_and_bypass_is_direct() -> 
     assert outcome_bypass.allowed
     assert outcome_bypass.outcome is PermissionOutcome.ALLOW
 
+    verification_tool = EvolutionPostRollbackRuntimeVerificationTool(
+        SimpleNamespace()
+    )
+    verification_guarded = PermissionChecker(PermissionMode.MODERATE).check(
+        verification_tool.name,
+        arguments,
+        tool=verification_tool,
+    )
+    verification_bypass = PermissionChecker(PermissionMode.BYPASS).check(
+        verification_tool.name,
+        arguments,
+        tool=verification_tool,
+    )
+    assert verification_guarded.allowed
+    assert verification_guarded.outcome is PermissionOutcome.ALLOW
+    assert not verification_guarded.requires_confirmation
+    assert verification_bypass.allowed
+    assert verification_bypass.outcome is PermissionOutcome.ALLOW
+
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(os.name == "nt", reason="fixture is a POSIX executable")
@@ -913,6 +939,146 @@ async def test_rollback_outcome_rejects_invalid_request_id(tmp_path: Path) -> No
     with pytest.raises(EvolutionRevalidationRollbackOutcomeError) as invalid:
         await service.record(request_id="../forged")
     assert invalid.value.code == "rollback_outcome_request_id_invalid"
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(os.name == "nt", reason="fixture is a POSIX executable")
+async def test_post_rollback_runtime_verification_runs_fresh_probes_and_converges(
+    tmp_path: Path,
+) -> None:
+    root, request, _source, release_store, _pointer, execution_factory, db_path = (
+        await _scenario(tmp_path, with_outcome_lineage=True)
+    )
+    execution_service = execution_factory()
+    execution_view = await execution_service.execute(request_id=request.request_id)
+    outcome_service = EvolutionRevalidationRollbackOutcomeService(
+        workspace_root=root,
+        execution_service=execution_service,
+        request_store=EvolutionRevalidationRollbackRequestStore(db_path),
+        plan_store=EvolutionRevalidationRolloutPlanStore(db_path),
+        promotion_input_store=EvolutionRevalidationPromotionInputStore(db_path),
+        experiment_store=EvolutionExperimentContractStore(db_path),
+        store=EvolutionRevalidationRollbackOutcomeStore(db_path),
+        now=lambda: (T0 + timedelta(minutes=7)).isoformat(),
+    )
+    outcome_view = await outcome_service.record(request_id=request.request_id)
+    verification_store = EvolutionPostRollbackRuntimeVerificationStore(db_path)
+
+    def verification_service(index: int):
+        times = iter(
+            (T0 + timedelta(minutes=8, microseconds=index * 10 + offset)).isoformat()
+            for offset in range(2)
+        )
+        return EvolutionPostRollbackRuntimeVerificationService(
+            workspace_root=root,
+            outcome_service=outcome_service,
+            rollback_service=execution_service,
+            release_slot_store=release_store,
+            store=verification_store,
+            now=lambda: next(times),
+        )
+
+    views = await asyncio.gather(*(
+        verification_service(index).record(request_id=request.request_id)
+        for index in range(8)
+    ))
+    view = views[0]
+    assert all(item == view for item in views)
+    item = view.verification
+    assert view.verification_authority
+    assert view.active_baseline_authority
+    assert item.outcome_id == outcome_view.outcome.outcome_id
+    assert item.rollback_receipt_id == execution_view.receipt.receipt_id
+    assert item.baseline_slot_id == execution_view.receipt.baseline_slot.slot_id
+    assert item.fresh_boot_receipt.receipt_id != (
+        execution_view.receipt.rollback_boot_receipt.receipt_id
+    )
+    assert item.fresh_launch_resolution.resolution_id != (
+        execution_view.receipt.launch_resolution.resolution_id
+    )
+    assert item.fresh_boot_receipt.binary_sha256 == (
+        item.fresh_launch_resolution.binary_sha256
+    )
+    assert item.post_rollback_evaluation_recorded
+    assert not item.behavioral_evaluation_recorded
+    assert not item.long_term_metrics_recorded
+    assert not item.learning_authority
+    assert not item.promotion_authority
+    projection_service = EvolutionProposalOutcomeProjectionService(
+        rollback_outcome_store=EvolutionRevalidationRollbackOutcomeStore(db_path),
+        rollback_outcome_service=outcome_service,
+        post_rollback_store=verification_store,
+        post_rollback_service=verification_service(20),
+    )
+    projected = await projection_service.project_session(
+        outcome_view.outcome.workbench_session_id
+    )
+    projection = projected[outcome_view.outcome.workbench_proposal_id]
+    assert projection.post_rollback_verification == item
+    assert projection.post_rollback_verification_recorded
+    assert projection.post_rollback_evaluation_recorded
+    assert not projection.post_rollback_behavioral_evaluation_recorded
+    assert not projection.long_term_metrics_recorded
+    assert not projection.learning_authority
+    rendered = render_post_rollback_runtime_verification(view)
+    assert "重新执行受控启动探针" in rendered
+    assert "行为级 Eval：尚未记录" in rendered
+
+    tool = EvolutionPostRollbackRuntimeVerificationTool(
+        SimpleNamespace(
+            evolution_post_rollback_runtime_verification_service=(
+                verification_service(8)
+            )
+        )
+    )
+    assert await tool.execute(request.request_id) == rendered
+    registry = ToolRegistry()
+    registry.register(tool)
+
+    class _VerificationSlashEngine:
+        def __init__(self):
+            self.tool_registry = registry
+
+        async def execute_tool(self, call: ToolCall, *, agent_name=None):
+            registered = self.tool_registry.get(call.name)
+            assert registered is not None and agent_name == "cli"
+            arguments = registered.parse_arguments(call.arguments)
+            return ToolResult(
+                call_id=call.id,
+                status="success",
+                content=await registered.execute(**arguments),
+            )
+
+    slash_rendered = await execute_slash_command(
+        _VerificationSlashEngine(),
+        f"/evolution outcome-verify-runtime {request.request_id}",
+    )
+    assert item.verification_id in slash_rendered
+    assert item.fresh_boot_receipt.receipt_id in slash_rendered
+    assert "行为级 Eval：尚未记录" in slash_rendered
+
+    with pytest.raises(EvolutionPostRollbackRuntimeVerificationError) as invalid:
+        await verification_service(9).record(request_id="../forged")
+    assert invalid.value.code == "post_rollback_request_id_invalid"
+
+    with release_store._connect() as db:  # noqa: SLF001 - tamper fixture
+        db.execute(
+            "UPDATE release_launch_resolutions SET resolution_json = ? "
+            "WHERE resolution_id = ?",
+            ("{}", item.fresh_launch_resolution.resolution_id),
+        )
+        db.commit()
+    stale = await verification_service(10).inspect(verification=item)
+    assert not stale.fresh_launch_authority
+    assert not stale.verification_authority
+    assert not stale.active_baseline_authority
+    assert not stale.behavioral_evaluation_authority
+    assert not stale.promotion_authority
+    with pytest.raises(EvolutionProposalOutcomeProjectionError) as stale_projection:
+        await projection_service.project_session(
+            outcome_view.outcome.workbench_session_id
+        )
+    assert stale_projection.value.code == "proposal_outcome_post_rollback_stale"
 
     for surface in ("new_ui", "tui"):
         command = next(

@@ -146,7 +146,8 @@ UI-10.6b1 已在既有 HAR-09.5b1 Proposal governance authority 上补齐 New UI
 Service 重验、CAS 与审计保持不变。HAR-09.6a 已补齐 `rolled_back` Outcome 的 Workbench/New UI/TUI
 只读投影和服务端 Contract 终态阻断。HAR-09.6b 又把原 Promotion Input 中 proposal-bound Final Evaluation
 与全部 HAR-08 H5c lane 登记为 `implementation_before_after`，并同步 Workbench/New UI/TUI；它明确不是
-回滚后恢复证明。长期指标、post-rollback verification 与 promoted Outcome 仍未完成。
+回滚后行为恢复证明。HAR-09.6c1 已新增 fresh baseline boot 与 launcher identity verification，并同步三端；
+行为级 Eval、长期指标与 promoted Outcome 仍未完成。
 HAR-07.5b 已为 New UI 增加 `v` Evidence 焦点和 `/harness evidence`，并让 CLI/Textual TUI 复用相同
 Explain authority；HAR-07.4b1 已补齐空闲 Bridge 有界重启、重新协商和精确 session 回执恢复。
 ARC-02.5a 又补齐两类安全回执的持久事件身份与 session cursor；ARC-02.5b 已补齐 New UI 持久 ACK、

@@ -367,6 +367,13 @@ def _append_proposal_review(
             if outcome.get("before_after_recorded") is True and before_after
             else "尚未记录"
         )
+        post_rollback = _mapping(outcome.get("post_rollback_verification"))
+        post_rollback_label = (
+            "已验证 · fresh boot + launch identity"
+            if outcome.get("post_rollback_verification_recorded") is True
+            and post_rollback
+            else "尚未记录"
+        )
         lines.extend(
             [
                 "",
@@ -384,6 +391,19 @@ def _append_proposal_review(
                 [
                     f"- Before/After Evidence：`{_code(before_after.get('evidence_id'))}`",
                     "- 口径：实施前 RED baseline → 实施后 GREEN candidate；不代表回滚后评测",
+                ]
+            )
+        lines.append(f"- 回滚后 Runtime：{post_rollback_label}")
+        if post_rollback:
+            lines.extend(
+                [
+                    "- Post-Rollback Verification："
+                    f"`{_code(post_rollback.get('verification_id'))}`",
+                    "- Baseline："
+                    f"`{_code(post_rollback.get('baseline_slot_id'))}` · "
+                    f"{_normalized(post_rollback.get('baseline_version'))}",
+                    "- 口径：installed-runtime mechanical verification；"
+                    "行为级 Eval 尚未记录",
                 ]
             )
     elif proposal.get("outcome_error"):

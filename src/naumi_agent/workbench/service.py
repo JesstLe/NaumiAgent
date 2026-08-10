@@ -979,6 +979,42 @@ class WorkbenchService:
                             and evidence.candidate_revision
                             == payload.get("candidate_revision")
                         )
+                post_rollback = payload.get("post_rollback_verification")
+                post_rollback_recorded = payload.get(
+                    "post_rollback_verification_recorded"
+                )
+                post_rollback_evaluation_recorded = payload.get(
+                    "post_rollback_evaluation_recorded"
+                )
+                post_rollback_valid = post_rollback is None
+                if isinstance(post_rollback, dict):
+                    from naumi_agent.evolution.post_rollback_runtime_verifications import (
+                        EvolutionPostRollbackRuntimeVerification,
+                    )
+
+                    try:
+                        verification = (
+                            EvolutionPostRollbackRuntimeVerification.model_validate(
+                                post_rollback
+                            )
+                        )
+                    except ValueError:
+                        post_rollback_valid = False
+                    else:
+                        post_rollback_valid = bool(
+                            verification.outcome_id == payload.get("outcome_id")
+                            and verification.outcome_sha256
+                            == payload.get("outcome_sha256")
+                            and verification.workbench_session_id == session_id
+                            and verification.workbench_proposal_id
+                            == str(proposal_id)
+                            and verification.experiment_contract_id
+                            == payload.get("experiment_contract_id")
+                            and verification.candidate_id
+                            == payload.get("candidate_id")
+                            and verification.candidate_revision
+                            == payload.get("candidate_revision")
+                        )
                 if not (
                     str(proposal_id) == str(payload.get("workbench_proposal_id") or "")
                     and session_id == str(payload.get("workbench_session_id") or "")
@@ -991,7 +1027,14 @@ class WorkbenchService:
                     and isinstance(before_after_recorded, bool)
                     and before_after_recorded is (before_after is not None)
                     and before_after_valid
-                    and payload.get("post_rollback_evaluation_recorded") is False
+                    and isinstance(post_rollback_recorded, bool)
+                    and post_rollback_recorded is (post_rollback is not None)
+                    and isinstance(post_rollback_evaluation_recorded, bool)
+                    and post_rollback_evaluation_recorded
+                    is (post_rollback is not None)
+                    and post_rollback_valid
+                    and payload.get("post_rollback_behavioral_evaluation_recorded")
+                    is False
                     and payload.get("long_term_metrics_recorded") is False
                     and payload.get("promoted") is False
                     and payload.get("learning_authority") is False
