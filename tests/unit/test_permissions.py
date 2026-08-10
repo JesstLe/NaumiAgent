@@ -108,6 +108,32 @@ class TestPermissionChecker:
             PermissionMode.STRICT,
         ],
     )
+    def test_stable_rollback_readiness_is_read_only_without_confirmation(
+        self,
+        mode: PermissionMode,
+    ) -> None:
+        result = PermissionChecker(mode).check(
+            "evolution_stable_rollback_readiness",
+            {
+                "completion_receipt_id": "evstablepopcomplete_" + "a" * 24,
+                "intent_id": "evrestableintent_" + "b" * 24,
+            },
+        )
+        assert result.allowed
+        assert not result.requires_confirmation
+        assert result.risk_level is PermissionRiskLevel.LOW
+        if mode is not PermissionMode.BYPASS:
+            assert result.tool_family == "evolution_release_observation"
+
+    @pytest.mark.parametrize(
+        "mode",
+        [
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+    )
     def test_doctor_export_uses_fixed_low_risk_preview_gate(
         self,
         mode: PermissionMode,

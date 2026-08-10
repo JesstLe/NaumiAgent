@@ -1134,6 +1134,15 @@ if TYPE_CHECKING:
         EvolutionStableReadGraphInspector,
         build_evolution_stable_read_graph_inspector,
     )
+    from naumi_agent.evolution.stable_rollback_readiness import (
+        EVOLUTION_STABLE_ROLLBACK_READINESS_POLICY,
+        EvolutionStableDeploymentInspectionPort,
+        EvolutionStablePopulationCompletionInspectionPort,
+        EvolutionStableRollbackReadiness,
+        EvolutionStableRollbackReadinessError,
+        EvolutionStableRollbackReadinessService,
+        render_stable_rollback_readiness,
+    )
     from naumi_agent.evolution.static_guards import (
         EvolutionStaticGuard,
         EvolutionStaticGuardPolicy,
@@ -1537,6 +1546,13 @@ __all__ = [
     "EvolutionStableReadGraphInspector",
     "EvolutionLazyStableReadGraphInspector",
     "build_evolution_stable_read_graph_inspector",
+    "EVOLUTION_STABLE_ROLLBACK_READINESS_POLICY",
+    "EvolutionStableDeploymentInspectionPort",
+    "EvolutionStablePopulationCompletionInspectionPort",
+    "EvolutionStableRollbackReadiness",
+    "EvolutionStableRollbackReadinessError",
+    "EvolutionStableRollbackReadinessService",
+    "render_stable_rollback_readiness",
     "EVOLUTION_REVALIDATION_PERCENTAGE_DEPLOYMENT_POLICY",
     "EvolutionRevalidationPercentageDeploymentError",
     "EvolutionRevalidationPercentageDeploymentReceipt",
@@ -2744,6 +2760,15 @@ def __getattr__(name: str) -> object:
         "EvolutionStableReadGraphInspector",
         "build_evolution_stable_read_graph_inspector",
     }
+    stable_rollback_readiness_exports = {
+        "EVOLUTION_STABLE_ROLLBACK_READINESS_POLICY",
+        "EvolutionStableDeploymentInspectionPort",
+        "EvolutionStablePopulationCompletionInspectionPort",
+        "EvolutionStableRollbackReadiness",
+        "EvolutionStableRollbackReadinessError",
+        "EvolutionStableRollbackReadinessService",
+        "render_stable_rollback_readiness",
+    }
     revalidation_percentage_stage_completion_exports = {
         "EVOLUTION_REVALIDATION_PERCENTAGE_STAGE_COMPLETION_POLICY",
         "EvolutionRevalidationPercentageStageCompletion",
@@ -3414,6 +3439,8 @@ def __getattr__(name: str) -> object:
         module_name = "stable_population_completions"
     elif name in stable_read_graph_exports:
         module_name = "stable_read_graph"
+    elif name in stable_rollback_readiness_exports:
+        module_name = "stable_rollback_readiness"
     elif name in revalidation_percentage_stage_completion_exports:
         module_name = "revalidation_percentage_stage_completions"
     elif name in revalidation_opt_in_observation_assessment_exports:

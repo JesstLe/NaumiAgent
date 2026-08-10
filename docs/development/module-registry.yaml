@@ -109,6 +109,7 @@ modules:
   - {id: EVO-05.5f5u, status: implemented, path: self-evolution/EVO-05-5f5u-dynamic-stage-completion-inspection-port.md, depends_on: [EVO-05.5f5t, HAR-10.2k]}
   - {id: EVO-05.5f5v, status: implemented, path: self-evolution/EVO-05-5f5v-default-stable-read-graph.md, depends_on: [EVO-05.5f5u, ARC-07.5c, HAR-10.2k]}
   - {id: EVO-05.5f5w, status: implemented, path: self-evolution/EVO-05-5f5w-stable-population-completion-authority.md, depends_on: [EVO-05.5f5v, UI-10]}
+  - {id: EVO-05.5f5x1, status: implemented, path: self-evolution/EVO-05-5f5x1-stable-rollback-readiness.md, depends_on: [EVO-05.5f5w, EVO-05.5f5m, ARC-07.5a, UI-10]}
   - {id: EVO-05.6a, status: implemented, path: self-evolution/EVO-05-6a-automatic-pause-rollback-request.md, depends_on: [EVO-05.5b, EVO-05.1a]}
   - {id: EVO-05.6b1, status: implemented, path: self-evolution/EVO-05-6b1-immutable-rollback-source.md, depends_on: [EVO-05.6a]}
   - {id: EVO-05.6b2a, status: implemented, path: self-evolution/EVO-05-6b2a-fenced-slot-rollback.md, depends_on: [EVO-05.6b1, ARC-07.5a, ARC-07.5b]}

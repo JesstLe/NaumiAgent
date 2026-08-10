@@ -211,6 +211,10 @@ from naumi_agent.evolution.stable_population_completions import (
     EvolutionStablePopulationCompletionError,
     render_stable_population_completion,
 )
+from naumi_agent.evolution.stable_rollback_readiness import (
+    EvolutionStableRollbackReadinessError,
+    render_stable_rollback_readiness,
+)
 from naumi_agent.evolution.store import EvolutionStoreError
 from naumi_agent.tools.base import Tool, ToolMetadata
 
@@ -2716,6 +2720,84 @@ class EvolutionStablePopulationCompletionTool(Tool):
         return render_stable_population_completion(view)
 
 
+class EvolutionStableRollbackReadinessTool(Tool):
+    """Verify exact ARC-07 rollback readiness for one stable member."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_stable_rollback_readiness"
+
+    @property
+    def description(self) -> str:
+        return (
+            "把 current 5f5w Population Completion 中的一个 Stable Intent 与"
+            "真实 Active Pointer、上一代 activation event、仍保留的 previous slot "
+            "及其原 Boot Receipt 精确对账，证明 binary rollback 的 expected-pointer "
+            "CAS 前置条件；只读且不授予 rollout/promotion 权限。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "completion_receipt_id": {
+                    "type": "string",
+                    "pattern": "^evstablepopcomplete_[0-9a-f]{24}$",
+                },
+                "intent_id": {
+                    "type": "string",
+                    "pattern": "^evrestableintent_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["completion_receipt_id", "intent_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="Stable 回滚就绪检查",
+            search_hint=(
+                "evolution stable rollback readiness active pointer previous slot "
+                "自进化 稳定发布 回滚 就绪 版本槽"
+            ),
+        )
+
+    async def execute(
+        self,
+        completion_receipt_id: str,
+        intent_id: str,
+    ) -> str:
+        try:
+            readiness = (
+                await self._engine.evolution_stable_rollback_readiness_service.inspect(
+                    completion_receipt_id=completion_receipt_id,
+                    intent_id=intent_id,
+                )
+            )
+        except (
+            AttributeError,
+            EvolutionStableRollbackReadinessError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "stable_rollback_readiness_failed")
+            return f"Stable Rollback Readiness 不可用（`{code}`）：{exc}"
+        return render_stable_rollback_readiness(readiness)
+
+
 class EvolutionRevalidationRollbackOutcomeTool(Tool):
     """Record one proposal-bound historical rollback Outcome."""
 
@@ -4117,6 +4199,7 @@ def create_evolution_review_tools(
         EvolutionPostRollbackRemoteResultTool(engine),
         EvolutionStablePopulationCandidatePreviewTool(engine),
         EvolutionStablePopulationCompletionTool(engine),
+        EvolutionStableRollbackReadinessTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -4171,6 +4254,7 @@ __all__ = [
     "EvolutionRevalidationRuntimeContractTool",
     "EvolutionStablePopulationCandidatePreviewTool",
     "EvolutionStablePopulationCompletionTool",
+    "EvolutionStableRollbackReadinessTool",
     "EvolutionRevalidationRollbackExecutionTool",
     "EvolutionRevalidationRollbackOutcomeTool",
     "EvolutionRevalidationReplayTool",
