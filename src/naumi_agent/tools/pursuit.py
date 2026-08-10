@@ -27,6 +27,9 @@ if TYPE_CHECKING:
     from naumi_agent.orchestrator.pursuit import PursuitInteractionPort
     from naumi_agent.orchestrator.pursuit_lease import PursuitLeasePort
     from naumi_agent.orchestrator.pursuit_reconcile import BackgroundTaskLookup
+    from naumi_agent.orchestrator.pursuit_terminal_dead_letter_abandon import (
+        PursuitTerminalDeadLetterAbandonReceipt,
+    )
     from naumi_agent.orchestrator.pursuit_terminal_dead_letter_action import (
         PursuitTerminalDeadLetterRequeueReceipt,
     )
@@ -621,6 +624,89 @@ class PursuitTerminalDeadLetterRequeueTool(Tool):
         ))
 
 
+class PursuitTerminalDeadLetterAbandonTool(Tool):
+    """Permanently abandon one exact authenticated terminal dead letter."""
+
+    _REASONS = {
+        "no_longer_required",
+        "superseded",
+        "external_resolution",
+        "invalid_target",
+    }
+
+    def __init__(
+        self,
+        runner: Callable[
+            [str, str, str],
+            Awaitable[PursuitTerminalDeadLetterAbandonReceipt],
+        ],
+    ) -> None:
+        self._runner = runner
+
+    @property
+    def name(self) -> str:
+        return "pursuit_terminal_dead_letter_abandon"
+
+    @property
+    def description(self) -> str:
+        return (
+            "永久停止一个精确 Pursuit 终态死信的后续投递；保留失败链并签发"
+            "不可变放弃回执，不会将其伪装为 delivered。"
+        )
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            destructive=True,
+            requires_confirmation=True,
+            requires_persistent_authorization=True,
+            user_facing_name="放弃 Pursuit 终态死信",
+            search_hint="pursuit terminal dead letter exact abandon receipt",
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "dead_letter_id": {
+                    "type": "string",
+                    "pattern": r"^ptfail_[0-9a-f]{24}$",
+                    "description": "Goal 死信审查目录公开的精确目标 ID。",
+                },
+                "reason": {
+                    "type": "string",
+                    "enum": sorted(self._REASONS),
+                    "description": "受控放弃原因，不接收可能泄密的自由文本。",
+                },
+            },
+            "required": ["dead_letter_id", "reason"],
+            "additionalProperties": False,
+        }
+
+    async def execute(self, **kwargs: Any) -> str:
+        dead_letter_id = str(kwargs.get("dead_letter_id") or "").strip()
+        reason = str(kwargs.get("reason") or "").strip()
+        if not re.fullmatch(r"ptfail_[0-9a-f]{24}", dead_letter_id):
+            raise ValueError("dead_letter_id 格式无效。")
+        if reason not in self._REASONS:
+            raise ValueError("dead-letter abandon reason 无效。")
+        permission_receipt = current_permission_receipt()
+        source_request_id = (
+            permission_receipt.call_id
+            if permission_receipt is not None
+            else f"local-tool-{uuid.uuid4()}"
+        )
+        receipt = await self._runner(dead_letter_id, source_request_id, reason)
+        return "\n".join((
+            "已永久停止该 Pursuit 终态死信的后续投递。",
+            f"- 死信：`{receipt.dead_letter_id}`",
+            f"- 回执：`{receipt.receipt_id}`",
+            f"- 原因：`{receipt.reason.value}`",
+            "- 旧失败证据已保留；该动作未声明 delivered。",
+        ))
+
+
 def create_pursuit_tool(
     *,
     terminal_outbox_runner: (
@@ -631,6 +717,13 @@ def create_pursuit_tool(
         Callable[
             [str, str],
             Awaitable[PursuitTerminalDeadLetterRequeueReceipt],
+        ]
+        | None
+    ) = None,
+    terminal_dead_letter_abandon: (
+        Callable[
+            [str, str, str],
+            Awaitable[PursuitTerminalDeadLetterAbandonReceipt],
         ]
         | None
     ) = None,
@@ -650,5 +743,9 @@ def create_pursuit_tool(
     if terminal_dead_letter_requeue is not None:
         tools.append(PursuitTerminalDeadLetterRequeueTool(
             terminal_dead_letter_requeue,
+        ))
+    if terminal_dead_letter_abandon is not None:
+        tools.append(PursuitTerminalDeadLetterAbandonTool(
+            terminal_dead_letter_abandon,
         ))
     return tools

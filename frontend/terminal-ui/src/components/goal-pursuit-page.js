@@ -18,7 +18,7 @@ export function renderGoalPursuitPage(view, width, height) {
     color(ANSI.cyan, "Goal / Pursuit"),
     color(
       ANSI.dim,
-      "r 刷新 · x 恢复当前 Pursuit · o 恢复终态队列 · d 选择死信 · u 重入队 · ↑/↓ 滚动 · j/k 选择交互 · Enter 详情 · f 筛选 · n/p 翻页 · Esc 返回",
+      "r 刷新 · x 恢复当前 Pursuit · o 恢复终态队列 · d 选择死信 · u 重入队 · a 原因 · z 放弃 · ↑/↓ 滚动 · j/k 选择交互 · Enter 详情 · f 筛选 · n/p 翻页 · Esc 返回",
     ),
   ];
   if (value.recoveryActionPending) {
@@ -77,6 +77,7 @@ export function renderGoalPursuitPage(view, width, height) {
     logical.push(...renderTerminalOutbox(
       snapshot.terminal_outbox,
       Math.max(0, Number(value.selectedDeadLetterIndex) || 0),
+      Math.max(0, Number(value.selectedAbandonReasonIndex) || 0),
     ));
   }
   const wrapped = logical.flatMap((line) => wrapAnsiLine(line, safeWidth));
@@ -87,7 +88,7 @@ export function renderGoalPursuitPage(view, width, height) {
   return lines.map((line) => padRight(fit(line, safeWidth), safeWidth));
 }
 
-function renderTerminalOutbox(value, selectedDeadLetterIndex) {
+function renderTerminalOutbox(value, selectedDeadLetterIndex, selectedAbandonReasonIndex) {
   const labels = {
     idle: "空闲",
     recovering: "正在恢复",
@@ -142,9 +143,24 @@ function renderTerminalOutbox(value, selectedDeadLetterIndex) {
       `${index === selectedDeadLetterIndex ? "▶" : " "} 死信 ${item.dead_letter_id} · ${disposition} · ${item.failure_code} · 失败 ${item.failure_attempts} 次 / 总认领 ${item.total_claim_attempts} 次 · ${item.occurred_at}`,
     ));
     if (index === selectedDeadLetterIndex) {
+      const reasons = [
+        ["no_longer_required", "不再需要"],
+        ["superseded", "已被替代"],
+        ["external_resolution", "外部已解决"],
+        ["invalid_target", "目标无效"],
+      ];
+      const [reason, reasonLabel] = reasons[selectedAbandonReasonIndex % reasons.length];
       lines.push(color(
         ANSI.dim,
         `  重入队命令 · /pursue outbox requeue ${item.dead_letter_id}`,
+      ));
+      lines.push(color(
+        ANSI.yellow,
+        `  放弃原因 · ${reasonLabel} (${reason}) · a 切换 · z 执行`,
+      ));
+      lines.push(color(
+        ANSI.dim,
+        `  放弃命令 · /pursue outbox abandon ${item.dead_letter_id} ${reason}`,
       ));
     }
   }

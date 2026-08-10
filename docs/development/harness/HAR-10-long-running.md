@@ -219,7 +219,11 @@
     receipt，以原子 dispatch/head 转换立即恢复领取，并按处置点重置失败预算段；New UI `d/u`、CLI 与
     Textual TUI 共用 `/pursue outbox requeue <ptfail_...>`。详见
     `HAR-10-8f2f-pursuit-terminal-outbox-dead-letter-requeue.md`。
-  - 未完成：exact accept/abandon、retention、push stream、跨 Store 原子 terminal commit 与 A5 故障/soak。
+  - HAR-10.8f2g 已实现：append-only exact abandon authority、四类受控原因、不可变回执与不可领取终态覆盖层，
+    并同步 Agent Tool、New UI `d/a/z`、CLI 与 Textual TUI；详见
+    `HAR-10-8f2g-pursuit-terminal-outbox-dead-letter-abandon.md`。
+  - 未完成：disposed history/effective-state projection、retention、push stream、跨 Store 原子 terminal commit
+    与 A5 故障/soak。
 
 ## 与 Pursuit 的合并原则
 

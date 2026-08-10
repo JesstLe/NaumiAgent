@@ -148,6 +148,28 @@ async def test_shared_pursue_outbox_routes_exact_dead_letter_requeue(
 
 
 @pytest.mark.asyncio
+async def test_shared_pursue_outbox_routes_exact_dead_letter_abandon(
+    rendered_console: StringIO,
+) -> None:
+    engine = _EngineFacadeFake(content="死信已永久停止后续投递。")
+    engine.tool_registry = {"pursuit_terminal_dead_letter_abandon": engine.tool}
+    dead_letter_id = "ptfail_" + "a" * 24
+
+    await commands_meta.run_pursue(
+        engine,
+        f"outbox abandon {dead_letter_id} superseded",
+    )
+
+    tool_call, agent_name = engine.calls[0]
+    assert agent_name == "cli"
+    assert tool_call.name == "pursuit_terminal_dead_letter_abandon"
+    assert json.loads(tool_call.arguments) == {
+        "dead_letter_id": dead_letter_id,
+        "reason": "superseded",
+    }
+
+
+@pytest.mark.asyncio
 async def test_delete_session_command_reports_durable_retry_request(
     rendered_console: StringIO,
 ) -> None:

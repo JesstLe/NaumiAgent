@@ -2541,6 +2541,54 @@ test("Goal dead-letter selection sends exact requeue and consumes its receipt", 
   assert.match(state.goalPanel.terminalOutboxActionNotice, /重新加入/);
 });
 
+test("Goal dead-letter abandon cycles bounded reason and consumes receipt", () => {
+  const state = createInitialState();
+  state.route = { name: "goals", originAnchor: null };
+  state.protocolNegotiated = true;
+  state.protocolNegotiation = { capabilities: ["pursuit_recovery_actions"] };
+  const deadLetterId = `ptfail_${"a".repeat(24)}`;
+  state.goalPanel.snapshot = {
+    current_goal_id: "",
+    goals: [],
+    interactions: [],
+    terminal_outbox: { enabled: true, dead_letters: [{ dead_letter_id: deadLetterId }] },
+  };
+  const sent = [];
+  const send = (type, payload) => {
+    sent.push({ type, payload });
+    return "abandon-request-1";
+  };
+
+  assert.equal(handleGoalPanelKey(state, "a", send), true);
+  assert.equal(handleGoalPanelKey(state, "z", send), true);
+  assert.deepEqual(sent, [{
+    type: "pursuit/terminal-outbox/dead-letter/abandon",
+    payload: { dead_letter_id: deadLetterId, reason: "superseded" },
+  }]);
+  reduceServerEvent(state, {
+    type: "pursuit/terminal-outbox/dead-letter/abandon_result",
+    request_id: "abandon-request-1",
+    payload: {
+      schema_version: 1,
+      dead_letter_id: deadLetterId,
+      status: "abandoned",
+      code: "abandoned",
+      message: "死信已永久停止后续投递。",
+      receipt: {
+        schema_version: 1,
+        receipt_id: `ptabn_${"b".repeat(24)}`,
+        dead_letter_id: deadLetterId,
+        failure_sequence: 1,
+        reason: "superseded",
+        abandoned_at: 1785888010,
+        receipt_sha256: "c".repeat(64),
+      },
+    },
+  });
+  assert.equal(state.goalPanel.terminalOutboxActionPending, false);
+  assert.match(state.goalPanel.terminalOutboxActionNotice, /永久停止/);
+});
+
 test("evolution command opens typed review route and navigates to detail", () => {
   const state = createInitialState();
   const sent = [];

@@ -890,6 +890,9 @@ function normalizeServerPayload(type, payload) {
   if (type === "pursuit/terminal-outbox/dead-letter/requeue_result") {
     return normalizePursuitTerminalDeadLetterRequeueResult(payload);
   }
+  if (type === "pursuit/terminal-outbox/dead-letter/abandon_result") {
+    return normalizePursuitTerminalDeadLetterAbandonResult(payload);
+  }
   if (type === "tasks/snapshot") {
     return normalizeTaskSnapshot(payload);
   }
@@ -2631,6 +2634,95 @@ function normalizePursuitTerminalDeadLetterRequeueReceipt(value) {
     failure_sequence: failureSequence,
     requeued_at: requeuedAt,
     next_attempt_at: nextAttemptAt,
+    receipt_sha256: receiptSha256,
+  };
+}
+
+function normalizePursuitTerminalDeadLetterAbandonResult(payload) {
+  if (Number(payload.schema_version) !== 1) {
+    throw new Error("terminal dead-letter abandon_result schema_version 不兼容");
+  }
+  const deadLetterId = harnessText(
+    payload.dead_letter_id,
+    "terminal dead-letter abandon_result dead_letter_id",
+  );
+  if (!/^ptfail_[0-9a-f]{24}$/.test(deadLetterId)) {
+    throw new Error("terminal dead-letter abandon_result target 无效");
+  }
+  const status = harnessChoice(
+    payload.status,
+    "terminal dead-letter abandon_result status",
+    new Set(["abandoned", "blocked", "error"]),
+  );
+  const code = harnessText(payload.code, "terminal dead-letter abandon_result code");
+  if (!/^[a-z][a-z0-9_]{0,63}$/.test(code)) {
+    throw new Error("terminal dead-letter abandon_result code 无效");
+  }
+  const receipt = payload.receipt == null
+    ? null
+    : normalizePursuitTerminalDeadLetterAbandonReceipt(payload.receipt);
+  if (
+    (status === "abandoned") !== (receipt != null)
+    || (receipt && receipt.dead_letter_id !== deadLetterId)
+  ) {
+    throw new Error("terminal dead-letter abandon_result 回执与状态不一致");
+  }
+  return {
+    schema_version: 1,
+    dead_letter_id: deadLetterId,
+    status,
+    code,
+    message: workbenchText(
+      payload.message,
+      "terminal dead-letter abandon_result message",
+      4_000,
+    ),
+    receipt,
+  };
+}
+
+function normalizePursuitTerminalDeadLetterAbandonReceipt(value) {
+  const item = harnessObject(value, "terminal dead-letter abandon receipt");
+  if (Number(item.schema_version) !== 1) {
+    throw new Error("terminal dead-letter abandon receipt schema_version 不兼容");
+  }
+  const receiptId = harnessText(item.receipt_id, "dead-letter abandon receipt_id");
+  const deadLetterId = harnessText(item.dead_letter_id, "dead-letter abandon target");
+  const receiptSha256 = harnessText(
+    item.receipt_sha256,
+    "dead-letter abandon receipt digest",
+  );
+  if (
+    !/^ptabn_[0-9a-f]{24}$/.test(receiptId)
+    || !/^ptfail_[0-9a-f]{24}$/.test(deadLetterId)
+    || !/^[0-9a-f]{64}$/.test(receiptSha256)
+  ) {
+    throw new Error("terminal dead-letter abandon receipt 标识无效");
+  }
+  const failureSequence = harnessPositiveInteger(
+    item.failure_sequence,
+    "terminal dead-letter abandon failure_sequence",
+  );
+  const reason = harnessChoice(
+    item.reason,
+    "terminal dead-letter abandon reason",
+    new Set([
+      "no_longer_required",
+      "superseded",
+      "external_resolution",
+      "invalid_target",
+    ]),
+  );
+  return {
+    schema_version: 1,
+    receipt_id: receiptId,
+    dead_letter_id: deadLetterId,
+    failure_sequence: failureSequence,
+    reason,
+    abandoned_at: harnessPositiveFiniteNumber(
+      item.abandoned_at,
+      "terminal dead-letter abandon abandoned_at",
+    ),
     receipt_sha256: receiptSha256,
   };
 }

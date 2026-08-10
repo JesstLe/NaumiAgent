@@ -4394,10 +4394,12 @@ class NaumiApp(App):
         }
         tool_name = tool_map[subcommand]
         outbox_parts = (
-            arg.strip().split(maxsplit=1) if subcommand == "outbox" else []
+            arg.strip().split() if subcommand == "outbox" else []
         )
         if outbox_parts and outbox_parts[0] == "requeue":
             tool_name = "pursuit_terminal_dead_letter_requeue"
+        elif outbox_parts and outbox_parts[0] == "abandon":
+            tool_name = "pursuit_terminal_dead_letter_abandon"
         tool = self.engine.tool_registry.get(tool_name)
         if tool is None:
             chat.mount(Markdown(f"**工具未注册**: `{tool_name}`", classes="agent-msg"))
@@ -4413,9 +4415,19 @@ class NaumiApp(App):
                 and outbox_parts[0] == "requeue"
                 and re.fullmatch(r"ptfail_[0-9a-f]{24}", outbox_parts[1])
             )
+            or (
+                len(outbox_parts) == 3
+                and outbox_parts[0] == "abandon"
+                and re.fullmatch(r"ptfail_[0-9a-f]{24}", outbox_parts[1])
+                and outbox_parts[2] in {
+                    "no_longer_required", "superseded",
+                    "external_resolution", "invalid_target",
+                }
+            )
         ):
             status.status_text = (
-                "用法: /pursue outbox run-now | requeue <ptfail_...>"
+                "用法: /pursue outbox run-now | requeue <ptfail_...> | "
+                "abandon <ptfail_...> <reason>"
             )
             return
         status.status_text = "目标追踪状态处理中..."
@@ -4424,7 +4436,14 @@ class NaumiApp(App):
                 arguments = (
                     {"dead_letter_id": outbox_parts[1]}
                     if outbox_parts[0] == "requeue"
-                    else {}
+                    else (
+                        {
+                            "dead_letter_id": outbox_parts[1],
+                            "reason": outbox_parts[2],
+                        }
+                        if outbox_parts[0] == "abandon"
+                        else {}
+                    )
                 )
             elif subcommand == "list":
                 arguments = {"active_only": "--active" in arg.split()}

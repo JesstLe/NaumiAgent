@@ -559,6 +559,10 @@ from naumi_agent.orchestrator.context_assembly import (
     is_harness_context_message,
 )
 from naumi_agent.orchestrator.planner import AdaptivePlanner, ExecutionMode, Plan
+from naumi_agent.orchestrator.pursuit_terminal_dead_letter_abandon import (
+    PursuitTerminalDeadLetterAbandonReason,
+    PursuitTerminalDeadLetterAbandonReceipt,
+)
 from naumi_agent.orchestrator.pursuit_terminal_dead_letter_action import (
     PursuitTerminalDeadLetterRequeueReceipt,
 )
@@ -3218,6 +3222,9 @@ class AgentEngine:
             terminal_dead_letter_requeue=(
                 self.requeue_pursuit_terminal_dead_letter
             ),
+            terminal_dead_letter_abandon=(
+                self.abandon_pursuit_terminal_dead_letter
+            ),
         ):
             self._tool_registry.register(tool)
 
@@ -4314,6 +4321,21 @@ class AgentEngine:
             now=datetime.now(UTC).timestamp(),
         )
         self._pursuit_terminal_outbox_worker.wake()
+        return receipt
+
+    async def abandon_pursuit_terminal_dead_letter(
+        self,
+        dead_letter_id: str,
+        source_request_id: str,
+        reason: str,
+    ) -> PursuitTerminalDeadLetterAbandonReceipt:
+        """Permanently stop one exact dead letter without claiming delivery."""
+        receipt, _ = self.pursuit_store.abandon_terminal_outbox_dead_letter(
+            dead_letter_id,
+            source_request_id=source_request_id,
+            reason=PursuitTerminalDeadLetterAbandonReason(reason),
+            now=datetime.now(UTC).timestamp(),
+        )
         return receipt
 
     async def run_agent_publication_recovery_once(
