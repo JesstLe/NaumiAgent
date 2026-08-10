@@ -47,10 +47,14 @@ from naumi_agent.daemons.worker_contract import (
     assess_worker_admission,
     normalize_worker_timestamp,
     verify_worker_contract,
+    verify_worker_health_report,
 )
+from naumi_agent.harness.heartbeat import HarnessHeartbeat, HarnessHeartbeatPhase, assess_heartbeat
+from naumi_agent.harness.run_lease import HarnessRunKind
 
-WORKER_REGISTRY_SCHEMA_VERSION = 4
+WORKER_REGISTRY_SCHEMA_VERSION = 5
 _MAX_CONTRACT_JSON_BYTES = 64 * 1024
+_MAX_HEALTH_REPORT_JSON_BYTES = 64 * 1024
 _MAX_CAPACITY_WAITERS = 10_000
 
 
@@ -1723,6 +1727,149 @@ class WorkerRegistryStore:
             now=checked_at,
         )
 
+    async def record_health_report(
+        self,
+        report: WorkerHealthReport,
+        *,
+        recorded_at: str,
+    ) -> WorkerHealthReport:
+        """Persist one monotonic report for the exact active Worker incarnation."""
+        if not isinstance(report, WorkerHealthReport):
+            raise TypeError("report 必须是 WorkerHealthReport。")
+        if not verify_worker_health_report(report):
+            raise ValueError("Worker Health Report 摘要校验失败。")
+        timestamp = normalize_worker_timestamp(recorded_at, field="recorded_at")
+        if datetime.fromisoformat(report.heartbeat.observed_at) > datetime.fromisoformat(
+            timestamp
+        ):
+            raise ValueError("Health Report observed_at 不能晚于 recorded_at。")
+        encoded = _serialize_health_report(report)
+        worker_id = report.heartbeat.subject_id
+
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                active_row = await _select_active(db, worker_id)
+                if active_row is None:
+                    raise WorkerRegistryConflictError("Worker 当前没有 active incarnation。")
+                active = _registration_from_row(active_row)
+                _validate_health_report_for_contract(report, active.contract)
+                _validate_health_report_registration_time(report, active)
+                existing = await _select_health_report(
+                    db,
+                    worker_id,
+                    report.heartbeat.epoch,
+                    report.heartbeat.sequence,
+                )
+                if existing is not None:
+                    restored = _health_report_from_row(existing)
+                    await db.rollback()
+                    if restored != report:
+                        raise WorkerRegistryConflictError(
+                            "同一 Worker heartbeat sequence 已绑定不同 Health Report。"
+                        )
+                    return restored
+                latest = await _select_latest_health_report(
+                    db,
+                    worker_id,
+                    report.heartbeat.epoch,
+                )
+                if latest is not None:
+                    previous = _health_report_from_row(latest)
+                    if report.heartbeat.sequence <= previous.heartbeat.sequence:
+                        raise WorkerRegistryConflictError(
+                            "Worker Health Report sequence 必须单调递增。"
+                        )
+                    observed = datetime.fromisoformat(report.heartbeat.observed_at)
+                    previous_observed = datetime.fromisoformat(
+                        previous.heartbeat.observed_at
+                    )
+                    if observed < previous_observed:
+                        raise WorkerRegistryConflictError(
+                            "Worker Health Report observed_at 不能回退。"
+                        )
+                await db.execute(
+                    "INSERT INTO worker_health_reports "
+                    "(worker_id, instance_id, epoch, sequence, contract_sha256, "
+                    "report_sha256, report_json, observed_at, recorded_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        worker_id,
+                        report.heartbeat.instance_id,
+                        report.heartbeat.epoch,
+                        report.heartbeat.sequence,
+                        report.contract_sha256,
+                        report.report_sha256,
+                        encoded,
+                        report.heartbeat.observed_at,
+                        timestamp,
+                    ),
+                )
+                await db.commit()
+                return report
+        except WorkerRegistryConflictError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise WorkerRegistryStoreError("无法持久化 Worker Health Report。") from exc
+
+    async def get_latest_health_report(
+        self,
+        worker_id: str,
+    ) -> WorkerHealthReport | None:
+        """Return health only for the current active incarnation."""
+        _validate_identifier(worker_id, field="worker_id")
+        if not _registry_file_exists(self._db_path):
+            return None
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                active_row = await _select_active(db, worker_id)
+                if active_row is None:
+                    return None
+                active = _registration_from_row(active_row)
+                row = await _select_latest_health_report(db, worker_id, active.contract.epoch)
+                if row is None:
+                    return None
+                report = _health_report_from_row(row)
+                _validate_health_report_for_contract(report, active.contract)
+                _validate_health_report_registration_time(report, active)
+                return report
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise WorkerRegistryStoreError("无法读取 Worker Health Report。") from exc
+
+    async def assess_latest_admission(
+        self,
+        *,
+        worker_id: str,
+        requirements: WorkerAdmissionRequirements,
+        now: str,
+    ) -> WorkerAdmissionResult:
+        """Assess admission from durable health instead of caller-supplied state."""
+        checked_at = normalize_worker_timestamp(now, field="now")
+        registration = await self.get_active(worker_id)
+        if registration is None:
+            return WorkerAdmissionResult(
+                decision=WorkerAdmissionDecision.BLOCKED,
+                reasons=(WorkerAdmissionReason.REGISTRATION_MISSING,),
+                checked_at=checked_at,
+                heartbeat_health=None,
+            )
+        report = await self.get_latest_health_report(worker_id)
+        if report is None:
+            return WorkerAdmissionResult(
+                decision=WorkerAdmissionDecision.BLOCKED,
+                reasons=(WorkerAdmissionReason.HEALTH_NOT_READY,),
+                checked_at=checked_at,
+                heartbeat_health=None,
+            )
+        return await self.assess_admission(
+            worker_id=worker_id,
+            report=report,
+            requirements=requirements,
+            now=checked_at,
+        )
+
     async def _ensure_schema(self) -> None:
         if self._schema_ready:
             return
@@ -1754,6 +1901,8 @@ class WorkerRegistryStore:
                             await db.execute(statement)
                         for statement in _SCHEMA_V4_STATEMENTS:
                             await db.execute(statement)
+                        for statement in _SCHEMA_V5_STATEMENTS:
+                            await db.execute(statement)
                         await db.execute(f"PRAGMA user_version = {WORKER_REGISTRY_SCHEMA_VERSION}")
                     elif version == 1:
                         for statement in _SCHEMA_V2_STATEMENTS:
@@ -1762,15 +1911,25 @@ class WorkerRegistryStore:
                             await db.execute(statement)
                         for statement in _SCHEMA_V4_STATEMENTS:
                             await db.execute(statement)
+                        for statement in _SCHEMA_V5_STATEMENTS:
+                            await db.execute(statement)
                         await db.execute(f"PRAGMA user_version = {WORKER_REGISTRY_SCHEMA_VERSION}")
                     elif version == 2:
                         for statement in _SCHEMA_V3_STATEMENTS:
                             await db.execute(statement)
                         for statement in _SCHEMA_V4_STATEMENTS:
                             await db.execute(statement)
+                        for statement in _SCHEMA_V5_STATEMENTS:
+                            await db.execute(statement)
                         await db.execute(f"PRAGMA user_version = {WORKER_REGISTRY_SCHEMA_VERSION}")
                     elif version == 3:
                         for statement in _SCHEMA_V4_STATEMENTS:
+                            await db.execute(statement)
+                        for statement in _SCHEMA_V5_STATEMENTS:
+                            await db.execute(statement)
+                        await db.execute(f"PRAGMA user_version = {WORKER_REGISTRY_SCHEMA_VERSION}")
+                    elif version == 4:
+                        for statement in _SCHEMA_V5_STATEMENTS:
                             await db.execute(statement)
                         await db.execute(f"PRAGMA user_version = {WORKER_REGISTRY_SCHEMA_VERSION}")
                     elif version != WORKER_REGISTRY_SCHEMA_VERSION:
@@ -1896,6 +2055,141 @@ def _deserialize_contract(raw: str) -> WorkerContract:
     if not verify_worker_contract(contract):
         raise ValueError("持久化 Worker contract 摘要校验失败。")
     return contract
+
+
+def _serialize_health_report(report: WorkerHealthReport) -> str:
+    payload = _json_value(asdict(report))
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    if len(encoded.encode("utf-8")) > _MAX_HEALTH_REPORT_JSON_BYTES:
+        raise ValueError("Worker Health Report 超过持久化大小上限。")
+    return encoded
+
+
+def _deserialize_health_report(raw: str) -> WorkerHealthReport:
+    if not isinstance(raw, str) or len(raw.encode("utf-8")) > _MAX_HEALTH_REPORT_JSON_BYTES:
+        raise ValueError("持久化 Worker Health Report 大小无效。")
+    payload = json.loads(raw)
+    if not isinstance(payload, dict) or set(payload) != {
+        "contract_sha256",
+        "heartbeat",
+        "active_jobs",
+        "accepting_jobs",
+        "report_sha256",
+    }:
+        raise ValueError("持久化 Worker Health Report 字段集合无效。")
+    heartbeat = payload["heartbeat"]
+    if not isinstance(heartbeat, dict) or set(heartbeat) != {
+        "workspace_root",
+        "subject_kind",
+        "subject_id",
+        "instance_id",
+        "epoch",
+        "sequence",
+        "phase",
+        "observed_at",
+        "timeout_seconds",
+        "detail_code",
+    }:
+        raise ValueError("持久化 Worker heartbeat 字段集合无效。")
+    try:
+        report = WorkerHealthReport(
+            contract_sha256=payload["contract_sha256"],
+            heartbeat=HarnessHeartbeat(
+                workspace_root=heartbeat["workspace_root"],
+                subject_kind=HarnessRunKind(heartbeat["subject_kind"]),
+                subject_id=heartbeat["subject_id"],
+                instance_id=heartbeat["instance_id"],
+                epoch=heartbeat["epoch"],
+                sequence=heartbeat["sequence"],
+                phase=HarnessHeartbeatPhase(heartbeat["phase"]),
+                observed_at=heartbeat["observed_at"],
+                timeout_seconds=heartbeat["timeout_seconds"],
+                detail_code=heartbeat["detail_code"],
+            ),
+            active_jobs=payload["active_jobs"],
+            accepting_jobs=payload["accepting_jobs"],
+            report_sha256=payload["report_sha256"],
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("持久化 Worker Health Report 内容无效。") from exc
+    if not verify_worker_health_report(report):
+        raise ValueError("持久化 Worker Health Report 摘要校验失败。")
+    return report
+
+
+def _validate_health_report_for_contract(
+    report: WorkerHealthReport,
+    contract: WorkerContract,
+) -> None:
+    heartbeat = report.heartbeat
+    if not verify_worker_health_report(report):
+        raise ValueError("Worker Health Report 摘要校验失败。")
+    if not (
+        report.contract_sha256 == contract.contract_sha256
+        and heartbeat.subject_kind is HarnessRunKind(contract.kind.value)
+        and heartbeat.subject_id == contract.worker_id
+        and heartbeat.instance_id == contract.instance_id
+        and heartbeat.epoch == contract.epoch
+    ):
+        raise WorkerRegistryConflictError(
+            "Worker Health Report 与 active incarnation identity 不一致。"
+        )
+    if (
+        not isinstance(heartbeat.sequence, int)
+        or isinstance(heartbeat.sequence, bool)
+        or heartbeat.sequence < 1
+        or heartbeat.sequence > 9_223_372_036_854_775_807
+    ):
+        raise ValueError("Worker Health Report sequence 必须是正整数。")
+    if not isinstance(heartbeat.phase, HarnessHeartbeatPhase):
+        raise TypeError("Worker Health Report phase 无效。")
+    if not isinstance(heartbeat.workspace_root, str) or not heartbeat.workspace_root:
+        raise ValueError("Worker Health Report workspace_root 不能为空。")
+    workspace = Path(heartbeat.workspace_root).expanduser()
+    if not workspace.is_absolute() or str(workspace.resolve()) != heartbeat.workspace_root:
+        raise ValueError("Worker Health Report workspace_root 必须 canonical。")
+    _validate_identifier(heartbeat.detail_code, field="detail_code")
+    observed_at = normalize_worker_timestamp(heartbeat.observed_at, field="observed_at")
+    if observed_at != heartbeat.observed_at:
+        raise ValueError("Worker Health Report observed_at 必须 canonical。")
+    assess_heartbeat(heartbeat, now=heartbeat.observed_at)
+
+
+def _validate_health_report_registration_time(
+    report: WorkerHealthReport,
+    registration: WorkerRegistration,
+) -> None:
+    observed = datetime.fromisoformat(report.heartbeat.observed_at)
+    issued = datetime.fromisoformat(registration.contract.issued_at)
+    registered = datetime.fromisoformat(registration.registered_at)
+    if observed < issued or observed < registered:
+        raise WorkerRegistryConflictError(
+            "Worker Health Report observed_at 早于 incarnation 注册。"
+        )
+
+
+def _health_report_from_row(row: aiosqlite.Row) -> WorkerHealthReport:
+    report = _deserialize_health_report(str(row["report_json"]))
+    heartbeat = report.heartbeat
+    if not (
+        heartbeat.subject_id == str(row["worker_id"])
+        and heartbeat.instance_id == str(row["instance_id"])
+        and heartbeat.epoch == int(row["epoch"])
+        and heartbeat.sequence == int(row["sequence"])
+        and report.contract_sha256 == str(row["contract_sha256"])
+        and report.report_sha256 == str(row["report_sha256"])
+        and heartbeat.observed_at == str(row["observed_at"])
+    ):
+        raise ValueError("Worker Health Report 索引列与内容不一致。")
+    recorded_at = normalize_worker_timestamp(str(row["recorded_at"]), field="recorded_at")
+    if datetime.fromisoformat(heartbeat.observed_at) > datetime.fromisoformat(recorded_at):
+        raise ValueError("Worker Health Report recorded_at 早于 observed_at。")
+    return report
 
 
 def _registration_from_row(row: aiosqlite.Row) -> WorkerRegistration:
@@ -2221,6 +2515,33 @@ async def _select_process_witness(
 ) -> aiosqlite.Row | None:
     cursor = await db.execute(
         "SELECT * FROM worker_process_witnesses WHERE worker_id = ? AND epoch = ?",
+        (worker_id, epoch),
+    )
+    return await cursor.fetchone()
+
+
+async def _select_health_report(
+    db: aiosqlite.Connection,
+    worker_id: str,
+    epoch: int,
+    sequence: int,
+) -> aiosqlite.Row | None:
+    cursor = await db.execute(
+        "SELECT * FROM worker_health_reports "
+        "WHERE worker_id = ? AND epoch = ? AND sequence = ?",
+        (worker_id, epoch, sequence),
+    )
+    return await cursor.fetchone()
+
+
+async def _select_latest_health_report(
+    db: aiosqlite.Connection,
+    worker_id: str,
+    epoch: int,
+) -> aiosqlite.Row | None:
+    cursor = await db.execute(
+        "SELECT * FROM worker_health_reports "
+        "WHERE worker_id = ? AND epoch = ? ORDER BY sequence DESC LIMIT 1",
         (worker_id, epoch),
     )
     return await cursor.fetchone()
@@ -2732,6 +3053,29 @@ CREATE TABLE IF NOT EXISTS worker_supervisor_fence_receipts (
     """
 CREATE INDEX IF NOT EXISTS worker_supervisor_fence_history
 ON worker_supervisor_fence_receipts (worker_id, decided_at DESC, operation_id DESC)
+""",
+)
+
+
+_SCHEMA_V5_STATEMENTS = (
+    """
+CREATE TABLE IF NOT EXISTS worker_health_reports (
+    worker_id TEXT NOT NULL,
+    instance_id TEXT NOT NULL,
+    epoch INTEGER NOT NULL CHECK (epoch >= 1),
+    sequence INTEGER NOT NULL CHECK (sequence >= 1),
+    contract_sha256 TEXT NOT NULL CHECK (length(contract_sha256) = 64),
+    report_sha256 TEXT NOT NULL UNIQUE CHECK (length(report_sha256) = 64),
+    report_json TEXT NOT NULL,
+    observed_at TEXT NOT NULL,
+    recorded_at TEXT NOT NULL,
+    PRIMARY KEY (worker_id, epoch, sequence),
+    FOREIGN KEY (worker_id, epoch) REFERENCES worker_registrations(worker_id, epoch)
+)
+""",
+    """
+CREATE INDEX IF NOT EXISTS worker_health_report_latest
+ON worker_health_reports (worker_id, epoch, sequence DESC)
 """,
 )
 

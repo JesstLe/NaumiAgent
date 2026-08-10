@@ -87,14 +87,21 @@ def _contract(epoch: int = 1, *, issued_at: str | None = None):
     )
 
 
-def _report(contract, *, observed_at: str = T2):
+def _report(
+    contract,
+    *,
+    observed_at: str = T2,
+    sequence: int = 1,
+    active_jobs: int = 0,
+    accepting_jobs: bool = True,
+):
     heartbeat = HarnessHeartbeat(
         workspace_root="/workspace",
         subject_kind=HarnessRunKind.TOOL,
         subject_id=contract.worker_id,
         instance_id=contract.instance_id,
         epoch=contract.epoch,
-        sequence=1,
+        sequence=sequence,
         phase=HarnessHeartbeatPhase.RUNNING,
         observed_at=observed_at,
         timeout_seconds=10,
@@ -103,8 +110,8 @@ def _report(contract, *, observed_at: str = T2):
     return issue_worker_health_report(
         contract=contract,
         heartbeat=heartbeat,
-        active_jobs=0,
-        accepting_jobs=True,
+        active_jobs=active_jobs,
+        accepting_jobs=accepting_jobs,
     )
 
 
@@ -546,6 +553,104 @@ async def test_authority_admission_uses_only_active_contract(tmp_path: Path) -> 
 
     assert WorkerAdmissionReason.IDENTITY_MISMATCH in stale.reasons
     assert admitted.admitted
+
+
+@pytest.mark.asyncio
+async def test_durable_health_reports_are_monotonic_fenced_and_reloaded(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "workers.db"
+    store = WorkerRegistryStore(db_path)
+    first = _contract()
+    await store.register(first, registered_at=T1)
+
+    missing = await store.assess_latest_admission(
+        worker_id=first.worker_id,
+        requirements=_requirements(),
+        now=T2,
+    )
+    assert missing.reasons == (WorkerAdmissionReason.HEALTH_NOT_READY,)
+
+    with pytest.raises(WorkerRegistryConflictError, match="早于 incarnation 注册"):
+        await store.record_health_report(
+            _report(first, observed_at=T0, sequence=1),
+            recorded_at=T2,
+        )
+
+    initial = _report(first, observed_at=T2, sequence=1)
+    concurrent = await asyncio.gather(
+        store.record_health_report(initial, recorded_at=T3),
+        WorkerRegistryStore(db_path).record_health_report(initial, recorded_at=T3),
+    )
+    assert concurrent == [initial, initial]
+    assert await store.record_health_report(initial, recorded_at=T4) == initial
+    assert await WorkerRegistryStore(db_path).get_latest_health_report(first.worker_id) == initial
+    admitted = await WorkerRegistryStore(db_path).assess_latest_admission(
+        worker_id=first.worker_id,
+        requirements=_requirements(),
+        now=T3,
+    )
+    assert admitted.admitted
+
+    second_report = _report(first, observed_at=T3, sequence=2, active_jobs=1)
+    await store.record_health_report(second_report, recorded_at=T4)
+    assert await store.get_latest_health_report(first.worker_id) == second_report
+    conflict = _report(first, observed_at=T2, sequence=1, accepting_jobs=False)
+    with pytest.raises(WorkerRegistryConflictError, match="绑定不同"):
+        await store.record_health_report(conflict, recorded_at=T4)
+
+    draining = _report(
+        first,
+        observed_at=T4,
+        sequence=3,
+        active_jobs=1,
+        accepting_jobs=False,
+    )
+    await store.record_health_report(draining, recorded_at=T4)
+    blocked = await store.assess_latest_admission(
+        worker_id=first.worker_id,
+        requirements=_requirements(),
+        now=T4,
+    )
+    assert WorkerAdmissionReason.NOT_ACCEPTING_JOBS in blocked.reasons
+
+    second = _contract(2, issued_at=T4)
+    await store.register(second, registered_at=T4)
+    assert await store.get_latest_health_report(first.worker_id) is None
+    with pytest.raises(WorkerRegistryConflictError, match="identity 不一致"):
+        await store.record_health_report(second_report, recorded_at=T4)
+
+    current = _report(second, observed_at=T4, sequence=1)
+    await store.record_health_report(current, recorded_at=T4)
+    with sqlite3.connect(db_path) as db:
+        db.execute(
+            "UPDATE worker_health_reports SET instance_id = 'forged-instance' "
+            "WHERE worker_id = ? AND epoch = ?",
+            (second.worker_id, second.epoch),
+        )
+        db.commit()
+    with pytest.raises(WorkerRegistryStoreError, match="无法读取 Worker Health Report"):
+        await WorkerRegistryStore(db_path).get_latest_health_report(second.worker_id)
+
+
+@pytest.mark.asyncio
+async def test_registry_migrates_v4_health_schema(tmp_path: Path) -> None:
+    db_path = tmp_path / "workers.db"
+    store = WorkerRegistryStore(db_path)
+    contract = _contract()
+    await store.register(contract, registered_at=T1)
+    with sqlite3.connect(db_path) as db:
+        db.execute("DROP INDEX worker_health_report_latest")
+        db.execute("DROP TABLE worker_health_reports")
+        db.execute("PRAGMA user_version = 4")
+        db.commit()
+
+    reopened = WorkerRegistryStore(db_path)
+    report = _report(contract, observed_at=T2)
+    assert await reopened.record_health_report(report, recorded_at=T3) == report
+    with sqlite3.connect(db_path) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert db.execute("SELECT COUNT(*) FROM worker_health_reports").fetchone()[0] == 1
 
 
 @pytest.mark.asyncio

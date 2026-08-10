@@ -61,8 +61,8 @@ Worker heartbeat 表示执行实例活性，两者不得合并成一个“在线
 
 - ARC-04.2b/2c 已持久化 immutable ToolJob admission、单调 lifecycle receipt 和 unknown 副作用边界；真实
   daemon transport 与执行 producer 仍未完成，因此本页不能声称 Worker 已可安全执行任务；
-- durable `WorkerHealthReport` 尚不存在；UI-13.1d 已可显示 reservation authority 的 reserved/available，
-  但仍不能将其冒充 active OS jobs、accepting jobs、队列深度或资源实耗；
+- ARC-04.1c 已交付 Registry v5 durable `WorkerHealthReport`；本页既有 Doctor read model 尚未投影其中的
+  active OS jobs 与 accepting-jobs，UI-13.1d 的 reservation reserved/available 也仍是独立事实，二者不得互相冒充；
 - 只有 latest heartbeat，没有 jitter、丢包率、crash-loop 历史和 SLO；这些属于 ARC-08；
 - 当前真实 producer 仍以 Pursuit 为主，Tool/Browser/Agent daemon heartbeat producer 要随各 daemon 垂直切片接入；
 - 下一步应做能解锁 HAR-08.4 一个真实 Profile check 的 ARC-04.3a non-PTY worker 最小垂直切片。

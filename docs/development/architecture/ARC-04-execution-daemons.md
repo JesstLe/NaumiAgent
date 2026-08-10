@@ -22,6 +22,9 @@
 - ARC-04.1b 已完成 Runtime-owned SQLite registration authority、最高 epoch incarnation fencing、撤销、
   authority-only admission 与 Store Catalog/Composition Root 装配，详见
   `ARC-04-1b-worker-registration-authority.md`。
+- ARC-04.1c 已将 exact active incarnation 的 typed heartbeat、active jobs 与 accepting-jobs 纳入 Registry v5
+  单调 durable authority，并提供 latest-only admission；higher epoch 自动 fencing 旧 health。详见
+  `ARC-04-1c-durable-worker-health-report.md`。
 - ARC-04.2a 已完成 execution-scoped grant authority：绑定参数 digest、幂等键、Tool run lease、active Worker
   epoch、权限来源与短期 expiry，并可在消费前重新 fencing，详见
   `ARC-04-2a-scoped-execution-grant-authority.md`。
@@ -157,6 +160,6 @@ crash-loop/quarantine/drain 或 supervisor 动作；在 ARC-04.1a 交付前，AR
 
 ARC-04.1a 在该 heartbeat 之上增加了能力、平台、资源、隔离和容量合同，并验证 worker/instance/epoch 与
 heartbeat generation 一致。它没有复制 liveness 状态机，也没有放宽上述 daemon producer 与 supervisor 缺口；
-ARC-04 当前状态为 partial (4.1a, 4.1b, 4.2a, 4.2b, 4.2c, 4.3a, 4.3b, 4.3c, 4.5a, 4.5b1,
+ARC-04 当前状态为 partial (4.1a, 4.1b, 4.1c, 4.2a, 4.2b, 4.2c, 4.3a, 4.3b, 4.3c, 4.5a, 4.5b1,
 4.5b1a, 4.5b2, 4.5c, 4.5d1, 4.5d2a, 4.5d2b, 4.5d2c, 4.5e1, 4.5e2, 4.5e3a,
 4.6a)。
