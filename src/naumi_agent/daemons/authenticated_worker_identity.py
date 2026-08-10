@@ -209,10 +209,7 @@ def verify_authenticated_worker_identity(
 
 class AuthenticatedWorkerIdentityStore:
     def __init__(self, db_path: str | Path) -> None:
-        unresolved = Path(db_path).expanduser()
-        if not unresolved.is_absolute():
-            raise ValueError("Worker Identity store 路径必须是绝对路径。")
-        self.db_path = unresolved.resolve(strict=False)
+        self.db_path = Path(db_path).expanduser().resolve(strict=False)
 
     async def record(
         self,

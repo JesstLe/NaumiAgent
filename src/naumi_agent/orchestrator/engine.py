@@ -20,6 +20,10 @@ from naumi_agent import __version__
 from naumi_agent.agent_control import AgentControlService
 from naumi_agent.background import BackgroundRunner, BackgroundTaskStore, create_background_tools
 from naumi_agent.config.settings import AppConfig
+from naumi_agent.daemons.authenticated_worker_identity import (
+    AuthenticatedWorkerIdentityAuthority,
+    AuthenticatedWorkerIdentityStore,
+)
 from naumi_agent.daemons.execution_grants import ExecutionGrantAuthority
 from naumi_agent.daemons.permission_context import (
     bind_permission_receipt,
@@ -201,6 +205,10 @@ from naumi_agent.evolution.post_rollback_behavioral_coverage import (
 from naumi_agent.evolution.post_rollback_behavioral_lanes import (
     EvolutionPostRollbackBehavioralLaneService,
     EvolutionPostRollbackBehavioralLaneStore,
+)
+from naumi_agent.evolution.post_rollback_remote_claims import (
+    EvolutionPostRollbackRemoteClaimService,
+    EvolutionPostRollbackRemoteClaimStore,
 )
 from naumi_agent.evolution.post_rollback_remote_dispatches import (
     EvolutionPostRollbackRemoteDispatchService,
@@ -2644,6 +2652,29 @@ class AgentEngine:
                 ),
                 worker_registry=resources.worker_registry_store,
                 store=self.evolution_post_rollback_remote_dispatch_store,
+            )
+        )
+        self.authenticated_worker_identity_store = AuthenticatedWorkerIdentityStore(
+            config.memory.session_db_path
+        )
+        self.authenticated_worker_identity_authority = (
+            AuthenticatedWorkerIdentityAuthority(
+                worker_registry=resources.worker_registry_store,
+                store=self.authenticated_worker_identity_store,
+            )
+        )
+        self.evolution_post_rollback_remote_claim_store = (
+            EvolutionPostRollbackRemoteClaimStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_post_rollback_remote_claim_service = (
+            EvolutionPostRollbackRemoteClaimService(
+                dispatch_service=self.evolution_post_rollback_remote_dispatch_service,
+                dispatch_store=self.evolution_post_rollback_remote_dispatch_store,
+                worker_registry=resources.worker_registry_store,
+                identity_authority=self.authenticated_worker_identity_authority,
+                store=self.evolution_post_rollback_remote_claim_store,
             )
         )
         self.evolution_proposal_outcome_projection_service = (

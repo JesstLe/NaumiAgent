@@ -84,6 +84,17 @@ def _public_key(marker: bytes) -> str:
     return base64.b64encode(raw).decode("ascii")
 
 
+def test_authenticated_worker_identity_store_normalizes_relative_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    store = AuthenticatedWorkerIdentityStore("data/sessions.db")
+
+    assert store.db_path == (tmp_path / "data" / "sessions.db")
+
+
 @pytest.mark.asyncio
 async def test_authenticated_worker_identity_is_durable_concurrent_and_fenced(
     tmp_path: Path,

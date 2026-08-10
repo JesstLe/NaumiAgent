@@ -163,7 +163,8 @@ current Target Baseline、exact Placement、durable Health、原 Before/After la
 tamper-evident queued Dispatch，并在 Registry 中原子预留 exact incarnation capacity；claim/lease、传输、执行授权
 和结果摄取仍未完成。
 ARC-04.1d 已补齐通用 supervisor-attested Ed25519 Worker Identity，为 claim challenge 提供 exact incarnation
-签名身份；one-time challenge、lease receipt 与 renewal 仍由 HAR-09.6c2a3c 完成。
+签名身份。HAR-09.6c2a3c 已进一步完成 one-time challenge、Ed25519 verification、单调 lease receipt、bounded
+renewal 与动态 fencing；baseline transport、execution authorization 和 result ingestion 仍未完成。
 HAR-07.5b 已为 New UI 增加 `v` Evidence 焦点和 `/harness evidence`，并让 CLI/Textual TUI 复用相同
 Explain authority；HAR-07.4b1 已补齐空闲 Bridge 有界重启、重新协商和精确 session 回执恢复。
 ARC-02.5a 又补齐两类安全回执的持久事件身份与 session cursor；ARC-02.5b 已补齐 New UI 持久 ACK、
