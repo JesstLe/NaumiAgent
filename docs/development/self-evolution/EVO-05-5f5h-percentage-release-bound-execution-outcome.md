@@ -72,6 +72,6 @@ slice；ledger、binding 或 ChatRun 任一来源变化都会动态撤销 author
 
 ## 当前边界与下一步
 
-本切片只冻结单 run outcome，尚未把同一 Assignment 下多个不同 run 聚合为 cohort evidence。下一最小切片应为
-`EVO-05.5f5i Percentage Completed-run Aggregation`：动态消费 current passing Window、current Outcome、GREEN Baseline 与 percentage
-guardrails，按不同 run ID 去重并计入失败结果；达到 `minimum_completed_runs` 之前不得形成 Stage Completion Evidence。
+本切片只冻结单 run outcome。[EVO-05.5f5i](EVO-05-5f5i-percentage-completed-run-aggregation.md) 已进一步动态消费 current
+passing Window、Outcome、GREEN Baseline 与 percentage guardrails，按不同 run ID 去重并计入失败结果。下一步仍须单独签发
+`percentage → stable` entry authority；5f5h/5f5i 都不能直接扩大 stable 流量。

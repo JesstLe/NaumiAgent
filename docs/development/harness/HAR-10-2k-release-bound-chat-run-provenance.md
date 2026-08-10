@@ -52,4 +52,5 @@
 content-addressed Opt-in Outcome。
 [EVO-05.5f5h](../self-evolution/EVO-05-5f5h-percentage-release-bound-execution-outcome.md) 已在 percentage 路线复用同一
 provenance authority，并绑定 exact Assignment/Exposure/Window。下一步仍需对不同 run ID 动态重验并聚合
-`minimum_completed_runs`；本 provenance 与单个 Outcome 都不能直接成为 Stage Completion Evidence。
+`minimum_completed_runs`；[EVO-05.5f5i](../self-evolution/EVO-05-5f5i-percentage-completed-run-aggregation.md) 已完成该聚合，
+但本 provenance、单个 Outcome 与 Stage Completion 都不能直接成为 stable entry authority。
