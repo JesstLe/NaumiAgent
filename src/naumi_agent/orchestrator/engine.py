@@ -502,6 +502,10 @@ from naumi_agent.evolution.stable_promotion_observation_contracts import (
     EvolutionStablePromotionObservationContractService,
     EvolutionStablePromotionObservationContractStore,
 )
+from naumi_agent.evolution.stable_promotion_runtime_observation_admissions import (
+    EvolutionStablePromotionRuntimeObservationAdmissionService,
+    EvolutionStablePromotionRuntimeObservationAdmissionStore,
+)
 from naumi_agent.evolution.stable_read_graph import (
     EvolutionLazyStableReadGraphInspector,
     build_evolution_stable_read_graph_inspector,
@@ -2780,6 +2784,31 @@ class AgentEngine:
                 experiment_store=self.evolution_experiment_contract_store,
                 store=(
                     self.evolution_stable_promotion_observation_contract_store
+                ),
+            )
+        )
+        self.evolution_stable_promotion_runtime_observation_admission_store = (
+            EvolutionStablePromotionRuntimeObservationAdmissionStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_stable_promotion_runtime_observation_admission_service = (
+            EvolutionStablePromotionRuntimeObservationAdmissionService(
+                workspace_root=paths.workspace_root,
+                contract_store=(
+                    self.evolution_stable_promotion_observation_contract_store
+                ),
+                contract_service=(
+                    self.evolution_stable_promotion_observation_contract_service
+                ),
+                finalization_service=(
+                    self.evolution_stable_remote_population_finalization_service
+                ),
+                deployment_inspector=self.evolution_stable_deployment_inspector,
+                evolution_db_path=config.memory.session_db_path,
+                harness_store=self._harness_store,
+                store=(
+                    self.evolution_stable_promotion_runtime_observation_admission_store
                 ),
             )
         )

@@ -76,6 +76,7 @@
 - `promotion_authority=false`；
 - `execution_authority=false`。
 
-下一独立切片 `EVO-05.7b2 Stable Promotion Runtime Observation Admission` 应把本契约逐字段绑定到 exact managed
-New UI/TUI release identity 与 Finalization 后的 startup-origin Harness ledger。随后 7b3 才能聚合长期窗口并给出
-sustained-health verdict；7b4 才能在独立审批策略下写入 `promoted` Outcome 与 supersede ledger。
+[EVO-05.7b2](EVO-05-7b2-stable-promotion-runtime-observation-admission.md) 已把本契约逐字段绑定到 exact Population
+member、Stable Intent/Deployment、managed New UI/TUI release identity 与 Finalization 后的 startup-origin Harness
+ledger。下一步先完成 7b2a 跨 installation Admission delivery，再由 7b3 聚合长期窗口并给出 sustained-health verdict；
+7b4 才能在独立审批策略下写入 `promoted` Outcome 与 supersede ledger。
