@@ -529,6 +529,10 @@ from naumi_agent.evolution.stable_promotion_outcome_eligibilities import (
     EvolutionStablePromotionOutcomeEligibilityService,
     EvolutionStablePromotionOutcomeEligibilityStore,
 )
+from naumi_agent.evolution.stable_promotion_outcomes import (
+    EvolutionStablePromotionOutcomeService,
+    EvolutionStablePromotionOutcomeStore,
+)
 from naumi_agent.evolution.stable_promotion_population_observation_assessments import (
     EvolutionStablePromotionPopulationObservationAssessmentService,
     EvolutionStablePromotionPopulationObservationAssessmentStore,
@@ -3069,6 +3073,26 @@ class AgentEngine:
                 interaction_store=self._harness_store,
                 store=self.evolution_stable_promotion_outcome_decision_store,
                 request_user_input=self.request_user_input,
+            )
+        )
+        self.evolution_stable_promotion_outcome_store = (
+            EvolutionStablePromotionOutcomeStore(
+                config.memory.session_db_path,
+                decision_store=self.evolution_stable_promotion_outcome_decision_store,
+                eligibility_store=(
+                    self.evolution_stable_promotion_outcome_eligibility_store
+                ),
+            )
+        )
+        self.evolution_stable_promotion_outcome_service = (
+            EvolutionStablePromotionOutcomeService(
+                decision_service=(
+                    self.evolution_stable_promotion_outcome_decision_service
+                ),
+                eligibility_service=(
+                    self.evolution_stable_promotion_outcome_eligibility_service
+                ),
+                store=self.evolution_stable_promotion_outcome_store,
             )
         )
         self.evolution_stable_promotion_observation_revision_dispatch_store = (

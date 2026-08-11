@@ -96,5 +96,6 @@ Harness interaction 和 evolution session ledger 允许位于不同 SQLite，这
 ## 8. 自我审视与后续边界
 
 本实现没有把原 rollout approval 冒充观察后决定，也没有把 bypass 冒充用户意图。它刻意不写 promoted ledger、
-不 supersede 历史 Outcome、不更新策略、不修改代码。下一步 7b4c 只能消费 current、动态有效的 `promote` Decision，
-在一个 append-only hash chain 中原子写 promoted Outcome 与 supersession；reject/defer 不能进入该写路径。
+不 supersede 历史 Outcome、不更新策略、不修改代码。[7b4c](EVO-05-7b4c-stable-promotion-outcome-ledger.md)
+已继续只消费 current、动态有效的 `promote` Decision，在 append-only hash chain 中原子写 promoted Outcome 与
+supersession；reject/defer 不能进入该写路径。
