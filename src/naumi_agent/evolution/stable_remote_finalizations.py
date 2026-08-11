@@ -689,9 +689,19 @@ class EvolutionStableRemoteFinalizationService:
             )
             late_window = (
                 allow_late_recovery
-                and _aware(package.grant.issued_at) <= completed < expiry
-                and expiry <= signed <= now
+                and expiry <= now
                 and (now - expiry).total_seconds() <= _MAX_LATE_RECOVERY_SECONDS
+                and (
+                    _aware(package.grant.issued_at)
+                    <= completed
+                    <= signed
+                    < expiry
+                    or _aware(package.grant.issued_at)
+                    <= completed
+                    < expiry
+                    <= signed
+                    <= now
+                )
             )
             if not (ordinary_window or late_window):
                 raise EvolutionStableRemoteFinalizationError(
@@ -1096,6 +1106,25 @@ def decode_stable_remote_finalization_submission(
     )
 
 
+def encode_stable_remote_finalization_receipt(
+    receipt: EvolutionStableRemoteFinalizationReceipt,
+) -> str:
+    return base64.b64encode(
+        _canonical_bytes(receipt.model_dump(mode="json"))
+    ).decode("ascii")
+
+
+def decode_stable_remote_finalization_receipt(
+    value: str,
+) -> EvolutionStableRemoteFinalizationReceipt:
+    return _decode_model(
+        value,
+        EvolutionStableRemoteFinalizationReceipt.model_validate_json,
+        "stable_remote_finalization_receipt_invalid",
+        "Remote Finalization Receipt 编码或结构无效。",
+    )
+
+
 def render_stable_remote_finalization(
     value: EvolutionStableRemoteFinalizationExecutionPackage
     | EvolutionStableRemoteFinalizationView,
@@ -1467,8 +1496,10 @@ __all__ = [
     "EvolutionStableRemoteFinalizationSubmission",
     "EvolutionStableRemoteFinalizationView",
     "decode_stable_remote_finalization_execution_package",
+    "decode_stable_remote_finalization_receipt",
     "decode_stable_remote_finalization_submission",
     "encode_stable_remote_finalization_execution_package",
+    "encode_stable_remote_finalization_receipt",
     "encode_stable_remote_finalization_submission",
     "execute_stable_remote_finalization",
     "recover_stable_remote_finalization_submission",

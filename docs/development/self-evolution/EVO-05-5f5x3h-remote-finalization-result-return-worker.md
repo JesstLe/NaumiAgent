@@ -117,6 +117,7 @@ writer/result、Receipt、retry、dead-letter、failure、forced shutdown 与下
 - macOS/Linux/Windows 真实 daemon 与网络故障矩阵尚未形成发布证据；
 - 单 member Receipt 尚未聚合为 Population Stable Rollout Completion Authority。
 
-下一最小切片是 **EVO-05.5f5x3i Authenticated Result Return HTTP Transport**：复用 x3g 的独立 mTLS 身份、同连接 pin、限长、timeout、
-并发与安全错误边界，为本 Protocol 提供跨机器实现。随后再以独立 Harness 切片完成 installation daemon supervision/service discovery，
-最后进入 Population Receipt aggregation；不能把这些未交付能力压缩成一个不可验证的大切片。
+[EVO-05.5f5x3i Authenticated Result Return HTTP Transport](EVO-05-5f5x3i-authenticated-result-return-http-transport.md) 已复用 x3g
+的独立 mTLS 身份、同连接 pin、限长、timeout、并发与安全错误边界，并增加 installation leaf→member 的精确授权。下一最小切片转为
+HAR-10.9a installation daemon supervision/service discovery；其后才进入 Population Receipt aggregation，不能把这些未交付能力压缩成
+一个不可验证的大切片。

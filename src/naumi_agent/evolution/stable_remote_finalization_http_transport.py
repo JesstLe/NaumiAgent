@@ -5,21 +5,22 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import os
 import re
-import socket
 import ssl
-import stat
 import threading
-import time
-from collections import defaultdict, deque
-from collections.abc import Callable
 from dataclasses import dataclass
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from types import TracebackType
 from urllib.parse import SplitResult, urlsplit
 
+from naumi_agent.evolution._stable_remote_finalization_http_common import (
+    BoundedTLSHTTPServer,
+    FingerprintRateLimiter,
+    validate_fingerprints,
+    validate_seconds,
+    validate_tls_file,
+)
 from naumi_agent.evolution.stable_remote_finalization_deliveries import (
     EvolutionStableRemoteFinalizationDeliveryError,
     EvolutionStableRemoteFinalizationDeliveryPackage,
@@ -69,25 +70,31 @@ class StableRemoteFinalizationHTTPClientPolicy:
         object.__setattr__(
             self,
             "server_ca_path",
-            _tls_file(self.server_ca_path, label="服务端 CA", private=False),
+            validate_tls_file(self.server_ca_path, label="服务端 CA", private=False),
         )
         object.__setattr__(
             self,
             "client_certificate_path",
-            _tls_file(self.client_certificate_path, label="客户端证书", private=False),
+            validate_tls_file(
+                self.client_certificate_path, label="客户端证书", private=False
+            ),
         )
         object.__setattr__(
             self,
             "client_private_key_path",
-            _tls_file(self.client_private_key_path, label="客户端私钥", private=True),
+            validate_tls_file(
+                self.client_private_key_path, label="客户端私钥", private=True
+            ),
         )
         object.__setattr__(
             self,
             "server_certificate_sha256_pins",
-            _fingerprints(self.server_certificate_sha256_pins, label="服务端证书 pin"),
+            validate_fingerprints(
+                self.server_certificate_sha256_pins, label="服务端证书 pin"
+            ),
         )
-        _seconds(self.connect_timeout_seconds, "连接 timeout", maximum=120)
-        _seconds(self.request_timeout_seconds, "请求 timeout", maximum=600)
+        validate_seconds(self.connect_timeout_seconds, "连接 timeout", maximum=120)
+        validate_seconds(self.request_timeout_seconds, "请求 timeout", maximum=600)
         if self.request_timeout_seconds < self.connect_timeout_seconds:
             raise ValueError("远程安装请求 timeout 不能小于连接 timeout。")
         if not 1 <= self.max_response_bytes <= _MAX_ACK_BYTES:
@@ -112,30 +119,38 @@ class StableRemoteFinalizationHTTPServerPolicy:
         object.__setattr__(
             self,
             "server_certificate_path",
-            _tls_file(self.server_certificate_path, label="服务端证书", private=False),
+            validate_tls_file(
+                self.server_certificate_path, label="服务端证书", private=False
+            ),
         )
         object.__setattr__(
             self,
             "server_private_key_path",
-            _tls_file(self.server_private_key_path, label="服务端私钥", private=True),
+            validate_tls_file(
+                self.server_private_key_path, label="服务端私钥", private=True
+            ),
         )
         object.__setattr__(
             self,
             "client_ca_path",
-            _tls_file(self.client_ca_path, label="客户端 CA", private=False),
+            validate_tls_file(self.client_ca_path, label="客户端 CA", private=False),
         )
         object.__setattr__(
             self,
             "authorized_client_certificate_sha256",
-            _fingerprints(
+            validate_fingerprints(
                 self.authorized_client_certificate_sha256,
                 label="客户端证书授权指纹",
             ),
         )
         if not 1 <= self.max_request_bytes <= _MAX_PACKAGE_BYTES:
             raise ValueError("远程安装 package 大小上限无效。")
-        _seconds(self.tls_handshake_timeout_seconds, "服务端 TLS handshake timeout", maximum=120)
-        _seconds(self.request_timeout_seconds, "服务端请求 timeout", maximum=600)
+        validate_seconds(
+            self.tls_handshake_timeout_seconds,
+            "服务端 TLS handshake timeout",
+            maximum=120,
+        )
+        validate_seconds(self.request_timeout_seconds, "服务端请求 timeout", maximum=600)
         if not 1 <= self.requests_per_minute <= 100_000:
             raise ValueError("远程安装请求速率上限无效。")
         if not 1 <= self.max_concurrent_requests <= 1024:
@@ -270,26 +285,6 @@ class MTLSStableRemoteFinalizationInstallationTransport:
         return headers + body
 
 
-class _FingerprintRateLimiter:
-    def __init__(self, limit: int, *, clock: Callable[[], float] = time.monotonic) -> None:
-        self.limit = limit
-        self.clock = clock
-        self._entries: dict[str, deque[float]] = defaultdict(deque)
-        self._lock = threading.Lock()
-
-    def allow(self, identity: str) -> bool:
-        now = self.clock()
-        cutoff = now - 60.0
-        with self._lock:
-            entries = self._entries[identity]
-            while entries and entries[0] <= cutoff:
-                entries.popleft()
-            if len(entries) >= self.limit:
-                return False
-            entries.append(now)
-            return True
-
-
 class StableRemoteFinalizationHTTPServer:
     """Dedicated mTLS endpoint; intentionally separate from the general API app."""
 
@@ -312,9 +307,9 @@ class StableRemoteFinalizationHTTPServer:
         self.port = port
         self.policy = policy
         self.transport = transport
-        self._server: ThreadingHTTPServer | None = None
+        self._server: BoundedTLSHTTPServer | None = None
         self._thread: threading.Thread | None = None
-        self._rate_limiter = _FingerprintRateLimiter(policy.requests_per_minute)
+        self._rate_limiter = FingerprintRateLimiter(policy.requests_per_minute)
         self._lifecycle_lock = threading.Lock()
 
     @property
@@ -334,7 +329,7 @@ class StableRemoteFinalizationHTTPServer:
             class Handler(_StableRemoteFinalizationRequestHandler):
                 endpoint = owner
 
-            server = _BoundedThreadingHTTPServer(
+            server = BoundedTLSHTTPServer(
                 (self.bind_host, self.port),
                 Handler,
                 max_concurrent_requests=self.policy.max_concurrent_requests,
@@ -398,75 +393,6 @@ class StableRemoteFinalizationHTTPServer:
                 return await self.transport.receive(package)
 
         return asyncio.run(receive_with_timeout())
-
-
-class _BoundedThreadingHTTPServer(ThreadingHTTPServer):
-    def __init__(
-        self,
-        server_address: tuple[str, int],
-        request_handler: type[BaseHTTPRequestHandler],
-        *,
-        max_concurrent_requests: int,
-    ) -> None:
-        self._request_slots = threading.BoundedSemaphore(max_concurrent_requests)
-        self._active_requests = 0
-        self._active_lock = threading.Lock()
-        self._ssl_context: ssl.SSLContext | None = None
-        self._handshake_timeout_seconds = 5.0
-        super().__init__(server_address, request_handler)
-
-    def configure_tls(
-        self,
-        context: ssl.SSLContext,
-        *,
-        handshake_timeout_seconds: float,
-    ) -> None:
-        self._ssl_context = context
-        self._handshake_timeout_seconds = handshake_timeout_seconds
-
-    def process_request(self, request: socket.socket, client_address: object) -> None:
-        if not self._request_slots.acquire(blocking=False):
-            self.shutdown_request(request)
-            return
-        with self._active_lock:
-            self._active_requests += 1
-        try:
-            super().process_request(request, client_address)
-        except Exception:
-            with self._active_lock:
-                self._active_requests -= 1
-            self._request_slots.release()
-            raise
-
-    def process_request_thread(
-        self,
-        request: socket.socket,
-        client_address: object,
-    ) -> None:
-        try:
-            context = self._ssl_context
-            if context is None:
-                self.shutdown_request(request)
-                return
-            request.settimeout(self._handshake_timeout_seconds)
-            try:
-                tls_request = context.wrap_socket(request, server_side=True)
-            except (ConnectionError, OSError, TimeoutError, ssl.SSLError):
-                self.shutdown_request(request)
-                return
-            super().process_request_thread(tls_request, client_address)
-        finally:
-            with self._active_lock:
-                self._active_requests -= 1
-            self._request_slots.release()
-
-    @property
-    def active_requests(self) -> int:
-        with self._active_lock:
-            return self._active_requests
-
-    def handle_error(self, request: object, client_address: object) -> None:
-        """Avoid leaking handler exceptions or peer identities to stderr."""
 
 
 class _StableRemoteFinalizationRequestHandler(BaseHTTPRequestHandler):
@@ -775,38 +701,6 @@ def _endpoint(value: str) -> SplitResult:
     ):
         raise ValueError("远程安装 endpoint 必须是固定路径的 https URL。")
     return parsed
-
-
-def _fingerprints(values: tuple[str, ...], *, label: str) -> tuple[str, ...]:
-    normalized = tuple(dict.fromkeys(str(item or "").strip().lower() for item in values))
-    if not 1 <= len(normalized) <= 2 or any(
-        _FINGERPRINT_RE.fullmatch(item) is None for item in normalized
-    ):
-        raise ValueError(f"{label} 必须包含 1–2 个 SHA-256 指纹。")
-    return normalized
-
-
-def _tls_file(value: str | Path, *, label: str, private: bool) -> Path:
-    source = Path(value).expanduser()
-    try:
-        metadata = source.lstat()
-    except OSError as exc:
-        raise ValueError(f"{label}不存在或不可读。") from exc
-    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
-        raise ValueError(f"{label}必须是普通文件，不能是符号链接。")
-    if not 1 <= metadata.st_size <= 4 * 1024 * 1024:
-        raise ValueError(f"{label}为空或超过 4 MiB。")
-    if os.name != "nt" and metadata.st_mode & (0o077 if private else 0o022):
-        requirement = "不能允许 group/world 访问" if private else "不能允许 group/world 写入"
-        raise ValueError(f"{label}{requirement}。")
-    return source.resolve()
-
-
-def _seconds(value: float, label: str, *, maximum: float) -> None:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{label}无效。")
-    if not 0.1 <= float(value) <= maximum:
-        raise ValueError(f"{label}无效。")
 
 
 __all__ = [

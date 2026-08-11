@@ -21,6 +21,10 @@ from naumi_agent.evolution.stable_remote_finalization_http_transport import (
     MTLSStableRemoteFinalizationInstallationTransport,
     StableRemoteFinalizationHTTPClientPolicy,
 )
+from naumi_agent.evolution.stable_remote_finalization_result_http_transport import (
+    MTLSStableRemoteFinalizationResultTransport,
+    StableRemoteFinalizationResultHTTPClientPolicy,
+)
 from naumi_agent.evolution.store import (
     EvolutionCandidateStore,
     resolve_evolution_db_path,
@@ -370,6 +374,25 @@ def build_runtime_services(
                 max_response_bytes=http_transport.max_response_bytes,
             )
         )
+    stable_remote_result_transport = (
+        resolved.stable_remote_finalization_result_transport
+    )
+    result_http = config.harness.stable_remote_finalization_result_http_transport
+    if stable_remote_result_transport is None and result_http.enabled:
+        stable_remote_result_transport = MTLSStableRemoteFinalizationResultTransport(
+            StableRemoteFinalizationResultHTTPClientPolicy(
+                endpoint_url=result_http.endpoint_url,
+                server_ca_path=Path(result_http.server_ca_path),
+                client_certificate_path=Path(result_http.client_certificate_path),
+                client_private_key_path=Path(result_http.client_private_key_path),
+                server_certificate_sha256_pins=tuple(
+                    result_http.server_certificate_sha256_pins
+                ),
+                connect_timeout_seconds=result_http.connect_timeout_seconds,
+                request_timeout_seconds=result_http.request_timeout_seconds,
+                max_response_bytes=result_http.max_response_bytes,
+            )
+        )
     return RuntimeServices(
         terminal_runtime_lifecycle_factory=factory,
         agent_execution_heartbeat_factory=agent_factory,
@@ -381,7 +404,7 @@ def build_runtime_services(
         ),
         stable_remote_finalization_transport=stable_remote_transport,
         stable_remote_finalization_result_transport=(
-            resolved.stable_remote_finalization_result_transport
+            stable_remote_result_transport
         ),
     )
 
