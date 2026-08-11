@@ -64,9 +64,11 @@ payload 只把 string/number/bool/null 投影为公开值；
 - [x] Textual TUI 完成页签、上下导航、空态和错误路径验证。
 - [x] `/workbench` 首帧仍为只读，不创建任务、Agent 或 worktree。
 
-## 未完成边界
+## 后续边界
 
-- UI-10.5b：Bridge revisioned domain event producer、连续 patch 应用、gap full-snapshot 恢复和断线 cursor。
+- UI-10.5b1 已建立独立持久 Timeline stream/cursor、旧库迁移、并发分配、Service replay window 与机械
+  gap 判定；详见 `UI-10-5b-timeline-cursor-authority.md`。Bridge producer、连续 patch、断线 replay 与
+  gap full-snapshot 恢复仍属于 UI-10.5b2。
 - HAR-10：多实例 push notification、持久 cursor 与跨 Store 原子 terminal commit。
 - 事件 payload 的领域专用详情卡仍需按事件类型逐项建立 typed projection；本切片不把通用 payload
   摘要冒充领域完整证据。
