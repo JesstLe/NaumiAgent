@@ -379,8 +379,12 @@ function renderProposalDetail(snapshot, proposal, width) {
     ...array(proposal.validation_plan).slice(0, 8).map((step) => color(ANSI.dim, `• ${compactText(step, 1_000)}`)),
     hasOutcome
       ? color(
-          ANSI.yellow,
-          outcome.status === "rollback_recovery_observed"
+          outcome.status === "promoted"
+            ? outcome.authority_valid ? ANSI.green : ANSI.red
+            : ANSI.yellow,
+          outcome.status === "promoted"
+            ? "该 Proposal 已形成 post-observation promoted Outcome；不会自动进入 policy learning。"
+            : outcome.status === "rollback_recovery_observed"
             ? "该 Proposal 已形成回滚恢复观察 Outcome；approved 治理记录与历史 rollback fact 保持不变。"
             : "该 Proposal 已形成 rollback Outcome；approved 治理记录保持不变。",
         )
@@ -401,6 +405,26 @@ function renderProposalDetail(snapshot, proposal, width) {
     const authority = outcome.authority_valid
       ? color(ANSI.green, "authority 有效")
       : color(ANSI.red, "authority 已失效");
+    if (outcome.status === "promoted") {
+      const prior = outcome.stable_previous_outcome_id
+        ? `${compactText(outcome.stable_previous_outcome_id, 128)} · 已由当前 Outcome 替代`
+        : "无 · 首个 promoted Outcome";
+      const invalidation = array(outcome.invalidation_reasons).join(", ");
+      lines.push(
+        color(ANSI.cyan, "稳定推广 Outcome"),
+        `${color(ANSI.green, "promoted")} · ${authority}`,
+        `Outcome · ${compactText(outcome.outcome_id, 128)} · sequence ${number(outcome.stable_promotion_sequence)}`,
+        `Decision · ${compactText(outcome.stable_decision_id, 128)}`,
+        `Eligibility · ${compactText(outcome.stable_eligibility_id, 128)}`,
+        `Observation Contract · ${compactText(outcome.stable_observation_contract_id, 128)}`,
+        `Population Assessment · ${compactText(outcome.stable_population_assessment_id, 128)}`,
+        `Prior Outcome · ${prior}`,
+        `Supersede Event · ${compactText(outcome.stable_supersede_event_id, 128)}`,
+        `Authority · head=${Boolean(outcome.projection_head_authority)} · outcome=${Boolean(outcome.stable_promotion_outcome_authority)}`,
+        ...(invalidation ? [color(ANSI.red, `撤权原因 · ${compactText(invalidation, 800)}`)] : []),
+        color(ANSI.dim, "长期观察已记录；Learning / Promotion / Execution authority 仍为 false。"),
+      );
+    } else {
     const beforeAfter = outcome.before_after_evidence;
     const beforeAfterLabel = beforeAfter
       ? color(ANSI.green, `已记录 · ${array(beforeAfter.lanes).length} lanes`)
@@ -482,6 +506,7 @@ function renderProposalDetail(snapshot, proposal, width) {
         : []),
       color(ANSI.dim, "不能再次签发 Contract、标记 promoted 或进入 policy learning。"),
     );
+    }
   }
   if (snapshot.action_notice) lines.push(color(ANSI.green, compactText(snapshot.action_notice, 1_000)));
   if (snapshot.action_error) lines.push(color(ANSI.red, compactText(snapshot.action_error, 1_000)));
@@ -553,6 +578,9 @@ function behavioralVerdictLabel(value) {
 }
 
 function proposalOutcomeLabel(proposal) {
+  if (proposal?.outcome_status === "promoted") {
+    return ` · ${color(ANSI.green, "promoted")}`;
+  }
   if (proposal?.outcome_status === "rollback_recovery_observed") {
     return ` · ${color(ANSI.green, "recovery observed")}`;
   }

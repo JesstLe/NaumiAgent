@@ -241,10 +241,12 @@ restore/remove step 并写入只读 content-addressed storage。
 [EVO-05.6b2a1](EVO-05-6b2a1-explicit-rollback-action.md) 已完成 authority-bound version-slot CAS、boot/launch
 验证、崩溃对账，以及 normal 单次确认/bypass 直通的 Agent Tool 与共享 Slash 入口。
 [EVO-05.7a](EVO-05-7a-rollback-outcome-authority.md) 已把真实 rollback Receipt 反向绑定到原始 Experiment Contract
-与 Workbench Proposal，形成动态可撤权的 `rolled_back` Outcome；长期指标和 promoted/superseded 状态尚未完成。
+与 Workbench Proposal，形成动态可撤权的 `rolled_back` Outcome；该阶段尚缺的长期恢复指标与 successful-rollout
+promoted/superseded 路径已分别由 HAR-09.6d/e 与 EVO-05.7b4a–7b4d 后续补齐。
 [EVO-06.1a](EVO-06-1a-outcome-backed-opportunity-discovery.md) 已把该真实 `rolled_back` Outcome 确定性回注
 现有 Candidate Store：同源并发幂等、同根失败聚合，Review/Workbench 入队前动态重验来源 authority；它不复制源码/补丁，
-也不授予实验、学习或推广权限。accepted/promoted Outcome 与后续 Capability Proposal/Shadow/Activation 仍未完成。
+也不授予实验、学习或推广权限。Successful-rollout promoted Outcome 已由 EVO-05.7b4a–7b4d 独立完成，但其回注
+Capability Proposal/Shadow/Activation 与 learning authority 仍未完成。
 
 [EVO-05.5f5x3a](EVO-05-5f5x3a-authenticated-remote-readiness-claim.md) 已为跨安装 Stable Finalization
 补齐 Population Credential-bound challenge、Ed25519 assertion 与 durable authenticated claim；它不把远端签名声明冒充
@@ -306,7 +308,9 @@ Harness 持久三选一交互，不能在 Tool 参数中自行 promote/reject/de
 
 [EVO-05.7b4c](EVO-05-7b4c-stable-promotion-outcome-ledger.md) 已实现 Proposal-scoped promoted/superseded append-only ledger：
 只消费 current promote Decision，原子写 Outcome/Event，第二个真实 Outcome 会保留并动态 supersede 旧记录。当前仍固定
-`learning_authority=false`；下一步是 typed Proposal Outcome projection，而不是直接进入自动学习。
+`learning_authority=false`。[EVO-05.7b4d](EVO-05-7b4d-stable-promotion-proposal-outcome-projection.md) 已把该 current
+ledger head 纳入 Proposal Outcome v3，Workbench/New UI/Textual TUI 同源显示 promoted、prior Outcome、Event 与撤权原因；
+下一步是可展开历史审计与独立 EVO-06 gate，而不是直接进入自动学习。
 [EVO-05.3f2c3b1](EVO-05-3f2c3b1-platform-dispatch-outbox.md) 已把实时准入的 required-platform Worker lane 转为 durable
 queued dispatch，并在 exact Worker incarnation 上预留容量。[EVO-05.3f2c3b2a](EVO-05-3f2c3b2a-authenticated-worker-claim.md)
 已增加 supervisor-attested Ed25519 Worker Identity、一次性 claim challenge 和可续期 lease hash chain。
@@ -317,13 +321,14 @@ queued dispatch，并在 exact Worker incarnation 上预留容量。[EVO-05.3f2c
 并以 completion 门禁推动 Matrix lane 完成；远端 stable runtime、配置/数据 rollback 与完整长期 Outcome 仍未完成。
 [HAR-09.6d1](../harness/HAR-09-6d1-post-rollback-long-term-observation-contract.md) 已把 recovered Matrix、fresh
 Runtime Verification、baseline slot/pointer/binary 与长期窗口规则冻结为不可变契约；真实 runtime binding admission、
-heartbeat window 聚合已由 6d2/6d3 继续完成，promoted Outcome 仍未完成。
+heartbeat window 聚合已由 6d2/6d3 继续完成；successful-rollout promoted Outcome 后由 EVO-05.7b4a–7b4d 完成。
 [HAR-09.6d2](../harness/HAR-09-6d2-post-rollback-runtime-observation-admission.md) 已继续将该契约逐字段绑定到 exact
-managed runtime identity 与 startup-origin Harness ledger；6d3 已完成长期窗口评估，promoted Outcome 仍未完成。
+managed runtime identity 与 startup-origin Harness ledger；6d3 已完成长期窗口评估，EVO-05.7b4a–7b4d 又完成独立
+post-observation Decision、promoted ledger 与三端 projection。
 [HAR-09.6d3](../harness/HAR-09-6d3-post-rollback-long-term-observation-assessment.md) 已完成真实 ledger 分页、head
 对账、四态长期窗口和动态撤权。[HAR-09.6e1](../harness/HAR-09-6e1-post-rollback-long-term-outcome-authority.md)
 已进一步签发 rollback-recovery-observed Outcome revision 与 append-only supersede event，保留 immutable rollback fact；
 [HAR-09.6e2](../harness/HAR-09-6e2-long-term-outcome-projection-parity.md) 又通过 Projection v2 同源同步
-Workbench/New UI/Textual TUI，并保持 Contract 终态阻断。promoted Outcome、配置/数据 rollback 与 policy learning
-authority 仍未完成。成功 rollout 路径的下一步是 EVO-05.7b4b 独立 Outcome Decision，而不是复用 rollback recovery
+Workbench/New UI/Textual TUI，并保持 Contract 终态阻断。Promoted Outcome 后由 EVO-05.7b4a–7b4d 完成；配置/数据
+rollback 与 policy learning authority 仍未完成。成功 rollout 路径使用独立 Outcome Decision，而不是复用 rollback recovery
 Outcome、把 installation 本地 Cursor 冒充 Control Plane evidence，或把 7b3c2 Population Assessment 直接冒充 promoted Outcome。

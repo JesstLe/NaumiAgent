@@ -3849,6 +3849,12 @@ class AgentEngine:
                 long_term_outcome_service=(
                     self.evolution_post_rollback_long_term_outcome_service
                 ),
+                stable_promotion_outcome_store=(
+                    self.evolution_stable_promotion_outcome_store
+                ),
+                stable_promotion_outcome_service=(
+                    self.evolution_stable_promotion_outcome_service
+                ),
             )
         )
         self.workbench_service.bind_proposal_outcome_reader(

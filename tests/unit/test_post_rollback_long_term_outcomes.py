@@ -581,7 +581,7 @@ async def test_proposal_projection_uses_current_long_term_head(tmp_path: Path) -
 
     projected = await projection_service.project_session(root.workbench_session_id)
     projection = projected[root.workbench_proposal_id]
-    assert projection.schema_version == 2
+    assert projection.schema_version == 3
     assert projection.status == "rollback_recovery_observed"
     assert projection.outcome_id == outcome_view.outcome.outcome_id
     assert projection.root_rollback_outcome_id == root.outcome_id

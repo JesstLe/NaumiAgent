@@ -742,6 +742,41 @@ async def test_dashboard_keeps_approved_evolution_proposal_actionable(tmp_path) 
     assert rolled_back["proposals"][0]["contract_issue_allowed"] is False
     assert rolled_back["proposals"][0]["outcome"]["outcome_id"] == projection.outcome_id
 
+    promoted_projection = EvolutionProposalOutcomeProjection(
+        workbench_session_id="s",
+        workbench_proposal_id=proposal["id"],
+        status="promoted",
+        outcome_id=f"evstablepromout_{'6' * 24}",
+        outcome_sha256="7" * 64,
+        candidate_id=f"evc_{'5' * 24}",
+        candidate_revision=2,
+        recorded_at="2026-08-11T00:00:00+00:00",
+        authority_valid=True,
+        long_term_metrics_recorded=True,
+        projection_head_authority=True,
+        stable_promotion_sequence=2,
+        stable_previous_outcome_id=f"evstablepromout_{'8' * 24}",
+        stable_decision_id=f"evstablepromdecision_{'9' * 24}",
+        stable_eligibility_id=f"evstablepromeligible_{'a' * 24}",
+        stable_observation_contract_id=f"evstablepromobserve_{'b' * 24}",
+        stable_population_assessment_id=f"evstableprompopobserve_{'c' * 24}",
+        stable_supersede_event_id=f"evstablepromoutsup_{'d' * 24}",
+        stable_supersede_event_sha256="e" * 64,
+        stable_prior_outcome_superseded=True,
+        stable_promotion_outcome_authority=True,
+        promoted=True,
+    )
+
+    class _PromotedOutcomeReader:
+        async def project_session(self, session_id: str):
+            return {proposal["id"]: promoted_projection}
+
+    service.bind_proposal_outcome_reader(_PromotedOutcomeReader())
+    promoted_snapshot = await service.dashboard_snapshot("s")
+    assert promoted_snapshot["proposals"][0]["outcome_status"] == "promoted"
+    assert promoted_snapshot["proposals"][0]["contract_issue_allowed"] is False
+    assert promoted_snapshot["proposals"][0]["outcome"]["promoted"] is True
+
     before_after = _before_after_evidence(
         outcome_id=projection.outcome_id,
         outcome_sha256=projection.outcome_sha256,

@@ -276,7 +276,9 @@
   已用 Harness durable interaction 实现 promote/reject/defer 独立治理，且不直接写 promoted Outcome。
 - [EVO-05.7b4c Stable Promotion Outcome Ledger](EVO-05-7b4c-stable-promotion-outcome-ledger.md)：
   已交付 Proposal-scoped promoted/superseded append-only hash chain。
-- EVO-05.7 后续：typed Proposal Outcome projection；policy learning 仍属于独立 EVO-06 gate。
+- [EVO-05.7b4d Stable Promotion Proposal Outcome Projection](EVO-05-7b4d-stable-promotion-proposal-outcome-projection.md)：
+  已交付 Workbench/New UI/Textual TUI 同源的 v3 promoted typed projection。
+- EVO-05.7 后续：可展开 supersession 历史审计；policy learning 仍属于独立 EVO-06 gate。
 
 ## 验收标准
 

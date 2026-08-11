@@ -12,6 +12,9 @@ from pydantic import ValidationError
 import naumi_agent.evolution as evolution_api
 from naumi_agent.cli.slash_router import execute_slash_command
 from naumi_agent.config.settings import AppConfig, MemoryConfig
+from naumi_agent.evolution.proposal_outcomes import (
+    EvolutionProposalOutcomeProjectionService,
+)
 from naumi_agent.evolution.stable_promotion_outcome_decisions import (
     EvolutionStablePromotionOutcomeDecisionAction,
     EvolutionStablePromotionOutcomeDecisionError,
@@ -162,6 +165,10 @@ async def test_engine_composes_outcome_eligibility_service_and_tool(tmp_path) ->
         assert isinstance(outcome_tool, EvolutionStablePromotionOutcomeTool)
         assert engine.evolution_stable_promotion_outcome_service.store is (
             engine.evolution_stable_promotion_outcome_store
+        )
+        assert (
+            engine.evolution_proposal_outcome_projection_service.stable_promotion_outcome_store
+            is engine.evolution_stable_promotion_outcome_store
         )
     finally:
         await engine.shutdown()
@@ -592,6 +599,43 @@ async def test_passing_population_creates_review_only_eligibility_and_revokes(
     assert outcome_two.supersede_event.previous_event_id == (outcome_left.supersede_event.event_id)
     assert outcome_two.supersede_event.prior_outcome_superseded
     assert outcome_two.promoted_outcome_authority
+    async def no_rollback_outcomes(_session_id: str):
+        return ()
+
+    projection_service = EvolutionProposalOutcomeProjectionService(
+        rollback_outcome_store=SimpleNamespace(list_by_session=no_rollback_outcomes),
+        rollback_outcome_service=SimpleNamespace(),
+        stable_promotion_outcome_store=outcome_store,
+        stable_promotion_outcome_service=outcome_service(),
+    )
+    projected = await projection_service.project_session(
+        outcome_two.outcome.workbench_session_id
+    )
+    promoted_projection = projected[outcome_two.outcome.workbench_proposal_id]
+    assert promoted_projection.status == "promoted"
+    assert promoted_projection.promoted
+    assert promoted_projection.authority_valid
+    assert promoted_projection.stable_promotion_sequence == 2
+    assert promoted_projection.stable_previous_outcome_id == outcome_left.outcome.outcome_id
+    assert promoted_projection.stable_supersede_event_id == (
+        outcome_two.supersede_event.event_id
+    )
+    assert promoted_projection.stable_prior_outcome_superseded
+    assert not promoted_projection.learning_authority
+    assert not promoted_projection.promotion_authority
+    assert not promoted_projection.execution_authority
+    forged_projection = promoted_projection.model_copy(
+        update={"stable_supersede_event_id": ""}
+    )
+    with pytest.raises(ValidationError, match="promoted projection"):
+        forged_projection.model_validate_json(forged_projection.model_dump_json())
+    forged_head_authority = promoted_projection.model_copy(
+        update={"projection_head_authority": False}
+    )
+    with pytest.raises(ValidationError, match="promoted projection"):
+        forged_head_authority.model_validate_json(
+            forged_head_authority.model_dump_json()
+        )
     superseded_first = await outcome_service().inspect(outcome_id=outcome_left.outcome.outcome_id)
     assert superseded_first.superseded
     assert not superseded_first.promoted_outcome_authority

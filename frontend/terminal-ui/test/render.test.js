@@ -867,6 +867,41 @@ test("workbench Reviews tab renders rollback Outcome and removes Contract action
   assert(recoveredPlain.includes("3600s · 13 samples"));
   assert(recoveredPlain.includes("Supersede Event"));
   assert(recoveredPlain.includes("preserved"));
+
+  const promotedProposal = {
+    ...proposal,
+    outcome_status: "promoted",
+    outcome: {
+      status: "promoted",
+      outcome_id: `evstablepromout_${"c".repeat(24)}`,
+      authority_valid: true,
+      stable_promotion_sequence: 2,
+      stable_previous_outcome_id: `evstablepromout_${"d".repeat(24)}`,
+      stable_decision_id: `evstablepromdecision_${"e".repeat(24)}`,
+      stable_eligibility_id: `evstablepromeligible_${"f".repeat(24)}`,
+      stable_observation_contract_id: `evstablepromobserve_${"1".repeat(24)}`,
+      stable_population_assessment_id: `evstableprompopobserve_${"2".repeat(24)}`,
+      stable_supersede_event_id: `evstablepromoutsup_${"3".repeat(24)}`,
+      stable_promotion_outcome_authority: true,
+      projection_head_authority: true,
+      invalidation_reasons: [],
+    },
+  };
+  const promotedRendered = renderWorkbenchOverview({
+    ...view,
+    proposals: [promotedProposal],
+  }, 120, 80);
+  const promotedPlain = promotedRendered.map(stripAnsi).join("\n");
+  assert(promotedPlain.includes("稳定推广 Outcome"));
+  assert(promotedPlain.includes("promoted"));
+  assert(promotedPlain.includes("sequence 2"));
+  assert(promotedPlain.includes(promotedProposal.outcome.stable_decision_id));
+  assert(promotedPlain.includes("Prior Outcome"));
+  assert(promotedPlain.includes("替代"));
+  assert(promotedPlain.includes("Learning / Promotion / Execution authority 仍为 false"));
+  assert(!promotedPlain.includes("Rollback Receipt"));
+  assert(!promotedPlain.includes("c 签发/重开 Contract"));
+  assert(promotedRendered.join("\n").includes(ANSI.green));
 });
 
 test("markdown code blocks show a bounded excerpt with lightweight highlighting", () => {

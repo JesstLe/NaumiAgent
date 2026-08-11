@@ -195,14 +195,19 @@
   显示 exact Attempt、suite/budget、deadline 与 signable digest，authorization 显示 Worker signature、Run Grant、
   Runtime lease 和 expiry；仍明确“没有真实 start/result 证据”，不投影 Matrix completed。
 - HAR-09.6c2b1/6c2b2 已完成完整行为矩阵及 typed Reviews 投影：New UI/TUI 显示 Matrix ID、总体 verdict、
-  platform、lane kind 与 local/remote evidence source；Matrix stale 或 binding/聚合篡改时失败关闭。长期指标、
-  promoted Outcome 和 policy learning 仍未完成。完整边界见
+  platform、lane kind 与 local/remote evidence source；Matrix stale 或 binding/聚合篡改时失败关闭。该阶段尚缺的
+  长期指标和 promoted Outcome 已分别由 HAR-09.6d/e 与 EVO-05.7b4a–7b4d 补齐；policy learning 仍未开放。完整边界见
   `../harness/HAR-09-6a-proposal-outcome-projection.md` 与
   `../harness/HAR-09-6b-before-after-outcome-evidence.md`、
   `../harness/HAR-09-6c1-post-rollback-runtime-verification.md`、
   `../harness/HAR-09-6c2a-post-rollback-behavioral-lane.md`。
   Coverage 前置见 `../harness/HAR-09-6c2a1-post-rollback-behavioral-coverage.md`，Matrix UI 见
   `../harness/HAR-09-6c2b2-post-rollback-behavioral-matrix-ui.md`。
+- EVO-05.7b4d 已把 Proposal Outcome 协议升级为 v3：Reviews/New UI/Textual TUI 现在显示 current promoted head、
+  sequence、Decision、Eligibility、Stable Observation Contract、Population Assessment、prior Outcome 与 Supersede Event；
+  有效态使用绿色，撤权态使用红色并显示原因。Promoted 不再误用 rollback 面板，也不会开放 Contract、Learning、
+  Promotion 或 Execution action。完整契约见
+  `../self-evolution/EVO-05-7b4d-stable-promotion-proposal-outcome-projection.md`。
 
 ### UI-10.6b1 已实现：Proposal defer
 

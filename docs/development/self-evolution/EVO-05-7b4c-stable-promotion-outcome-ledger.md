@@ -101,6 +101,6 @@ supersession。
 
 ## 8. 自我审视与后续边界
 
-本切片已形成真实 promoted/superseded durable ledger，但尚未把它加入
-`EvolutionProposalOutcomeProjection`。下一最小切片应升级 typed Proposal Outcome projection，并让 Workbench/New UI/Textual TUI
-显示 promoted 当前态、历史 supersession 与撤权原因。随后才能进入 EVO-06 policy learning gate；不得由本 Outcome 自动学习。
+本切片已形成真实 promoted/superseded durable ledger。[7b4d](EVO-05-7b4d-stable-promotion-proposal-outcome-projection.md)
+已继续升级 typed Proposal Outcome projection，并让 Workbench/New UI/Textual TUI 显示 promoted 当前态、历史
+supersession 与撤权原因。EVO-06 policy learning gate 仍保持独立；不得由本 Outcome 自动学习。
