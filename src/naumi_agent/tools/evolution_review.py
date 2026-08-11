@@ -240,6 +240,10 @@ from naumi_agent.evolution.stable_promotion_observation_revision_delivery_worker
     render_stable_promotion_observation_revision_worker,
     render_stable_promotion_observation_revision_worker_pass,
 )
+from naumi_agent.evolution.stable_promotion_outcome_eligibilities import (
+    EvolutionStablePromotionOutcomeEligibilityError,
+    render_stable_promotion_outcome_eligibility,
+)
 from naumi_agent.evolution.stable_promotion_population_observation_assessments import (
     EvolutionStablePromotionPopulationObservationAssessmentError,
     render_stable_promotion_population_observation_assessment,
@@ -4486,6 +4490,90 @@ class EvolutionStablePromotionPopulationObservationAssessmentTool(Tool):
         return render_stable_promotion_population_observation_assessment(view)
 
 
+class EvolutionStablePromotionOutcomeEligibilityTool(Tool):
+    """Record or inspect review eligibility without deciding promotion."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_stable_promotion_outcome_eligibility"
+
+    @property
+    def description(self) -> str:
+        return (
+            "把 current exact Population passing 机械转换为 Outcome 独立审批资格；"
+            "只写 review-ready evidence，不签发 promoted、learning、promotion 或执行权限。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["record", "inspect"]},
+                "population_assessment_id": {
+                    "type": "string",
+                    "pattern": "^evstableprompopobserve_[0-9a-f]{24}$",
+                },
+                "eligibility_id": {
+                    "type": "string",
+                    "pattern": "^evstablepromeligible_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["action"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="稳定推广 Outcome 审批资格",
+            search_hint=(
+                "evolution stable promotion outcome eligibility review ready "
+                "自进化 稳定推广 Outcome 审批资格"
+            ),
+        )
+
+    async def execute(
+        self,
+        action: str,
+        population_assessment_id: str = "",
+        eligibility_id: str = "",
+    ) -> str:
+        operation = str(action or "").strip().lower()
+        service = self._engine.evolution_stable_promotion_outcome_eligibility_service
+        try:
+            if operation == "record":
+                view = await service.record(
+                    population_assessment_id=str(population_assessment_id or "").strip()
+                )
+            elif operation == "inspect":
+                view = await service.inspect(
+                    eligibility_id=str(eligibility_id or "").strip()
+                )
+            else:
+                raise ValueError("action 必须是 record 或 inspect。")
+        except (
+            AttributeError,
+            EvolutionStablePromotionOutcomeEligibilityError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "stable_promotion_outcome_eligibility_failed")
+            return f"稳定推广 Outcome 审批资格未完成（`{code}`）：{exc}"
+        return render_stable_promotion_outcome_eligibility(view)
+
+
 class EvolutionStablePromotionRuntimeAdmissionDeliveryTool(Tool):
     """Prepare, export, receive, or inspect one signed runtime Admission."""
 
@@ -6209,6 +6297,7 @@ def create_evolution_review_tools(
         EvolutionStablePromotionObservationRevisionDeliveryTool(engine),
         EvolutionStablePromotionInstallationObservationAssessmentTool(engine),
         EvolutionStablePromotionPopulationObservationAssessmentTool(engine),
+        EvolutionStablePromotionOutcomeEligibilityTool(engine),
         EvolutionStablePromotionRuntimeAdmissionDeliveryTool(engine),
         EvolutionStableRolloutAuthorizationTool(engine),
         EvolutionStableRolloutFinalizationTool(engine),
@@ -6279,6 +6368,7 @@ __all__ = [
     "EvolutionStablePromotionObservationContractTool",
     "EvolutionStablePromotionInstallationObservationAssessmentTool",
     "EvolutionStablePromotionPopulationObservationAssessmentTool",
+    "EvolutionStablePromotionOutcomeEligibilityTool",
     "EvolutionStablePromotionRuntimeAdmissionDeliveryTool",
     "EvolutionStablePromotionObservationChainCursorTool",
     "EvolutionStablePromotionObservationRevisionDeliveryTool",

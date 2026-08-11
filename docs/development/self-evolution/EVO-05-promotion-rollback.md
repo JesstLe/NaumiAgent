@@ -270,7 +270,9 @@
   已交付；从 Control Plane 完整已验签 ledger 形成 durable 单安装四态结论和动态撤权，不扩张 Population authority。
 - [EVO-05.7b3c2 Population Observation Aggregation](EVO-05-7b3c2-population-observation-aggregation.md)：
   已交付；冻结 exact denominator/member set，形成五态 coverage、缺员、breach guardrail、writer fence 与动态撤权。
-- EVO-05.7 后续：7b4 promoted/superseded ledger 与 policy learning。
+- [EVO-05.7b4a Stable Promotion Outcome Eligibility](EVO-05-7b4a-stable-promotion-outcome-eligibility.md)：
+  已交付；只形成 current passing Population 的独立审批资格，不签发 promoted 或 learning authority。
+- EVO-05.7 后续：7b4b post-observation Decision、7b4c promoted/superseded ledger 与 policy learning。
 
 ## 验收标准
 

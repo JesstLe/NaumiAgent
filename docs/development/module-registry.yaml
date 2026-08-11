@@ -85,6 +85,7 @@ modules:
   - {id: EVO-05.7b3b2b, status: implemented, path: self-evolution/EVO-05-7b3b2b-authenticated-observation-revision-http-transport.md, depends_on: [EVO-05.7b3b2a, EVO-05.7b2a2b]}
   - {id: EVO-05.7b3c1, status: implemented, path: self-evolution/EVO-05-7b3c1-remote-installation-observation-assessment.md, depends_on: [EVO-05.7b3b2b, EVO-05.7b1]}
   - {id: EVO-05.7b3c2, status: implemented, path: self-evolution/EVO-05-7b3c2-population-observation-aggregation.md, depends_on: [EVO-05.7b3c1, EVO-05.5f5x3j]}
+  - {id: EVO-05.7b4a, status: implemented, path: self-evolution/EVO-05-7b4a-stable-promotion-outcome-eligibility.md, depends_on: [EVO-05.7b3c2, HAR-09.5b1]}
   - {id: EVO-05.3f2c3b2a, status: implemented, path: self-evolution/EVO-05-3f2c3b2a-authenticated-worker-claim.md, depends_on: [EVO-05.3f2c3b1, ARC-06]}
   - {id: EVO-05.3f2c3b2b1, status: implemented, path: self-evolution/EVO-05-3f2c3b2b1-claim-bound-execution-authorization.md, depends_on: [EVO-05.3f2c3b2a, HAR-08.4f, ARC-04]}
   - {id: EVO-05.3f2c3b2b2, status: implemented, path: self-evolution/EVO-05-3f2c3b2b2-signed-result-h5a-ingestion.md, depends_on: [EVO-05.3f2c3b2b1, HAR-08.4e, EVO-05.3f2c1]}

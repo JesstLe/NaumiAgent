@@ -2984,6 +2984,7 @@ def _print_help() -> None:
             "stable-promotion-observation-revisions|"
             "stable-promotion-installation-observation|"
             "stable-promotion-population-observation|"
+            "stable-promotion-outcome-eligibility|"
             "stable-promotion-admission-delivery|"
             "stable-rollout-authorization|"
             "stable-rollout-finalization|"
@@ -4300,6 +4301,25 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 arg="",
             )
             return
+        if action == "stable-promotion-outcome-eligibility":
+            if len(parts) != 3 or parts[1] not in {"record", "inspect"}:
+                raise ValueError(
+                    "stable-promotion-outcome-eligibility 需要 record "
+                    "<population-assessment-id> 或 inspect <eligibility-id>。"
+                )
+            arguments = {"action": parts[1]}
+            if parts[1] == "record":
+                arguments["population_assessment_id"] = parts[2]
+            else:
+                arguments["eligibility_id"] = parts[2]
+            await _run_tool_slash_command(
+                engine,
+                slash_command="/evolution",
+                tool_name="evolution_stable_promotion_outcome_eligibility",
+                parse_args=lambda _arg: arguments,
+                arg="",
+            )
+            return
         if action == "stable-promotion-admission-delivery":
             if len(parts) == 3 and parts[1] in {
                 "prepare",
@@ -4736,6 +4756,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "stable-promotion-observation-revisions、"
                 "stable-promotion-installation-observation、"
                 "stable-promotion-population-observation、"
+                "stable-promotion-outcome-eligibility、"
                 "stable-promotion-admission-delivery、"
                 "stable-rollout-authorization、"
                 "stable-rollout-finalization、"
@@ -4982,6 +5003,8 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "<runtime-admission-id>；"
             "/evolution stable-promotion-population-observation assess "
             "<population-finalization-receipt-id>；inspect <population-assessment-id>；"
+            "/evolution stable-promotion-outcome-eligibility record "
+            "<population-assessment-id>；inspect <eligibility-id>；"
             "/evolution stable-promotion-admission-delivery prepare|export|inspect|"
             "queue|inspect-dispatch <runtime-admission-id>；"
             "receive <submission-base64>；run-worker；inspect-worker；"

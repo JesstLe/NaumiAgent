@@ -521,6 +521,10 @@ from naumi_agent.evolution.stable_promotion_observation_revision_delivery_worker
     EvolutionStablePromotionObservationRevisionWorkerPolicy,
     EvolutionStablePromotionObservationRevisionWorkerSnapshot,
 )
+from naumi_agent.evolution.stable_promotion_outcome_eligibilities import (
+    EvolutionStablePromotionOutcomeEligibilityService,
+    EvolutionStablePromotionOutcomeEligibilityStore,
+)
 from naumi_agent.evolution.stable_promotion_population_observation_assessments import (
     EvolutionStablePromotionPopulationObservationAssessmentService,
     EvolutionStablePromotionPopulationObservationAssessmentStore,
@@ -3015,6 +3019,32 @@ class AgentEngine:
                 store=(
                     self.evolution_stable_promotion_population_observation_assessment_store
                 ),
+            )
+        )
+        self.evolution_stable_promotion_outcome_eligibility_store = (
+            EvolutionStablePromotionOutcomeEligibilityStore(
+                config.memory.session_db_path,
+                contract_store=(
+                    self.evolution_stable_promotion_observation_contract_store
+                ),
+                population_assessment_store=(
+                    self.evolution_stable_promotion_population_observation_assessment_store
+                ),
+            )
+        )
+        self.evolution_stable_promotion_outcome_eligibility_service = (
+            EvolutionStablePromotionOutcomeEligibilityService(
+                workspace_root=paths.workspace_root,
+                contract_store=(
+                    self.evolution_stable_promotion_observation_contract_store
+                ),
+                contract_service=(
+                    self.evolution_stable_promotion_observation_contract_service
+                ),
+                population_assessment_service=(
+                    self.evolution_stable_promotion_population_observation_assessment_service
+                ),
+                store=self.evolution_stable_promotion_outcome_eligibility_store,
             )
         )
         self.evolution_stable_promotion_observation_revision_dispatch_store = (

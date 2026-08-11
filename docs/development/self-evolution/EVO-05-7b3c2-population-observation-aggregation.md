@@ -120,4 +120,6 @@ missing、insufficient、censored 或 stale Receipt 都不授予两者。
 - alert 是当前 breach authority，不等于 promoted Outcome，也不会自动回滚；
 - 7b4 仍需 append-only promoted/superseded ledger、人工/策略决策边界和后续 policy learning gate。
 
-下一步应实现最小 7b4 promoted outcome ledger 前置，而不是继续扩张 7b3c2 或把 rollback recovery Outcome 复用于成功推广路径。
+下一步最小前置 [EVO-05.7b4a Stable Promotion Outcome Eligibility](EVO-05-7b4a-stable-promotion-outcome-eligibility.md)
+已实现：它只把 current passing 转成独立审批资格。后续 7b4b/7b4c 仍必须分别完成 Decision 与 ledger，不能继续扩张
+7b3c2 或把 rollback recovery Outcome 复用于成功推广路径。
