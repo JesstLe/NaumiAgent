@@ -26,11 +26,16 @@ from naumi_agent.orchestrator.pursuit_terminal_retention_admission import (
     new_retention_candidate_plan,
     render_terminal_outbox_retention_admission,
 )
+from naumi_agent.orchestrator.pursuit_terminal_retention_prune import (
+    PursuitTerminalOutboxRetentionPruneReceipt,
+    render_terminal_outbox_retention_prune,
+)
 from naumi_agent.safety.permissions import TOOL_PERMISSIONS, PermissionMode
 from naumi_agent.tools.pursuit import (
     create_pursuit_tool,
     parse_terminal_outbox_retention_admission_args,
     parse_terminal_outbox_retention_preview_args,
+    parse_terminal_outbox_retention_prune_args,
 )
 from tests.unit.test_pursuit_terminal_outbox_dead_letter import _pending_store
 
@@ -411,6 +416,256 @@ def test_terminal_outbox_retention_admission_read_is_legacy_safe(tmp_path) -> No
     ) is None
 
 
+def test_terminal_outbox_retention_prune_defaults_to_byte_stable_dry_run(
+    tmp_path,
+) -> None:
+    store, outbox_id, _failure, receipt = _abandoned_store(tmp_path)
+    preview = _preview_for_admission(store, receipt, tmp_path)
+    admission = _admit(store, preview, receipt, tmp_path)
+    before = store.db_path.read_bytes()
+
+    dry_run = store.apply_terminal_outbox_retention(
+        admission_id=admission.admission_id,
+        admission_sha256=admission.admission_sha256,
+        source_request_id="dry-run-prune",
+        execute=False,
+        now=receipt.abandoned_at + 31 * 86_400 + 2,
+    )
+
+    assert dry_run.status == "dry_run"
+    assert not dry_run.durable
+    assert not dry_run.execution_requested
+    assert not dry_run.physical_prune_completed
+    assert dry_run.deleted_row_count == 0
+    assert store.db_path.read_bytes() == before
+    assert store.get_terminal_outbox_effective_state(outbox_id).state.value == (
+        "abandoned"
+    )
+    rendered = render_terminal_outbox_retention_prune(dry_run)
+    assert "默认 dry-run" in rendered
+    assert "--execute" in rendered
+
+
+def test_terminal_outbox_retention_prune_is_atomic_and_prevents_resurrection(
+    tmp_path,
+) -> None:
+    store, outbox_id, _failure, receipt = _abandoned_store(tmp_path)
+    preview = _preview_for_admission(store, receipt, tmp_path)
+    admission = _admit(store, preview, receipt, tmp_path)
+
+    completed = store.apply_terminal_outbox_retention(
+        admission_id=admission.admission_id,
+        admission_sha256=admission.admission_sha256,
+        source_request_id="execute-prune",
+        execute=True,
+        now=receipt.abandoned_at + 31 * 86_400 + 2,
+    )
+
+    assert completed.status == "completed"
+    assert completed.durable
+    assert completed.physical_prune_completed
+    assert completed.deleted_row_count == admission.candidates[0].recovery_row_count
+    assert completed.tombstone_count == 1
+    assert store.get_terminal_outbox(outbox_id) is None
+    assert store.get_terminal_outbox_effective_state(outbox_id) is None
+    assert store.get_terminal_outbox_retention_admission(
+        admission.admission_id
+    ) == admission
+    assert store.get_terminal_outbox_retention_prune(completed.prune_id) == completed
+    replay = store.apply_terminal_outbox_retention(
+        admission_id=admission.admission_id,
+        admission_sha256=admission.admission_sha256,
+        source_request_id="execute-prune",
+        execute=True,
+        now=receipt.abandoned_at + 31 * 86_400 + 3,
+    )
+    assert replay == completed
+    with sqlite3.connect(store.db_path) as conn:
+        with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+            conn.execute(
+                "DELETE FROM pursuit_terminal_outbox_retention_prune_members"
+            )
+    checkpoint = store.get_checkpoint("pursuit-reconcile")
+    assert checkpoint is not None
+    store.save_checkpoint(checkpoint)
+    assert store.get_terminal_outbox(outbox_id) is None
+    with sqlite3.connect(store.db_path) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM "
+            "pursuit_terminal_outbox_retention_prune_members"
+        ).fetchone()[0] == 1
+
+
+def test_terminal_outbox_retention_prune_serializes_concurrent_execution(
+    tmp_path,
+) -> None:
+    store, _outbox_id, _failure, receipt = _abandoned_store(tmp_path)
+    preview = _preview_for_admission(store, receipt, tmp_path)
+    admission = _admit(store, preview, receipt, tmp_path)
+
+    def execute(index: int):
+        return PursuitStore(store.base_dir).apply_terminal_outbox_retention(
+            admission_id=admission.admission_id,
+            admission_sha256=admission.admission_sha256,
+            source_request_id=f"concurrent-prune-{index}",
+            execute=True,
+            now=receipt.abandoned_at + 31 * 86_400 + 2 + index,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first, second = tuple(pool.map(execute, range(2)))
+
+    assert first == second
+    with sqlite3.connect(store.db_path) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM pursuit_terminal_outbox_retention_prunes"
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM "
+            "pursuit_terminal_outbox_retention_prune_members"
+        ).fetchone()[0] == 1
+
+
+def test_terminal_outbox_retention_prune_rolls_back_every_write_boundary(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store, outbox_id, _failure, receipt = _abandoned_store(tmp_path)
+    preview = _preview_for_admission(store, receipt, tmp_path)
+    admission = _admit(store, preview, receipt, tmp_path)
+    candidate = admission.candidates[0]
+    killpoints = [
+        "before_prune_receipt_insert",
+        "after_prune_receipt_insert",
+        f"before_member_tombstone_{candidate.candidate_id}",
+        f"after_member_tombstone_{candidate.candidate_id}",
+        *(
+            point
+            for step in candidate.steps
+            for point in (step.before_killpoint, step.after_killpoint)
+        ),
+    ]
+
+    for index, target in enumerate(killpoints):
+        def fail_at(name: str, *, expected=target) -> None:
+            if name == expected:
+                raise RuntimeError("simulated-process-kill")
+
+        monkeypatch.setattr(store, "_retention_prune_fault_point", fail_at)
+        with pytest.raises(RuntimeError, match="simulated-process-kill"):
+            store.apply_terminal_outbox_retention(
+                admission_id=admission.admission_id,
+                admission_sha256=admission.admission_sha256,
+                source_request_id=f"killpoint-{index}",
+                execute=True,
+                now=receipt.abandoned_at + 31 * 86_400 + 2 + index,
+            )
+        reopened = PursuitStore(store.base_dir)
+        assert reopened.get_terminal_outbox_effective_state(
+            outbox_id
+        ).state.value == "abandoned"
+        with sqlite3.connect(store.db_path) as conn:
+            assert conn.execute(
+                "SELECT COUNT(*) FROM pursuit_terminal_outbox_retention_prunes"
+            ).fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT COUNT(*) FROM "
+                "pursuit_terminal_outbox_retention_prune_members"
+            ).fetchone()[0] == 0
+
+
+def test_terminal_outbox_retention_prune_reauthenticates_before_first_delete(
+    tmp_path,
+) -> None:
+    store, outbox_id, _failure, receipt = _abandoned_store(tmp_path)
+    preview = _preview_for_admission(store, receipt, tmp_path)
+    admission = _admit(store, preview, receipt, tmp_path)
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute(
+            "UPDATE pursuit_terminal_outbox_dispatch "
+            "SET payload_sha256 = ? WHERE outbox_id = ?",
+            ("f" * 64, outbox_id),
+        )
+
+    with pytest.raises(PursuitStoreError, match="摘要校验失败"):
+        store.apply_terminal_outbox_retention(
+            admission_id=admission.admission_id,
+            admission_sha256=admission.admission_sha256,
+            source_request_id="changed-authority-prune",
+            execute=True,
+            now=receipt.abandoned_at + 31 * 86_400 + 2,
+        )
+    with sqlite3.connect(store.db_path) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM pursuit_terminal_outbox WHERE outbox_id = ?",
+            (outbox_id,),
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM pursuit_terminal_outbox_retention_prunes"
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM "
+            "pursuit_terminal_outbox_retention_prune_members"
+        ).fetchone()[0] == 0
+
+
+def test_terminal_outbox_retention_prune_receipt_is_strict_and_tamper_evident(
+    tmp_path,
+) -> None:
+    store, _outbox_id, _failure, receipt = _abandoned_store(tmp_path)
+    preview = _preview_for_admission(store, receipt, tmp_path)
+    admission = _admit(store, preview, receipt, tmp_path)
+    completed = store.apply_terminal_outbox_retention(
+        admission_id=admission.admission_id,
+        admission_sha256=admission.admission_sha256,
+        source_request_id="tamper-prune",
+        execute=True,
+        now=receipt.abandoned_at + 31 * 86_400 + 2,
+    )
+    tampered = completed.model_dump(mode="json")
+    tampered["deleted_row_count"] += 1
+    with pytest.raises(ValidationError, match="deleted 行数"):
+        PursuitTerminalOutboxRetentionPruneReceipt.model_validate(tampered)
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute(
+            "UPDATE pursuit_terminal_outbox_retention_prunes "
+            "SET source_request_sha256 = ?",
+            ("f" * 64,),
+        )
+    with pytest.raises(PursuitStoreError, match="持久化摘要不匹配"):
+        PursuitStore(store.base_dir).get_terminal_outbox_retention_prune(
+            completed.prune_id
+        )
+
+
+def test_terminal_outbox_retention_prune_reconciles_member_set(
+    tmp_path,
+) -> None:
+    store, _outbox_id, _failure, receipt = _abandoned_store(tmp_path)
+    preview = _preview_for_admission(store, receipt, tmp_path)
+    admission = _admit(store, preview, receipt, tmp_path)
+    completed = store.apply_terminal_outbox_retention(
+        admission_id=admission.admission_id,
+        admission_sha256=admission.admission_sha256,
+        source_request_id="member-reconcile-prune",
+        execute=True,
+        now=receipt.abandoned_at + 31 * 86_400 + 2,
+    )
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute(
+            "DROP TRIGGER "
+            "trg_pursuit_terminal_retention_prune_members_no_delete"
+        )
+        conn.execute(
+            "DELETE FROM pursuit_terminal_outbox_retention_prune_members"
+        )
+
+    with pytest.raises(PursuitStoreError, match="tombstone 集合不一致"):
+        PursuitStore(store.base_dir).get_terminal_outbox_retention_prune(
+            completed.prune_id
+        )
+
+
 def test_terminal_outbox_retention_preview_excludes_recent_disposition(
     tmp_path,
 ) -> None:
@@ -601,6 +856,93 @@ async def test_terminal_outbox_retention_admission_tool_is_shared_and_bounded(
     assert len(calls) == 1
 
 
+def test_terminal_outbox_retention_prune_parser_defaults_to_dry_run() -> None:
+    digest = "a" * 64
+    assert parse_terminal_outbox_retention_prune_args([
+        f"ptora_{digest[:24]}", digest,
+    ]) == {
+        "admission_id": f"ptora_{digest[:24]}",
+        "admission_sha256": digest,
+        "execute": False,
+    }
+    assert parse_terminal_outbox_retention_prune_args([
+        f"ptora_{digest[:24]}", digest, "--execute",
+    ])["execute"] is True
+    with pytest.raises(ValueError, match="仅支持"):
+        parse_terminal_outbox_retention_prune_args([
+            f"ptora_{digest[:24]}", digest, "--force",
+        ])
+
+
+@pytest.mark.asyncio
+async def test_terminal_outbox_retention_prune_tool_requires_bypass_for_execute(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store, outbox_id, _failure, receipt = _abandoned_store(tmp_path)
+    preview = _preview_for_admission(store, receipt, tmp_path)
+    admission = _admit(store, preview, receipt, tmp_path)
+    calls: list[tuple[object, ...]] = []
+
+    async def runner(admission_id, admission_sha256, execute, source_request_id):
+        calls.append((admission_id, admission_sha256, execute, source_request_id))
+        return store.apply_terminal_outbox_retention(
+            admission_id=admission_id,
+            admission_sha256=admission_sha256,
+            source_request_id=source_request_id,
+            execute=execute,
+            now=receipt.abandoned_at + 31 * 86_400 + 2,
+        )
+
+    tool = next(
+        item
+        for item in create_pursuit_tool(
+            terminal_outbox_retention_prune=runner,
+        )
+        if item.name == "pursuit_terminal_outbox_retention_prune"
+    )
+    dry = await tool.execute(
+        admission_id=admission.admission_id,
+        admission_sha256=admission.admission_sha256,
+    )
+    assert "默认 dry-run" in dry
+    assert store.get_terminal_outbox(outbox_id) is not None
+
+    monkeypatch.setattr(
+        "naumi_agent.tools.pursuit.current_permission_receipt",
+        lambda: SimpleNamespace(
+            call_id="strict-prune",
+            permission_mode=PermissionMode.STRICT,
+        ),
+    )
+    with pytest.raises(ValueError, match="仅允许在 bypass"):
+        await tool.execute(
+            admission_id=admission.admission_id,
+            admission_sha256=admission.admission_sha256,
+            execute=True,
+        )
+    assert len(calls) == 1
+
+    monkeypatch.setattr(
+        "naumi_agent.tools.pursuit.current_permission_receipt",
+        lambda: SimpleNamespace(
+            call_id="bypass-prune",
+            permission_mode=PermissionMode.BYPASS,
+        ),
+    )
+    completed = await tool.execute(
+        admission_id=admission.admission_id,
+        admission_sha256=admission.admission_sha256,
+        execute=True,
+    )
+    assert "物理 prune 已" in completed
+    assert store.get_terminal_outbox(outbox_id) is None
+    assert len(calls) == 2
+    rule = TOOL_PERMISSIONS[tool.name]
+    assert PermissionMode.BYPASS in rule.allowed_modes
+    assert not rule.requires_confirmation
+
+
 @pytest.mark.asyncio
 async def test_engine_terminal_outbox_retention_preview_uses_reproducible_time(
     tmp_path,
@@ -673,6 +1015,39 @@ async def test_engine_terminal_outbox_retention_admission_uses_store_authority(
             "2026-08-11T08:00:00",
             "invalid-engine-admission",
         )
+
+
+@pytest.mark.asyncio
+async def test_engine_terminal_outbox_retention_prune_uses_store_authority(
+    tmp_path,
+) -> None:
+    from naumi_agent.orchestrator.engine import AgentEngine
+
+    store, outbox_id, _failure, receipt = _abandoned_store(tmp_path)
+    preview = _preview_for_admission(store, receipt, tmp_path)
+    admission = store.admit_terminal_outbox_retention(
+        preview_id=preview.preview_id,
+        preview_sha256=preview.preview_sha256,
+        workspace_root=str(tmp_path.resolve()),
+        assessed_at=receipt.abandoned_at + 31 * 86_400,
+        retention_days=30,
+        limit=1,
+        scan_limit=1,
+        source_request_id="engine-admission-for-prune",
+        now=datetime.now(UTC).timestamp(),
+    )
+    engine = SimpleNamespace(pursuit_store=store)
+
+    dry = await AgentEngine.prune_pursuit_terminal_outbox_retention(
+        engine,
+        admission.admission_id,
+        admission.admission_sha256,
+        False,
+        "engine-prune-dry-run",
+    )
+
+    assert dry.status == "dry_run"
+    assert store.get_terminal_outbox(outbox_id) is not None
 
 
 def test_terminal_outbox_retention_preview_fails_closed_on_tampered_receipt(

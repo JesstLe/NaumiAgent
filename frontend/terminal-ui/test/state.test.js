@@ -6206,6 +6206,25 @@ test("Pursuit terminal retention admission stays on the shared Slash channel", (
   }]);
 });
 
+test("Pursuit terminal retention prune stays on the shared Slash channel", () => {
+  const state = createInitialState();
+  const sent = [];
+  const digest = "a".repeat(64);
+  const command = `/pursue outbox retention-prune ptora_${digest.slice(0, 24)} `
+    + `${digest} --execute`;
+
+  handleSubmitText(state, command, (type, payload, options) => {
+    sent.push({ type, payload, options });
+  });
+
+  assert.equal(state.route.name, "conversation");
+  assert.deepEqual(sent, [{
+    type: "submit",
+    payload: { text: command },
+    options: { id: "submit-1" },
+  }]);
+});
+
 test("Harness Baseline promotion command opens guided typed route and restores origin", () => {
   const state = createInitialState();
   state.scrollOffset = 8;

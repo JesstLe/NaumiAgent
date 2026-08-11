@@ -654,6 +654,9 @@ from naumi_agent.orchestrator.pursuit_terminal_retention import (
 from naumi_agent.orchestrator.pursuit_terminal_retention_admission import (
     PursuitTerminalOutboxRetentionAdmission,
 )
+from naumi_agent.orchestrator.pursuit_terminal_retention_prune import (
+    PursuitTerminalOutboxRetentionPruneReceipt,
+)
 from naumi_agent.orchestrator.system_prompt import (
     PromptAssemblyInput,
     build_system_prompt,
@@ -3691,6 +3694,9 @@ class AgentEngine:
             terminal_outbox_retention_admission=(
                 self.admit_pursuit_terminal_outbox_retention
             ),
+            terminal_outbox_retention_prune=(
+                self.prune_pursuit_terminal_outbox_retention
+            ),
         ):
             self._tool_registry.register(tool)
 
@@ -5000,6 +5006,22 @@ class AgentEngine:
             limit=limit,
             scan_limit=scan_limit,
             source_request_id=source_request_id,
+            now=datetime.now(UTC).timestamp(),
+        )
+
+    async def prune_pursuit_terminal_outbox_retention(
+        self,
+        admission_id: str,
+        admission_sha256: str,
+        execute: bool,
+        source_request_id: str,
+    ) -> PursuitTerminalOutboxRetentionPruneReceipt:
+        """Dry-run or atomically consume one exact retention admission."""
+        return self.pursuit_store.apply_terminal_outbox_retention(
+            admission_id=admission_id,
+            admission_sha256=admission_sha256,
+            source_request_id=source_request_id,
+            execute=execute,
             now=datetime.now(UTC).timestamp(),
         )
 

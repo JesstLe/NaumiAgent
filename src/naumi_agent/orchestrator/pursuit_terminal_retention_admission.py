@@ -260,7 +260,7 @@ def render_terminal_outbox_retention_admission(
         "## Pursuit 终态 Outbox retention apply 准入",
         "",
         f"- 决策：`{admission.status}`",
-        f"- 准入回执：`{admission.admission_id}`",
+        f"- 准入回执：`{admission.admission_id}` / `{admission.admission_sha256}`",
         f"- 绑定 preview：`{admission.preview_id}` / `{admission.preview_sha256}`",
         f"- 决策时间：`{admission.decided_at}`",
     ]

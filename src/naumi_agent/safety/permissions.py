@@ -1660,6 +1660,17 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         ],
         requires_confirmation=False,
     ),
+    "pursuit_terminal_outbox_retention_prune": PermissionRule(
+        tool_name="pursuit_terminal_outbox_retention_prune",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+            PermissionMode.LOCKDOWN,
+        ],
+        requires_confirmation=False,
+    ),
     "hot_reload": PermissionRule(
         tool_name="hot_reload",
         allowed_modes=[

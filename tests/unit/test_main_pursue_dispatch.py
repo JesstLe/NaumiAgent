@@ -101,6 +101,16 @@ async def test_run_pursue_routes_goal_through_engine_tool_executor() -> None:
             },
         ),
         (
+            "outbox retention-prune ptora_" + "a" * 24 + " " + "a" * 64
+            + " --execute",
+            "pursuit_terminal_outbox_retention_prune",
+            {
+                "admission_id": "ptora_" + "a" * 24,
+                "admission_sha256": "a" * 64,
+                "execute": True,
+            },
+        ),
+        (
             "reconcile recovery-" + "a" * 64,
             "pursuit_reconcile",
             {"attempt_id": "recovery-" + "a" * 64},
