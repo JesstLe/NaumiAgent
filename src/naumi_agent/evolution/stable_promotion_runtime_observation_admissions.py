@@ -258,6 +258,51 @@ class EvolutionStablePromotionRuntimeObservationAdmissionStore:
                 "稳定推广 Runtime Admission 损坏或无法读取。",
             ) from exc
 
+    async def get_by_id(
+        self, admission_id: str
+    ) -> EvolutionStablePromotionRuntimeObservationAdmission | None:
+        item_id = _admission_id(admission_id)
+        if not self.db_path.is_file():
+            return None
+        try:
+            async with aiosqlite.connect(self.db_path, timeout=5.0) as db:
+                db.row_factory = aiosqlite.Row
+                await _ensure_schema(db)
+                row = await (
+                    await db.execute(
+                        "SELECT * FROM evolution_stable_promotion_runtime_admissions "
+                        "WHERE admission_id = ?",
+                        (item_id,),
+                    )
+                ).fetchone()
+            if row is None:
+                return None
+            item = _restore(str(row["admission_json"]))
+            if not (
+                item.admission_id == row["admission_id"]
+                and item.admission_sha256 == row["admission_sha256"]
+                and item.observation_contract_id == row["observation_contract_id"]
+                and item.installation_member_id == row["installation_member_id"]
+                and item.stable_intent_id == row["stable_intent_id"]
+                and item.subject_id == row["subject_id"]
+                and item.binding_id == row["binding_id"]
+                and item.origin_sample_id == row["origin_sample_id"]
+            ):
+                raise ValueError("stable promotion runtime admission row mismatch")
+            if not await _dependencies_current(self.db_path, item):
+                raise EvolutionStablePromotionRuntimeObservationAdmissionError(
+                    "stable_promotion_runtime_admission_dependency_changed",
+                    "稳定推广 Runtime Admission 的 durable dependency 已变化。",
+                )
+            return item
+        except EvolutionStablePromotionRuntimeObservationAdmissionError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise EvolutionStablePromotionRuntimeObservationAdmissionError(
+                "stable_promotion_runtime_admission_store_corrupt",
+                "稳定推广 Runtime Admission 损坏或无法读取。",
+            ) from exc
+
     async def record(
         self, admission: EvolutionStablePromotionRuntimeObservationAdmission
     ) -> EvolutionStablePromotionRuntimeObservationAdmission:
@@ -955,6 +1000,16 @@ def _contract_id(value: str) -> str:
         raise EvolutionStablePromotionRuntimeObservationAdmissionError(
             "stable_promotion_runtime_admission_contract_id_invalid",
             "Stable Promotion Observation Contract ID 格式无效。",
+        )
+    return normalized
+
+
+def _admission_id(value: str) -> str:
+    normalized = str(value or "").strip()
+    if re.fullmatch(r"^evstablepromadmit_[0-9a-f]{24}$", normalized) is None:
+        raise EvolutionStablePromotionRuntimeObservationAdmissionError(
+            "stable_promotion_runtime_admission_id_invalid",
+            "Stable Promotion Runtime Admission ID 格式无效。",
         )
     return normalized
 

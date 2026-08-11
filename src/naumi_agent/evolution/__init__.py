@@ -1138,6 +1138,20 @@ if TYPE_CHECKING:
         EvolutionStablePromotionObservationContractView,
         render_stable_promotion_observation_contract,
     )
+    from naumi_agent.evolution.stable_promotion_runtime_admission_deliveries import (
+        EVOLUTION_STABLE_PROMOTION_RUNTIME_ADMISSION_DELIVERY_POLICY,
+        EvolutionStablePromotionRuntimeAdmissionDeliveryError,
+        EvolutionStablePromotionRuntimeAdmissionDeliveryReceipt,
+        EvolutionStablePromotionRuntimeAdmissionDeliveryService,
+        EvolutionStablePromotionRuntimeAdmissionDeliveryStore,
+        EvolutionStablePromotionRuntimeAdmissionDeliveryView,
+        EvolutionStablePromotionRuntimeAdmissionSubmission,
+        EvolutionStablePromotionRuntimeAdmissionSubmissionPayload,
+        decode_stable_promotion_runtime_admission_submission,
+        encode_stable_promotion_runtime_admission_submission,
+        render_stable_promotion_runtime_admission_delivery,
+        render_stable_promotion_runtime_admission_submission,
+    )
     from naumi_agent.evolution.stable_promotion_runtime_observation_admissions import (
         EVOLUTION_STABLE_PROMOTION_RUNTIME_OBSERVATION_ADMISSION_POLICY,
         EvolutionStablePromotionRuntimeObservationAdmission,
@@ -1830,6 +1844,18 @@ __all__ = [
     "EvolutionStablePromotionRuntimeObservationAdmissionStore",
     "EvolutionStablePromotionRuntimeObservationAdmissionView",
     "render_stable_promotion_runtime_observation_admission",
+    "EVOLUTION_STABLE_PROMOTION_RUNTIME_ADMISSION_DELIVERY_POLICY",
+    "EvolutionStablePromotionRuntimeAdmissionDeliveryError",
+    "EvolutionStablePromotionRuntimeAdmissionDeliveryReceipt",
+    "EvolutionStablePromotionRuntimeAdmissionDeliveryService",
+    "EvolutionStablePromotionRuntimeAdmissionDeliveryStore",
+    "EvolutionStablePromotionRuntimeAdmissionDeliveryView",
+    "EvolutionStablePromotionRuntimeAdmissionSubmission",
+    "EvolutionStablePromotionRuntimeAdmissionSubmissionPayload",
+    "decode_stable_promotion_runtime_admission_submission",
+    "encode_stable_promotion_runtime_admission_submission",
+    "render_stable_promotion_runtime_admission_delivery",
+    "render_stable_promotion_runtime_admission_submission",
     "render_stable_remote_population_finalization",
     "EVOLUTION_STABLE_REMOTE_FINALIZATION_DELIVERY_POLICY",
     "EvolutionStableRemoteFinalizationDeliveryAck",
@@ -3225,6 +3251,20 @@ def __getattr__(name: str) -> object:
         "EvolutionStablePromotionRuntimeObservationAdmissionView",
         "render_stable_promotion_runtime_observation_admission",
     }
+    stable_promotion_runtime_admission_delivery_exports = {
+        "EVOLUTION_STABLE_PROMOTION_RUNTIME_ADMISSION_DELIVERY_POLICY",
+        "EvolutionStablePromotionRuntimeAdmissionDeliveryError",
+        "EvolutionStablePromotionRuntimeAdmissionDeliveryReceipt",
+        "EvolutionStablePromotionRuntimeAdmissionDeliveryService",
+        "EvolutionStablePromotionRuntimeAdmissionDeliveryStore",
+        "EvolutionStablePromotionRuntimeAdmissionDeliveryView",
+        "EvolutionStablePromotionRuntimeAdmissionSubmission",
+        "EvolutionStablePromotionRuntimeAdmissionSubmissionPayload",
+        "decode_stable_promotion_runtime_admission_submission",
+        "encode_stable_promotion_runtime_admission_submission",
+        "render_stable_promotion_runtime_admission_delivery",
+        "render_stable_promotion_runtime_admission_submission",
+    }
     stable_remote_finalization_delivery_exports = {
         "EVOLUTION_STABLE_REMOTE_FINALIZATION_DELIVERY_POLICY",
         "EvolutionStableRemoteFinalizationDeliveryAck",
@@ -4007,6 +4047,8 @@ def __getattr__(name: str) -> object:
         module_name = "stable_promotion_observation_contracts"
     elif name in stable_promotion_runtime_observation_admission_exports:
         module_name = "stable_promotion_runtime_observation_admissions"
+    elif name in stable_promotion_runtime_admission_delivery_exports:
+        module_name = "stable_promotion_runtime_admission_deliveries"
     elif name in stable_remote_finalization_delivery_exports:
         module_name = "stable_remote_finalization_deliveries"
     elif name in stable_remote_finalization_delivery_worker_exports:

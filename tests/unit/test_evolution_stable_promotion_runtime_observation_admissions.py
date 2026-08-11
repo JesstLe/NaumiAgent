@@ -505,3 +505,6 @@ def test_invalid_external_ids_are_rejected_before_io(tmp_path: Path) -> None:
     with pytest.raises(EvolutionStablePromotionRuntimeObservationAdmissionError) as invalid:
         asyncio.run(store.get("bad\ncontract", "bad-member", "bad subject"))
     assert invalid.value.code == "stable_promotion_runtime_admission_contract_id_invalid"
+    with pytest.raises(EvolutionStablePromotionRuntimeObservationAdmissionError) as bad_id:
+        asyncio.run(store.get_by_id("bad\nadmission"))
+    assert bad_id.value.code == "stable_promotion_runtime_admission_id_invalid"

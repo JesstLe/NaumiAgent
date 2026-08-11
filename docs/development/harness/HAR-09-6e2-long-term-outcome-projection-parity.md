@@ -97,5 +97,7 @@ promotion 或 execution authority，也没有解决配置/数据 rollback。New 
 [EVO-05.7b1](../self-evolution/EVO-05-7b1-stable-promotion-observation-contract.md) 完成：它冻结 approval、active stable
 runtime、Proposal binding 与 finalization 后长期观察规则，但不冒充独立长期效果。
 [EVO-05.7b2](../self-evolution/EVO-05-7b2-stable-promotion-runtime-observation-admission.md) 已完成单
-installation 的 exact member/runtime 绑定。下一步必须先安全汇集跨安装 Admission，再聚合长期窗口，最后才设计
+installation 的 exact member/runtime 绑定；
+[EVO-05.7b2a1](../self-evolution/EVO-05-7b2a1-stable-promotion-runtime-admission-signed-delivery.md) 已完成 current
+Credential 签名和 Control Plane 幂等接收，但尚无 authenticated network worker。下一步必须先完成真实跨安装传输，再聚合长期窗口，最后才设计
 promoted/superseded ledger；不得复用本 recovery Outcome 越权推广。

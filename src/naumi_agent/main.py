@@ -2980,6 +2980,7 @@ def _print_help() -> None:
             "stable-remote-population-finalization|"
             "stable-promotion-observation-contract|"
             "stable-promotion-admit-runtime|"
+            "stable-promotion-admission-delivery|"
             "stable-rollout-authorization|"
             "stable-rollout-finalization|"
             "discover-outcome|"
@@ -4147,6 +4148,34 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 arg="",
             )
             return
+        if action == "stable-promotion-admission-delivery":
+            if len(parts) == 3 and parts[1] in {"prepare", "export", "inspect"}:
+                arguments = {
+                    "action": parts[1],
+                    "admission_id": parts[2],
+                    "submission_base64": None,
+                }
+            elif len(parts) == 3 and parts[1] == "receive":
+                arguments = {
+                    "action": "receive",
+                    "admission_id": None,
+                    "submission_base64": parts[2],
+                }
+            else:
+                raise ValueError(
+                    "stable-promotion-admission-delivery 需要 prepare|export|inspect "
+                    "<Admission ID>，或 receive <Submission Base64>。"
+                )
+            await _run_tool_slash_command(
+                engine,
+                slash_command="/evolution",
+                tool_name=(
+                    "evolution_stable_promotion_runtime_admission_delivery"
+                ),
+                parse_args=lambda _arg: arguments,
+                arg="",
+            )
+            return
         if action == "stable-rollout-authorization":
             if len(parts) == 4 and parts[1] == "issue":
                 arguments = {
@@ -4535,6 +4564,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "stable-remote-population-finalization、"
                 "stable-promotion-observation-contract、"
                 "stable-promotion-admit-runtime、"
+                "stable-promotion-admission-delivery、"
                 "stable-rollout-authorization、"
                 "stable-rollout-finalization、"
                 "discover-outcome、"
@@ -4770,6 +4800,8 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution stable-promotion-admit-runtime "
             "<population-finalization-receipt-id> <stable-intent-id> "
             "<runtime-subject-id>；"
+            "/evolution stable-promotion-admission-delivery prepare|export|inspect "
+            "<runtime-admission-id>；receive <submission-base64>；"
             "/evolution discover-outcome <rollback-outcome-id>；"
             "/evolution revalidation-rollback-execute <rollback-request-id>；"
             "/evolution revalidation-rollback-outcome <rollback-request-id>；"

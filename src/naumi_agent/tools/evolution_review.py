@@ -220,6 +220,13 @@ from naumi_agent.evolution.stable_promotion_observation_contracts import (
     EvolutionStablePromotionObservationContractError,
     render_stable_promotion_observation_contract,
 )
+from naumi_agent.evolution.stable_promotion_runtime_admission_deliveries import (
+    EvolutionStablePromotionRuntimeAdmissionDeliveryError,
+    decode_stable_promotion_runtime_admission_submission,
+    encode_stable_promotion_runtime_admission_submission,
+    render_stable_promotion_runtime_admission_delivery,
+    render_stable_promotion_runtime_admission_submission,
+)
 from naumi_agent.evolution.stable_promotion_runtime_observation_admissions import (
     EvolutionStablePromotionRuntimeObservationAdmissionError,
     render_stable_promotion_runtime_observation_admission,
@@ -4013,6 +4020,124 @@ class EvolutionStablePromotionRuntimeObservationAdmissionTool(Tool):
         return render_stable_promotion_runtime_observation_admission(view)
 
 
+class EvolutionStablePromotionRuntimeAdmissionDeliveryTool(Tool):
+    """Prepare, export, receive, or inspect one signed runtime Admission."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_stable_promotion_runtime_admission_delivery"
+
+    @property
+    def description(self) -> str:
+        return (
+            "使用当前 Population Credential 对 exact Runtime Admission 签名，"
+            "并在 control plane 验证、幂等接收或重验；不授予观察窗口、"
+            "Promoted Outcome 或执行权限。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["prepare", "export", "receive", "inspect"],
+                },
+                "admission_id": {
+                    "type": ["string", "null"],
+                    "pattern": "^evstablepromadmit_[0-9a-f]{24}$",
+                },
+                "submission_base64": {"type": ["string", "null"]},
+            },
+            "required": ["action"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="稳定推广 Runtime Admission 签名交付",
+            search_hint=(
+                "evolution stable promotion runtime admission signed delivery "
+                "自进化 稳定推广 运行时 准入 签名 交付 接收"
+            ),
+        )
+
+    async def execute(
+        self,
+        action: str,
+        admission_id: str | None = None,
+        submission_base64: str | None = None,
+    ) -> str:
+        operation = str(action or "").strip().lower()
+        service = getattr(
+            self._engine,
+            "evolution_stable_promotion_runtime_admission_delivery_service",
+            None,
+        )
+        try:
+            if operation in {"prepare", "export"}:
+                submission = await service.prepare(
+                    admission_id=str(admission_id or "").strip()
+                )
+                rendered = render_stable_promotion_runtime_admission_submission(
+                    submission
+                )
+                if operation == "export":
+                    rendered += (
+                        "\n\n## Transport Payload\n\n"
+                        + encode_stable_promotion_runtime_admission_submission(
+                            submission
+                        )
+                    )
+                return rendered
+            if operation == "receive":
+                submission = decode_stable_promotion_runtime_admission_submission(
+                    str(submission_base64 or "")
+                )
+                view = await service.receive(submission=submission)
+                return render_stable_promotion_runtime_admission_delivery(view)
+            if operation == "inspect":
+                stored = await service.store.get_received(
+                    str(admission_id or "").strip()
+                )
+                if stored is None:
+                    raise EvolutionStablePromotionRuntimeAdmissionDeliveryError(
+                        "stable_promotion_admission_delivery_receipt_missing",
+                        "指定 Runtime Admission 尚未收到 signed delivery。",
+                    )
+                submission, receipt = stored
+                view = await service.inspect(
+                    submission=submission,
+                    receipt=receipt,
+                )
+                return render_stable_promotion_runtime_admission_delivery(view)
+            raise EvolutionStablePromotionRuntimeAdmissionDeliveryError(
+                "stable_promotion_admission_delivery_action_invalid",
+                "仅支持 prepare、export、receive 或 inspect。",
+            )
+        except (
+            AttributeError,
+            EvolutionStablePromotionRuntimeAdmissionDeliveryError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "stable_promotion_admission_delivery_failed")
+            return f"稳定推广 Runtime Admission 交付未完成（`{code}`）：{exc}"
+
+
 class EvolutionStableRolloutAuthorizationTool(Tool):
     """Issue or inspect one member-scoped stable rollout capability."""
 
@@ -5574,6 +5699,7 @@ def create_evolution_review_tools(
         EvolutionStableRemotePopulationFinalizationTool(engine),
         EvolutionStablePromotionObservationContractTool(engine),
         EvolutionStablePromotionRuntimeObservationAdmissionTool(engine),
+        EvolutionStablePromotionRuntimeAdmissionDeliveryTool(engine),
         EvolutionStableRolloutAuthorizationTool(engine),
         EvolutionStableRolloutFinalizationTool(engine),
         EvolutionOutcomeOpportunityTool(engine),
@@ -5641,6 +5767,7 @@ __all__ = [
     "EvolutionStableRemoteFinalizationTool",
     "EvolutionStableRemotePopulationFinalizationTool",
     "EvolutionStablePromotionObservationContractTool",
+    "EvolutionStablePromotionRuntimeAdmissionDeliveryTool",
     "EvolutionStablePromotionRuntimeObservationAdmissionTool",
     "EvolutionStableRolloutAuthorizationTool",
     "EvolutionStableRolloutFinalizationTool",

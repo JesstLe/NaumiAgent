@@ -1225,6 +1225,16 @@ class TestPermissionChecker:
             if mode is PermissionMode.MODERATE:
                 assert decision.tool_family == "evolution_evaluation_artifact"
 
+    def test_stable_promotion_runtime_admission_delivery_never_prompts(self) -> None:
+        for mode in (PermissionMode.MODERATE, PermissionMode.BYPASS):
+            decision = PermissionChecker(mode).check(
+                "evolution_stable_promotion_runtime_admission_delivery",
+                {"action": "receive"},
+            )
+            assert decision.allowed and not decision.requires_confirmation
+            if mode is PermissionMode.MODERATE:
+                assert decision.tool_family == "evolution_evaluation_artifact"
+
     def test_shell_confirmation_is_medium_and_session_grantable(self, tmp_path) -> None:
         checker = PermissionChecker(
             PermissionMode.MODERATE,
