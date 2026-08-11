@@ -273,6 +273,19 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         risk_level=PermissionRiskLevel.MEDIUM,
         tool_family="evolution_opportunity",
     ),
+    "evolution_discover_tool_catalog_miss_opportunity": PermissionRule(
+        tool_name="evolution_discover_tool_catalog_miss_opportunity",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+        max_calls_per_session=50,
+        risk_level=PermissionRiskLevel.MEDIUM,
+        tool_family="evolution_opportunity",
+    ),
     "file_read": PermissionRule(
         tool_name="file_read",
         allowed_modes=[

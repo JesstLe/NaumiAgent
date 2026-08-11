@@ -340,6 +340,10 @@ from naumi_agent.evolution.stable_rollout_finalizations import (
     render_stable_rollout_finalization,
 )
 from naumi_agent.evolution.store import EvolutionStoreError
+from naumi_agent.evolution.tool_catalog_miss_opportunities import (
+    EvolutionToolCatalogMissOpportunityError,
+    render_tool_catalog_miss_opportunity,
+)
 from naumi_agent.release.installation_keys import (
     ReleaseInstallationKeyError,
     render_release_installation_key,
@@ -623,6 +627,69 @@ class EvolutionGoalNeedOpportunityTool(Tool):
             code = getattr(exc, "code", "goal_need_opportunity_failed")
             return f"Goal 明确需求机会发现未完成（`{code}`）：{exc}"
         return render_goal_need_opportunity(result)
+
+
+class EvolutionToolCatalogMissOpportunityTool(Tool):
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_discover_tool_catalog_miss_opportunity"
+
+    @property
+    def description(self) -> str:
+        return (
+            "把一个 durable 精确 Tool Catalog miss 投影为缺失能力 Candidate。"
+            "只接受 tool_search 返回的 tsm ID，重验当前完整目录；"
+            "不保存自然语言查询，也不授予实验或推广权限。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "miss_id": {
+                    "type": "string",
+                    "pattern": "^tsm_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["miss_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            user_facing_name="Tool Catalog 缺失能力机会发现",
+            search_hint=(
+                "evolution tool catalog exact miss missing capability opportunity "
+                "自进化 工具 目录 精确 缺失 能力 机会发现"
+            ),
+        )
+
+    async def execute(self, miss_id: str) -> str:
+        try:
+            result = (
+                await self._engine.evolution_tool_catalog_miss_opportunity_service.discover(
+                    miss_id=miss_id
+                )
+            )
+        except (
+            EvolutionToolCatalogMissOpportunityError,
+            EvolutionStoreError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "tool_catalog_miss_opportunity_failed")
+            return f"Tool Catalog 缺失能力机会发现未完成（`{code}`）：{exc}"
+        return render_tool_catalog_miss_opportunity(result)
 
 
 class EvolutionExperimentContractAuthorityTool(Tool):
@@ -6615,6 +6682,7 @@ def create_evolution_review_tools(
         EvolutionOutcomeOpportunityTool(engine),
         EvolutionEvalMetricOpportunityTool(engine),
         EvolutionGoalNeedOpportunityTool(engine),
+        EvolutionToolCatalogMissOpportunityTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -6628,6 +6696,7 @@ __all__ = [
     "EvolutionCandidatesTool",
     "EvolutionEvalMetricOpportunityTool",
     "EvolutionGoalNeedOpportunityTool",
+    "EvolutionToolCatalogMissOpportunityTool",
     "EvolutionOutcomeOpportunityTool",
     "EvolutionCounterfactualEvidenceTool",
     "EvolutionDecisionInputTool",

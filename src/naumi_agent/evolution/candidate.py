@@ -75,6 +75,7 @@ _FINDING_LABELS = MappingProxyType({
     "eval_token_regression": "评测 Token 消耗回归",
     "eval_metric_regression": "评测定量指标回归",
     "user_explicit_need": "用户明确能力需求",
+    "missing_tool_capability": "缺失工具能力",
 })
 
 
@@ -119,6 +120,7 @@ class CandidateExpectedMetric(_StrictModel):
     target: float
     verifier: Literal[
         "goal_completion",
+        "tool_catalog_presence",
         "harness_replay",
         "self_review_static",
         "feedback_recurrence",
@@ -308,7 +310,7 @@ def _unique_evidence(evidence: Iterable[EvolutionEvidence]) -> tuple[EvolutionEv
 
 
 def _candidate_kind(finding_code: str) -> CandidateKind:
-    if finding_code == "user_explicit_need":
+    if finding_code in {"missing_tool_capability", "user_explicit_need"}:
         return "capability"
     if finding_code in _SAFETY_FINDINGS:
         return "safety"
@@ -379,6 +381,14 @@ def _expected_metrics(
                 direction="increase",
                 target=1,
                 verifier="goal_completion",
+            )
+        elif item.source_kind == "tool_catalog_miss":
+            source_key = item.source_kind
+            metric = CandidateExpectedMetric(
+                name="tool.catalog.requested_capability.availability",
+                direction="increase",
+                target=1,
+                verifier="tool_catalog_presence",
             )
         else:
             source_key = item.source_kind

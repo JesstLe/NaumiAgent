@@ -99,12 +99,14 @@ def _router(
     promoted: object,
     metric: object | None = None,
     goal: object | None = None,
+    catalog: object | None = None,
 ):
     return EvolutionCandidateSourceAuthorityRouter({
         "eval_metric_regression": metric or _Reader(),  # type: ignore[dict-item]
         "goal_need": goal or _Reader(),  # type: ignore[dict-item]
         "rollback_outcome": rollback,  # type: ignore[dict-item]
         "promoted_outcome": promoted,  # type: ignore[dict-item]
+        "tool_catalog_miss": catalog or _Reader(),  # type: ignore[dict-item]
     })
 
 
@@ -121,6 +123,7 @@ async def test_router_calls_each_distinct_reader_once_and_runs_them_concurrently
         "goal_need",
         "promoted_outcome",
         "rollback_outcome",
+        "tool_catalog_miss",
     )
 
     entered: set[str] = set()
@@ -196,6 +199,7 @@ def test_router_rejects_missing_unknown_or_invalid_readers() -> None:
             "goal_need": reader,
             "rollback_outcome": reader,
             "promoted_outcome": reader,
+            "tool_catalog_miss": reader,
             "future_claim": reader,
         })
     with pytest.raises(TypeError, match="validate_candidate_sources"):

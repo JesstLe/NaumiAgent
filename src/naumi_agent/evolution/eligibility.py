@@ -15,6 +15,7 @@ _MECHANICAL_SOURCES = frozenset({
     "rollback_outcome",
     "promoted_outcome",
     "self_review_static",
+    "tool_catalog_miss",
 })
 _FEEDBACK_SOURCES = frozenset({"user_feedback", "agent_interpreted_feedback"})
 _EXPLICIT_NEED_SOURCES = frozenset({"goal_need"})
@@ -91,6 +92,7 @@ def assess_candidate_eligibility(
     verifier_ready = bool(candidate.expected_metrics) and all(
         metric.verifier in {
             "goal_completion",
+            "tool_catalog_presence",
             "harness_replay",
             "self_review_static",
             "feedback_recurrence",
@@ -187,7 +189,7 @@ def _evidence_detail(
     occurrence_count: int,
 ) -> str:
     if mechanical:
-        return "包含 Harness、Eval、静态扫描或可信 Outcome 机械证据。"
+        return "包含 Harness、Eval、Tool Catalog、静态扫描或可信 Outcome 机械证据。"
     if explicit_need:
         return "包含用户明确创建且当前未终结的 durable Goal 需求。"
     if direct_feedback and occurrence_count >= 2:

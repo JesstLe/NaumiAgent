@@ -62,6 +62,7 @@ class ValidationMetricPair(_StrictModel):
     target: float
     verifier: Literal[
         "goal_completion",
+        "tool_catalog_presence",
         "harness_replay",
         "self_review_static",
         "feedback_recurrence",

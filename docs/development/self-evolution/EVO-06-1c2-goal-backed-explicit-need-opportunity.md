@@ -103,8 +103,9 @@ Candidate/Eligibility/Proposal/Experiment 81。
 本切片证明“显式、当前、可撤权的用户需求能够进入 Candidate”，没有证明能力已经实现或 Goal 已被
 候选改动满足。以下仍独立待办：
 
-1. EVO-06.1c3：把 durable Tool Search miss/缺失能力事实提升为机械 Evidence，不能使用瞬时日志；
-2. EVO-06.1c4：跨 Outcome/Eval/Goal 时间窗聚类、影响范围和去重；
+1. [EVO-06.1c3](EVO-06-1c3-durable-tool-catalog-miss-opportunity.md) 已把 exact Tool Search miss
+   提升为机械 Evidence；自然语言缺失意图仍不能使用瞬时日志；
+2. EVO-06.1c4：跨 Outcome/Eval/Goal/Tool Catalog 时间窗聚类、影响范围和去重；
 3. EVO-01.5：可解释 Prioritization，不以 token、调用次数或重复 Goal 奖励候选；
 4. EVO-06.2：完整 Capability Proposal 和真实 `goal_completion` acceptance runner；
 5. Goal 完成只能作为用户事实之一，仍需 before/after、回归与长期 Outcome 证据。

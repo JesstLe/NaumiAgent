@@ -246,8 +246,8 @@ promoted/superseded 路径已分别由 HAR-09.6d/e 与 EVO-05.7b4a–7b4d 后续
 [EVO-06.1a](EVO-06-1a-outcome-backed-opportunity-discovery.md) 已把真实 `rolled_back` Outcome 确定性回注
 现有 Candidate Store；[EVO-06.1b](EVO-06-1b-promoted-outcome-opportunity-discovery.md) 进一步把 current
 stable `promoted` Outcome 回注为不同于上一轮的新 Candidate。两者均具备同源并发幂等和 Review/Workbench
-入队前动态 authority 重验，不复制源码/补丁，也不授予实验、学习或推广权限。热点/需求发现、Capability
-Proposal、Shadow/Activation 与 learning authority 仍未完成。
+入队前动态 authority 重验，不复制源码/补丁，也不授予实验、学习或推广权限。跨类型聚类/优先级、
+Capability Proposal、Shadow/Activation 与 learning authority 仍未完成。
 [EVO-01.4b](EVO-01-4b-composite-source-authority-router.md) 已为下一步 runtime metric/Eval Evidence
 补齐 fail-closed 多来源 authority router：所有动态 kind 必须完整注册，不同 reader 并发重验，且 Review
 绑定不能被后续 reader 静默覆盖。
@@ -256,8 +256,10 @@ quantitative regression：完整重建 H5a/H5c authority，只接收 primary met
 保留 name/direction/target 的 Evidence v2 Candidate，并在 Review 前动态重验。
 [EVO-06.1c2](EVO-06-1c2-goal-backed-explicit-need-opportunity.md) 已把用户显式创建且未终结的 durable
 Goal 脱敏投影为 `goal_need` capability Candidate，Goal 完成、取消或被篡改时动态撤权；没有独立
-`goal_completion` runner 时明确阻止自动实验。durable 缺失能力、跨类型时间窗和可解释 Prioritization
-仍待后续独立切片。
+`goal_completion` runner 时明确阻止自动实验。
+[EVO-06.1c3](EVO-06-1c3-durable-tool-catalog-miss-opportunity.md) 已实现 exact
+`select:<tool-name>` miss：工作区隔离、完整目录摘要绑定、目标出现/目录变化/篡改动态撤权，并拒绝保存
+自然语言查询。自然语言缺失意图、跨类型时间窗和可解释 Prioritization 仍待后续独立切片。
 
 [EVO-05.5f5x3a](EVO-05-5f5x3a-authenticated-remote-readiness-claim.md) 已为跨安装 Stable Finalization
 补齐 Population Credential-bound challenge、Ed25519 assertion 与 durable authenticated claim；它不把远端签名声明冒充

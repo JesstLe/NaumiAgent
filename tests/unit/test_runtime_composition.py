@@ -18,6 +18,9 @@ from naumi_agent.daemons.run_delegation_grants import RunDelegationGrantStore
 from naumi_agent.daemons.tool_jobs import ToolJobStore
 from naumi_agent.daemons.worker_registry import WorkerRegistryStore
 from naumi_agent.evolution.store import EvolutionCandidateStore
+from naumi_agent.evolution.tool_catalog_miss_opportunities import (
+    ToolCatalogMissStore,
+)
 from naumi_agent.harness.store import HarnessStore
 from naumi_agent.harness.trust import HarnessTrustStore
 from naumi_agent.memory.session import SessionStore
@@ -306,6 +309,7 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
     falsey_store = _FalseyHarnessStore(tmp_path / "custom-harness.db")
     trust_store = HarnessTrustStore(tmp_path / "custom-trust.db")
     evolution_store = EvolutionCandidateStore(tmp_path / "custom-evolution.db")
+    miss_store = ToolCatalogMissStore(tmp_path / "custom-evolution.db")
     chat_run_store = _FalseyChatRunStore(tmp_path / "custom-chat-runs.db")
     terminal_event_store = _FalseyTerminalEventStore(
         tmp_path / "custom-terminal-events.db",
@@ -338,6 +342,7 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
             tool_job_store=tool_job_store,
             agent_job_store=agent_job_store,
             evolution_candidate_store=evolution_store,
+            tool_catalog_miss_store=miss_store,
             harness_store=falsey_store,
             harness_trust_store=trust_store,
             goal_store=goal_store,
@@ -360,11 +365,13 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
     assert defaults.agent_job_store.db_path == paths.agent_job_db_path
     assert defaults.harness_trust_store._db_path == paths.harness_trust_db_path
     assert defaults.evolution_candidate_store.db_path == paths.evolution_db_path
+    assert defaults.tool_catalog_miss_store.db_path == paths.evolution_db_path
     assert defaults.goal_store.base_dir == paths.goal_storage_dir
     assert defaults.pursuit_store.base_dir == paths.pursuit_storage_dir
     assert defaults.task_store.db_path == paths.session_db_path
     assert defaults.workbench_store.db_path == paths.session_db_path
     assert overridden.evolution_candidate_store is evolution_store
+    assert overridden.tool_catalog_miss_store is miss_store
     assert overridden.chat_run_store is chat_run_store
     assert overridden.terminal_event_store is terminal_event_store
     assert overridden.worker_registry_store is worker_registry_store
@@ -461,6 +468,9 @@ def test_runtime_resources_reject_incomplete_bundle(tmp_path: Path) -> None:
             evolution_candidate_store=EvolutionCandidateStore(
                 tmp_path / "evolution.db"
             ),
+            tool_catalog_miss_store=ToolCatalogMissStore(
+                tmp_path / "evolution.db"
+            ),
             harness_store=object(),  # type: ignore[arg-type]
             harness_trust_store=HarnessTrustStore(tmp_path / "trust.db"),
             goal_store=GoalStore(tmp_path / "goals"),
@@ -485,6 +495,7 @@ def test_runtime_resources_reject_split_task_databases(tmp_path: Path) -> None:
             tool_job_store=defaults.tool_job_store,
             agent_job_store=defaults.agent_job_store,
             evolution_candidate_store=defaults.evolution_candidate_store,
+            tool_catalog_miss_store=defaults.tool_catalog_miss_store,
             harness_store=defaults.harness_store,
             harness_trust_store=defaults.harness_trust_store,
             goal_store=defaults.goal_store,

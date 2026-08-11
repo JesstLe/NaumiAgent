@@ -43,6 +43,9 @@ from naumi_agent.evolution.store import (
     EvolutionCandidateStore,
     resolve_evolution_db_path,
 )
+from naumi_agent.evolution.tool_catalog_miss_opportunities import (
+    ToolCatalogMissStore,
+)
 from naumi_agent.harness.store import HarnessStore, resolve_harness_db_path
 from naumi_agent.harness.trust import (
     HarnessTrustStore,
@@ -234,6 +237,10 @@ def build_runtime_resources(
     if evolution_candidate_store is None:
         evolution_candidate_store = EvolutionCandidateStore(paths.evolution_db_path)
 
+    tool_catalog_miss_store = resolved.tool_catalog_miss_store
+    if tool_catalog_miss_store is None:
+        tool_catalog_miss_store = ToolCatalogMissStore(paths.evolution_db_path)
+
     harness_store = resolved.harness_store
     if harness_store is None:
         harness_store = HarnessStore(paths.harness_db_path)
@@ -268,6 +275,7 @@ def build_runtime_resources(
         tool_job_store=tool_job_store,
         agent_job_store=agent_job_store,
         evolution_candidate_store=evolution_candidate_store,
+        tool_catalog_miss_store=tool_catalog_miss_store,
         harness_store=harness_store,
         harness_trust_store=harness_trust_store,
         goal_store=goal_store,
