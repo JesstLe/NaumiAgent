@@ -4868,6 +4868,8 @@ test("normalizes workbench event payloads", () => {
       type: "issue.claimed",
       actor: "Backend-Agent",
       subject_id: "1",
+      session_id: "session-1",
+      severity: "info",
       payload: { lease_id: "lease-1" },
       timestamp: "2026-06-27T10:00:00",
       stream_id: "stream-a",
@@ -4881,8 +4883,67 @@ test("normalizes workbench event payloads", () => {
   assert.equal(record.payload.stream_id, "stream-a");
   assert.equal(record.payload.revision, 4);
   assert.equal(record.payload.subject_id, "1");
+  assert.equal(record.payload.session_id, "session-1");
   assert.equal(record.payload.payload.lease_id, "lease-1");
   assert.equal(record.payload.timestamp, "2026-06-27T10:00:00");
+});
+
+test("workbench timeline snapshot is strict bounded and summarizes nested payloads", () => {
+  const event = {
+    id: "evt-1",
+    session_id: "session-1",
+    type: "validation.failed",
+    actor: "Harness",
+    subject_id: "task-1",
+    payload: {
+      exit_code: 1,
+      command: ["pytest", "-q"],
+      detail: { private: "drop" },
+      note: "line 1\nline 2",
+    },
+    timestamp: "2026-08-11T12:00:00+00:00",
+    correlation_id: "run-1",
+    parent_event_id: null,
+    severity: "error",
+  };
+  const normalized = normalizeServerRecord({
+    type: "workbench/snapshot",
+    payload: {
+      schema_version: 1,
+      stream_id: "stream-1",
+      revision: 1,
+      generated_at: "2026-08-11T12:00:00+00:00",
+      full: true,
+      session_id: "session-1",
+      counts: {},
+      active_selection: {},
+      events: [event],
+    },
+  });
+
+  assert.deepEqual(normalized.payload.events[0].payload, {
+    exit_code: "1",
+    command: "[2 项]",
+    detail: "[结构化对象]",
+    note: "line 1 line 2",
+  });
+  assert.equal(normalized.payload.events[0].severity, "error");
+  assert.throws(() => normalizeServerRecord({
+    type: "workbench/snapshot",
+    payload: { ...normalized.payload, events: Array.from({ length: 101 }, () => event) },
+  }), /不超过 100 项/);
+  assert.throws(() => normalizeServerRecord({
+    type: "workbench/snapshot",
+    payload: { ...normalized.payload, events: [{ ...event, actor: "bad\nactor" }] },
+  }), /规范化的有界文本/);
+  assert.throws(() => normalizeServerRecord({
+    type: "workbench/snapshot",
+    payload: { ...normalized.payload, events: [{ ...event, session_id: "other" }] },
+  }), /会话不匹配/);
+  assert.throws(() => normalizeServerRecord({
+    type: "workbench/snapshot",
+    payload: { ...normalized.payload, events: [{ ...event, payload: { duration: Infinity } }] },
+  }), /数值无效/);
 });
 
 test("normalizes bounded workbench review evidence and rejects mismatches", () => {

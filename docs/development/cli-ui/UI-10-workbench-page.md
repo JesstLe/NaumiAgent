@@ -89,6 +89,17 @@
 - 真实 x3j→Workbench→Bridge→Node 与 Textual 交互、小/中/宽视口均已定向验证。完整契约见
   `UI-10-8-stable-population-finalization-authority.md`。
 
+### UI-10.5a 已实现：权威 Timeline 快照
+
+- New UI 与 Textual TUI 复用 `WorkbenchService.dashboard_snapshot()` 中最近 50 条持久审计事实，
+  不解析聊天文本、不新增日志 Store，也不授予任何执行权。
+- 两端都严格限制事件数量、字段长度、severity 和 payload 深度；数组只显示数量、嵌套对象不递归展开，
+  身份字段控制字符或越界结构失败关闭，payload 文本在显示边界安全归一化。
+- Timeline 按权限、Git、Harness、Agent、工具、工作台分类；严重级别覆盖类别色。New UI 在
+  80/120/200 列有界渲染，TUI fallback 使用同义符号和文本。
+- `5`/`l` 打开 Timeline，方向键/Home/End/PgUp/PgDn 导航；刷新按稳定 event id 保留选择。
+- 完整契约、验收证据和后续增量边界见 `UI-10-5a-authoritative-timeline-snapshot.md`。
+
 ### UI-10.3 已实现：权威 Worktrees tab
 
 - `WorkbenchService` 直接从 Engine 注入的 `WorktreeManager` 读取 Git 权威状态，并与当前 Task、active
@@ -205,5 +216,5 @@
 
 ### 尚未完成
 
-- UI-10.5：Timeline tab 与 revisioned 增量事件生产。
+- UI-10.5b：Timeline revisioned 增量事件生产、断线 cursor 与 gap 恢复。
 - UI-10.6：waiting Approval 动作。

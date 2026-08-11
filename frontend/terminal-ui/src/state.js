@@ -128,6 +128,8 @@ function createEmptyWorkbenchState() {
     selected_review_id: "",
     selected_review_kind: "",
     selected_review_index: 0,
+    selected_event_id: "",
+    selected_event_index: 0,
     review_loading: false,
     review_error: "",
     review_detail: null,
@@ -666,7 +668,9 @@ function applyWorkbenchSnapshot(state, payload) {
   const previousReviewId = String(state.workbench.selected_review_id || "");
   const previousReviewKind = String(state.workbench.selected_review_kind || "");
   const previousReviewIndex = Math.max(0, Number(state.workbench.selected_review_index) || 0);
-  const selectedTab = ["overview", "worktrees", "reviews", "release"].includes(state.workbench.selected_tab)
+  const previousEventId = String(state.workbench.selected_event_id || "");
+  const previousEventIndex = Math.max(0, Number(state.workbench.selected_event_index) || 0);
+  const selectedTab = ["overview", "worktrees", "reviews", "timeline", "release"].includes(state.workbench.selected_tab)
     ? state.workbench.selected_tab
     : "overview";
   const previousReviewDetail = state.workbench.review_detail;
@@ -686,6 +690,10 @@ function applyWorkbenchSnapshot(state, payload) {
     previousId: previousReviewId,
     previousKind: previousReviewKind,
     previousIndex: previousReviewIndex,
+  });
+  reconcileWorkbenchTimelineSelection(state.workbench, {
+    previousId: previousEventId,
+    previousIndex: previousEventIndex,
   });
   if (
     previousReviewDetail
@@ -1799,7 +1807,7 @@ export function reduceServerEvent(state, record) {
             sessionId: String(eventSessionId || state.currentSessionId || ""),
           }];
         }
-        state.workbench.events = [...state.workbench.events, record.payload].slice(-100);
+        prependWorkbenchTimelineEvent(state.workbench, record.payload);
         state.workbench.loading = true;
         return [{
           type: "refresh_workbench",
@@ -1808,7 +1816,7 @@ export function reduceServerEvent(state, record) {
           sessionId: String(eventSessionId || state.currentSessionId || ""),
         }];
       }
-      state.workbench.events = [...state.workbench.events, record.payload].slice(-100);
+      prependWorkbenchTimelineEvent(state.workbench, record.payload);
       break;
     }
     default:
@@ -3905,21 +3913,28 @@ export function handleWorkbenchOverviewKey(state, key, send) {
     state.workbench.selected_tab = "release";
     return true;
   }
+  if (normalized === "5" || normalized === "l") {
+    state.workbench.selected_tab = "timeline";
+    reconcileWorkbenchTimelineSelection(state.workbench);
+    return true;
+  }
   if ([INPUT_KEYS.tab, "]", INPUT_KEYS.right, INPUT_KEYS.rightAlt].includes(key)) {
-    const tabs = ["overview", "worktrees", "reviews", "release"];
+    const tabs = ["overview", "worktrees", "reviews", "timeline", "release"];
     const index = tabs.indexOf(state.workbench.selected_tab);
     state.workbench.selected_tab = tabs[(index + 1 + tabs.length) % tabs.length];
     reconcileWorkbenchSelection(state.workbench);
     reconcileWorkbenchReviewSelection(state.workbench);
+    reconcileWorkbenchTimelineSelection(state.workbench);
     if (state.workbench.selected_tab === "reviews") requestWorkbenchReview(state, send);
     return true;
   }
   if ([INPUT_KEYS.shiftTab, "[", INPUT_KEYS.left, INPUT_KEYS.leftAlt].includes(key)) {
-    const tabs = ["overview", "worktrees", "reviews", "release"];
+    const tabs = ["overview", "worktrees", "reviews", "timeline", "release"];
     const index = tabs.indexOf(state.workbench.selected_tab);
     state.workbench.selected_tab = tabs[(index - 1 + tabs.length) % tabs.length];
     reconcileWorkbenchSelection(state.workbench);
     reconcileWorkbenchReviewSelection(state.workbench);
+    reconcileWorkbenchTimelineSelection(state.workbench);
     if (state.workbench.selected_tab === "reviews") requestWorkbenchReview(state, send);
     return true;
   }
@@ -3993,6 +4008,20 @@ export function handleWorkbenchOverviewKey(state, key, send) {
     requestWorkbenchReview(state, send);
     return true;
   }
+  if (state.workbench.selected_tab === "timeline") {
+    let delta = 0;
+    if ([INPUT_KEYS.up, INPUT_KEYS.upAlt].includes(key)) delta = -1;
+    else if ([INPUT_KEYS.down, INPUT_KEYS.downAlt].includes(key)) delta = 1;
+    else if (key === INPUT_KEYS.pageUp) delta = -10;
+    else if (key === INPUT_KEYS.pageDown) delta = 10;
+    else if ([INPUT_KEYS.home, INPUT_KEYS.homeAlt, INPUT_KEYS.homeSs3].includes(key)) {
+      setWorkbenchTimelineSelectionIndex(state.workbench, 0);
+    } else if ([INPUT_KEYS.end, INPUT_KEYS.endAlt, INPUT_KEYS.endSs3].includes(key)) {
+      setWorkbenchTimelineSelectionIndex(state.workbench, Number.MAX_SAFE_INTEGER);
+    }
+    if (delta) moveWorkbenchTimelineSelection(state.workbench, delta);
+    return true;
+  }
   if (state.workbench.selected_tab !== "worktrees") return true;
   if ([INPUT_KEYS.up, INPUT_KEYS.upAlt].includes(key)) {
     moveWorkbenchSelection(state.workbench, -1);
@@ -4008,6 +4037,53 @@ export function handleWorkbenchOverviewKey(state, key, send) {
     setWorkbenchSelectionIndex(state.workbench, Number.MAX_SAFE_INTEGER);
   }
   return true;
+}
+
+function reconcileWorkbenchTimelineSelection(workbench, previous = {}) {
+  const events = Array.isArray(workbench.events) ? workbench.events : [];
+  if (!events.length) {
+    workbench.selected_event_id = "";
+    workbench.selected_event_index = 0;
+    return;
+  }
+  const previousId = String(previous.previousId || workbench.selected_event_id || "");
+  const byId = previousId
+    ? events.findIndex((item) => String(item.id || "") === previousId)
+    : -1;
+  const fallback = Math.min(
+    events.length - 1,
+    Math.max(0, Number(previous.previousIndex ?? workbench.selected_event_index) || 0),
+  );
+  setWorkbenchTimelineSelectionIndex(workbench, byId >= 0 ? byId : fallback);
+}
+
+function prependWorkbenchTimelineEvent(workbench, event) {
+  const previousId = String(workbench.selected_event_id || "");
+  const eventId = String(event?.id || "");
+  const current = Array.isArray(workbench.events) ? workbench.events : [];
+  workbench.events = [
+    event,
+    ...current.filter((item) => !eventId || String(item.id || "") !== eventId),
+  ].slice(0, 100);
+  reconcileWorkbenchTimelineSelection(workbench, {
+    previousId,
+    previousIndex: workbench.selected_event_index,
+  });
+}
+
+function setWorkbenchTimelineSelectionIndex(workbench, index) {
+  const events = Array.isArray(workbench.events) ? workbench.events : [];
+  if (!events.length) return;
+  const next = Math.min(events.length - 1, Math.max(0, Number(index) || 0));
+  workbench.selected_event_index = next;
+  workbench.selected_event_id = String(events[next]?.id || "");
+}
+
+function moveWorkbenchTimelineSelection(workbench, delta) {
+  setWorkbenchTimelineSelectionIndex(
+    workbench,
+    (Number(workbench.selected_event_index) || 0) + Number(delta || 0),
+  );
 }
 
 function reconcileWorkbenchReviewSelection(workbench, previous = {}) {

@@ -18,7 +18,7 @@
 
 | ID | 名称 | 状态 | 依赖 | 文档 |
 | --- | --- | --- | --- | --- |
-| UI-10 | `/workbench` 命令页 | partial (10.1-10.4, 10.6a, 10.6b1, 10.6b2, 10.6c, 10.7, 10.8) | UI 协议、Runtime Inspector | `cli-ui/UI-10-workbench-page.md` |
+| UI-10 | `/workbench` 命令页 | partial (10.1-10.4, 10.5a, 10.6a, 10.6b1, 10.6b2, 10.6c, 10.7, 10.8) | UI 协议、Runtime Inspector | `cli-ui/UI-10-workbench-page.md` |
 | UI-11 | 全屏任务与 Timeline 导航 | partial (11.1a, 11.2a) | Agent Control Center | `cli-ui/UI-11-task-navigation.md` |
 | UI-12 | 权限策略中心 | partial (12.1a, 12.3a, 12.3b1, 12.3b2) | permission bubbles | `cli-ui/UI-12-permission-center.md` |
 | UI-13 | Doctor/Debug 全屏诊断 | partial (13.1a-13.1e, 13.2a, 13.3a, 13.4a, 13.5a) | DebugTrace, heartbeat | `cli-ui/UI-13-diagnostics.md` |

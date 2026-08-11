@@ -401,6 +401,50 @@ test("workbench release tab renders completed revoked and unavailable authority"
   assert(!unavailableText.includes("private"));
 });
 
+test("workbench Timeline renders categorized semantic colors and bounded detail", () => {
+  const events = [
+    {
+      id: "event-validation",
+      session_id: "session-ui-10",
+      type: "validation.failed",
+      actor: "Harness",
+      subject_id: "task-1",
+      payload: { exit_code: "1", path: "tests/test_ui.py" },
+      timestamp: "2026-08-11T12:00:00+00:00",
+      severity: "error",
+    },
+    {
+      id: "event-git",
+      session_id: "session-ui-10",
+      type: "worktree.created",
+      actor: "Git-Agent",
+      subject_id: "wt-1",
+      payload: { branch: "codex/ui-10-5a" },
+      timestamp: "2026-08-11T11:59:00+00:00",
+      severity: "info",
+    },
+  ];
+  const view = {
+    ...workbenchOverviewFixture(),
+    selected_tab: "timeline",
+    selected_event_index: 0,
+    events,
+  };
+  for (const width of [80, 120, 200]) {
+    const rendered = renderWorkbenchOverview(view, width, 20);
+    const plain = rendered.map(stripAnsi).join("\n");
+    assert(rendered.every((line) => visibleWidth(line) <= width));
+    assert(plain.includes("Timeline · 2"));
+    assert(plain.includes("工具 · validation › failed"));
+    assert(plain.includes("Harness"));
+    assert(plain.includes("exit_code · 1"));
+    assert(rendered.join("\n").includes(ANSI.red));
+  }
+  const empty = renderWorkbenchOverview({ ...view, events: [] }, 80, 12)
+    .map(stripAnsi).join("\n");
+  assert(empty.includes("不从聊天文本推断事件"));
+});
+
 test("workbench overview distinguishes loading empty and error without list explosions", () => {
   const loading = renderWorkbenchOverview({ loading: true, revision: 0 }, 80, 12).map(stripAnsi).join("\n");
   assert(loading.includes("正在加载 Workbench"));

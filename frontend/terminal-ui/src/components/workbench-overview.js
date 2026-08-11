@@ -27,6 +27,8 @@ export function renderWorkbenchOverview(view, width, height) {
     body = renderWorktrees(snapshot, safeWidth, bodyHeight);
   } else if (snapshot.selected_tab === "reviews") {
     body = renderReviews(snapshot, safeWidth, bodyHeight);
+  } else if (snapshot.selected_tab === "timeline") {
+    body = renderTimeline(snapshot, safeWidth, bodyHeight);
   } else if (snapshot.selected_tab === "release") {
     body = renderReleaseFinalizationPage(snapshot, safeWidth, bodyHeight);
   } else if (!array(snapshot.missions).length && !array(snapshot.tasks).length) {
@@ -47,14 +49,15 @@ export function renderWorkbenchOverview(view, width, height) {
 }
 
 function renderTabs(snapshot) {
-  const selected = ["overview", "worktrees", "reviews", "release"].includes(snapshot.selected_tab)
+  const selected = ["overview", "worktrees", "reviews", "timeline", "release"].includes(snapshot.selected_tab)
     ? snapshot.selected_tab
     : "overview";
   const overview = selected === "overview" ? color(ANSI.cyan, "[1 概览]") : color(ANSI.dim, "1 概览");
   const worktrees = selected === "worktrees" ? color(ANSI.cyan, "[2 Worktrees]") : color(ANSI.dim, "2 Worktrees");
   const reviews = selected === "reviews" ? color(ANSI.cyan, "[3 Reviews]") : color(ANSI.dim, "3 Reviews");
   const release = selected === "release" ? color(ANSI.cyan, "[4 Release]") : color(ANSI.dim, "4 Release");
-  return `Workbench Overview · ${overview} · ${worktrees} · ${reviews} · ${release}`;
+  const timeline = selected === "timeline" ? color(ANSI.cyan, "[5 Timeline]") : color(ANSI.dim, "5 Timeline");
+  return `Workbench Overview · ${overview} · ${worktrees} · ${reviews} · ${release} · ${timeline}`;
 }
 
 function renderSummary(snapshot) {
@@ -92,10 +95,129 @@ function renderPageState(snapshot) {
   if (snapshot.proposal_action?.phase === "loading") {
     return color(ANSI.cyan, "正在写入 Proposal 决策与审计…");
   }
-  if (["worktrees", "reviews", "release"].includes(snapshot.selected_tab)) {
+  if (["worktrees", "reviews", "timeline", "release"].includes(snapshot.selected_tab)) {
     return color(ANSI.dim, "Tab/Shift+Tab 标签 · ↑/↓ 选择 · PgUp/PgDn 翻页 · r 刷新 · Esc 返回");
   }
   return color(ANSI.dim, "Tab/Shift+Tab 标签 · r 刷新 · Esc 返回对话");
+}
+
+function renderTimeline(snapshot, width, height) {
+  const events = array(snapshot.events);
+  if (!events.length) {
+    return [
+      color(ANSI.dim, "当前会话尚无 Workbench 审计事件。"),
+      color(ANSI.dim, "Timeline 只展示后端已持久化的事实，不从聊天文本推断事件。"),
+    ];
+  }
+  const selectedIndex = Math.min(
+    events.length - 1,
+    Math.max(0, number(snapshot.selected_event_index)),
+  );
+  const selected = events[selectedIndex];
+  if (width >= 120) {
+    const leftWidth = Math.max(50, Math.min(Math.floor(width * 0.52), width - 48));
+    const rightWidth = Math.max(1, width - leftWidth - 1);
+    const left = renderTimelineList(events, selectedIndex, leftWidth, height);
+    const right = renderTimelineDetail(selected, rightWidth);
+    return Array.from({ length: height }, (_, index) => (
+      `${padRight(fitAnsiWidth(left[index] || "", leftWidth), leftWidth)}${color(ANSI.blue, "│")}${padRight(fitAnsiWidth(right[index] || "", rightWidth), rightWidth)}`
+    ));
+  }
+  const listHeight = Math.max(5, Math.min(9, Math.floor(height * 0.48)));
+  return [
+    ...renderTimelineList(events, selectedIndex, width, listHeight),
+    ...renderTimelineDetail(selected, width),
+  ].slice(0, height);
+}
+
+function renderTimelineList(events, selectedIndex, width, height) {
+  const rowCount = Math.max(1, height - 1);
+  const start = Math.max(
+    0,
+    Math.min(events.length - rowCount, selectedIndex - Math.floor(rowCount / 2)),
+  );
+  const rows = events.slice(start, start + rowCount).map((event, offset) => {
+    const index = start + offset;
+    const marker = index === selectedIndex ? color(ANSI.cyan, "›") : " ";
+    const category = timelineCategory(event.type);
+    const categoryLabel = color(timelineColor(event), category);
+    const timestamp = compactText(event.timestamp || "时间未知", 40);
+    const subject = compactText(event.subject_id || "无对象", 120);
+    return fitAnsiWidth(
+      `${marker} ${categoryLabel} ${timelineEventLabel(event.type)} · ${subject} · ${timestamp}`,
+      width,
+    );
+  });
+  return [color(ANSI.cyan, `Timeline · ${events.length} · 当前 ${selectedIndex + 1}`), ...rows];
+}
+
+function renderTimelineDetail(event, width) {
+  if (!event) return [color(ANSI.dim, "未选择事件")];
+  const lines = [
+    color(timelineColor(event), `${timelineCategory(event.type)} · ${timelineEventLabel(event.type)}`),
+    `级别 · ${timelineSeverityLabel(event.severity)} · 时间 ${compactText(event.timestamp || "-", 100)}`,
+    `执行者 · ${compactText(event.actor || "未知", 300)}`,
+    `对象 · ${compactText(event.subject_id || "-", 300)}`,
+    color(ANSI.dim, `Event · ${compactText(event.id || "-", 128)}`),
+  ];
+  if (event.correlation_id) {
+    lines.push(color(ANSI.dim, `关联 · ${compactText(event.correlation_id, 128)}`));
+  }
+  const entries = Object.entries(event.payload || {});
+  if (entries.length) {
+    lines.push(color(ANSI.cyan, "证据字段"));
+    for (const [key, value] of entries.slice(0, 12)) {
+      lines.push(`${timelinePayloadKey(key)} · ${compactText(value, 500)}`);
+    }
+    if (entries.length > 12) lines.push(color(ANSI.dim, `另有 ${entries.length - 12} 个字段`));
+  } else {
+    lines.push(color(ANSI.dim, "证据字段 · 无公开字段"));
+  }
+  return lines.flatMap((line) => wrapAnsiLine(line, Math.max(1, width)));
+}
+
+function timelineCategory(type) {
+  const value = String(type || "").toLowerCase();
+  if (/permission|approval|proposal|review/.test(value)) return "权限";
+  if (/git|worktree|branch|commit|merge/.test(value)) return "Git";
+  if (/harness|pursuit|heartbeat|run\.|daemon|worker/.test(value)) return "Harness";
+  if (/agent|lease|bid|dispatch/.test(value)) return "Agent";
+  if (/tool|validation|check|eval/.test(value)) return "工具";
+  return "工作台";
+}
+
+function timelineColor(event) {
+  if (["error", "critical"].includes(String(event.severity))) return ANSI.red;
+  if (String(event.severity) === "warning") return ANSI.yellow;
+  return {
+    权限: ANSI.yellow,
+    Git: ANSI.green,
+    Harness: ANSI.magenta,
+    Agent: ANSI.cyan,
+    工具: ANSI.blue,
+    工作台: ANSI.white,
+  }[timelineCategory(event.type)] || ANSI.white;
+}
+
+function timelineSeverityLabel(value) {
+  return {
+    info: "信息",
+    warning: "警告",
+    error: "错误",
+    critical: "严重",
+  }[String(value)] || "未知";
+}
+
+function timelineEventLabel(value) {
+  return compactText(String(value || "unknown").replaceAll(".", " › "), 160);
+}
+
+function timelinePayloadKey(value) {
+  const key = compactText(value, 80);
+  if (/status|state|result|verdict/.test(key)) return color(ANSI.green, key);
+  if (/error|failure|risk|blocked/.test(key)) return color(ANSI.red, key);
+  if (/path|branch|commit|sha|worktree/.test(key)) return color(ANSI.blue, key);
+  return color(ANSI.dim, key);
 }
 
 function renderReviews(snapshot, width, height) {

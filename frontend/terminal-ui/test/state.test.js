@@ -4245,12 +4245,16 @@ test("initial state includes empty workbench bucket", () => {
     worktrees_total: 0,
     worktrees_truncated: false,
     worktrees: [],
+    stable_population_finalization: null,
+    stable_population_finalization_error: "stable_population_finalization_unavailable",
     selected_tab: "overview",
     selected_worktree_name: "",
     selected_worktree_index: 0,
     selected_review_id: "",
     selected_review_kind: "",
     selected_review_index: 0,
+    selected_event_id: "",
+    selected_event_index: 0,
     review_loading: false,
     review_error: "",
     review_detail: null,
@@ -4504,6 +4508,51 @@ test("workbench tabs navigate 100 worktrees and preserve stable selection on ref
   assert.equal(state.workbench.selected_tab, "overview");
   handleWorkbenchOverviewKey(state, "2", () => {});
   assert.equal(state.workbench.selected_tab, "worktrees");
+});
+
+test("workbench Timeline navigates bounded persisted events and preserves selection", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-workbench";
+  handleSubmitText(state, "/workbench", () => {});
+  const events = Array.from({ length: 100 }, (_, index) => ({
+    id: `event-${index}`,
+    session_id: "session-workbench",
+    type: index % 2 ? "worktree.created" : "validation.completed",
+    actor: "Agent",
+    subject_id: `task-${index}`,
+    payload: {},
+    timestamp: `2026-08-11T12:00:${String(index % 60).padStart(2, "0")}+00:00`,
+    severity: "info",
+  }));
+  reduceServerEvent(state, {
+    type: "workbench/snapshot",
+    payload: {
+      schema_version: 1, stream_id: "stream-a", revision: 1,
+      generated_at: "", full: true, session_id: "session-workbench",
+      counts: {}, active_selection: {}, missions: [], tasks: [], issues: [], failures: [],
+      events,
+    },
+  });
+
+  handleWorkbenchOverviewKey(state, "5", () => {});
+  assert.equal(state.workbench.selected_tab, "timeline");
+  assert.equal(state.workbench.selected_event_id, "event-0");
+  handleWorkbenchOverviewKey(state, "\x1b[F", () => {});
+  assert.equal(state.workbench.selected_event_id, "event-99");
+  handleWorkbenchOverviewKey(state, "\x1b[A", () => {});
+  assert.equal(state.workbench.selected_event_id, "event-98");
+
+  reduceServerEvent(state, {
+    type: "workbench/snapshot",
+    payload: {
+      schema_version: 1, stream_id: "stream-a", revision: 2,
+      generated_at: "", full: true, session_id: "session-workbench",
+      counts: {}, active_selection: {}, missions: [], tasks: [], issues: [], failures: [],
+      events: [events[99], ...events.slice(0, 99)],
+    },
+  });
+  assert.equal(state.workbench.selected_event_id, "event-98");
+  assert.equal(state.workbench.selected_event_index, 99);
 });
 
 test("workbench Reviews tab lazily requests selected evidence and ignores stale detail", () => {
@@ -5228,7 +5277,7 @@ test("outbox snapshot restores task intent without automatic downgrade", () => {
   assert.equal(sent[0].payload.mission_id, "mission-3");
 });
 
-test("workbench event appends to event log and keeps last 100", () => {
+test("workbench event prepends, deduplicates, and keeps the newest 100", () => {
   const state = createInitialState();
 
   reduceServerEvent(state, {
@@ -5251,8 +5300,18 @@ test("workbench event appends to event log and keeps last 100", () => {
   }
 
   assert.equal(state.workbench.events.length, 100);
-  assert.equal(state.workbench.events[0].id, "e6");
-  assert.equal(state.workbench.events.at(-1).id, "e105");
+  assert.equal(state.workbench.events[0].id, "e105");
+  assert.equal(state.workbench.events.at(-1).id, "e6");
+
+  state.workbench.selected_event_id = "e50";
+  state.workbench.selected_event_index = state.workbench.events.findIndex((item) => item.id === "e50");
+  reduceServerEvent(state, {
+    type: "workbench/event",
+    payload: { id: "e105", type: "issue.updated", actor: "agent", subject_id: "105", payload: {}, timestamp: "" },
+  });
+  assert.equal(state.workbench.events.length, 100);
+  assert.equal(state.workbench.selected_event_id, "e50");
+  assert.equal(state.workbench.events[state.workbench.selected_event_index].id, "e50");
 });
 
 test("run activity group aggregates backend phases into one durable message", () => {
