@@ -1165,6 +1165,18 @@ if TYPE_CHECKING:
         encode_stable_remote_finalization_delivery_package,
         render_stable_remote_finalization_delivery,
     )
+    from naumi_agent.evolution.stable_remote_finalization_delivery_worker import (
+        EvolutionStableRemoteFinalizationDeliveryPassResult,
+        EvolutionStableRemoteFinalizationDeliveryWorker,
+        EvolutionStableRemoteFinalizationDeliveryWorkerPolicy,
+        EvolutionStableRemoteFinalizationDeliveryWorkerSnapshot,
+        EvolutionStableRemoteFinalizationDeliveryWorkerState,
+        EvolutionStableRemoteFinalizationInstallationTransport,
+        EvolutionStableRemoteFinalizationTransportError,
+        LocalStableRemoteFinalizationInstallationTransport,
+        render_stable_remote_finalization_delivery_pass,
+        render_stable_remote_finalization_delivery_worker,
+    )
     from naumi_agent.evolution.stable_remote_finalizations import (
         EVOLUTION_STABLE_REMOTE_FINALIZATION_POLICY,
         EvolutionStableRemoteFinalizationError,
@@ -1730,6 +1742,16 @@ __all__ = [
     "encode_stable_remote_finalization_delivery_ack",
     "encode_stable_remote_finalization_delivery_package",
     "render_stable_remote_finalization_delivery",
+    "EvolutionStableRemoteFinalizationDeliveryPassResult",
+    "EvolutionStableRemoteFinalizationDeliveryWorker",
+    "EvolutionStableRemoteFinalizationDeliveryWorkerPolicy",
+    "EvolutionStableRemoteFinalizationDeliveryWorkerSnapshot",
+    "EvolutionStableRemoteFinalizationDeliveryWorkerState",
+    "EvolutionStableRemoteFinalizationInstallationTransport",
+    "EvolutionStableRemoteFinalizationTransportError",
+    "LocalStableRemoteFinalizationInstallationTransport",
+    "render_stable_remote_finalization_delivery_pass",
+    "render_stable_remote_finalization_delivery_worker",
     "EVOLUTION_STABLE_ROLLOUT_AUTHORIZATION_POLICY",
     "EvolutionStableRolloutAuthorization",
     "EvolutionStableRolloutAuthorizationError",
@@ -3045,6 +3067,18 @@ def __getattr__(name: str) -> object:
         "encode_stable_remote_finalization_delivery_package",
         "render_stable_remote_finalization_delivery",
     }
+    stable_remote_finalization_delivery_worker_exports = {
+        "EvolutionStableRemoteFinalizationDeliveryPassResult",
+        "EvolutionStableRemoteFinalizationDeliveryWorker",
+        "EvolutionStableRemoteFinalizationDeliveryWorkerPolicy",
+        "EvolutionStableRemoteFinalizationDeliveryWorkerSnapshot",
+        "EvolutionStableRemoteFinalizationDeliveryWorkerState",
+        "EvolutionStableRemoteFinalizationInstallationTransport",
+        "EvolutionStableRemoteFinalizationTransportError",
+        "LocalStableRemoteFinalizationInstallationTransport",
+        "render_stable_remote_finalization_delivery_pass",
+        "render_stable_remote_finalization_delivery_worker",
+    }
     stable_rollout_authorization_exports = {
         "EVOLUTION_STABLE_ROLLOUT_AUTHORIZATION_POLICY",
         "EvolutionStableRolloutAuthorization",
@@ -3746,6 +3780,8 @@ def __getattr__(name: str) -> object:
         module_name = "stable_remote_finalizations"
     elif name in stable_remote_finalization_delivery_exports:
         module_name = "stable_remote_finalization_deliveries"
+    elif name in stable_remote_finalization_delivery_worker_exports:
+        module_name = "stable_remote_finalization_delivery_worker"
     elif name in stable_rollout_authorization_exports:
         module_name = "stable_rollout_authorizations"
     elif name in stable_rollout_finalization_exports:

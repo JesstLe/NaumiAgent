@@ -460,6 +460,37 @@ class AgentPublicationRecoveryConfig(BaseSettings):
         return self
 
 
+class StableRemoteFinalizationDeliveryWorkerConfig(BaseSettings):
+    """Bounded delivery worker policy; transport is injected by runtime composition."""
+
+    enabled: bool = True
+    interval_seconds: float = Field(default=30.0, ge=0.1, le=86_400)
+    max_empty_backoff_seconds: float = Field(default=300.0, ge=0.1, le=604_800)
+    max_failure_backoff_seconds: float = Field(default=300.0, ge=0.1, le=604_800)
+    claim_lease_seconds: int = Field(default=60, ge=3, le=300)
+    scan_limit: int = Field(default=20, ge=1, le=1000)
+    ack_timeout_seconds: float = Field(default=20.0, ge=0.1, le=299.9)
+    retry_base_seconds: float = Field(default=5.0, ge=0.1, le=3600)
+    retry_max_seconds: float = Field(default=300.0, ge=0.1, le=3600)
+    max_attempts: int = Field(default=8, ge=1, le=1000)
+    shutdown_drain_seconds: float = Field(default=25.0, ge=0.1, le=3600)
+    jitter_ratio: float = Field(default=0.1, ge=0, le=0.5)
+
+    @model_validator(mode="after")
+    def _validate_stable_remote_delivery(
+        self,
+    ) -> StableRemoteFinalizationDeliveryWorkerConfig:
+        if self.max_empty_backoff_seconds < self.interval_seconds:
+            raise ValueError("Remote Finalization 空轮退避不能小于 interval")
+        if self.max_failure_backoff_seconds < self.interval_seconds:
+            raise ValueError("Remote Finalization 失败退避不能小于 interval")
+        if self.ack_timeout_seconds >= self.claim_lease_seconds:
+            raise ValueError("Remote Finalization ACK timeout 必须小于 claim lease")
+        if self.retry_max_seconds < self.retry_base_seconds:
+            raise ValueError("Remote Finalization retry max 不能小于 retry base")
+        return self
+
+
 class HarnessConfig(BaseSettings):
     """Harness runtime policy configuration."""
 
@@ -474,6 +505,9 @@ class HarnessConfig(BaseSettings):
     agent_publication_recovery: AgentPublicationRecoveryConfig = Field(
         default_factory=AgentPublicationRecoveryConfig
     )
+    stable_remote_finalization_delivery: (
+        StableRemoteFinalizationDeliveryWorkerConfig
+    ) = Field(default_factory=StableRemoteFinalizationDeliveryWorkerConfig)
 
 
 class AppConfig(BaseSettings):

@@ -227,6 +227,10 @@ from naumi_agent.evolution.stable_remote_finalization_deliveries import (
     encode_stable_remote_finalization_delivery_ack,
     render_stable_remote_finalization_delivery,
 )
+from naumi_agent.evolution.stable_remote_finalization_delivery_worker import (
+    render_stable_remote_finalization_delivery_pass,
+    render_stable_remote_finalization_delivery_worker,
+)
 from naumi_agent.evolution.stable_remote_finalizations import (
     EvolutionStableRemoteFinalizationError,
     decode_stable_remote_finalization_execution_package,
@@ -3448,6 +3452,7 @@ class EvolutionStableRemoteFinalizationTool(Tool):
                         "receive-delivery-local", "execute-delivery-local",
                         "recover-delivery-local", "ack-delivery",
                         "ingest-delivery", "ingest-delivery-late", "inspect-delivery",
+                        "run-delivery-worker", "inspect-delivery-worker",
                     ],
                 },
                 "authorization_id": {"type": "string"},
@@ -3510,7 +3515,24 @@ class EvolutionStableRemoteFinalizationTool(Tool):
                 )
             if normalized == "queue-delivery":
                 delivery = await delivery_service.queue(grant_id=grant_id)
+                worker = getattr(
+                    self._engine,
+                    "evolution_stable_remote_finalization_delivery_worker",
+                    None,
+                )
+                if worker is not None:
+                    worker.wake()
                 return render_stable_remote_finalization_delivery(delivery)
+            if normalized == "run-delivery-worker":
+                result = await (
+                    self._engine.run_stable_remote_finalization_delivery_once()
+                )
+                return render_stable_remote_finalization_delivery_pass(result)
+            if normalized == "inspect-delivery-worker":
+                snapshot = (
+                    self._engine.stable_remote_finalization_delivery_worker_snapshot()
+                )
+                return render_stable_remote_finalization_delivery_worker(snapshot)
             if normalized == "claim-delivery":
                 delivery = await delivery_store.claim(
                     owner_id=owner_id,

@@ -214,7 +214,10 @@
   CAS、签署 typed Result，Control Plane 动态重验后形成 Receipt；
 - [EVO-05.5f5x3e Remote Finalization Delivery and Recovery](EVO-05-5f5x3e-remote-finalization-delivery-recovery.md)：
   已交付；durable outbox 以 owner/epoch/lease fencing 重试，目标以独立 installation domain 签 ACK 并写 journal；writer 已提交但
-  keyring 暂不可用时只补签既有事实。真实 daemon transport worker 与 Population aggregation 仍未完成；
+  keyring 暂不可用时只补签既有事实；
+- [EVO-05.5f5x3f Remote Finalization Delivery Worker](EVO-05-5f5x3f-remote-finalization-delivery-worker.md)：
+  已交付；认证安装 transport Protocol、本机 adapter、周期 claim、ACK timeout、retry budget、dead-letter 和 shutdown drain 已
+  接入 Runtime composition 与双通道；生产 HTTP/mTLS adapter、Result 主动回传和 Population aggregation 仍未完成；
 - [EVO-05.6a Automatic Pause and Rollback Request](EVO-05-6a-automatic-pause-rollback-request.md)：已交付；
   exact breach 会触发或复用 kill switch，并冻结只读 exact Rollback Request，不虚报执行完成。
 - [EVO-05.6b1 Immutable Rollback Source](EVO-05-6b1-immutable-rollback-source.md)：已交付；从 exact Git

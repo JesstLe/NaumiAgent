@@ -60,7 +60,7 @@
 | EVO-03 | 多层验证与 Eval 对照 | partial (3.1a, 3.1b, 3.2a-3.2g, 3.3a-3.3c2c2, 3.4a-3.4b, 3.5a-3.5c, 3.6a-3.6e, 3.7a, 3.7b1-3.7b2) | EVO-02, HAR-08 | `self-evolution/EVO-03-validation-evaluation.md` |
 | EVO-04 | 反思决策与防奖励投机（EVO-04.1a Decision Input、4.2a Mechanical Gate、4.3a Independent Reviewer 已完成） | partial | EVO-03 | `self-evolution/EVO-04-reflection-decision.md` |
 | EVO-GOV-01 | Evolution Agent Tool 权限矩阵 | implemented | EVO-03, EVO-04 | `self-evolution/EVO-GOV-01-agent-tool-permission-matrix.md` |
-| EVO-05 | 提升、回滚与发布治理 | partial (stable 路线已完成本机逐成员 5.5f5x3 binary finalization、5.5f5x3a 远端 identity claim、5.5f5x3b fresh Probe、5.5f5x3c signed authorization、5.5f5x3d target CAS/signed result 与 5.5f5x3e durable delivery/ACK/retry/late recovery；installed-slot rollback 与 Proposal-bound rolled_back Outcome 至 5.7a；真实 transport worker、Population rollout aggregation、配置/数据 finalization 与 promotion 仍未完成，以路线文档为准) | EVO-04, ARC-07 | `self-evolution/EVO-05-promotion-rollback.md` |
+| EVO-05 | 提升、回滚与发布治理 | partial (stable 路线已完成本机逐成员 5.5f5x3 binary finalization、5.5f5x3a 远端 identity claim、5.5f5x3b fresh Probe、5.5f5x3c signed authorization、5.5f5x3d target CAS/signed result、5.5f5x3e durable delivery/recovery 与 5.5f5x3f bounded delivery Worker；installed-slot rollback 与 Proposal-bound rolled_back Outcome 至 5.7a；生产 HTTP/mTLS adapter、Population rollout aggregation、配置/数据 finalization 与 promotion 仍未完成，以路线文档为准) | EVO-04, ARC-07 | `self-evolution/EVO-05-promotion-rollback.md` |
 | EVO-06 | 持续学习与能力扩展 | partial (6.1a rolled_back Outcome 回注已实现；accepted/promoted、Capability Proposal、Shadow/Activation/Selection/Retirement 待完成) | EVO-05, HAR-09 | `self-evolution/EVO-06-continuous-evolution.md` |
 
 ## 推荐关键路径

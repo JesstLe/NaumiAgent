@@ -4003,12 +4003,17 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 }
             elif len(parts) == 3 and parts[1] == "inspect-delivery":
                 arguments = {"action": "inspect-delivery", "delivery_id": parts[2]}
+            elif len(parts) == 2 and parts[1] in {
+                "run-delivery-worker",
+                "inspect-delivery-worker",
+            }:
+                arguments = {"action": parts[1]}
             else:
                 raise ValueError(
                     "stable-remote-finalization 需要 prepare <authorization-id>、"
                     "export <grant-id>、execute-local <package-base64>、"
                     "ingest <grant-id> <submission-base64>、inspect <receipt-id>，"
-                    "或 delivery queue/claim/receive/ack/execute/ingest/inspect 操作。"
+                    "或 delivery queue/claim/receive/ack/execute/ingest/inspect/worker 操作。"
                 )
             await _run_tool_slash_command(
                 engine,
