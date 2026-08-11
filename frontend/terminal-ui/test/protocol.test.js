@@ -693,6 +693,7 @@ test("protocol contract drives client and server event validation", () => {
       "evolution_evaluation_lane",
       "goal_lifecycle_actions",
       "goal_snapshot",
+      "goal_terminal_outbox_disposed_cursor",
       "heartbeat",
       "pursuit_recovery_actions",
       "sequence_integrity",
@@ -902,6 +903,7 @@ test("hello payload is generated from the embedded negotiation contract", () => 
       "evolution_evaluation_lane",
       "goal_lifecycle_actions",
       "goal_snapshot",
+      "goal_terminal_outbox_disposed_cursor",
       "heartbeat",
       "pursuit_recovery_actions",
       "sequence_integrity",
@@ -1967,7 +1969,7 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
         owner_id: "private-owner",
       },
       terminal_outbox: {
-        schema_version: 4,
+        schema_version: 5,
         enabled: true,
         status: "recovering",
         worker_state: "waiting",
@@ -2004,6 +2006,10 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
           source_request_sha256: "drop",
         }],
         disposed_truncated: false,
+        disposed_cursor: "",
+        disposed_next_cursor: "",
+        disposed_has_more: false,
+        disposed_warning: "",
         private_owner: "drop",
       },
     },
@@ -2050,7 +2056,7 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
   assert.equal(normalized.selected_interaction.options[0].label, "继续");
   assert.equal(normalized.terminal_outbox.status, "recovering");
   assert.equal(normalized.terminal_outbox.counts.total_pending, 3);
-  assert.equal(normalized.terminal_outbox.schema_version, 4);
+  assert.equal(normalized.terminal_outbox.schema_version, 5);
   assert.equal(normalized.terminal_outbox.counts.dead_letter, 0);
   assert.equal(normalized.terminal_outbox.disposed_count, 1);
   assert.equal(normalized.terminal_outbox.disposed[0].effective_state, "abandoned");
@@ -2094,7 +2100,7 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
       },
     },
   }).payload.terminal_outbox;
-  assert.equal(legacyNormalized.schema_version, 4);
+  assert.equal(legacyNormalized.schema_version, 5);
   assert.equal(legacyNormalized.counts.dead_letter, 0);
   assert.equal(legacyNormalized.dead_lettered_count, 0);
   assert.equal(legacyNormalized.disposed_count, 0);
@@ -2145,6 +2151,20 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
       },
     }),
     /effective_state/,
+  );
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "goals/snapshot",
+      payload: {
+        ...normalized,
+        terminal_outbox: {
+          ...normalized.terminal_outbox,
+          disposed_next_cursor: "opaque-next",
+          disposed_has_more: false,
+        },
+      },
+    }),
+    /分页状态不一致/,
   );
   assert.throws(
     () => normalizeServerRecord({

@@ -108,7 +108,7 @@ class TerminalOutboxProjection(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schema_version: Literal[4] = 4
+    schema_version: Literal[5] = 5
     enabled: bool
     status: Literal[
         "idle", "recovering", "backoff", "degraded", "disabled", "unavailable"
@@ -131,6 +131,10 @@ class TerminalOutboxProjection(BaseModel):
     disposed_count: int = Field(ge=0, le=10_000)
     disposed: tuple[TerminalOutboxDisposedItem, ...] = Field(max_length=20)
     disposed_truncated: bool
+    disposed_cursor: str = Field(default="", max_length=1_024)
+    disposed_next_cursor: str = Field(default="", max_length=1_024)
+    disposed_has_more: bool = False
+    disposed_warning: str = Field(default="", max_length=500)
 
     @model_validator(mode="after")
     def _state_is_coherent(self) -> TerminalOutboxProjection:
@@ -170,6 +174,19 @@ class TerminalOutboxProjection(BaseModel):
                 raise ValueError("terminal outbox disposed 截断事实不一致。")
         elif len(self.disposed) != self.disposed_count:
             raise ValueError("terminal outbox disposed 目录与总数不一致。")
+        if self.disposed_has_more != bool(self.disposed_next_cursor):
+            raise ValueError("terminal outbox disposed 下一页事实不一致。")
+        if self.disposed_has_more and not self.disposed_truncated:
+            raise ValueError("terminal outbox disposed 下一页必须标记截断。")
+        if self.disposed_warning and (
+            self.disposed
+            or self.disposed_count
+            or self.disposed_cursor
+            or self.disposed_next_cursor
+            or self.disposed_has_more
+            or self.disposed_truncated
+        ):
+            raise ValueError("terminal outbox disposed 失败状态不得混入历史事实。")
         return self
 
 
@@ -325,6 +342,7 @@ async def build_goal_pursuit_snapshot_with_recovery(
     interaction_filter: str = "all",
     interaction_cursor: str = "",
     selected_interaction_id: str = "",
+    terminal_outbox_disposed_cursor: str = "",
     terminal_outbox_enabled: bool | None = None,
     terminal_outbox_worker_snapshot: (
         Callable[[], PursuitTerminalOutboxWorkerSnapshot] | None
@@ -453,6 +471,7 @@ async def build_goal_pursuit_snapshot_with_recovery(
             enabled=terminal_outbox_enabled,
             worker_snapshot=terminal_outbox_worker_snapshot,
             assessed_at=assessed_at,
+            disposed_cursor=terminal_outbox_disposed_cursor,
         ),
     )
 
@@ -463,6 +482,7 @@ def _build_terminal_outbox_projection(
     enabled: bool | None,
     worker_snapshot: Callable[[], PursuitTerminalOutboxWorkerSnapshot] | None,
     assessed_at: str | None,
+    disposed_cursor: str,
 ) -> TerminalOutboxProjection | None:
     if enabled is None:
         return None
@@ -481,6 +501,9 @@ def _build_terminal_outbox_projection(
     disposed_count = 0
     disposed: tuple[TerminalOutboxDisposedItem, ...] = ()
     disposed_truncated = False
+    normalized_disposed_cursor = ""
+    disposed_next_cursor = ""
+    disposed_warning = ""
     if pursuit_store.db_path.is_file():
         try:
             backlog = pursuit_store.terminal_outbox_backlog(
@@ -516,11 +539,23 @@ def _build_terminal_outbox_projection(
                 for record in catalog.records
             )
             dead_letters_truncated = catalog.truncated
-            disposed_catalog = pursuit_store.terminal_outbox_disposed_catalog(
+        except Exception:
+            warnings.append(
+                "终态恢复队列读取失败，请运行 `/doctor` 检查 Pursuit Store。"
+            )
+            dead_letters = ()
+            dead_letters_truncated = counts.dead_letter > 0
+            disposed_count = 0
+            disposed = ()
+            disposed_truncated = False
+    if pursuit_store.db_path.is_file() or disposed_cursor:
+        try:
+            disposed_page = pursuit_store.terminal_outbox_disposed_page(
                 limit=20,
                 scan_limit=10_000,
+                cursor=disposed_cursor,
             )
-            disposed_count = disposed_catalog.total
+            disposed_count = disposed_page.total
             disposed = tuple(
                 TerminalOutboxDisposedItem(
                     receipt_id=record.receipt.receipt_id,
@@ -533,18 +568,22 @@ def _build_terminal_outbox_projection(
                         tz=UTC,
                     ).isoformat(),
                 )
-                for record in disposed_catalog.records
+                for record in disposed_page.records
             )
-            disposed_truncated = disposed_catalog.truncated
+            normalized_disposed_cursor = disposed_page.cursor
+            disposed_next_cursor = disposed_page.next_cursor
+            disposed_truncated = len(disposed) < disposed_count
         except Exception:
-            warnings.append(
-                "终态恢复队列读取失败，请运行 `/doctor` 检查 Pursuit Store。"
+            disposed_warning = (
+                "已处置历史 cursor 已失效或 authority 已变化，请返回第一页。"
+                if disposed_cursor
+                else "已处置历史读取失败，请运行 `/doctor` 检查 Pursuit Store。"
             )
-            dead_letters = ()
-            dead_letters_truncated = counts.dead_letter > 0
             disposed_count = 0
             disposed = ()
             disposed_truncated = False
+            normalized_disposed_cursor = ""
+            disposed_next_cursor = ""
 
     snapshot: PursuitTerminalOutboxWorkerSnapshot | None = None
     if enabled and worker_snapshot is not None:
@@ -620,6 +659,10 @@ def _build_terminal_outbox_projection(
         disposed_count=disposed_count,
         disposed=disposed,
         disposed_truncated=disposed_truncated,
+        disposed_cursor=normalized_disposed_cursor,
+        disposed_next_cursor=disposed_next_cursor,
+        disposed_has_more=bool(disposed_next_cursor),
+        disposed_warning=disposed_warning,
     )
 
 
@@ -817,7 +860,16 @@ def _render_terminal_outbox(value: TerminalOutboxProjection) -> list[str]:
             f"回执 `{item.receipt_id}` · {item.abandoned_at}"
         )
     if value.disposed_truncated:
-        lines.append("- 已处置历史已按当前视图上限截断。")
+        lines.append("- 已处置历史当前只显示一页。")
+    if value.disposed_next_cursor:
+        lines.append(
+            "- 下一页：`/goal outbox history "
+            f"{value.disposed_next_cursor}`"
+        )
+    if value.disposed_cursor:
+        lines.append("- 当前为历史后续页；返回第一页：`/goal outbox history`。")
+    if value.disposed_warning:
+        lines.append(f"- ⚠️ {value.disposed_warning}")
     if value.warning:
         lines.append(f"- ⚠️ {value.warning}")
     return lines

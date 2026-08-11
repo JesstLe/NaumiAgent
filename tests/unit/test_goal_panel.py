@@ -238,7 +238,7 @@ async def test_terminal_outbox_projection_is_shared_and_identity_free(tmp_path) 
     payload = snapshot.to_protocol_dict()["terminal_outbox"]
 
     assert payload == {
-        "schema_version": 4,
+            "schema_version": 5,
         "enabled": True,
         "status": "recovering",
         "worker_state": "waiting",
@@ -263,7 +263,11 @@ async def test_terminal_outbox_projection_is_shared_and_identity_free(tmp_path) 
         "dead_letters_truncated": False,
         "disposed_count": 0,
         "disposed": [],
-        "disposed_truncated": False,
+            "disposed_truncated": False,
+            "disposed_cursor": "",
+            "disposed_next_cursor": "",
+            "disposed_has_more": False,
+            "disposed_warning": "",
     }
     assert "owner" not in str(payload).lower()
     rendered = render_goal_pursuit_snapshot(snapshot)
@@ -291,6 +295,30 @@ async def test_terminal_outbox_projection_fails_closed_when_authority_missing(
     assert projection.status == "unavailable"
     assert projection.worker_state == "unavailable"
     assert "authority 未接入" in projection.warning
+    assert not pursuit_store.base_dir.exists()
+
+
+@pytest.mark.asyncio
+async def test_terminal_outbox_projection_rejects_cursor_when_store_is_missing(
+    tmp_path,
+) -> None:
+    pursuit_store = PursuitStore(tmp_path / "pursuit")
+
+    snapshot = await build_goal_pursuit_snapshot_with_recovery(
+        GoalStore(tmp_path / "goals"),
+        pursuit_store,
+        None,
+        workspace_root=tmp_path,
+        terminal_outbox_enabled=False,
+        terminal_outbox_disposed_cursor="opaque_cursor",
+        assessed_at="2026-08-05T00:00:20+00:00",
+    )
+
+    projection = snapshot.terminal_outbox
+    assert projection is not None
+    assert projection.disposed == ()
+    assert projection.disposed_cursor == ""
+    assert "cursor 已失效" in projection.disposed_warning
     assert not pursuit_store.base_dir.exists()
 
 
@@ -354,7 +382,7 @@ async def test_terminal_outbox_projection_surfaces_dead_letter_action(tmp_path) 
 
     projection = snapshot.terminal_outbox
     assert projection is not None
-    assert projection.schema_version == 4
+    assert projection.schema_version == 5
     assert projection.status == "degraded"
     assert projection.counts.dead_letter == 1
     assert "dead_letter_present" in projection.failure_codes
@@ -393,7 +421,7 @@ async def test_terminal_outbox_projection_surfaces_identity_free_disposed_histor
         total=0,
         truncated=False,
     )
-    pursuit_store.terminal_outbox_disposed_catalog = lambda **_: SimpleNamespace(  # type: ignore[method-assign]
+    pursuit_store.terminal_outbox_disposed_page = lambda **_: SimpleNamespace(  # type: ignore[method-assign]
         records=(SimpleNamespace(
             receipt=SimpleNamespace(
                 receipt_id="ptabn_" + "b" * 24,
@@ -408,8 +436,9 @@ async def test_terminal_outbox_projection_surfaces_identity_free_disposed_histor
             failure=SimpleNamespace(failure_code="lease_missing"),
             outbox=SimpleNamespace(outbox_id="private-outbox-id"),
         ),),
-        total=1,
-        truncated=False,
+        total=2,
+        cursor="opaque-current",
+        next_cursor="opaque-next",
     )
 
     snapshot = await build_goal_pursuit_snapshot_with_recovery(
@@ -418,15 +447,20 @@ async def test_terminal_outbox_projection_surfaces_identity_free_disposed_histor
         None,
         workspace_root=tmp_path,
         terminal_outbox_enabled=False,
+        terminal_outbox_disposed_cursor="opaque-current",
         assessed_at="2026-08-05T00:00:20+00:00",
     )
 
     projection = snapshot.terminal_outbox
     assert projection is not None
-    assert projection.schema_version == 4
-    assert projection.disposed_count == 1
+    assert projection.schema_version == 5
+    assert projection.disposed_count == 2
     assert projection.disposed[0].effective_state == "abandoned"
     assert projection.disposed[0].reason == "superseded"
+    assert projection.disposed_cursor == "opaque-current"
+    assert projection.disposed_next_cursor == "opaque-next"
+    assert projection.disposed_has_more is True
+    assert projection.disposed_truncated is True
     payload = projection.model_dump(mode="json")
     assert "private" not in str(payload)
     assert "outbox_id" not in str(payload)
@@ -434,6 +468,7 @@ async def test_terminal_outbox_projection_surfaces_identity_free_disposed_histor
     assert "已处置 `ptfail_" in rendered
     assert "已被替代 · lease_missing" in rendered
     assert "回执 `ptabn_" in rendered
+    assert "/goal outbox history opaque-next" in rendered
 
 
 @pytest.mark.asyncio

@@ -539,6 +539,34 @@ def test_disposed_catalog_is_stably_sorted_and_reports_truncation(tmp_path) -> N
         receipts,
         key=lambda item: (item.abandoned_at, item.receipt_id),
     )
+    first_page = PursuitStore(store.base_dir).terminal_outbox_disposed_page(
+        limit=1,
+        scan_limit=2,
+    )
+    assert first_page.total == 2
+    assert first_page.cursor == ""
+    assert first_page.next_cursor
+    second_page = PursuitStore(store.base_dir).terminal_outbox_disposed_page(
+        limit=1,
+        scan_limit=2,
+        cursor=first_page.next_cursor,
+    )
+    assert second_page.total == 2
+    assert second_page.cursor == first_page.next_cursor
+    assert second_page.next_cursor == ""
+    assert second_page.records[0].receipt != first_page.records[0].receipt
+    with pytest.raises(PursuitStoreError, match="cursor"):
+        store.terminal_outbox_disposed_page(
+            limit=1,
+            scan_limit=2,
+            cursor=first_page.next_cursor[:-1] + "A",
+        )
+    with pytest.raises(PursuitStoreError, match="当前查询"):
+        store.terminal_outbox_disposed_page(
+            limit=2,
+            scan_limit=2,
+            cursor=first_page.next_cursor,
+        )
     with pytest.raises(ValueError, match="disposed catalog 策略无效"):
         store.terminal_outbox_disposed_catalog(limit=2, scan_limit=1)
 
@@ -707,7 +735,7 @@ async def test_permanent_invariant_enters_dead_letter_immediately(tmp_path) -> N
         )
     ).terminal_outbox
     assert projection is not None
-    assert projection.schema_version == 4
+    assert projection.schema_version == 5
     assert projection.dead_letters[0].dead_letter_id == failures[0].event_id
     assert projection.dead_letters[0].failure_code == "lease_missing"
     assert "outbox_id" not in projection.model_dump(mode="json")["dead_letters"][0]

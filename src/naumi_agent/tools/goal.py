@@ -234,6 +234,11 @@ class GoalListTool(Tool):
                     "description": "可选的历史目标详情 ID",
                     "default": "",
                 },
+                "terminal_outbox_disposed_cursor": {
+                    "type": "string",
+                    "description": "上一页返回的不透明终态已处置历史 cursor",
+                    "default": "",
+                },
             },
             "required": [],
         }
@@ -246,6 +251,7 @@ class GoalListTool(Tool):
         interaction_cursor: str = "",
         selected_interaction_id: str = "",
         selected_goal_id: str = "",
+        terminal_outbox_disposed_cursor: str = "",
         **kwargs: Any,
     ) -> str:
         return render_goal_pursuit_snapshot(
@@ -261,6 +267,9 @@ class GoalListTool(Tool):
                 interaction_filter=interaction_filter,
                 interaction_cursor=interaction_cursor,
                 selected_interaction_id=selected_interaction_id,
+                terminal_outbox_disposed_cursor=(
+                    terminal_outbox_disposed_cursor
+                ),
                 terminal_outbox_enabled=self._terminal_outbox_enabled,
                 terminal_outbox_worker_snapshot=(
                     self._terminal_outbox_worker_snapshot

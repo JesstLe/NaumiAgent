@@ -47,8 +47,9 @@
     持久账本而非工具文案为准；见
     [UI-18.5b1](UI-18-5b1-pursuit-recovery-action.md)。
   - HAR-10.8f1/2a/2b 已完成 terminal outbox 原子 Store 核心、自动 bounded worker，以及
-    `goals/snapshot`/New UI/TUI fallback 的 typed backlog/worker health；takeover/cleanup、专用
-    push stream 与多 run cursor 历史仍属于后续切片。
+    `goals/snapshot`/New UI/TUI fallback 的 typed backlog/worker health；HAR-10.8f2l 已增加协商式
+    disposed history cursor、New UI `{`/`}` 页栈与 `/goal outbox history [cursor]` fallback；专用
+    push stream、外部 archive/anchor 与跨 Store 原子收口仍属于后续切片。
 - UI-18.6 TUI parity：Textual TUI 消费相同 snapshot/动作协议，以紧凑布局提供核心状态和操作。
 
 ## UI-18.1 已实现边界

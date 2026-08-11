@@ -1213,6 +1213,7 @@ def test_protocol_contract_matches_python_enums() -> None:
             "doctor_live_probe",
             "doctor_trace_index",
             "goal_snapshot",
+            "goal_terminal_outbox_disposed_cursor",
             "heartbeat",
             "pursuit_recovery_actions",
             "session_list",
@@ -8167,7 +8168,11 @@ async def test_bridge_emits_typed_goal_snapshot_and_legacy_fallback(
     writer = io.StringIO()
     bridge = JsonlEngineBridge(engine, config_path="config.yaml")
     bridge.bind_writer(writer)
-    bridge._client_capabilities = {"goal_snapshot", "typed_ui_messages"}
+    bridge._client_capabilities = {
+        "goal_snapshot",
+        "goal_terminal_outbox_disposed_cursor",
+        "typed_ui_messages",
+    }
     snapshot = SimpleNamespace(
         to_protocol_dict=lambda: {
             "schema_version": 1,
@@ -8178,6 +8183,13 @@ async def test_bridge_emits_typed_goal_snapshot_and_legacy_fallback(
             "warnings": [],
             "truncated": False,
             "include_finished": True,
+            "terminal_outbox": {
+                "schema_version": 5,
+                "disposed_cursor": "opaque_cursor",
+                "disposed_next_cursor": "next_cursor",
+                "disposed_has_more": True,
+                "disposed_warning": "",
+            },
         }
     )
 
@@ -8206,6 +8218,7 @@ async def test_bridge_emits_typed_goal_snapshot_and_legacy_fallback(
             "limit": 7,
             "include_finished": False,
             "selected_goal_id": "goal_history",
+            "terminal_outbox_disposed_cursor": "opaque_cursor",
         },
     })
 
@@ -8213,6 +8226,8 @@ async def test_bridge_emits_typed_goal_snapshot_and_legacy_fallback(
     typed = next(record for record in records if record["type"] == "goals/snapshot")
     assert typed["request_id"] == "goal-open"
     assert typed["payload"]["current_goal_id"] == "goal_1"
+    assert typed["payload"]["terminal_outbox"]["schema_version"] == 5
+    assert typed["payload"]["terminal_outbox"]["disposed_has_more"] is True
     assert build_calls == [{
         "workspace_root": engine.workspace_root,
         "limit": 7,
@@ -8222,9 +8237,29 @@ async def test_bridge_emits_typed_goal_snapshot_and_legacy_fallback(
         "interaction_filter": "all",
         "interaction_cursor": "",
         "selected_interaction_id": "",
+        "terminal_outbox_disposed_cursor": "opaque_cursor",
         "terminal_outbox_enabled": False,
         "terminal_outbox_worker_snapshot": None,
     }]
+
+    writer.seek(0)
+    writer.truncate(0)
+    bridge._client_capabilities = {"goal_snapshot", "typed_ui_messages"}
+    await bridge.handle_client_record({
+        "id": "goal-old-client",
+        "type": ClientEventType.GOAL_PANEL,
+        "payload": {},
+    })
+
+    old_client = next(
+        record for record in _records(writer) if record["type"] == "goals/snapshot"
+    )
+    old_outbox = old_client["payload"]["terminal_outbox"]
+    assert old_outbox["schema_version"] == 4
+    assert "disposed_cursor" not in old_outbox
+    assert "disposed_next_cursor" not in old_outbox
+    assert "disposed_has_more" not in old_outbox
+    assert "disposed_warning" not in old_outbox
 
     writer.seek(0)
     writer.truncate(0)
@@ -8253,9 +8288,41 @@ async def test_bridge_emits_typed_goal_snapshot_and_legacy_fallback(
         "interaction_filter": "all",
         "interaction_cursor": "",
         "selected_interaction_id": "",
+        "terminal_outbox_disposed_cursor": "",
         "terminal_outbox_enabled": False,
         "terminal_outbox_worker_snapshot": None,
     }
+
+
+@pytest.mark.asyncio
+async def test_bridge_rejects_disposed_cursor_without_negotiated_capability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = _FakeEngine()
+    engine.goal_store = object()
+    engine.pursuit_store = object()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    bridge._client_capabilities = {"goal_snapshot", "typed_ui_messages"}
+
+    async def unexpected_build(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("未协商能力时不得查询 disposed authority")
+
+    monkeypatch.setattr(
+        "naumi_agent.ui.goal_panel.build_goal_pursuit_snapshot_with_recovery",
+        unexpected_build,
+    )
+    await bridge.handle_client_record({
+        "id": "goal-unsupported-cursor",
+        "type": ClientEventType.GOAL_PANEL,
+        "payload": {"terminal_outbox_disposed_cursor": "opaque_cursor"},
+    })
+
+    record = next(record for record in _records(writer) if record["type"] == "error")
+    assert record["request_id"] == "goal-unsupported-cursor"
+    assert record["payload"]["code"] == "goal_disposed_cursor_unsupported"
+    assert "升级" in record["payload"]["message"]
 
 
 @pytest.mark.asyncio

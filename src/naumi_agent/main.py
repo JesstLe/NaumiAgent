@@ -6953,6 +6953,20 @@ async def _run_goal(engine: Any, arg: str) -> None:
                 "[interaction-id][/yellow]"
             )
             return
+    elif subcommand == "outbox":
+        action, _, cursor = remainder.partition(" ")
+        cursor = cursor.strip()
+        if (
+            action.lower() != "history"
+            or (cursor and not re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", cursor))
+        ):
+            console.print("[yellow]用法: /goal outbox history [cursor][/yellow]")
+            return
+        tool_name = "goal_list"
+        kwargs = {
+            "include_finished": True,
+            "terminal_outbox_disposed_cursor": cursor,
+        }
     else:
         tool_name = "goal_create"
         kwargs = {"objective": normalized}

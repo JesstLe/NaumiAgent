@@ -98,7 +98,7 @@ schema v1 的 prune receipt 只公开：
 - admission 私有快照保留被删 payload，满足恢复/审计但不会减少全部数据库体积；后续需设计独立加密 archive 与过期；
 - 一次 apply 最多 20 个候选、160 个 delete 写点，尚未提供大批次 cursor/worker；
 - 当前恢复依赖 SQLite 原子回滚，不支持跨 Store 原子 prune；
-- disposed cursor、push stream、跨 Store terminal commit 和 24 小时 soak 仍未完成。
+- disposed cursor 已由 HAR-10.8f2l 交付；push stream、跨 Store terminal commit 和 24 小时 soak 仍未完成。
 
 下一步不继续扩大 retention ARC。应回到跨文档依赖图，在 HAR-10、ARC-04/06、UI-10 与 EVO-06 中选择下一项用户可见
 且已具备前置条件的最小纵切；retention 的后续 archive/外部 anchor 作为独立模块再排期。
