@@ -58,6 +58,7 @@ _GRANT_RE = re.compile(r"^evstableremotefinalgrant_[0-9a-f]{24}$")
 _RECEIPT_RE = re.compile(r"^evstableremotefinalreceipt_[0-9a-f]{24}$")
 _MAX_ARTIFACT_BYTES = 512 * 1024
 _MAX_ENCODED_CHARS = ((_MAX_ARTIFACT_BYTES + 2) // 3) * 4
+_MAX_LATE_RECOVERY_SECONDS = 24 * 60 * 60
 
 
 class _StrictModel(BaseModel):
@@ -577,6 +578,37 @@ class EvolutionStableRemoteFinalizationService:
         grant_id: str,
         submission_base64: str,
     ) -> EvolutionStableRemoteFinalizationView:
+        return await self._ingest(
+            grant_id=grant_id,
+            submission_base64=submission_base64,
+            allow_late_recovery=False,
+        )
+
+    async def ingest_late_recovery(
+        self,
+        *,
+        grant_id: str,
+        submission_base64: str,
+    ) -> EvolutionStableRemoteFinalizationView:
+        """Ingest a result for a writer that committed before grant expiry.
+
+        This path never grants writer authority.  It only accepts an installation-signed
+        projection of the already durable release finalization, within a bounded recovery
+        window and while every original control-plane source is still current.
+        """
+        return await self._ingest(
+            grant_id=grant_id,
+            submission_base64=submission_base64,
+            allow_late_recovery=True,
+        )
+
+    async def _ingest(
+        self,
+        *,
+        grant_id: str,
+        submission_base64: str,
+        allow_late_recovery: bool,
+    ) -> EvolutionStableRemoteFinalizationView:
         item_id = _grant_id(grant_id)
         submission = decode_stable_remote_finalization_submission(submission_base64)
         lock = self._locks.setdefault(item_id, asyncio.Lock())
@@ -596,7 +628,8 @@ class EvolutionStableRemoteFinalizationService:
                     )
                 return await self.inspect(receipt_id=existing.receipt_id)
             now = _aware(self.clock())
-            if now >= _aware(package.grant.expires_at):
+            expiry = _aware(package.grant.expires_at)
+            if now >= expiry and not allow_late_recovery:
                 raise EvolutionStableRemoteFinalizationError(
                     "stable_remote_finalization_grant_expired",
                     "Remote Finalization Execution Grant 已过期。",
@@ -604,7 +637,26 @@ class EvolutionStableRemoteFinalizationService:
             auth_view = await self.authorization_service.inspect(
                 authorization_id=package.grant.authorization_id
             )
-            if not _authorization_sources_current(auth_view):
+            sources_current = _authorization_sources_current(auth_view)
+            if allow_late_recovery:
+                sources_current = bool(
+                    auth_view.source_current
+                    and auth_view.probe_current
+                    and auth_view.control_current
+                    and auth_view.consumed
+                )
+                try:
+                    verify_stable_remote_finalization_execution_package(
+                        trust_policy=load_release_rollout_control_trust_policy(
+                            self.trust_policy_path
+                        ),
+                        package=package,
+                        expected_member_id=package.grant.installation_member_id,
+                        now=submission.result.completed_at,
+                    )
+                except (OSError, RuntimeError, TypeError, ValueError):
+                    sources_current = False
+            if not sources_current:
                 raise EvolutionStableRemoteFinalizationError(
                     "stable_remote_finalization_sources_changed",
                     "Control Plane authority source 在结果接收前已变化。",
@@ -626,13 +678,22 @@ class EvolutionStableRemoteFinalizationService:
                     exc.code,
                     "Remote Finalization installation signature 无效。",
                 ) from exc
-            if not (
+            completed = _aware(submission.result.completed_at)
+            signed = _aware(submission.signature.signed_at)
+            ordinary_window = (
                 _aware(package.grant.issued_at)
-                <= _aware(submission.result.completed_at)
-                <= _aware(submission.signature.signed_at)
+                <= completed
+                <= signed
                 <= now
-                < _aware(package.grant.expires_at)
-            ):
+                < expiry
+            )
+            late_window = (
+                allow_late_recovery
+                and _aware(package.grant.issued_at) <= completed < expiry
+                and expiry <= signed <= now
+                and (now - expiry).total_seconds() <= _MAX_LATE_RECOVERY_SECONDS
+            )
+            if not (ordinary_window or late_window):
                 raise EvolutionStableRemoteFinalizationError(
                     "stable_remote_finalization_result_outside_window",
                     "Remote Finalization Result 超出 Execution Grant 时间窗口。",
@@ -845,6 +906,83 @@ def execute_stable_remote_finalization(
     return EvolutionStableRemoteFinalizationSubmission(
         result=result, signature=signature
     )
+
+
+def recover_stable_remote_finalization_submission(
+    *,
+    package: EvolutionStableRemoteFinalizationExecutionPackage,
+    trust_policy: ReleaseRolloutControlTrustPolicyDocument,
+    credential: ReleaseManagedInstallationCredential,
+    release_slot_store: ReleaseSlotStore,
+    installation_key_service: ReleaseInstallationKeyService,
+    clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+) -> EvolutionStableRemoteFinalizationSubmission:
+    """Sign only an existing writer result; never execute or reopen writer authority."""
+    if release_slot_store.release_root != installation_key_service.release_root:
+        raise EvolutionStableRemoteFinalizationError(
+            "stable_remote_finalization_release_root_mismatch",
+            "Release Store 与 installation key 不属于同一 install root。",
+        )
+    auth = package.authorization.authorization
+    try:
+        finalization = release_slot_store.get_stable_member_finalization(
+            auth.authorization_id
+        )
+    except (ReleaseSlotError, OSError, RuntimeError, TypeError, ValueError) as exc:
+        raise EvolutionStableRemoteFinalizationError(
+            getattr(exc, "code", "stable_remote_finalization_recovery_failed"),
+            "目标 Release Store finalization recovery 失败。",
+        ) from exc
+    if finalization is None:
+        raise EvolutionStableRemoteFinalizationError(
+            "stable_remote_finalization_recovery_fact_missing",
+            "目标 Release Store 不存在可恢复的 durable finalization；禁止补执行 writer。",
+        )
+    completed = _aware(finalization.finalized_at)
+    if not (_aware(package.grant.issued_at) <= completed < _aware(package.grant.expires_at)):
+        raise EvolutionStableRemoteFinalizationError(
+            "stable_remote_finalization_recovery_fact_outside_window",
+            "既有 durable finalization 不在原 Execution Grant 窗口内。",
+        )
+    verify_stable_remote_finalization_execution_package(
+        trust_policy=trust_policy,
+        package=package,
+        expected_member_id=credential.payload.member_id,
+        now=completed,
+    )
+    handle = installation_key_service.inspect()
+    if not (
+        credential.credential_id == package.grant.installation_credential_id
+        and credential.credential_sha256
+        == package.grant.installation_credential_sha256
+        and credential.payload.installation_public_key_sha256
+        == package.grant.installation_public_key_sha256
+        and handle.public_key_sha256
+        == package.grant.installation_public_key_sha256
+        and handle.release_root_sha256 == package.grant.release_root_sha256
+        and finalization.authority.authority_id == auth.authorization_id
+        and finalization.authority.authority_sha256 == auth.authorization_sha256
+    ):
+        raise EvolutionStableRemoteFinalizationError(
+            "stable_remote_finalization_recovery_binding_mismatch",
+            "既有 finalization、Population Credential 或 installation key 绑定不一致。",
+        )
+    now = _aware(clock())
+    if now < completed:
+        raise EvolutionStableRemoteFinalizationError(
+            "stable_remote_finalization_recovery_clock_invalid",
+            "补签时间不得早于 durable finalization。",
+        )
+    result = _build_result(package, finalization, handle.release_root_sha256)
+    try:
+        signature = installation_key_service.sign_remote_finalization_result(
+            credential=credential, payload=result.canonical_bytes()
+        )
+    except ReleaseInstallationKeyError as exc:
+        raise EvolutionStableRemoteFinalizationError(
+            exc.code, "目标 installation key 无法补签既有 Finalization Result。"
+        ) from exc
+    return EvolutionStableRemoteFinalizationSubmission(result=result, signature=signature)
 
 
 def _execute_target_writer(
@@ -1333,6 +1471,7 @@ __all__ = [
     "encode_stable_remote_finalization_execution_package",
     "encode_stable_remote_finalization_submission",
     "execute_stable_remote_finalization",
+    "recover_stable_remote_finalization_submission",
     "render_stable_remote_finalization",
     "render_stable_remote_finalization_submission",
     "verify_stable_remote_finalization_execution_package",

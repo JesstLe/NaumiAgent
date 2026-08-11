@@ -3965,11 +3965,50 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 }
             elif len(parts) == 3 and parts[1] == "inspect":
                 arguments = {"action": "inspect", "receipt_id": parts[2]}
+            elif len(parts) == 3 and parts[1] == "queue-delivery":
+                arguments = {"action": "queue-delivery", "grant_id": parts[2]}
+            elif len(parts) == 3 and parts[1] == "claim-delivery":
+                arguments = {"action": "claim-delivery", "owner_id": parts[2]}
+            elif len(parts) == 6 and parts[1] == "retry-delivery":
+                arguments = {
+                    "action": "retry-delivery",
+                    "delivery_id": parts[2],
+                    "owner_id": parts[3],
+                    "claim_epoch": int(parts[4]),
+                    "failure_code": parts[5],
+                }
+            elif len(parts) == 3 and parts[1] in {
+                "receive-delivery-local",
+                "execute-delivery-local",
+                "recover-delivery-local",
+            }:
+                arguments = {
+                    "action": parts[1],
+                    "delivery_package_base64": parts[2],
+                }
+            elif len(parts) == 4 and parts[1] == "ack-delivery":
+                arguments = {
+                    "action": "ack-delivery",
+                    "delivery_id": parts[2],
+                    "ack_base64": parts[3],
+                }
+            elif len(parts) == 4 and parts[1] in {
+                "ingest-delivery",
+                "ingest-delivery-late",
+            }:
+                arguments = {
+                    "action": parts[1],
+                    "delivery_id": parts[2],
+                    "submission_base64": parts[3],
+                }
+            elif len(parts) == 3 and parts[1] == "inspect-delivery":
+                arguments = {"action": "inspect-delivery", "delivery_id": parts[2]}
             else:
                 raise ValueError(
                     "stable-remote-finalization 需要 prepare <authorization-id>、"
                     "export <grant-id>、execute-local <package-base64>、"
-                    "ingest <grant-id> <submission-base64> 或 inspect <receipt-id>。"
+                    "ingest <grant-id> <submission-base64>、inspect <receipt-id>，"
+                    "或 delivery queue/claim/receive/ack/execute/ingest/inspect 操作。"
                 )
             await _run_tool_slash_command(
                 engine,
@@ -4585,6 +4624,11 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution stable-remote-finalization prepare <authorization-id>；"
             "export <grant-id>；execute-local <package-base64>；"
             "ingest <grant-id> <submission-base64>；inspect <receipt-id>；"
+            "queue-delivery <grant-id>；claim-delivery <owner-id>；"
+            "receive-delivery-local|execute-delivery-local|recover-delivery-local "
+            "<delivery-package-base64>；ack-delivery <delivery-id> <ack-base64>；"
+            "ingest-delivery|ingest-delivery-late <delivery-id> <submission-base64>；"
+            "inspect-delivery <delivery-id>；"
             "/evolution discover-outcome <rollback-outcome-id>；"
             "/evolution revalidation-rollback-execute <rollback-request-id>；"
             "/evolution revalidation-rollback-outcome <rollback-request-id>；"

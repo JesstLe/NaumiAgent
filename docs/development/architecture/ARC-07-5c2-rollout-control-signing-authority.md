@@ -87,4 +87,6 @@ member-scoped writer capability；远端 executor 仍必须在 writer 前重验�
 - 自动 daemon transport、mTLS/network identity、delivery retry 与离线队列尚未完成；
 - `EVO-05.5f5x3c Signed Remote Finalization Authorization` 已交付 portable signed capability；
   `EVO-05.5f5x3d Remote Stable Member Finalization Executor` 已实现独立 domain 的 signed Execution Grant、目标侧 Trust
-  Policy/Release Store 重验、expected-pointer CAS 与 installation-signed result。自动 transport 和超期恢复仍需 x3e 完成。
+  Policy/Release Store 重验、expected-pointer CAS 与 installation-signed result；
+  `EVO-05.5f5x3e Remote Finalization Delivery and Recovery` 已实现 durable outbox、installation-signed ACK、retry fencing、
+  target journal 与 bounded late-result recovery。真实 daemon/mTLS transport worker 仍未完成。
