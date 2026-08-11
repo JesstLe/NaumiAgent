@@ -48,6 +48,21 @@ harness:
     # 同一 publication 达到该 claim 次数后，认证隔离并继续处理后续 FIFO。
     max_attempts: 5
     jitter_ratio: 0.1
+  stable_remote_finalization_result_return:
+    # 仅在 Runtime 绑定 authenticated Result transport 后创建 Worker。
+    enabled: true
+    interval_seconds: 30
+    max_empty_backoff_seconds: 300
+    max_failure_backoff_seconds: 300
+    journal_scan_limit: 20
+    return_scan_limit: 20
+    claim_lease_seconds: 60
+    result_timeout_seconds: 20
+    retry_base_seconds: 5
+    retry_max_seconds: 300
+    max_attempts: 8
+    shutdown_drain_seconds: 25
+    jitter_ratio: 0.1
 
 search:
   # 实际 token 不写入 YAML；运行时从环境变量解析。

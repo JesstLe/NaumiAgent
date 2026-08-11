@@ -380,6 +380,9 @@ def build_runtime_services(
             resolved.stable_stage_completion_inspector
         ),
         stable_remote_finalization_transport=stable_remote_transport,
+        stable_remote_finalization_result_transport=(
+            resolved.stable_remote_finalization_result_transport
+        ),
     )
 
 

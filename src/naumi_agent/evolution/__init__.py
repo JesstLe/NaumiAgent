@@ -1159,6 +1159,7 @@ if TYPE_CHECKING:
         EvolutionStableRemoteFinalizationDeliveryStore,
         EvolutionStableRemoteFinalizationDeliveryView,
         EvolutionStableRemoteFinalizationTargetJournal,
+        EvolutionStableRemoteFinalizationTargetJournalEntry,
         decode_stable_remote_finalization_delivery_ack,
         decode_stable_remote_finalization_delivery_package,
         encode_stable_remote_finalization_delivery_ack,
@@ -1185,6 +1186,23 @@ if TYPE_CHECKING:
         StableRemoteFinalizationHTTPClientPolicy,
         StableRemoteFinalizationHTTPServer,
         StableRemoteFinalizationHTTPServerPolicy,
+    )
+    from naumi_agent.evolution.stable_remote_finalization_result_return_worker import (
+        EvolutionStableRemoteFinalizationCredentialResolver,
+        EvolutionStableRemoteFinalizationResultReturnError,
+        EvolutionStableRemoteFinalizationResultReturnEvent,
+        EvolutionStableRemoteFinalizationResultReturnPassResult,
+        EvolutionStableRemoteFinalizationResultReturnStore,
+        EvolutionStableRemoteFinalizationResultReturnView,
+        EvolutionStableRemoteFinalizationResultReturnWorker,
+        EvolutionStableRemoteFinalizationResultReturnWorkerPolicy,
+        EvolutionStableRemoteFinalizationResultReturnWorkerSnapshot,
+        EvolutionStableRemoteFinalizationResultReturnWorkerState,
+        EvolutionStableRemoteFinalizationResultTransport,
+        EvolutionStableRemoteFinalizationResultTransportError,
+        LocalStableRemoteFinalizationControlPlaneTransport,
+        render_stable_remote_finalization_result_return_pass,
+        render_stable_remote_finalization_result_return_worker,
     )
     from naumi_agent.evolution.stable_remote_finalizations import (
         EVOLUTION_STABLE_REMOTE_FINALIZATION_POLICY,
@@ -1746,6 +1764,7 @@ __all__ = [
     "EvolutionStableRemoteFinalizationDeliveryStore",
     "EvolutionStableRemoteFinalizationDeliveryView",
     "EvolutionStableRemoteFinalizationTargetJournal",
+    "EvolutionStableRemoteFinalizationTargetJournalEntry",
     "decode_stable_remote_finalization_delivery_ack",
     "decode_stable_remote_finalization_delivery_package",
     "encode_stable_remote_finalization_delivery_ack",
@@ -1761,6 +1780,21 @@ __all__ = [
     "LocalStableRemoteFinalizationInstallationTransport",
     "render_stable_remote_finalization_delivery_pass",
     "render_stable_remote_finalization_delivery_worker",
+    "EvolutionStableRemoteFinalizationCredentialResolver",
+    "EvolutionStableRemoteFinalizationResultReturnError",
+    "EvolutionStableRemoteFinalizationResultReturnEvent",
+    "EvolutionStableRemoteFinalizationResultReturnPassResult",
+    "EvolutionStableRemoteFinalizationResultReturnStore",
+    "EvolutionStableRemoteFinalizationResultReturnView",
+    "EvolutionStableRemoteFinalizationResultReturnWorker",
+    "EvolutionStableRemoteFinalizationResultReturnWorkerPolicy",
+    "EvolutionStableRemoteFinalizationResultReturnWorkerSnapshot",
+    "EvolutionStableRemoteFinalizationResultReturnWorkerState",
+    "EvolutionStableRemoteFinalizationResultTransport",
+    "EvolutionStableRemoteFinalizationResultTransportError",
+    "LocalStableRemoteFinalizationControlPlaneTransport",
+    "render_stable_remote_finalization_result_return_pass",
+    "render_stable_remote_finalization_result_return_worker",
     "MTLSStableRemoteFinalizationInstallationTransport",
     "STABLE_REMOTE_FINALIZATION_ACK_MEDIA_TYPE",
     "STABLE_REMOTE_FINALIZATION_HTTP_PATH",
@@ -3077,6 +3111,7 @@ def __getattr__(name: str) -> object:
         "EvolutionStableRemoteFinalizationDeliveryStore",
         "EvolutionStableRemoteFinalizationDeliveryView",
         "EvolutionStableRemoteFinalizationTargetJournal",
+        "EvolutionStableRemoteFinalizationTargetJournalEntry",
         "decode_stable_remote_finalization_delivery_ack",
         "decode_stable_remote_finalization_delivery_package",
         "encode_stable_remote_finalization_delivery_ack",
@@ -3103,6 +3138,23 @@ def __getattr__(name: str) -> object:
         "StableRemoteFinalizationHTTPClientPolicy",
         "StableRemoteFinalizationHTTPServer",
         "StableRemoteFinalizationHTTPServerPolicy",
+    }
+    stable_remote_finalization_result_return_exports = {
+        "EvolutionStableRemoteFinalizationCredentialResolver",
+        "EvolutionStableRemoteFinalizationResultReturnError",
+        "EvolutionStableRemoteFinalizationResultReturnEvent",
+        "EvolutionStableRemoteFinalizationResultReturnPassResult",
+        "EvolutionStableRemoteFinalizationResultReturnStore",
+        "EvolutionStableRemoteFinalizationResultReturnView",
+        "EvolutionStableRemoteFinalizationResultReturnWorker",
+        "EvolutionStableRemoteFinalizationResultReturnWorkerPolicy",
+        "EvolutionStableRemoteFinalizationResultReturnWorkerSnapshot",
+        "EvolutionStableRemoteFinalizationResultReturnWorkerState",
+        "EvolutionStableRemoteFinalizationResultTransport",
+        "EvolutionStableRemoteFinalizationResultTransportError",
+        "LocalStableRemoteFinalizationControlPlaneTransport",
+        "render_stable_remote_finalization_result_return_pass",
+        "render_stable_remote_finalization_result_return_worker",
     }
     stable_rollout_authorization_exports = {
         "EVOLUTION_STABLE_ROLLOUT_AUTHORIZATION_POLICY",
@@ -3809,6 +3861,8 @@ def __getattr__(name: str) -> object:
         module_name = "stable_remote_finalization_delivery_worker"
     elif name in stable_remote_finalization_http_transport_exports:
         module_name = "stable_remote_finalization_http_transport"
+    elif name in stable_remote_finalization_result_return_exports:
+        module_name = "stable_remote_finalization_result_return_worker"
     elif name in stable_rollout_authorization_exports:
         module_name = "stable_rollout_authorizations"
     elif name in stable_rollout_finalization_exports:

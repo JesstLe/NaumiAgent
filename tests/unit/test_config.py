@@ -31,6 +31,11 @@ class TestAppConfig:
         assert config.harness.agent_publication_recovery.enabled is True
         assert config.harness.agent_publication_recovery.scan_limit == 100
         assert config.harness.agent_publication_recovery.max_attempts == 5
+        result_return = config.harness.stable_remote_finalization_result_return
+        assert result_return.enabled is True
+        assert result_return.journal_scan_limit == 20
+        assert result_return.return_scan_limit == 20
+        assert result_return.result_timeout_seconds == 20
         assert config.browser_daemon.base_url == "http://127.0.0.1:3005"
         assert config.browser_daemon.project_dir.endswith("browser-debugging-daemon")
         assert config.browser.max_concurrent_runs == 2
@@ -49,6 +54,7 @@ class TestAppConfig:
                 }
             }
         )
+
         retention = config.harness.runtime_heartbeat_retention
         assert retention.enabled is False
         assert retention.retention_days == 30
@@ -60,6 +66,23 @@ class TestAppConfig:
                     "runtime_heartbeat_retention": {"retention_days": 2}
                 }
             )
+
+    @pytest.mark.parametrize(
+        "override",
+        [
+            {"interval_seconds": 10, "max_empty_backoff_seconds": 9},
+            {"interval_seconds": 10, "max_failure_backoff_seconds": 9},
+            {"claim_lease_seconds": 10, "result_timeout_seconds": 10},
+            {"retry_base_seconds": 10, "retry_max_seconds": 9},
+        ],
+    )
+    def test_result_return_worker_config_rejects_unsafe_relationships(
+        self, override: dict[str, float | int]
+    ) -> None:
+        with pytest.raises(ValueError):
+            AppConfig(
+                harness={"stable_remote_finalization_result_return": override}
+            )  # type: ignore[arg-type]
 
     def test_pursuit_terminal_outbox_config_is_bounded(self) -> None:
         config = AppConfig(harness={

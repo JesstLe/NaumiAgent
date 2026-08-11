@@ -231,6 +231,10 @@ from naumi_agent.evolution.stable_remote_finalization_delivery_worker import (
     render_stable_remote_finalization_delivery_pass,
     render_stable_remote_finalization_delivery_worker,
 )
+from naumi_agent.evolution.stable_remote_finalization_result_return_worker import (
+    render_stable_remote_finalization_result_return_pass,
+    render_stable_remote_finalization_result_return_worker,
+)
 from naumi_agent.evolution.stable_remote_finalizations import (
     EvolutionStableRemoteFinalizationError,
     decode_stable_remote_finalization_execution_package,
@@ -3453,6 +3457,7 @@ class EvolutionStableRemoteFinalizationTool(Tool):
                         "recover-delivery-local", "ack-delivery",
                         "ingest-delivery", "ingest-delivery-late", "inspect-delivery",
                         "run-delivery-worker", "inspect-delivery-worker",
+                        "run-result-return-worker", "inspect-result-return-worker",
                     ],
                 },
                 "authorization_id": {"type": "string"},
@@ -3533,6 +3538,17 @@ class EvolutionStableRemoteFinalizationTool(Tool):
                     self._engine.stable_remote_finalization_delivery_worker_snapshot()
                 )
                 return render_stable_remote_finalization_delivery_worker(snapshot)
+            if normalized == "run-result-return-worker":
+                result = await (
+                    self._engine.run_stable_remote_finalization_result_return_once()
+                )
+                return render_stable_remote_finalization_result_return_pass(result)
+            if normalized == "inspect-result-return-worker":
+                snapshot = (
+                    self._engine
+                    .stable_remote_finalization_result_return_worker_snapshot()
+                )
+                return render_stable_remote_finalization_result_return_worker(snapshot)
             if normalized == "claim-delivery":
                 delivery = await delivery_store.claim(
                     owner_id=owner_id,
@@ -3595,6 +3611,13 @@ class EvolutionStableRemoteFinalizationTool(Tool):
                         ),
                         clock=self._engine.release_installation_key_service.clock,
                     )
+                    result_worker = getattr(
+                        self._engine,
+                        "evolution_stable_remote_finalization_result_return_worker",
+                        None,
+                    )
+                    if result_worker is not None:
+                        result_worker.wake()
                     return "\n".join((
                         "## Remote Stable Finalization Delivery ACK",
                         "",
@@ -3618,6 +3641,13 @@ class EvolutionStableRemoteFinalizationTool(Tool):
                     recover_existing_only=normalized == "recover-delivery-local",
                     clock=self._engine.release_installation_key_service.clock,
                 )
+                result_worker = getattr(
+                    self._engine,
+                    "evolution_stable_remote_finalization_result_return_worker",
+                    None,
+                )
+                if result_worker is not None:
+                    result_worker.wake()
                 return render_stable_remote_finalization_submission(submission)
             if normalized == "ack-delivery":
                 delivery = await delivery_service.acknowledge(

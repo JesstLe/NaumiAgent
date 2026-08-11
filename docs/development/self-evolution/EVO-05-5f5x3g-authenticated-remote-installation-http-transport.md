@@ -122,6 +122,7 @@ signals 或 shell 命令；路径使用 `pathlib.Path`，Windows 不把 POSIX mo
 - ACK 后 writer/result 仍不会被 endpoint 自动执行或回传，这是刻意保留的 authority separation；
 - rate limiter 是单进程 endpoint-local，未来多副本部署必须绑定共享或网关层限流策略。
 
-下一最小切片应实现 **EVO-05.5f5x3h Remote Finalization Result Return Worker**：消费已 ACK 的目标 journal，使用独立授权触发
-expected-pointer writer、durable outbox 回传 installation-signed Result，并在 Control Plane 形成 x3d Receipt；daemon packaging 和
-三平台 deployment matrix 应作为其前置/并行 Harness 运维切片，而不是把未验证网络声明成 Population 完成。
+[EVO-05.5f5x3h Remote Finalization Result Return Worker](EVO-05-5f5x3h-remote-finalization-result-return-worker.md) 已消费 ACKed
+target journal，以 durable 双阶段 outbox 监管 expected-pointer writer/补签、Result 回传和 Control Plane Receipt。下一最小切片是
+x3i authenticated Result HTTP transport；daemon packaging 和三平台 deployment matrix 应作为后续独立 Harness 运维切片，而不是把
+未验证网络声明成 Population 完成。

@@ -76,7 +76,10 @@ claim/retry fencing、目标 journal 与受限 late-result recovery。
 [EVO-05.5f5x3f](EVO-05-5f5x3f-remote-finalization-delivery-worker.md) 已增加认证 transport Protocol、本机安装 adapter、周期 claim、
 ACK timeout、retry budget、dead-letter 与 shutdown drain。
 [EVO-05.5f5x3g](EVO-05-5f5x3g-authenticated-remote-installation-http-transport.md) 已继续交付独立 mTLS endpoint、同连接服务端
-证书 pin、客户端证书授权、current/next 轮换、严格限长/timeout 与 Runtime 自动装配。后续仍需 Result 主动回传与安装端 daemon；只有每个
+证书 pin、客户端证书授权、current/next 轮换、严格限长/timeout 与 Runtime 自动装配。
+[EVO-05.5f5x3h](EVO-05-5f5x3h-remote-finalization-result-return-worker.md) 已继续交付 ACK 后 writer/补签和 Result 回传的 durable
+双阶段 outbox、fencing、anti-join、retry/dead-letter、shutdown drain 与 exact Receipt 绑定。后续仍需 Result 认证网络传输与安装端
+daemon；只有每个
 member 都形成 current readiness、Authorization 与 Finalization Receipt，才可
 聚合 population-level Stable Rollout Completion Authority。配置/数据 finalization 继续等待 ARC-07.6，Promotion authority
 继续独立。

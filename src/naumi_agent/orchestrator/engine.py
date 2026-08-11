@@ -509,12 +509,20 @@ from naumi_agent.evolution.stable_remote_finalization_authorizations import (
 from naumi_agent.evolution.stable_remote_finalization_deliveries import (
     EvolutionStableRemoteFinalizationDeliveryService,
     EvolutionStableRemoteFinalizationDeliveryStore,
+    EvolutionStableRemoteFinalizationTargetJournal,
 )
 from naumi_agent.evolution.stable_remote_finalization_delivery_worker import (
     EvolutionStableRemoteFinalizationDeliveryPassResult,
     EvolutionStableRemoteFinalizationDeliveryWorker,
     EvolutionStableRemoteFinalizationDeliveryWorkerPolicy,
     EvolutionStableRemoteFinalizationDeliveryWorkerSnapshot,
+)
+from naumi_agent.evolution.stable_remote_finalization_result_return_worker import (
+    EvolutionStableRemoteFinalizationResultReturnPassResult,
+    EvolutionStableRemoteFinalizationResultReturnStore,
+    EvolutionStableRemoteFinalizationResultReturnWorker,
+    EvolutionStableRemoteFinalizationResultReturnWorkerPolicy,
+    EvolutionStableRemoteFinalizationResultReturnWorkerSnapshot,
 )
 from naumi_agent.evolution.stable_remote_finalizations import (
     EvolutionStableRemoteFinalizationService,
@@ -656,6 +664,9 @@ from naumi_agent.release import (
     load_release_build_trust_policy,
     load_release_channel_trust_policy,
     load_release_population_trust_policy,
+)
+from naumi_agent.release.rollout_control_keys import (
+    load_release_rollout_control_trust_policy,
 )
 from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.runs.recorder import ChatRunRecorder, ChatRunRecorderEventSink
@@ -2762,6 +2773,64 @@ class AgentEngine:
                     ),
                 )
             )
+        self.evolution_stable_remote_finalization_target_journal = (
+            EvolutionStableRemoteFinalizationTargetJournal(
+                self.evolution_release_slot_store.release_root
+            )
+        )
+        self.evolution_stable_remote_finalization_result_return_store = (
+            EvolutionStableRemoteFinalizationResultReturnStore(
+                self.evolution_stable_remote_finalization_target_journal.db_path
+            )
+        )
+        self.evolution_stable_remote_finalization_result_return_worker: (
+            EvolutionStableRemoteFinalizationResultReturnWorker | None
+        ) = None
+        if services.stable_remote_finalization_result_transport is not None:
+            result_config = config.harness.stable_remote_finalization_result_return
+            self.evolution_stable_remote_finalization_result_return_worker = (
+                EvolutionStableRemoteFinalizationResultReturnWorker(
+                    journal=(
+                        self.evolution_stable_remote_finalization_target_journal
+                    ),
+                    store=(
+                        self.evolution_stable_remote_finalization_result_return_store
+                    ),
+                    release_slot_store=self.evolution_release_slot_store,
+                    installation_key_service=self.release_installation_key_service,
+                    trust_policy_provider=lambda: (
+                        load_release_rollout_control_trust_policy(
+                            self.evolution_release_rollout_control_trust_policy_path
+                        )
+                    ),
+                    credential_resolver=(
+                        self._resolve_stable_remote_finalization_target_credential
+                    ),
+                    transport=services.stable_remote_finalization_result_transport,
+                    policy=EvolutionStableRemoteFinalizationResultReturnWorkerPolicy(
+                        interval_seconds=result_config.interval_seconds,
+                        max_empty_backoff_seconds=(
+                            result_config.max_empty_backoff_seconds
+                        ),
+                        max_failure_backoff_seconds=(
+                            result_config.max_failure_backoff_seconds
+                        ),
+                        journal_scan_limit=result_config.journal_scan_limit,
+                        return_scan_limit=result_config.return_scan_limit,
+                        claim_lease_seconds=result_config.claim_lease_seconds,
+                        result_timeout_seconds=(
+                            result_config.result_timeout_seconds
+                        ),
+                        retry_base_seconds=result_config.retry_base_seconds,
+                        retry_max_seconds=result_config.retry_max_seconds,
+                        max_attempts=result_config.max_attempts,
+                        shutdown_drain_seconds=(
+                            result_config.shutdown_drain_seconds
+                        ),
+                        jitter_ratio=result_config.jitter_ratio,
+                    ),
+                )
+            )
         self.evolution_stable_rollout_authorization_store = (
             EvolutionStableRolloutAuthorizationStore(config.memory.session_db_path)
         )
@@ -4019,6 +4088,12 @@ class AgentEngine:
                 "stable_remote_finalization_delivery_worker",
                 self.evolution_stable_remote_finalization_delivery_worker.stop,
             )
+        result_worker = self.evolution_stable_remote_finalization_result_return_worker
+        if result_worker is not None:
+            await self._shutdown_component(
+                "stable_remote_finalization_result_return_worker",
+                result_worker.stop,
+            )
         if hasattr(self, "_agent_publication_recovery_worker"):
             await self._shutdown_component(
                 "agent_publication_recovery_worker",
@@ -4575,6 +4650,13 @@ class AgentEngine:
         ):
             await delivery_worker.run_once()
             delivery_worker.start()
+        result_worker = self.evolution_stable_remote_finalization_result_return_worker
+        if (
+            result_worker is not None
+            and self._config.harness.stable_remote_finalization_result_return.enabled
+        ):
+            await result_worker.run_once()
+            result_worker.start()
         self.start_session_retention_worker()
         return recovered
 
@@ -4597,6 +4679,48 @@ class AgentEngine:
                 "尚未绑定 authenticated installation transport，无法读取 Worker。"
             )
         return worker.snapshot()
+
+    async def run_stable_remote_finalization_result_return_once(
+        self,
+    ) -> EvolutionStableRemoteFinalizationResultReturnPassResult:
+        worker = self.evolution_stable_remote_finalization_result_return_worker
+        if worker is None:
+            raise RuntimeError(
+                "尚未绑定 authenticated Result transport，无法自动回传。"
+            )
+        return await worker.run_once()
+
+    def stable_remote_finalization_result_return_worker_snapshot(
+        self,
+    ) -> EvolutionStableRemoteFinalizationResultReturnWorkerSnapshot:
+        worker = self.evolution_stable_remote_finalization_result_return_worker
+        if worker is None:
+            raise RuntimeError(
+                "尚未绑定 authenticated Result transport，无法读取 Worker。"
+            )
+        return worker.snapshot()
+
+    async def _resolve_stable_remote_finalization_target_credential(
+        self,
+        package,
+    ):
+        authorization = package.execution_package.authorization.authorization
+        snapshot = await self.evolution_release_population_snapshot_store.inspect(
+            snapshot_id=authorization.population_snapshot_id
+        )
+        credential = next(
+            (
+                item
+                for item in snapshot.snapshot.payload.credentials
+                if item.payload.member_id == package.installation_member_id
+            ),
+            None,
+        )
+        if not snapshot.population_snapshot_authority or credential is None:
+            raise RuntimeError(
+                "current Population Snapshot 不包含目标 installation member。"
+            )
+        return credential
 
     async def run_pursuit_terminal_outbox_once(
         self,
