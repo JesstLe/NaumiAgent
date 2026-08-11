@@ -2260,6 +2260,7 @@ test("goal command opens typed Goal/Pursuit route while writes stay on submit", 
       interaction_filter: "all",
       interaction_cursor: "",
       selected_interaction_id: "",
+      selected_goal_id: "",
     },
   });
   assert.equal(handleGoalPanelKey(state, INPUT_KEYS.escape, send), true);
@@ -2312,6 +2313,52 @@ test("Goal interaction ledger navigates filters pages and opens typed detail", (
   assert.equal(handleGoalPanelKey(state, INPUT_KEYS.escape, send), true);
   assert.equal(state.route.name, "goals");
   assert.equal(state.goalPanel.snapshot.selected_interaction, null);
+});
+
+test("Goal page selects historical detail through typed authority", () => {
+  const state = createInitialState();
+  state.route = { name: "goals", originAnchor: null };
+  state.goalPanel.snapshot = {
+    selected_goal_id: "goal-current",
+    goals: [
+      { goal_id: "goal-current" },
+      { goal_id: "goal-history" },
+    ],
+    interactions: [],
+  };
+  state.goalPanel.selectedGoalIndex = 0;
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+
+  assert.equal(handleGoalPanelKey(state, INPUT_KEYS.right, send), true);
+  assert.equal(state.goalPanel.selectedGoalIndex, 1);
+  assert.equal(state.goalPanel.loading, true);
+  assert.equal(sent[0].type, "goal_panel");
+  assert.equal(sent[0].payload.selected_goal_id, "goal-history");
+
+  state.goalPanel.loading = false;
+  state.goalPanel.snapshot.selected_goal_id = "goal-history";
+  assert.equal(handleGoalPanelKey(state, INPUT_KEYS.left, send), true);
+  assert.equal(sent[1].payload.selected_goal_id, "goal-current");
+});
+
+test("Goal detail command opens the typed historical selection", () => {
+  const state = createInitialState();
+  const sent = [];
+
+  handleSubmitText(state, "/goal detail goal-history", (type, payload) => {
+    sent.push({ type, payload });
+  });
+
+  assert.equal(state.route.name, "goals");
+  assert.deepEqual(sent, [{
+    type: "goal_panel",
+    payload: {
+      limit: 20,
+      include_finished: true,
+      selected_goal_id: "goal-history",
+    },
+  }]);
 });
 
 test("Goal page resumes current Pursuit through typed ToolExecution action", () => {

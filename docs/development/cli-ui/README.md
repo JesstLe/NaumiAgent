@@ -82,7 +82,13 @@ HAR-10.8d 又为恢复动作建立持久、幂等的 attempt 账本；当前状�
 UI-18.5b1 已让 New UI 通过 typed ToolExecution 发起受控 resume，并让 TUI fallback 显示同源动作、
 共享命令和最近 attempt；HAR-10.8e 又提供 fenced `/pursue reconcile <attempt-id>`，只按更高
 RunLease epoch 和准入后的 checkpoint/机械裁判收口。两端均不得自行猜测准入或完成。
-自动 outbox、takeover/cleanup 与历史 cursor 尚未实现。
+HAR-10.8f 已继续交付自动 terminal outbox 核心、worker、死信审查/重入队/放弃动作；takeover/cleanup
+与恢复历史 cursor 尚未实现。
+
+UI-18.2a 已把 Goal 页面从历史目标平铺升级为稳定目录选择：New UI 使用 `←/→` 或 `[/]` 发送明确
+`selected_goal_id`，TUI/Agent Tool 使用 `/goal detail <goal-id>` / `goal_status(goal_id=...)` 消费同一
+Python snapshot。所选详情显示当前快照内全部有界 wait/evidence，不再由 Node 二次裁成最后 5 条；
+Goal 历史与完整 evidence 时间线 cursor 仍属于 UI-18.2 后续切片。
 
 ## 未来顺序
 

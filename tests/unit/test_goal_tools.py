@@ -118,6 +118,38 @@ async def test_goal_status_uses_shared_typed_projection_for_pursuit(tmp_path) ->
 
 
 @pytest.mark.asyncio
+async def test_goal_status_selects_historical_goal_with_shared_pursuit_detail(
+    tmp_path,
+) -> None:
+    goal_store = GoalStore(tmp_path / "goals")
+    pursuit_store = PursuitStore(tmp_path / "pursuit")
+    historical = goal_store.create("历史交付")
+    now = time.time()
+    run = PursuitRun(
+        id="pursuit_historical_detail",
+        goal=historical.objective,
+        status=PursuitRunStatus.COMPLETED,
+        phase="completed",
+        started_at=now,
+        updated_at=now,
+        criteria_total=2,
+        criteria_verified=2,
+    )
+    pursuit_store.save_run(run)
+    goal_store.attach_pursuit(historical.id, run.id)
+    goal_store.update(historical.id, GoalStatus.COMPLETED)
+    goal_store.create("当前目标")
+    tools = _tool_map(goal_store, pursuit_store=pursuit_store)
+
+    output = await tools["goal_status"].execute(goal_id=historical.id)
+
+    assert f"目标详情 · `{historical.id}`" in output
+    assert "历史交付" in output
+    assert "pursuit_historical_detail" in output
+    assert "成功标准：2/2" in output
+
+
+@pytest.mark.asyncio
 async def test_goal_status_renders_terminal_outbox_for_tui_fallback(tmp_path) -> None:
     goal_store = GoalStore(tmp_path / "goals")
     worker = PursuitTerminalOutboxWorkerSnapshot(

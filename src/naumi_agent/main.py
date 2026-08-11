@@ -6464,7 +6464,7 @@ async def _run_goal(engine: Any, arg: str) -> None:
     if not normalized:
         tool_name = "goal_status"
         kwargs: dict[str, Any] = {}
-    elif subcommand == "status":
+    elif subcommand in {"status", "detail"}:
         tool_name = "goal_status"
         kwargs = {"goal_id": remainder} if remainder else {}
     elif subcommand == "list":

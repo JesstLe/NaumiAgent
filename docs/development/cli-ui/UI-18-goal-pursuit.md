@@ -10,7 +10,9 @@
 
 - UI-18.1 Typed snapshot（已实现）：以稳定 `goal_id`、`pursuit_run_id` 输出目标、状态、阶段、criteria、等待和
   有界证据；Producer/consumer 双边校验 schema、文本长度与列表上限。
-- UI-18.2 Goal page：当前目标主卡、历史目标、Pursuit 时间线、证据/等待详情和明确的空/缺失引用状态。
+- UI-18.2 Goal page（partial）：UI-18.2a 已实现稳定历史 Goal 选择、紧凑目录、New UI 键盘导航、
+  TUI/Agent Tool 同源详情，以及当前快照内全部有界 wait/evidence 渲染；见
+  [UI-18.2a](UI-18-2a-goal-detail-navigation.md)。Goal 历史与完整 evidence 时间线 cursor 仍未完成。
 - UI-18.3 Actions：create/pause/resume/block/complete/cancel 与 pursue/resume；全部调用现有 ToolExecution
   权威路径，写操作展示风险和结果，不在前端改状态。
 - UI-18.4 Interaction（partial）：HAR-10.6b 已让 New UI 的结构化选项、自定义输入、超时与 takeover
@@ -90,11 +92,13 @@ implemented。
 
 ## 当前不足
 
-UI-18.1/18.4a/18.4b/18.4c/18.4d1/18.4d2/18.4d3/18.5a/18.5b1 已提供类型化 Goal 快照、New UI/TUI durable
+UI-18.1/18.2a/18.4a/18.4b/18.4c/18.4d1/18.4d2/18.4d3/18.5a/18.5b1 已提供类型化 Goal 快照、历史 Goal
+选择与有界详情、New UI/TUI durable
 interaction、显式取消、共享 interaction 详情、宿主绑定手动 takeover、交互账本分页/筛选和只读恢复事实，
 公平交互优先级、跨页 pending 恢复，以及受控 resume 动作，但不包含 Goal/Pursuit 其余写按钮、可展开完整证据时间线、
 takeover/cleanup 或恢复历史 cursor；这些分别属于 UI-18.2/18.3/后续 Interaction UX/后续 Recovery UX。
-Pursuit wait/evidence 当前仍按最近有界集合显示。页面不会自动恢复。UI-18 因此保持 partial。
+Pursuit wait/evidence 当前会在所选目标详情中完整显示最近有界集合，但尚无全历史 cursor。页面不会
+自动恢复。UI-18 因此保持 partial。
 
 HAR-10.2b 已组合并渲染 Pursuit recovery 权威事实，HAR-10.8d/UI-18.5b1 已完成 resume 动作闭环；
 剩余 takeover/cleanup、持续状态推送和历史治理未完成，不能把 UI-18 标记为完整。

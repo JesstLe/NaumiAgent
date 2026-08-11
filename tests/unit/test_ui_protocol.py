@@ -824,6 +824,7 @@ def test_protocol_rejects_invalid_evaluation_lane_comparison_id(
         ({}, {
             "limit": 20,
             "include_finished": True,
+            "selected_goal_id": "",
             "interaction_limit": 10,
             "interaction_filter": "all",
             "interaction_cursor": "",
@@ -834,6 +835,7 @@ def test_protocol_rejects_invalid_evaluation_lane_comparison_id(
             {
                 "limit": 50,
                 "include_finished": False,
+                "selected_goal_id": "",
                 "interaction_limit": 10,
                 "interaction_filter": "all",
                 "interaction_cursor": "",
@@ -845,6 +847,7 @@ def test_protocol_rejects_invalid_evaluation_lane_comparison_id(
             {
                 "limit": 7,
                 "include_finished": False,
+                "selected_goal_id": "",
                 "interaction_limit": 10,
                 "interaction_filter": "all",
                 "interaction_cursor": "",
@@ -867,6 +870,7 @@ def test_protocol_normalizes_goal_panel_request(payload, expected) -> None:
         {"interaction_filter": "unknown"},
         {"interaction_cursor": "x" * 1_025},
         {"selected_interaction_id": "../ask-other"},
+        {"selected_goal_id": "../goal-other"},
     ],
 )
 def test_protocol_rejects_invalid_goal_interaction_navigation(payload) -> None:

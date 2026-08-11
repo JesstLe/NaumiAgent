@@ -120,6 +120,7 @@ def test_snapshot_preserves_stable_link_and_bounds_public_details(tmp_path) -> N
 
     assert payload["schema_version"] == 2
     assert payload["current_goal_id"] == goal.id
+    assert payload["selected_goal_id"] == goal.id
     assert len(payload["goals"]) == 1
     item = payload["goals"][0]
     assert item["pursuit_run_id"] == run.id
@@ -728,6 +729,35 @@ def test_snapshot_orders_history_and_marks_truncation(tmp_path) -> None:
     assert [item["goal_id"] for item in snapshot.goals] == [current.id, second.id]
     assert [item["status"] for item in snapshot.goals] == ["active", "cancelled"]
     assert snapshot.truncated is True
+
+
+def test_snapshot_selects_history_outside_default_page_and_renders_full_detail(
+    tmp_path,
+) -> None:
+    goal_store = GoalStore(tmp_path / "goals")
+    pursuit_store = PursuitStore(tmp_path / "pursuit")
+    selected = goal_store.create("最早的历史目标")
+    goal_store.update(selected.id, GoalStatus.COMPLETED)
+    for index in range(3):
+        goal = goal_store.create(f"后续目标 {index}")
+        goal_store.update(goal.id, GoalStatus.COMPLETED)
+    current = goal_store.create("当前目标")
+
+    snapshot = build_goal_pursuit_snapshot(
+        goal_store,
+        pursuit_store,
+        limit=1,
+        selected_goal_id=selected.id,
+    )
+
+    assert snapshot.current_goal_id == current.id
+    assert snapshot.selected_goal_id == selected.id
+    assert len(snapshot.goals) == 2
+    assert selected.id in [item["goal_id"] for item in snapshot.goals]
+    rendered = render_goal_pursuit_snapshot(snapshot)
+    assert "目标目录" in rendered
+    assert f"目标详情 · `{selected.id}`" in rendered
+    assert "最早的历史目标" in rendered
 
 
 def test_snapshot_reports_corrupt_or_unreadable_goal_store(

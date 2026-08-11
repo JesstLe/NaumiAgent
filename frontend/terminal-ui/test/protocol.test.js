@@ -1893,6 +1893,7 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
       generated_at: "2026-07-18T00:00:01+00:00",
       full: true,
       current_goal_id: "goal_1",
+      selected_goal_id: "goal_1",
       goals: [goal, ...Array.from({ length: 54 }, (_, index) => ({
         ...goal,
         goal_id: `goal_${index + 2}`,
@@ -2029,6 +2030,7 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
   assert.equal(normalized.interactions[0].can_takeover, true);
   assert.equal(Object.hasOwn(normalized.interactions[0], "owner_id"), false);
   assert.equal(normalized.schema_version, 2);
+  assert.equal(normalized.selected_goal_id, "goal_1");
   assert.equal(normalized.interaction_filter, "pending");
   assert.equal(normalized.interaction_has_more, true);
   assert.equal(normalized.selected_interaction.options[0].label, "继续");
@@ -2046,6 +2048,19 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
   assert.equal(Object.hasOwn(normalized.terminal_outbox, "private_owner"), false);
   assert.equal(Object.hasOwn(normalized.terminal_outbox.counts, "private_owner"), false);
   assert.equal(Object.hasOwn(normalized.selected_interaction, "owner_id"), false);
+  const { selected_goal_id: _selectedGoalId, ...withoutSelectedGoal } = normalized;
+  const selectionFallback = normalizeServerRecord({
+    type: "goals/snapshot",
+    payload: withoutSelectedGoal,
+  }).payload;
+  assert.equal(selectionFallback.selected_goal_id, normalized.current_goal_id);
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "goals/snapshot",
+      payload: { ...normalized, selected_goal_id: "goal_missing" },
+    }),
+    /selected_goal_id 不在 goals 中/,
+  );
   const {
     dead_letter: _legacyDeadLetter,
     ...legacyCounts
