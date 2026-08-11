@@ -2983,6 +2983,7 @@ def _print_help() -> None:
             "stable-promotion-observation-chain|"
             "stable-promotion-observation-revisions|"
             "stable-promotion-installation-observation|"
+            "stable-promotion-population-observation|"
             "stable-promotion-admission-delivery|"
             "stable-rollout-authorization|"
             "stable-rollout-finalization|"
@@ -4277,6 +4278,28 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 arg="",
             )
             return
+        if action == "stable-promotion-population-observation":
+            if len(parts) != 3 or parts[1] not in {"assess", "inspect"}:
+                raise ValueError(
+                    "stable-promotion-population-observation 需要 assess "
+                    "<population-finalization-receipt-id> 或 inspect "
+                    "<population-assessment-id>。"
+                )
+            arguments = {"action": parts[1]}
+            if parts[1] == "assess":
+                arguments["finalization_receipt_id"] = parts[2]
+            else:
+                arguments["assessment_id"] = parts[2]
+            await _run_tool_slash_command(
+                engine,
+                slash_command="/evolution",
+                tool_name=(
+                    "evolution_stable_promotion_population_observation_assessment"
+                ),
+                parse_args=lambda _arg: arguments,
+                arg="",
+            )
+            return
         if action == "stable-promotion-admission-delivery":
             if len(parts) == 3 and parts[1] in {
                 "prepare",
@@ -4712,6 +4735,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "stable-promotion-observation-chain、"
                 "stable-promotion-observation-revisions、"
                 "stable-promotion-installation-observation、"
+                "stable-promotion-population-observation、"
                 "stable-promotion-admission-delivery、"
                 "stable-rollout-authorization、"
                 "stable-rollout-finalization、"
@@ -4956,6 +4980,8 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "inspect-dispatch <admission|submission-id>；run-worker；inspect-worker；"
             "/evolution stable-promotion-installation-observation assess|inspect "
             "<runtime-admission-id>；"
+            "/evolution stable-promotion-population-observation assess "
+            "<population-finalization-receipt-id>；inspect <population-assessment-id>；"
             "/evolution stable-promotion-admission-delivery prepare|export|inspect|"
             "queue|inspect-dispatch <runtime-admission-id>；"
             "receive <submission-base64>；run-worker；inspect-worker；"

@@ -292,7 +292,10 @@ owner/epoch/lease Worker、自动 next-batch chaining、Receipt ACK、retry/dead
 current/next pin、严格 HTTP bounds 与配置自动装配。
 [EVO-05.7b3c1](EVO-05-7b3c1-remote-installation-observation-assessment.md) 已继续从 Control Plane 完整已验签 ledger 形成
 durable 单安装四态长期结论、动态 source/ledger/timeout 撤权、Tool/Slash 双通道；它只拥有 installation health/alert authority。
-下一步是 7b3c2 Population denominator/member coverage 聚合；Population long-term authority 仍明确未完成。
+[EVO-05.7b3c2](EVO-05-7b3c2-population-observation-aggregation.md) 已继续冻结 current Population Finalization 的 exact
+denominator/member set，持久化 missing/insufficient/passing/breached/censored 五态、member/duration coverage、缺员列表、
+并发 writer fence 和 timeout/source 动态撤权。只有 exact Population current passing/breached 才分别拥有 health/alert authority；
+promoted Outcome 与 learning authority 仍等待 7b4。
 [EVO-05.3f2c3b1](EVO-05-3f2c3b1-platform-dispatch-outbox.md) 已把实时准入的 required-platform Worker lane 转为 durable
 queued dispatch，并在 exact Worker incarnation 上预留容量。[EVO-05.3f2c3b2a](EVO-05-3f2c3b2a-authenticated-worker-claim.md)
 已增加 supervisor-attested Ed25519 Worker Identity、一次性 claim challenge 和可续期 lease hash chain。
@@ -311,5 +314,5 @@ managed runtime identity 与 startup-origin Harness ledger；6d3 已完成长期
 已进一步签发 rollback-recovery-observed Outcome revision 与 append-only supersede event，保留 immutable rollback fact；
 [HAR-09.6e2](../harness/HAR-09-6e2-long-term-outcome-projection-parity.md) 又通过 Projection v2 同源同步
 Workbench/New UI/Textual TUI，并保持 Contract 终态阻断。promoted Outcome、配置/数据 rollback 与 policy learning
-authority 仍未完成。成功 rollout 路径的下一步是 EVO-05.7b3c2 Population aggregation，而不是复用 rollback recovery
-Outcome、把 installation 本地 Cursor 冒充 Control Plane evidence，或把 7b3c1 单 installation Assessment 冒充 Population 长期健康。
+authority 仍未完成。成功 rollout 路径的下一步是 EVO-05.7b4 promoted/superseded ledger，而不是复用 rollback recovery
+Outcome、把 installation 本地 Cursor 冒充 Control Plane evidence，或把 7b3c2 Population Assessment 直接冒充 promoted Outcome。
