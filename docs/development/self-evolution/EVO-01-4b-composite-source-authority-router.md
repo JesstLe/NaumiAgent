@@ -23,6 +23,7 @@ runtime metric 或其他动态来源时，第二次 `bind_source_authority_reade
 - `goal_need`
 - `rollback_outcome`
 - `promoted_outcome`
+- `tool_catalog_miss`
 
 `EvolutionCandidateSourceAuthorityRouter` 构造时必须收到与注册表 **exact match** 的
 `source_kind -> reader` 映射：
@@ -54,7 +55,7 @@ runtime metric 或其他动态来源时，第二次 `bind_source_authority_reade
 `AgentEngine` 在 Outcome Opportunity Service 构造完成后创建
 `evolution_candidate_source_authority_router`，将 rollback/promoted 映射到 Outcome Service，并将
 `eval_metric_regression` 映射到 H5c Opportunity Service，`goal_need` 映射到 Goal Need Opportunity
-Service，再把完整 router 一次性绑定到
+Service，`tool_catalog_miss` 映射到 Tool Catalog Miss Opportunity Service，再把完整 router 一次性绑定到
 `EvolutionReviewService`。New UI、Textual TUI、Slash 和 Agent Tool
 仍通过 Review Service 消费同一个 `source_authority` Gate，没有界面专属判断。
 
@@ -76,5 +77,5 @@ Service，再把完整 router 一次性绑定到
 ## 非目标与下一步
 
 EVO-01.1c / EVO-06.1c1 已形成 `eval_metric_regression` Evidence；EVO-06.1c2 已形成 `goal_need`
-Evidence。两者均接入独立 reader。后续实现 durable 缺失能力 Evidence、跨类型时间窗和 EVO-01.5
-可解释 Prioritization。
+Evidence；EVO-06.1c3 已形成 exact `tool_catalog_miss` Evidence。三者均接入独立 reader。后续实现
+自然语言缺失意图、跨类型时间窗和 EVO-01.5 可解释 Prioritization。

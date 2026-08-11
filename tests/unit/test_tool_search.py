@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import re
 
 import pytest
 
 from naumi_agent.config.settings import AppConfig, MemoryConfig
+from naumi_agent.evolution.tool_catalog_miss_opportunities import ToolCatalogMissStore
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
 from naumi_agent.tools.base import ToolCall, ToolRegistry
@@ -25,6 +27,22 @@ def registry() -> ToolRegistry:
 
 
 class TestToolSearch:
+    def test_package_keeps_lazy_tool_search_compatibility_export(self) -> None:
+        from naumi_agent.tools import ToolSearchTool as ExportedToolSearchTool
+
+        assert ExportedToolSearchTool is ToolSearchTool
+
+    def test_miss_store_and_workspace_must_be_configured_together(
+        self,
+        registry: ToolRegistry,
+        tmp_path,
+    ) -> None:
+        with pytest.raises(ValueError, match="必须同时提供"):
+            ToolSearchTool(
+                registry,
+                miss_store=ToolCatalogMissStore(tmp_path / "evolution.db"),
+            )
+
     def test_keyword_search_scores_name_description_and_metadata(
         self,
         registry: ToolRegistry,
@@ -71,7 +89,8 @@ class TestToolSearch:
 
 class TestToolSearchIntegration:
     @pytest.fixture
-    def engine(self, tmp_path, request) -> AgentEngine:
+    def engine(self, tmp_path, request, monkeypatch) -> AgentEngine:
+        monkeypatch.setenv("NAUMI_STATE_HOME", str(tmp_path / "state"))
         instance = AgentEngine(
             AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
         )
@@ -97,6 +116,33 @@ class TestToolSearchIntegration:
         assert result.status == "success"
         assert "工具搜索" in result.content
         assert "`memory_recall`" in result.content
+
+    async def test_engine_persists_exact_miss_and_discovers_candidate(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        search = await engine._execute_tool(
+            ToolCall(
+                id="search-miss-1",
+                name="tool_search",
+                arguments='{"query": "select:browser_trace_compare"}',
+            )
+        )
+        match = re.search(r"`(tsm_[0-9a-f]{24})`", search.content)
+        assert search.status == "success"
+        assert match is not None
+
+        opportunity = await engine._execute_tool(
+            ToolCall(
+                id="discover-miss-1",
+                name="evolution_discover_tool_catalog_miss_opportunity",
+                arguments=f'{{"miss_id": "{match.group(1)}"}}',
+            )
+        )
+
+        assert opportunity.status == "success"
+        assert "Tool Catalog 缺失能力已进入机会发现" in opportunity.content
+        assert "未授予实验或推广权限" in opportunity.content
 
     def test_permission_allows_tool_search_in_lockdown(self) -> None:
         decision = PermissionChecker(PermissionMode.LOCKDOWN).check("tool_search", {})

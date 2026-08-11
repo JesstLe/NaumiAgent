@@ -97,6 +97,7 @@ from naumi_agent.tools.evolution_review import (
     EvolutionStableRollbackReadinessTool,
     EvolutionStableRolloutAuthorizationTool,
     EvolutionStableRolloutFinalizationTool,
+    EvolutionToolCatalogMissOpportunityTool,
     create_evolution_review_tools,
 )
 
@@ -227,6 +228,10 @@ def test_review_filter_rejects_unbounded_or_unknown_values() -> None:
         source_kind="eval_metric_regression"
     ).source_kind == "eval_metric_regression"
     assert EvolutionReviewFilter(source_kind="goal_need").source_kind == "goal_need"
+    assert (
+        EvolutionReviewFilter(source_kind="tool_catalog_miss").source_kind
+        == "tool_catalog_miss"
+    )
     with pytest.raises(ValueError, match="risk"):
         EvolutionReviewFilter(risk="urgent")
     with pytest.raises(ValueError, match="source"):
@@ -321,6 +326,7 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
         "evolution_discover_outcome_opportunity",
         "evolution_discover_eval_metric_opportunity",
         "evolution_discover_goal_need_opportunity",
+        "evolution_discover_tool_catalog_miss_opportunity",
         "evolution_proposal_queue",
     ]
     assert {tool.name for tool in tools if tool.metadata.read_only} == {
@@ -423,7 +429,8 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
     assert isinstance(tools[74], EvolutionOutcomeOpportunityTool)
     assert isinstance(tools[75], EvolutionEvalMetricOpportunityTool)
     assert isinstance(tools[76], EvolutionGoalNeedOpportunityTool)
-    assert isinstance(tools[77], EvolutionProposalQueueTool)
+    assert isinstance(tools[77], EvolutionToolCatalogMissOpportunityTool)
+    assert isinstance(tools[78], EvolutionProposalQueueTool)
 
 
 class _FakeEngine:

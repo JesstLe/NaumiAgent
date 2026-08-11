@@ -98,6 +98,7 @@ def _authority_router(
         "goal_need": service,
         "promoted_outcome": service,
         "rollback_outcome": service,
+        "tool_catalog_miss": service,
     })
 
 
@@ -425,12 +426,17 @@ async def test_engine_binds_both_outcome_authorities(tmp_path: Path) -> None:
         goal_service = engine.evolution_goal_need_opportunity_service
         assert goal_service.goal_store is engine.goal_store
         assert goal_service.candidate_store is engine.evolution_candidate_store
+        catalog_service = engine.evolution_tool_catalog_miss_opportunity_service
+        assert catalog_service.miss_store is engine.tool_catalog_miss_store
+        assert catalog_service.tool_catalog is engine.tool_registry
+        assert catalog_service.candidate_store is engine.evolution_candidate_store
         router = engine.evolution_candidate_source_authority_router
         assert router.source_kinds == (
             "eval_metric_regression",
             "goal_need",
             "promoted_outcome",
             "rollback_outcome",
+            "tool_catalog_miss",
         )
         assert engine.evolution_review_service._source_authority_reader is router
     finally:

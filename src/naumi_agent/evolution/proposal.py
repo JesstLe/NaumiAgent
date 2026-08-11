@@ -58,6 +58,7 @@ _FINDING_KIND: dict[str, ProposalKind] = {
     "flaky_test": "test",
     "missing_test": "test",
     "user_explicit_need": "tool",
+    "missing_tool_capability": "tool",
 }
 _KIND_LABELS: dict[ProposalKind, str] = {
     "knowledge": "知识",
@@ -69,6 +70,9 @@ _KIND_LABELS: dict[ProposalKind, str] = {
 }
 _VERIFIER_PROCEDURES = {
     "goal_completion": "由独立 Goal 验收窗口确认用户完成状态；取消、静默或 Agent 自评不计为完成。",
+    "tool_catalog_presence": (
+        "由独立 Tool Catalog 验收器确认精确工具注册、schema、权限和真实调用链均可用。"
+    ),
     "harness_replay": "使用同一 Harness 输入安全回放，并比较失败分类与验收条件。",
     "self_review_static": "对同一 scope 重新运行 Self-Review 静态扫描并比较 finding 数量。",
     "feedback_recurrence": "在后续观察窗口比较同根用户反馈复发率，不把沉默视为自动通过。",
@@ -109,6 +113,7 @@ class ProposalValidationStep(_StrictModel):
     target: float
     verifier: Literal[
         "goal_completion",
+        "tool_catalog_presence",
         "harness_replay",
         "self_review_static",
         "feedback_recurrence",

@@ -86,6 +86,7 @@ def test_protocol_exposes_typed_harness_receipt_event() -> None:
         "promoted_outcome",
         "eval_metric_regression",
         "goal_need",
+        "tool_catalog_miss",
     ],
 )
 def test_evolution_review_accepts_outcome_filters(source_kind: str) -> None:

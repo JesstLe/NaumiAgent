@@ -1475,6 +1475,34 @@ class TestPermissionChecker:
         assert not lockdown.allowed
         assert lockdown.outcome is PermissionOutcome.BLOCK
 
+    def test_tool_catalog_miss_permission_is_bounded_and_bypass_is_direct(
+        self,
+    ) -> None:
+        arguments = {"miss_id": "tsm_" + "a" * 24}
+        moderate = PermissionChecker(PermissionMode.MODERATE).check(
+            "evolution_discover_tool_catalog_miss_opportunity",
+            arguments,
+        )
+        bypass = PermissionChecker(PermissionMode.BYPASS).check(
+            "evolution_discover_tool_catalog_miss_opportunity",
+            arguments,
+        )
+        lockdown = PermissionChecker(PermissionMode.LOCKDOWN).check(
+            "evolution_discover_tool_catalog_miss_opportunity",
+            arguments,
+        )
+
+        assert moderate.allowed
+        assert moderate.outcome is PermissionOutcome.ALLOW
+        assert not moderate.requires_confirmation
+        assert moderate.risk_level is PermissionRiskLevel.MEDIUM
+        assert moderate.tool_family == "evolution_opportunity"
+        assert bypass.allowed
+        assert bypass.outcome is PermissionOutcome.ALLOW
+        assert not bypass.requires_confirmation
+        assert not lockdown.allowed
+        assert lockdown.outcome is PermissionOutcome.BLOCK
+
     def test_reset_counts(self) -> None:
         checker = PermissionChecker(PermissionMode.MODERATE)
         checker.check("file_read", {"path": "/workspace/test.txt"})

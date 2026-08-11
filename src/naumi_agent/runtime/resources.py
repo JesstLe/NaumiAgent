@@ -11,6 +11,9 @@ from naumi_agent.daemons.run_delegation_grants import RunDelegationGrantStore
 from naumi_agent.daemons.tool_jobs import ToolJobStore
 from naumi_agent.daemons.worker_registry import WorkerRegistryStore
 from naumi_agent.evolution.store import EvolutionCandidateStore
+from naumi_agent.evolution.tool_catalog_miss_opportunities import (
+    ToolCatalogMissStore,
+)
 from naumi_agent.harness.store import HarnessStore
 from naumi_agent.harness.trust import HarnessTrustStore
 from naumi_agent.orchestrator.goal_store import GoalStore
@@ -57,6 +60,10 @@ _RESOURCE_CONTRACTS: dict[str, tuple[type[object], str]] = {
         EvolutionCandidateStore,
         "evolution_candidate_store 必须是 EvolutionCandidateStore 实例。",
     ),
+    "tool_catalog_miss_store": (
+        ToolCatalogMissStore,
+        "tool_catalog_miss_store 必须是 ToolCatalogMissStore 实例。",
+    ),
     "harness_store": (
         HarnessStore,
         "harness_store 必须是 HarnessStore 实例。",
@@ -97,6 +104,7 @@ class RuntimeResources:
     tool_job_store: ToolJobStore
     agent_job_store: AgentJobStore
     evolution_candidate_store: EvolutionCandidateStore
+    tool_catalog_miss_store: ToolCatalogMissStore
     harness_store: HarnessStore
     harness_trust_store: HarnessTrustStore
     goal_store: GoalStore
@@ -126,6 +134,7 @@ class RuntimeResourceOverrides:
     tool_job_store: ToolJobStore | None = None
     agent_job_store: AgentJobStore | None = None
     evolution_candidate_store: EvolutionCandidateStore | None = None
+    tool_catalog_miss_store: ToolCatalogMissStore | None = None
     harness_store: HarnessStore | None = None
     harness_trust_store: HarnessTrustStore | None = None
     goal_store: GoalStore | None = None

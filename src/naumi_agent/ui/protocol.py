@@ -789,7 +789,7 @@ def _normalize_client_payload(
         if source_kind not in {
             "", "harness_failure", "self_review_static", "user_feedback",
             "agent_interpreted_feedback", "eval_metric_regression",
-            "goal_need",
+            "goal_need", "tool_catalog_miss",
             "rollback_outcome", "promoted_outcome",
         }:
             raise ValueError("Evolution source_kind 格式无效。")

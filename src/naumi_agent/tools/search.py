@@ -4,8 +4,16 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
+from naumi_agent.evolution.store import EvolutionStoreError
+from naumi_agent.evolution.tool_catalog_miss_opportunities import (
+    StoredToolCatalogMiss,
+    ToolCatalogMissStore,
+    normalize_missing_tool_name,
+    tool_catalog_sha256,
+)
 from naumi_agent.tools.base import Tool, ToolMetadata, ToolRegistry
 
 
@@ -20,15 +28,36 @@ class ToolSearchMatch:
     requires_confirmation: bool | None
 
 
-def create_tool_search_tools(registry: ToolRegistry) -> list[Tool]:
-    return [ToolSearchTool(registry)]
+def create_tool_search_tools(
+    registry: ToolRegistry,
+    *,
+    miss_store: ToolCatalogMissStore | None = None,
+    workspace_root: str | Path | None = None,
+) -> list[Tool]:
+    return [
+        ToolSearchTool(
+            registry,
+            miss_store=miss_store,
+            workspace_root=workspace_root,
+        )
+    ]
 
 
 class ToolSearchTool(Tool):
     """Search currently registered tools by name, hint, and description."""
 
-    def __init__(self, registry: ToolRegistry) -> None:
+    def __init__(
+        self,
+        registry: ToolRegistry,
+        *,
+        miss_store: ToolCatalogMissStore | None = None,
+        workspace_root: str | Path | None = None,
+    ) -> None:
+        if (miss_store is None) != (workspace_root is None):
+            raise ValueError("miss_store 与 workspace_root 必须同时提供。")
         self._registry = registry
+        self._miss_store = miss_store
+        self._workspace_root = workspace_root
 
     @property
     def name(self) -> str:
@@ -90,11 +119,39 @@ class ToolSearchTool(Tool):
             tools=all_tools,
             max_results=safe_limit,
         )
+        recorded_misses: list[StoredToolCatalogMiss] = []
+        unrecorded_misses: list[str] = []
+        persistence_failed = False
+        if missing and self._miss_store is not None and self._workspace_root is not None:
+            try:
+                catalog_sha256 = tool_catalog_sha256(self._registry.names)
+            except (TypeError, ValueError):
+                catalog_sha256 = ""
+                persistence_failed = True
+            for requested_name in missing if catalog_sha256 else ():
+                try:
+                    normalize_missing_tool_name(requested_name)
+                except (TypeError, ValueError):
+                    unrecorded_misses.append(requested_name)
+                    continue
+                try:
+                    recorded_misses.append(
+                        await self._miss_store.record(
+                            self._workspace_root,
+                            requested_name=requested_name,
+                            catalog_sha256=catalog_sha256,
+                        )
+                    )
+                except (EvolutionStoreError, OSError, TypeError, ValueError):
+                    persistence_failed = True
         return format_tool_search_result(
             query=query,
             matches=matches,
             missing=missing,
             total_tools=len(all_tools),
+            recorded_misses=recorded_misses,
+            unrecorded_misses=unrecorded_misses,
+            persistence_failed=persistence_failed,
         )
 
 
@@ -143,13 +200,32 @@ def format_tool_search_result(
     matches: list[ToolSearchMatch],
     missing: list[str],
     total_tools: int,
+    recorded_misses: list[StoredToolCatalogMiss] | None = None,
+    unrecorded_misses: list[str] | None = None,
+    persistence_failed: bool = False,
 ) -> str:
+    durable = [] if recorded_misses is None else recorded_misses
+    unsafe = [] if unrecorded_misses is None else unrecorded_misses
     lines = [
         f"工具搜索：`{query}`",
         f"已扫描 {total_tools} 个工具，匹配 {len(matches)} 个。",
     ]
     if missing:
         lines.append("未找到：" + "、".join(f"`{name}`" for name in missing))
+    for stored in durable:
+        lines.append(
+            "已记录精确缺失事实："
+            f"`{stored.record.requested_name}` → `{stored.record.miss_id}`；"
+            "可用 `/evolution discover-miss <miss-id>` 进入人工候选审阅。"
+        )
+    if unsafe:
+        lines.append(
+            "未持久化非安全工具标识符："
+            + "、".join(f"`{name}`" for name in unsafe)
+            + "。自然语言查询不会进入 Evolution Evidence。"
+        )
+    if persistence_failed:
+        lines.append("缺失事实未能写入用户状态库；本次搜索结果仍可使用，但不能进入 Evolution。")
     if not matches:
         lines.append("没有找到匹配工具。请换用更具体的能力词，例如 file、browser、memory、task。")
         return "\n".join(lines)

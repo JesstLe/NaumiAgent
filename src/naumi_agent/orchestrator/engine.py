@@ -622,6 +622,9 @@ from naumi_agent.evolution.stable_rollout_finalizations import (
     EvolutionStableRolloutFinalizationStore,
 )
 from naumi_agent.evolution.static_guards import EvolutionStaticGuard
+from naumi_agent.evolution.tool_catalog_miss_opportunities import (
+    EvolutionToolCatalogMissOpportunityService,
+)
 from naumi_agent.evolution.validation_cohorts import (
     EvolutionBaselineCohortRequestBuilder,
 )
@@ -1338,6 +1341,7 @@ class AgentEngine:
             model_port=self._model_port,
         )
         self.evolution_candidate_store = resources.evolution_candidate_store
+        self.tool_catalog_miss_store = resources.tool_catalog_miss_store
         self.feedback_intake_service = FeedbackIntakeService(
             self.evolution_candidate_store
         )
@@ -3477,6 +3481,14 @@ class AgentEngine:
                 candidate_store=self.evolution_candidate_store,
             )
         )
+        self.evolution_tool_catalog_miss_opportunity_service = (
+            EvolutionToolCatalogMissOpportunityService(
+                workspace_root=paths.workspace_root,
+                miss_store=resources.tool_catalog_miss_store,
+                tool_catalog=self._tool_registry,
+                candidate_store=self.evolution_candidate_store,
+            )
+        )
         self.evolution_candidate_source_authority_router = (
             EvolutionCandidateSourceAuthorityRouter({
                 "eval_metric_regression": (
@@ -3485,6 +3497,9 @@ class AgentEngine:
                 "goal_need": self.evolution_goal_need_opportunity_service,
                 "promoted_outcome": self.evolution_outcome_opportunity_service,
                 "rollback_outcome": self.evolution_outcome_opportunity_service,
+                "tool_catalog_miss": (
+                    self.evolution_tool_catalog_miss_opportunity_service
+                ),
             })
         )
         self.evolution_review_service.bind_source_authority_reader(
@@ -4070,7 +4085,11 @@ class AgentEngine:
             self._tool_registry.register(tool)
         for tool in create_runtime_tools(self):
             self._tool_registry.register(tool)
-        for tool in create_tool_search_tools(self._tool_registry):
+        for tool in create_tool_search_tools(
+            self._tool_registry,
+            miss_store=self.tool_catalog_miss_store,
+            workspace_root=self.workspace_root,
+        ):
             self._tool_registry.register(tool)
 
         # Hot-reload tool
