@@ -89,7 +89,9 @@ class EvolutionRevalidationStableRuntimeExposureReceipt(_StrictModel):
             and deployment.proof_of_possession_enforced
         ):
             raise ValueError("Stable Runtime Exposure source 投影不一致。")
-        if not _identity_matches_deployment(binding.runtime_identity, deployment):
+        if not stable_runtime_identity_matches_deployment(
+            binding.runtime_identity, deployment
+        ):
             raise ValueError("Runtime Identity 未绑定 exact Stable Deployment。")
         if not _startup_pair_matches(
             binding,
@@ -336,7 +338,9 @@ class EvolutionRevalidationStableRuntimeExposureService:
                 workspace_root=self.workspace_root,
                 subject_id=subject_id,
             )
-            if not _identity_matches_deployment(binding.runtime_identity, deployment):
+            if not stable_runtime_identity_matches_deployment(
+                binding.runtime_identity, deployment
+            ):
                 raise EvolutionRevalidationStableRuntimeExposureError(
                     "stable_runtime_exposure_release_mismatch",
                     "Managed runtime 未运行 exact Stable Deployment。",
@@ -503,7 +507,8 @@ def _build_receipt(*, workspace_root, deployment, binding, startup, ready):
     )
 
 
-def _identity_matches_deployment(identity, deployment) -> bool:
+def stable_runtime_identity_matches_deployment(identity, deployment) -> bool:
+    """Match every release-identity field to one exact Stable Deployment."""
     intent = deployment.preparation.intent
     pointer = deployment.activated_pointer
     slot = intent.archive_admission.installed_slot
@@ -743,4 +748,5 @@ __all__ = [
     "EvolutionRevalidationStableRuntimeExposureService",
     "EvolutionRevalidationStableRuntimeExposureStore",
     "EvolutionRevalidationStableRuntimeExposureView",
+    "stable_runtime_identity_matches_deployment",
 ]

@@ -20,11 +20,15 @@ from naumi_agent.evolution.stable_promotion_observation_contracts import (
     EvolutionStablePromotionObservationContractService,
     EvolutionStablePromotionObservationContractStore,
 )
+from naumi_agent.evolution.stable_promotion_runtime_observation_admissions import (
+    EvolutionStablePromotionRuntimeObservationAdmissionService,
+)
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
 from naumi_agent.tools.base import ToolCall, ToolRegistry, ToolResult
 from naumi_agent.tools.evolution_review import (
     EvolutionStablePromotionObservationContractTool,
+    EvolutionStablePromotionRuntimeObservationAdmissionTool,
 )
 from tests.unit.test_evolution_stable_remote_population_finalizations import (
     _population_fixture,
@@ -555,6 +559,10 @@ async def test_engine_composes_contract_service_and_tool(tmp_path: Path) -> None
         evolution_api.EvolutionStablePromotionObservationContractService
         is EvolutionStablePromotionObservationContractService
     )
+    assert (
+        evolution_api.EvolutionStablePromotionRuntimeObservationAdmissionService
+        is EvolutionStablePromotionRuntimeObservationAdmissionService
+    )
     session_db = tmp_path / ".naumi" / "sessions.db"
     engine = AgentEngine(
         AppConfig(
@@ -579,6 +587,17 @@ async def test_engine_composes_contract_service_and_tool(tmp_path: Path) -> None
         assert (
             engine.evolution_stable_promotion_observation_contract_store.db_path
             == session_db.resolve()
+        )
+        admission_tool = engine.tool_registry.get(
+            "evolution_stable_promotion_runtime_observation_admission"
+        )
+        assert isinstance(
+            admission_tool,
+            EvolutionStablePromotionRuntimeObservationAdmissionTool,
+        )
+        assert isinstance(
+            engine.evolution_stable_promotion_runtime_observation_admission_service,
+            EvolutionStablePromotionRuntimeObservationAdmissionService,
         )
     finally:
         await engine.shutdown()

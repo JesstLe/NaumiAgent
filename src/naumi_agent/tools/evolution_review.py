@@ -220,6 +220,10 @@ from naumi_agent.evolution.stable_promotion_observation_contracts import (
     EvolutionStablePromotionObservationContractError,
     render_stable_promotion_observation_contract,
 )
+from naumi_agent.evolution.stable_promotion_runtime_observation_admissions import (
+    EvolutionStablePromotionRuntimeObservationAdmissionError,
+    render_stable_promotion_runtime_observation_admission,
+)
 from naumi_agent.evolution.stable_remote_finalization_authorizations import (
     EvolutionStableRemoteFinalizationAuthorizationError,
     render_stable_remote_finalization_authorization,
@@ -3923,6 +3927,92 @@ class EvolutionStablePromotionObservationContractTool(Tool):
         return render_stable_promotion_observation_contract(view)
 
 
+class EvolutionStablePromotionRuntimeObservationAdmissionTool(Tool):
+    """Admit a fresh managed runtime for one finalized stable member."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_stable_promotion_runtime_observation_admission"
+
+    @property
+    def description(self) -> str:
+        return (
+            "把 Finalization 后的新 managed New UI/TUI startup chain 绑定到 exact "
+            "Population member 与 Stable Deployment；不计算长期指标。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "finalization_receipt_id": {
+                    "type": "string",
+                    "pattern": "^evstableremotepopfinal_[0-9a-f]{24}$",
+                },
+                "stable_intent_id": {
+                    "type": "string",
+                    "pattern": "^evrestableintent_[0-9a-f]{24}$",
+                },
+                "subject_id": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_-]{0,95}$",
+                },
+            },
+            "required": [
+                "finalization_receipt_id",
+                "stable_intent_id",
+                "subject_id",
+            ],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="稳定推广 Runtime 观察准入",
+            search_hint=(
+                "evolution stable promotion runtime observation admission "
+                "自进化 稳定推广 运行时 观察准入"
+            ),
+        )
+
+    async def execute(
+        self,
+        finalization_receipt_id: str,
+        stable_intent_id: str,
+        subject_id: str,
+    ) -> str:
+        try:
+            view = await (
+                self._engine.evolution_stable_promotion_runtime_observation_admission_service.record(
+                    finalization_receipt_id=str(finalization_receipt_id or "").strip(),
+                    stable_intent_id=str(stable_intent_id or "").strip(),
+                    subject_id=str(subject_id or "").strip(),
+                )
+            )
+        except (
+            AttributeError,
+            EvolutionStablePromotionRuntimeObservationAdmissionError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "stable_promotion_runtime_admission_failed")
+            return f"稳定推广 Runtime 观察准入未完成（`{code}`）：{exc}"
+        return render_stable_promotion_runtime_observation_admission(view)
+
+
 class EvolutionStableRolloutAuthorizationTool(Tool):
     """Issue or inspect one member-scoped stable rollout capability."""
 
@@ -5483,6 +5573,7 @@ def create_evolution_review_tools(
         EvolutionStableRemoteFinalizationTool(engine),
         EvolutionStableRemotePopulationFinalizationTool(engine),
         EvolutionStablePromotionObservationContractTool(engine),
+        EvolutionStablePromotionRuntimeObservationAdmissionTool(engine),
         EvolutionStableRolloutAuthorizationTool(engine),
         EvolutionStableRolloutFinalizationTool(engine),
         EvolutionOutcomeOpportunityTool(engine),
@@ -5550,6 +5641,7 @@ __all__ = [
     "EvolutionStableRemoteFinalizationTool",
     "EvolutionStableRemotePopulationFinalizationTool",
     "EvolutionStablePromotionObservationContractTool",
+    "EvolutionStablePromotionRuntimeObservationAdmissionTool",
     "EvolutionStableRolloutAuthorizationTool",
     "EvolutionStableRolloutFinalizationTool",
     "EvolutionRevalidationRollbackExecutionTool",
