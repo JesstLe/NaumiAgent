@@ -78,8 +78,7 @@ ACK timeout、retry budget、dead-letter 与 shutdown drain。
 [EVO-05.5f5x3g](EVO-05-5f5x3g-authenticated-remote-installation-http-transport.md) 已继续交付独立 mTLS endpoint、同连接服务端
 证书 pin、客户端证书授权、current/next 轮换、严格限长/timeout 与 Runtime 自动装配。
 [EVO-05.5f5x3h](EVO-05-5f5x3h-remote-finalization-result-return-worker.md) 已继续交付 ACK 后 writer/补签和 Result 回传的 durable
-双阶段 outbox、fencing、anti-join、retry/dead-letter、shutdown drain 与 exact Receipt 绑定。后续仍需 Result 认证网络传输与安装端
-daemon；只有每个
-member 都形成 current readiness、Authorization 与 Finalization Receipt，才可
-聚合 population-level Stable Rollout Completion Authority。配置/数据 finalization 继续等待 ARC-07.6，Promotion authority
-继续独立。
+双阶段 outbox、fencing、anti-join、retry/dead-letter、shutdown drain 与 exact Receipt 绑定；x3i 与 HAR-10.9a 已补双向认证网络和
+daemon，[EVO-05.5f5x3j](EVO-05-5f5x3j-population-finalization-receipt-aggregation.md) 已把 exact current Snapshot 的全部
+member Receipt 聚合为 durable Population finalization fact 与动态 current authority。配置/数据 finalization 继续等待
+ARC-07.6，Promotion authority 继续独立。

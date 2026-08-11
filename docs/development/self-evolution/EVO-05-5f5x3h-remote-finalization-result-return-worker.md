@@ -11,7 +11,8 @@ expected-pointer writer，或只补签已落盘 writer fact；持久化 installa
 验证并落盘 exact Finalization Receipt，同时使 Control Plane Delivery 进入 `completed`。
 
 本切片提供真实进程内 Control Plane adapter 和 Runtime transport 注入点，不虚构跨机器 Result 网络已经完成。生产 mTLS Result endpoint、
-安装端独立 daemon、证书热重载与 Population Receipt aggregation 仍属后续切片。
+安装端独立 daemon 与 Population Receipt aggregation 在本切片交付时仍属后续边界，现已分别由 x3i、HAR-10.9a 与 x3j 补齐；证书
+热重载仍未实现。
 
 ## 为什么 outbox 从 execute 阶段开始
 
@@ -115,10 +116,11 @@ writer/result、Receipt、retry、dead-letter、failure、forced shutdown 与下
 - synchronous Release Store writer 没有进程级 watchdog，安装 daemon crash supervision 尚未接入；
 - dead-letter 仍缺签名人工审查、requeue/abandon 和 retention；
 - macOS/Linux/Windows 真实 daemon 与网络故障矩阵尚未形成发布证据；
-- 单 member Receipt 尚未聚合为 Population Stable Rollout Completion Authority。
+- 本切片自身只形成单 member Receipt；Population 聚合现由 x3j 独立负责。
 
 [EVO-05.5f5x3i Authenticated Result Return HTTP Transport](EVO-05-5f5x3i-authenticated-result-return-http-transport.md) 已复用 x3g
 的独立 mTLS 身份、同连接 pin、限长、timeout、并发与安全错误边界，并增加 installation leaf→member 的精确授权。下一最小切片转为
 [HAR-10.9a installation daemon supervision/service discovery](../harness/HAR-10-9a-remote-finalization-installation-daemon-supervision.md)
-已完成；下一步才进入 EVO-05.5f5x3j Population Receipt aggregation，不能把单 member Result/daemon 健康
+已完成；[EVO-05.5f5x3j](EVO-05-5f5x3j-population-finalization-receipt-aggregation.md) 也已用 exact Snapshot/member Receipt、
+writer fence 与动态 Control/Trust/Credential/签名重验形成 Population authority，不再把单 member Result/daemon 健康
 冒充 Population completion。

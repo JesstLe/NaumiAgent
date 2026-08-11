@@ -1227,6 +1227,7 @@ if TYPE_CHECKING:
     )
     from naumi_agent.evolution.stable_remote_finalizations import (
         EVOLUTION_STABLE_REMOTE_FINALIZATION_POLICY,
+        EvolutionStableRemoteFinalizationAggregationMaterial,
         EvolutionStableRemoteFinalizationError,
         EvolutionStableRemoteFinalizationExecutionGrant,
         EvolutionStableRemoteFinalizationExecutionPackage,
@@ -1247,6 +1248,16 @@ if TYPE_CHECKING:
         render_stable_remote_finalization,
         render_stable_remote_finalization_submission,
         verify_stable_remote_finalization_execution_package,
+    )
+    from naumi_agent.evolution.stable_remote_population_finalizations import (
+        EVOLUTION_STABLE_REMOTE_POPULATION_FINALIZATION_POLICY,
+        EvolutionStableRemotePopulationFinalizationError,
+        EvolutionStableRemotePopulationFinalizationMember,
+        EvolutionStableRemotePopulationFinalizationReceipt,
+        EvolutionStableRemotePopulationFinalizationService,
+        EvolutionStableRemotePopulationFinalizationStore,
+        EvolutionStableRemotePopulationFinalizationView,
+        render_stable_remote_population_finalization,
     )
     from naumi_agent.evolution.stable_remote_readiness_claims import (
         EVOLUTION_STABLE_REMOTE_READINESS_CLAIM_POLICY,
@@ -1759,6 +1770,7 @@ __all__ = [
     "render_stable_remote_finalization_authorization",
     "verify_stable_remote_finalization_authorization",
     "EVOLUTION_STABLE_REMOTE_FINALIZATION_POLICY",
+    "EvolutionStableRemoteFinalizationAggregationMaterial",
     "EvolutionStableRemoteFinalizationError",
     "EvolutionStableRemoteFinalizationExecutionGrant",
     "EvolutionStableRemoteFinalizationExecutionPackage",
@@ -1779,6 +1791,14 @@ __all__ = [
     "render_stable_remote_finalization",
     "render_stable_remote_finalization_submission",
     "verify_stable_remote_finalization_execution_package",
+    "EVOLUTION_STABLE_REMOTE_POPULATION_FINALIZATION_POLICY",
+    "EvolutionStableRemotePopulationFinalizationError",
+    "EvolutionStableRemotePopulationFinalizationMember",
+    "EvolutionStableRemotePopulationFinalizationReceipt",
+    "EvolutionStableRemotePopulationFinalizationService",
+    "EvolutionStableRemotePopulationFinalizationStore",
+    "EvolutionStableRemotePopulationFinalizationView",
+    "render_stable_remote_population_finalization",
     "EVOLUTION_STABLE_REMOTE_FINALIZATION_DELIVERY_POLICY",
     "EvolutionStableRemoteFinalizationDeliveryAck",
     "EvolutionStableRemoteFinalizationDeliveryAckPayload",
@@ -3123,6 +3143,7 @@ def __getattr__(name: str) -> object:
     }
     stable_remote_finalization_exports = {
         "EVOLUTION_STABLE_REMOTE_FINALIZATION_POLICY",
+        "EvolutionStableRemoteFinalizationAggregationMaterial",
         "EvolutionStableRemoteFinalizationError",
         "EvolutionStableRemoteFinalizationExecutionGrant",
         "EvolutionStableRemoteFinalizationExecutionPackage",
@@ -3143,6 +3164,16 @@ def __getattr__(name: str) -> object:
         "render_stable_remote_finalization",
         "render_stable_remote_finalization_submission",
         "verify_stable_remote_finalization_execution_package",
+    }
+    stable_remote_population_finalization_exports = {
+        "EVOLUTION_STABLE_REMOTE_POPULATION_FINALIZATION_POLICY",
+        "EvolutionStableRemotePopulationFinalizationError",
+        "EvolutionStableRemotePopulationFinalizationMember",
+        "EvolutionStableRemotePopulationFinalizationReceipt",
+        "EvolutionStableRemotePopulationFinalizationService",
+        "EvolutionStableRemotePopulationFinalizationStore",
+        "EvolutionStableRemotePopulationFinalizationView",
+        "render_stable_remote_population_finalization",
     }
     stable_remote_finalization_delivery_exports = {
         "EVOLUTION_STABLE_REMOTE_FINALIZATION_DELIVERY_POLICY",
@@ -3920,6 +3951,8 @@ def __getattr__(name: str) -> object:
         module_name = "stable_remote_finalization_authorizations"
     elif name in stable_remote_finalization_exports:
         module_name = "stable_remote_finalizations"
+    elif name in stable_remote_population_finalization_exports:
+        module_name = "stable_remote_population_finalizations"
     elif name in stable_remote_finalization_delivery_exports:
         module_name = "stable_remote_finalization_deliveries"
     elif name in stable_remote_finalization_delivery_worker_exports:

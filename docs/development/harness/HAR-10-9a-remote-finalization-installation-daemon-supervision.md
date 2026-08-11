@@ -204,6 +204,6 @@ daemon core 使用 `asyncio`、线程化标准库 HTTPS server、SQLite RunLease
 - Result dead-letter review/requeue/abandon/retention 尚未交付；
 - Windows/Linux 真实 service/ACL/soak 证据尚未形成。
 
-下一独立切片回到自进化闭环：**EVO-05.5f5x3j Population Finalization Receipt Aggregation Authority**。
-它只聚合 exact active Population Snapshot 中逐 member 的 current Receipt，并动态撤销 stale/missing/conflict
-authority；不把 daemon 健康、单 member 成功或静态计数冒充 Population 完成。
+[EVO-05.5f5x3j Population Finalization Receipt Aggregation Authority](../self-evolution/EVO-05-5f5x3j-population-finalization-receipt-aggregation.md)
+已继续聚合 exact active Population Snapshot 中逐 member 的 current Receipt，并动态撤销 stale/missing/conflict authority；
+daemon 健康、单 member 成功或静态计数仍不构成 Population 完成。

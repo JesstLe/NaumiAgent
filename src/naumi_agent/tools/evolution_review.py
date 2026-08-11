@@ -245,6 +245,10 @@ from naumi_agent.evolution.stable_remote_finalizations import (
     render_stable_remote_finalization,
     render_stable_remote_finalization_submission,
 )
+from naumi_agent.evolution.stable_remote_population_finalizations import (
+    EvolutionStableRemotePopulationFinalizationError,
+    render_stable_remote_population_finalization,
+)
 from naumi_agent.evolution.stable_remote_readiness_claims import (
     EvolutionStableRemoteReadinessClaimError,
     render_stable_remote_readiness_challenge,
@@ -3754,6 +3758,98 @@ class EvolutionStableRemoteFinalizationTool(Tool):
         return render_stable_remote_finalization(view)
 
 
+class EvolutionStableRemotePopulationFinalizationTool(Tool):
+    """Complete or re-inspect the exact remote finalization Population."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_stable_remote_population_finalization"
+
+    @property
+    def description(self) -> str:
+        return (
+            "聚合 exact current Stable Population 的全部远端 member Finalization "
+            "Receipt，在 SQLite writer fence 内重验 Grant、Consumption、Control、"
+            "Trust、Population Credential 和安装签名，签发 durable Population "
+            "Finalization Receipt；缺员、重复、篡改或 authority 漂移立即撤权，"
+            "不授予配置/数据 finalization 或 promotion 权限。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["complete", "inspect"]},
+                "snapshot_id": {
+                    "type": ["string", "null"],
+                    "pattern": "^relpopsnapshot_[0-9a-f]{24}$",
+                },
+                "receipt_id": {
+                    "type": ["string", "null"],
+                    "pattern": "^evstableremotepopfinal_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["action"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="Remote Population Finalization",
+            search_hint=(
+                "evolution stable remote population finalization receipt aggregation "
+                "自进化 稳定发布 群体 远端 完成 回执 聚合"
+            ),
+        )
+
+    async def execute(
+        self,
+        action: str,
+        snapshot_id: str | None = None,
+        receipt_id: str | None = None,
+    ) -> str:
+        try:
+            service = (
+                self._engine.evolution_stable_remote_population_finalization_service
+            )
+            if action == "complete":
+                if receipt_id is not None:
+                    raise ValueError("complete 不接受 receipt_id。")
+                view = await service.complete(snapshot_id=snapshot_id)
+            elif action == "inspect":
+                if snapshot_id is not None or receipt_id is None:
+                    raise ValueError("inspect 需要且仅接受 receipt_id。")
+                view = await service.inspect(receipt_id=receipt_id)
+            else:
+                raise ValueError("action 必须是 complete 或 inspect。")
+        except (
+            AttributeError,
+            EvolutionStableRemotePopulationFinalizationError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(
+                exc,
+                "code",
+                "stable_remote_population_finalization_failed",
+            )
+            return f"Remote Population Finalization 未完成（`{code}`）：{exc}"
+        return render_stable_remote_population_finalization(view)
+
+
 class EvolutionStableRolloutAuthorizationTool(Tool):
     """Issue or inspect one member-scoped stable rollout capability."""
 
@@ -5312,6 +5408,7 @@ def create_evolution_review_tools(
         EvolutionStableRemoteReadinessProbeTool(engine),
         EvolutionStableRemoteFinalizationAuthorizationTool(engine),
         EvolutionStableRemoteFinalizationTool(engine),
+        EvolutionStableRemotePopulationFinalizationTool(engine),
         EvolutionStableRolloutAuthorizationTool(engine),
         EvolutionStableRolloutFinalizationTool(engine),
         EvolutionOutcomeOpportunityTool(engine),
@@ -5377,6 +5474,7 @@ __all__ = [
     "EvolutionStableRemoteReadinessProbeTool",
     "EvolutionStableRemoteFinalizationAuthorizationTool",
     "EvolutionStableRemoteFinalizationTool",
+    "EvolutionStableRemotePopulationFinalizationTool",
     "EvolutionStableRolloutAuthorizationTool",
     "EvolutionStableRolloutFinalizationTool",
     "EvolutionRevalidationRollbackExecutionTool",
