@@ -253,12 +253,14 @@
   runtime chain，仍不计算长期窗口或 promoted Outcome。
 - [EVO-05.7b2a1 Stable Promotion Runtime Admission Signed Delivery](EVO-05-7b2a1-stable-promotion-runtime-admission-signed-delivery.md)：
   已交付；installation 使用 current Population Credential 对完整 Admission 签名，Control Plane 幂等接收并动态撤权；
-  authenticated network transport 尚未完成。
+  authenticated network transport 已由 7b2a2b 完成。
 - [EVO-05.7b2a2a Fenced Runtime Admission Delivery Worker](EVO-05-7b2a2a-fenced-runtime-admission-delivery-worker.md)：
   已交付；durable owner/epoch/lease Worker、Receipt ACK、retry/dead-letter、真实本地 Control Plane adapter 和双通道已闭合。
 - [EVO-05.7b2a2b Authenticated Runtime Admission HTTP Transport](EVO-05-7b2a2b-authenticated-runtime-admission-http-transport.md)：
   已交付；mTLS、member certificate pin、strict HTTP bounds、并发/限流和 Runtime 自动装配已闭合。
-- EVO-05.7 后续：7b3a observation chain cursor、7b3 long-term assessment、7b4 promoted/superseded ledger 与 policy learning。
+- [EVO-05.7b3a Stable Promotion Observation Chain Cursor](EVO-05-7b3a-stable-promotion-observation-chain-cursor.md)：
+  已交付；从 acknowledged Admission 和 installation 本地 HAR ledger 建立逐 sample 可恢复 cursor，保持远端与长期 authority 为 false。
+- EVO-05.7 后续：7b3b signed revision delivery、7b3c Population long-term assessment、7b4 promoted/superseded ledger 与 policy learning。
 
 ## 验收标准
 

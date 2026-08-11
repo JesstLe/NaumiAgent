@@ -1129,6 +1129,16 @@ if TYPE_CHECKING:
         EvolutionStablePopulationCompletionView,
         render_stable_population_completion,
     )
+    from naumi_agent.evolution.stable_promotion_observation_chain_cursors import (
+        EVOLUTION_STABLE_PROMOTION_OBSERVATION_CHAIN_CURSOR_POLICY,
+        EvolutionStablePromotionObservationChainCursor,
+        EvolutionStablePromotionObservationChainCursorError,
+        EvolutionStablePromotionObservationChainCursorService,
+        EvolutionStablePromotionObservationChainCursorStore,
+        EvolutionStablePromotionObservationChainCursorView,
+        EvolutionStablePromotionObservationChainRevision,
+        render_stable_promotion_observation_chain_cursor,
+    )
     from naumi_agent.evolution.stable_promotion_observation_contracts import (
         EVOLUTION_STABLE_PROMOTION_OBSERVATION_CONTRACT_POLICY,
         EvolutionStablePromotionObservationContract,
@@ -1866,6 +1876,14 @@ __all__ = [
     "EvolutionStablePromotionObservationContractStore",
     "EvolutionStablePromotionObservationContractView",
     "render_stable_promotion_observation_contract",
+    "EVOLUTION_STABLE_PROMOTION_OBSERVATION_CHAIN_CURSOR_POLICY",
+    "EvolutionStablePromotionObservationChainCursor",
+    "EvolutionStablePromotionObservationChainCursorError",
+    "EvolutionStablePromotionObservationChainCursorService",
+    "EvolutionStablePromotionObservationChainCursorStore",
+    "EvolutionStablePromotionObservationChainCursorView",
+    "EvolutionStablePromotionObservationChainRevision",
+    "render_stable_promotion_observation_chain_cursor",
     "EVOLUTION_STABLE_PROMOTION_RUNTIME_OBSERVATION_ADMISSION_POLICY",
     "EvolutionStablePromotionRuntimeObservationAdmission",
     "EvolutionStablePromotionRuntimeObservationAdmissionError",
@@ -3296,6 +3314,16 @@ def __getattr__(name: str) -> object:
         "EvolutionStablePromotionObservationContractView",
         "render_stable_promotion_observation_contract",
     }
+    stable_promotion_observation_chain_cursor_exports = {
+        "EVOLUTION_STABLE_PROMOTION_OBSERVATION_CHAIN_CURSOR_POLICY",
+        "EvolutionStablePromotionObservationChainCursor",
+        "EvolutionStablePromotionObservationChainCursorError",
+        "EvolutionStablePromotionObservationChainCursorService",
+        "EvolutionStablePromotionObservationChainCursorStore",
+        "EvolutionStablePromotionObservationChainCursorView",
+        "EvolutionStablePromotionObservationChainRevision",
+        "render_stable_promotion_observation_chain_cursor",
+    }
     stable_promotion_runtime_observation_admission_exports = {
         "EVOLUTION_STABLE_PROMOTION_RUNTIME_OBSERVATION_ADMISSION_POLICY",
         "EvolutionStablePromotionRuntimeObservationAdmission",
@@ -4128,6 +4156,8 @@ def __getattr__(name: str) -> object:
         module_name = "stable_remote_population_finalizations"
     elif name in stable_promotion_observation_contract_exports:
         module_name = "stable_promotion_observation_contracts"
+    elif name in stable_promotion_observation_chain_cursor_exports:
+        module_name = "stable_promotion_observation_chain_cursors"
     elif name in stable_promotion_runtime_observation_admission_exports:
         module_name = "stable_promotion_runtime_observation_admissions"
     elif name in stable_promotion_runtime_admission_delivery_exports:

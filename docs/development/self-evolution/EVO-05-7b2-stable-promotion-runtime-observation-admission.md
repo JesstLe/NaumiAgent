@@ -82,7 +82,8 @@ View 分项暴露 Contract、Population member、active Deployment、Runtime Bin
 installation 签名、durable outbound、Control Plane current Credential/Contract/Finalization 复验与幂等 Receipt；它没有
 冒充已完成网络投递。[EVO-05.7b2a2a](EVO-05-7b2a2a-fenced-runtime-admission-delivery-worker.md) 已完成 durable
 fenced Worker 与真实本地 Control Plane adapter；
-[EVO-05.7b2a2b](EVO-05-7b2a2b-authenticated-runtime-admission-http-transport.md) 又完成 mTLS HTTP 与配置自动装配。下一步由
-`EVO-05.7b3a` 按 7b1 冻结规则建立可恢复 chain cursor，再继续 Population aggregation：
+[EVO-05.7b2a2b](EVO-05-7b2a2b-authenticated-runtime-admission-http-transport.md) 又完成 mTLS HTTP 与配置自动装配；
+[EVO-05.7b3a](EVO-05-7b3a-stable-promotion-observation-chain-cursor.md) 已按 7b1/HAR-10.2j 建立 installation 本地可恢复
+chain cursor。下一步 7b3b 先签名交付 revision，再继续 Population aggregation：
 分页读取每个 admitted chain，形成
 `insufficient / passing / breached / censored` 的 Population 长期评估。任何单 member Admission 都不得冒充完整稳定推广。

@@ -106,5 +106,7 @@ budget、dead-letter、shutdown drain 或跨进程 Worker supervision。`receive
 后续 [EVO-05.7b2a2a](EVO-05-7b2a2a-fenced-runtime-admission-delivery-worker.md) 已交付 transport Protocol、本地真实
 Control Plane adapter、owner/epoch/lease fencing、Receipt ACK、指数退避、dead-letter 与 Engine lifecycle。下一独立切片为
 [EVO-05.7b2a2b](EVO-05-7b2a2b-authenticated-runtime-admission-http-transport.md) 已补齐 mTLS HTTP、证书 pin、严格
-网络边界和配置自动装配。下一步进入 `EVO-05.7b3a` 的 Population observation chain cursor；任何单个 signed
-Admission 或 Delivery Receipt 都不得被投影为 fleet sustained health 或 `promoted` Outcome。
+网络边界和配置自动装配；
+[EVO-05.7b3a](EVO-05-7b3a-stable-promotion-observation-chain-cursor.md) 已继续建立 installation 本地 durable cursor。
+下一步是 7b3b signed revision delivery；任何单个 signed Admission、Delivery Receipt 或本地 Cursor 都不得被投影为 fleet
+sustained health 或 `promoted` Outcome。

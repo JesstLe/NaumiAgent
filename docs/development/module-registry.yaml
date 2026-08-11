@@ -79,6 +79,7 @@ modules:
   - {id: EVO-05.7b2a1, status: implemented, path: self-evolution/EVO-05-7b2a1-stable-promotion-runtime-admission-signed-delivery.md, depends_on: [EVO-05.7b2, ARC-07.5c1]}
   - {id: EVO-05.7b2a2a, status: implemented, path: self-evolution/EVO-05-7b2a2a-fenced-runtime-admission-delivery-worker.md, depends_on: [EVO-05.7b2a1, HAR-05.2]}
   - {id: EVO-05.7b2a2b, status: implemented, path: self-evolution/EVO-05-7b2a2b-authenticated-runtime-admission-http-transport.md, depends_on: [EVO-05.7b2a2a, EVO-05.5f5x3i]}
+  - {id: EVO-05.7b3a, status: implemented, path: self-evolution/EVO-05-7b3a-stable-promotion-observation-chain-cursor.md, depends_on: [EVO-05.7b2a2b, HAR-10.2j]}
   - {id: EVO-05.3f2c3b2a, status: implemented, path: self-evolution/EVO-05-3f2c3b2a-authenticated-worker-claim.md, depends_on: [EVO-05.3f2c3b1, ARC-06]}
   - {id: EVO-05.3f2c3b2b1, status: implemented, path: self-evolution/EVO-05-3f2c3b2b1-claim-bound-execution-authorization.md, depends_on: [EVO-05.3f2c3b2a, HAR-08.4f, ARC-04]}
   - {id: EVO-05.3f2c3b2b2, status: implemented, path: self-evolution/EVO-05-3f2c3b2b2-signed-result-h5a-ingestion.md, depends_on: [EVO-05.3f2c3b2b1, HAR-08.4e, EVO-05.3f2c1]}
