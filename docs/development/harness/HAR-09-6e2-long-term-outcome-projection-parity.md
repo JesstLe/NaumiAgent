@@ -110,5 +110,6 @@ revision delivery；[EVO-05.7b3b1](../self-evolution/EVO-05-7b3b1-signed-observa
 [EVO-05.7b3b2a](../self-evolution/EVO-05-7b3b2a-fenced-observation-revision-delivery-worker.md) 已补齐 fenced Worker、自动
 next-batch、Receipt ACK 与 retry/dead-letter；
 [EVO-05.7b3b2b](../self-evolution/EVO-05-7b3b2b-authenticated-observation-revision-http-transport.md) 已补齐 mTLS 网络交付。
-之后才由 7b3c 聚合长期窗口，最后设计
+[EVO-05.7b3c1](../self-evolution/EVO-05-7b3c1-remote-installation-observation-assessment.md) 已形成单安装四态长期结论；之后才由
+7b3c2 聚合 Population 长期窗口，最后设计
 promoted/superseded ledger；不得复用本 recovery Outcome 越权推广。

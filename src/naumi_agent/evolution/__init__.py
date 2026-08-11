@@ -1129,6 +1129,18 @@ if TYPE_CHECKING:
         EvolutionStablePopulationCompletionView,
         render_stable_population_completion,
     )
+    from naumi_agent.evolution.stable_promotion_installation_observation_assessments import (
+        EVOLUTION_STABLE_PROMOTION_INSTALLATION_OBSERVATION_ASSESSMENT_POLICY,
+        EvolutionStablePromotionInstallationObservationAssessment,
+        EvolutionStablePromotionInstallationObservationAssessmentError,
+        EvolutionStablePromotionInstallationObservationAssessmentService,
+        EvolutionStablePromotionInstallationObservationAssessmentStore,
+        EvolutionStablePromotionInstallationObservationAssessmentView,
+        EvolutionStablePromotionInstallationObservationBatch,
+        EvolutionStablePromotionInstallationObservationStatus,
+        build_stable_promotion_installation_observation_assessment,
+        render_stable_promotion_installation_observation_assessment,
+    )
     from naumi_agent.evolution.stable_promotion_observation_chain_cursors import (
         EVOLUTION_STABLE_PROMOTION_OBSERVATION_CHAIN_CURSOR_POLICY,
         EvolutionStablePromotionObservationChainCursor,
@@ -1918,6 +1930,16 @@ __all__ = [
     "EvolutionStablePromotionObservationContractStore",
     "EvolutionStablePromotionObservationContractView",
     "render_stable_promotion_observation_contract",
+    "EVOLUTION_STABLE_PROMOTION_INSTALLATION_OBSERVATION_ASSESSMENT_POLICY",
+    "EvolutionStablePromotionInstallationObservationAssessment",
+    "EvolutionStablePromotionInstallationObservationAssessmentError",
+    "EvolutionStablePromotionInstallationObservationAssessmentService",
+    "EvolutionStablePromotionInstallationObservationAssessmentStore",
+    "EvolutionStablePromotionInstallationObservationAssessmentView",
+    "EvolutionStablePromotionInstallationObservationBatch",
+    "EvolutionStablePromotionInstallationObservationStatus",
+    "build_stable_promotion_installation_observation_assessment",
+    "render_stable_promotion_installation_observation_assessment",
     "EVOLUTION_STABLE_PROMOTION_OBSERVATION_CHAIN_CURSOR_POLICY",
     "EvolutionStablePromotionObservationChainCursor",
     "EvolutionStablePromotionObservationChainCursorError",
@@ -3392,6 +3414,18 @@ def __getattr__(name: str) -> object:
         "EvolutionStablePromotionObservationContractView",
         "render_stable_promotion_observation_contract",
     }
+    stable_promotion_installation_observation_assessment_exports = {
+        "EVOLUTION_STABLE_PROMOTION_INSTALLATION_OBSERVATION_ASSESSMENT_POLICY",
+        "EvolutionStablePromotionInstallationObservationAssessment",
+        "EvolutionStablePromotionInstallationObservationAssessmentError",
+        "EvolutionStablePromotionInstallationObservationAssessmentService",
+        "EvolutionStablePromotionInstallationObservationAssessmentStore",
+        "EvolutionStablePromotionInstallationObservationAssessmentView",
+        "EvolutionStablePromotionInstallationObservationBatch",
+        "EvolutionStablePromotionInstallationObservationStatus",
+        "build_stable_promotion_installation_observation_assessment",
+        "render_stable_promotion_installation_observation_assessment",
+    }
     stable_promotion_observation_chain_cursor_exports = {
         "EVOLUTION_STABLE_PROMOTION_OBSERVATION_CHAIN_CURSOR_POLICY",
         "EvolutionStablePromotionObservationChainCursor",
@@ -4276,6 +4310,8 @@ def __getattr__(name: str) -> object:
         module_name = "stable_remote_population_finalizations"
     elif name in stable_promotion_observation_contract_exports:
         module_name = "stable_promotion_observation_contracts"
+    elif name in stable_promotion_installation_observation_assessment_exports:
+        module_name = "stable_promotion_installation_observation_assessments"
     elif name in stable_promotion_observation_chain_cursor_exports:
         module_name = "stable_promotion_observation_chain_cursors"
     elif name in stable_promotion_observation_revision_delivery_exports:

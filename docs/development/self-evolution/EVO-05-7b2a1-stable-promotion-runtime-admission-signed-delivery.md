@@ -110,6 +110,7 @@ Control Plane adapter、owner/epoch/lease fencing、Receipt ACK、指数退避�
 [EVO-05.7b3a](EVO-05-7b3a-stable-promotion-observation-chain-cursor.md) 已继续建立 installation 本地 durable cursor。
 随后 [EVO-05.7b3b1](EVO-05-7b3b1-signed-observation-revision-delivery.md) 已完成有界 signed revision batch 与 Control Plane
 顺序验签/Receipt，[EVO-05.7b3b2a](EVO-05-7b3b2a-fenced-observation-revision-delivery-worker.md) 已完成自动 fenced Worker，
-[EVO-05.7b3b2b](EVO-05-7b3b2b-authenticated-observation-revision-http-transport.md) 已完成 mTLS；下一步是 7b3c Population 聚合。
+[EVO-05.7b3b2b](EVO-05-7b3b2b-authenticated-observation-revision-http-transport.md) 已完成 mTLS；
+[EVO-05.7b3c1](EVO-05-7b3c1-remote-installation-observation-assessment.md) 已形成单安装长期结论，下一步是 7b3c2 Population 聚合。
 任何单个 signed Admission、Delivery Receipt 或本地 Cursor 都不得被投影为 fleet
 sustained health 或 `promoted` Outcome。

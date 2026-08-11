@@ -126,6 +126,7 @@ Control Plane server 使用 `StablePromotionObservationRevisionHTTPServerPolicy`
 - dead-letter 的人工签名 requeue/abandon 和 retention 尚未实现；
 - 当前真实 loopback 只证明本机平台，Linux/Windows 仍需要发布 CI matrix 证据。
 
-至此 7b3a Cursor、7b3b1 signed batch/Receipt、7b3b2a fenced Worker 和 7b3b2b mTLS 已形成跨安装交付闭环。下一独立切片
-`EVO-05.7b3c Population Long-term Observation Assessment` 只能读取 Control Plane 已验签 revision ledger，按 7b1 Contract 对安装覆盖、
-时间窗口和缺失样本进行聚合。只有 7b3c 完整 Population aggregation 达标，才能进入 7b4 promoted/superseded ledger。
+至此 7b3a Cursor、7b3b1 signed batch/Receipt、7b3b2a fenced Worker 和 7b3b2b mTLS 已形成跨安装交付闭环。
+[EVO-05.7b3c1](EVO-05-7b3c1-remote-installation-observation-assessment.md) 已读取 Control Plane 完整已验签 ledger，并按 7b1
+Contract 形成单 installation 四态结论。下一独立切片 `EVO-05.7b3c2 Population Observation Aggregation` 才能冻结 denominator、
+聚合 member coverage 和缺失成员。只有完整 Population aggregation 达标，才能进入 7b4 promoted/superseded ledger。

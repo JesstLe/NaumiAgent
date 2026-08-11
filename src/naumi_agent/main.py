@@ -2982,6 +2982,7 @@ def _print_help() -> None:
             "stable-promotion-admit-runtime|"
             "stable-promotion-observation-chain|"
             "stable-promotion-observation-revisions|"
+            "stable-promotion-installation-observation|"
             "stable-promotion-admission-delivery|"
             "stable-rollout-authorization|"
             "stable-rollout-finalization|"
@@ -4257,6 +4258,25 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "<admission-id>、inspect-dispatch <admission|submission-id>、"
                 "run-worker 或 inspect-worker。"
             )
+        if action == "stable-promotion-installation-observation":
+            if len(parts) != 3 or parts[1] not in {"assess", "inspect"}:
+                raise ValueError(
+                    "stable-promotion-installation-observation 需要 assess|inspect "
+                    "和 Runtime Admission ID。"
+                )
+            await _run_tool_slash_command(
+                engine,
+                slash_command="/evolution",
+                tool_name=(
+                    "evolution_stable_promotion_installation_observation_assessment"
+                ),
+                parse_args=lambda _arg: {
+                    "action": parts[1],
+                    "admission_id": parts[2],
+                },
+                arg="",
+            )
+            return
         if action == "stable-promotion-admission-delivery":
             if len(parts) == 3 and parts[1] in {
                 "prepare",
@@ -4691,6 +4711,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "stable-promotion-admit-runtime、"
                 "stable-promotion-observation-chain、"
                 "stable-promotion-observation-revisions、"
+                "stable-promotion-installation-observation、"
                 "stable-promotion-admission-delivery、"
                 "stable-rollout-authorization、"
                 "stable-rollout-finalization、"
@@ -4933,6 +4954,8 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "<runtime-admission-id> [after-sequence]；export <submission-id>；"
             "receive <payload-base64>；inspect <receipt-id>；queue <admission-id>；"
             "inspect-dispatch <admission|submission-id>；run-worker；inspect-worker；"
+            "/evolution stable-promotion-installation-observation assess|inspect "
+            "<runtime-admission-id>；"
             "/evolution stable-promotion-admission-delivery prepare|export|inspect|"
             "queue|inspect-dispatch <runtime-admission-id>；"
             "receive <submission-base64>；run-worker；inspect-worker；"
