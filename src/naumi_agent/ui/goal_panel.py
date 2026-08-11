@@ -709,6 +709,12 @@ def _render_goal_detail(item: dict[str, Any]) -> list[str]:
     ]
     if item["note"]:
         lines.append(f"- 说明：{item['note']}")
+    if item["status"] == "active":
+        lines.append("- 可用操作：`/goal pause`（New UI：`m`）")
+    elif item["status"] == "paused":
+        lines.append("- 可用操作：`/goal resume`（New UI：`m`）")
+    else:
+        lines.append("- 可逆操作：当前状态不可用")
     pursuit = item["pursuit"]
     if pursuit is None:
         if item["pursuit_link_status"] == "missing":

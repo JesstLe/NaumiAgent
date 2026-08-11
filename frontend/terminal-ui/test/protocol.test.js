@@ -691,6 +691,7 @@ test("protocol contract drives client and server event validation", () => {
       "doctor_live_probe",
       "doctor_trace_index",
       "evolution_evaluation_lane",
+      "goal_lifecycle_actions",
       "goal_snapshot",
       "heartbeat",
       "pursuit_recovery_actions",
@@ -717,6 +718,8 @@ test("protocol contract drives client and server event validation", () => {
   assert(PROTOCOL_CONTRACT.client_events.includes("evolution/evaluation-lane/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("pursuit/recovery/resume"));
   assert(PROTOCOL_CONTRACT.server_events.includes("pursuit/recovery/action_result"));
+  assert(PROTOCOL_CONTRACT.client_events.includes("goal/lifecycle/update"));
+  assert(PROTOCOL_CONTRACT.server_events.includes("goal/lifecycle/action_result"));
   assert(PROTOCOL_CONTRACT.client_events.includes("inspector/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("agents/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("agents/stop"));
@@ -812,6 +815,14 @@ test("event capability registry governs typed feature events", () => {
     "evolution_evaluation_lane",
   );
   assert.equal(
+    requiredEventCapability("client", "goal/lifecycle/update"),
+    "goal_lifecycle_actions",
+  );
+  assert.equal(
+    requiredEventCapability("server", "goal/lifecycle/action_result"),
+    "goal_lifecycle_actions",
+  );
+  assert.equal(
     requiredEventCapability("client", "doctor/export"),
     "doctor_export",
   );
@@ -888,6 +899,7 @@ test("hello payload is generated from the embedded negotiation contract", () => 
       "doctor_live_probe",
       "doctor_trace_index",
       "evolution_evaluation_lane",
+      "goal_lifecycle_actions",
       "goal_snapshot",
       "heartbeat",
       "pursuit_recovery_actions",
@@ -2328,6 +2340,53 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
       },
     }),
     /长度/,
+  );
+});
+
+test("Goal lifecycle action result is strict and authority-bound", () => {
+  const normalized = normalizeServerRecord({
+    type: "goal/lifecycle/action_result",
+    request_id: "goal-action-1",
+    payload: {
+      schema_version: 1,
+      goal_id: "goal-1",
+      action: "pause",
+      status: "completed",
+      code: "goal_paused",
+      message: "Goal 已暂停。",
+      goal_status: "paused",
+      private_note: "drop",
+    },
+  });
+
+  assert.deepEqual(normalized.payload, {
+    schema_version: 1,
+    goal_id: "goal-1",
+    action: "pause",
+    status: "completed",
+    code: "goal_paused",
+    message: "Goal 已暂停。",
+    goal_status: "paused",
+  });
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "goal/lifecycle/action_result",
+      payload: {
+        ...normalized.payload,
+        goal_status: "active",
+      },
+    }),
+    /不一致/,
+  );
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "goal/lifecycle/action_result",
+      payload: {
+        ...normalized.payload,
+        action: "complete",
+      },
+    }),
+    /action/,
   );
 });
 

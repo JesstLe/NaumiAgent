@@ -881,6 +881,9 @@ function normalizeServerPayload(type, payload) {
   if (type === "workbench/proposal/action_result") {
     return normalizeWorkbenchProposalActionResult(payload);
   }
+  if (type === "goal/lifecycle/action_result") {
+    return normalizeGoalLifecycleActionResult(payload);
+  }
   if (type === "pursuit/recovery/action_result") {
     return normalizePursuitRecoveryActionResult(payload);
   }
@@ -2460,6 +2463,45 @@ function normalizePursuitRecoveryActionResult(payload) {
     resume_action: payload.resume_action == null
       ? null
       : normalizePursuitRecoveryResumeAction(payload.resume_action, runId),
+  };
+}
+
+function normalizeGoalLifecycleActionResult(payload) {
+  if (Number(payload.schema_version) !== 1) {
+    throw new Error(`goal/lifecycle/action_result schema_version 不兼容: ${payload.schema_version}`);
+  }
+  const goalId = harnessText(payload.goal_id, "goal/lifecycle/action_result goal_id");
+  validateGoalId(goalId, "goal/lifecycle/action_result goal_id");
+  const action = harnessChoice(
+    payload.action,
+    "goal/lifecycle/action_result action",
+    new Set(["pause", "resume"]),
+  );
+  const status = harnessChoice(
+    payload.status,
+    "goal/lifecycle/action_result status",
+    new Set(["completed", "blocked", "conflict", "not_found", "error"]),
+  );
+  const code = harnessText(payload.code, "goal/lifecycle/action_result code");
+  if (!/^[a-z][a-z0-9_]{0,63}$/.test(code)) {
+    throw new Error("goal/lifecycle/action_result code 无效");
+  }
+  const goalStatus = String(payload.goal_status || "");
+  if (!["", "active", "paused", "blocked", "completed", "cancelled"].includes(goalStatus)) {
+    throw new Error("goal/lifecycle/action_result goal_status 无效");
+  }
+  const expected = action === "pause" ? "paused" : "active";
+  if (status === "completed" && goalStatus !== expected) {
+    throw new Error("goal/lifecycle/action_result 完成状态与目标状态不一致");
+  }
+  return {
+    schema_version: 1,
+    goal_id: goalId,
+    action,
+    status,
+    code,
+    message: workbenchText(payload.message, "goal/lifecycle/action_result message", 4_000),
+    goal_status: goalStatus,
   };
 }
 

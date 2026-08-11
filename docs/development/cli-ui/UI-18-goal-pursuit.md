@@ -13,8 +13,10 @@
 - UI-18.2 Goal page（partial）：UI-18.2a 已实现稳定历史 Goal 选择、紧凑目录、New UI 键盘导航、
   TUI/Agent Tool 同源详情，以及当前快照内全部有界 wait/evidence 渲染；见
   [UI-18.2a](UI-18-2a-goal-detail-navigation.md)。Goal 历史与完整 evidence 时间线 cursor 仍未完成。
-- UI-18.3 Actions：create/pause/resume/block/complete/cancel 与 pursue/resume；全部调用现有 ToolExecution
-  权威路径，写操作展示风险和结果，不在前端改状态。
+- UI-18.3 Actions（partial）：UI-18.3a 已实现所选 Goal 的 pause/resume typed action，经现有
+  `goal_update` ToolExecution 与 Permission 权限链执行，并以 GoalStore 重读结果为权威；New UI 使用
+  `m`，TUI/Agent Tool 显示同源 `/goal pause|resume` fallback，见
+  [UI-18.3a](UI-18-3a-goal-pause-resume-actions.md)。create/block/complete/cancel 仍待后续独立切片。
 - UI-18.4 Interaction（partial）：HAR-10.6b 已让 New UI 的结构化选项、自定义输入、超时与 takeover
   重放进入 durable authority；UI-18.4b 已让 Textual TUI 复用相同 create/answer/expire/recover adapter 与
   Pursuit checkpoint callback；UI-18.4c 已把有界 interaction ledger、显式 cancel、New UI 实时关闭与
@@ -82,7 +84,7 @@ ARC-01.4b2e 是该切片的必要前置：Composition Root 已保证 Bridge/TUI/
 - 新 UI 页面与 TUI fallback 读取同一 typed contract；旧客户端收到明确文本降级；
 - 页面重开不恢复上次本地侧栏/输入草稿，只有显式 resume 才恢复持久运行事实；
 - 只读 snapshot 不启动模型、不执行工具、不修改 Goal/Pursuit 数据库；
-- UI-18.3 前所有按钮均不可伪装为可用动作；UI-18.5 前不展示虚假 heartbeat/lease 健康。
+- UI-18.3 未实现的动作不可伪装为可用按钮；UI-18.5 前不展示虚假 heartbeat/lease 健康。
 
 ## 依赖与完成定义
 
@@ -92,10 +94,10 @@ implemented。
 
 ## 当前不足
 
-UI-18.1/18.2a/18.4a/18.4b/18.4c/18.4d1/18.4d2/18.4d3/18.5a/18.5b1 已提供类型化 Goal 快照、历史 Goal
+UI-18.1/18.2a/18.3a/18.4a/18.4b/18.4c/18.4d1/18.4d2/18.4d3/18.5a/18.5b1 已提供类型化 Goal 快照、历史 Goal
 选择与有界详情、New UI/TUI durable
 interaction、显式取消、共享 interaction 详情、宿主绑定手动 takeover、交互账本分页/筛选和只读恢复事实，
-公平交互优先级、跨页 pending 恢复，以及受控 resume 动作，但不包含 Goal/Pursuit 其余写按钮、可展开完整证据时间线、
+公平交互优先级、跨页 pending 恢复、Goal pause/resume，以及受控 Pursuit resume 动作，但不包含 Goal 其余写按钮、可展开完整证据时间线、
 takeover/cleanup 或恢复历史 cursor；这些分别属于 UI-18.2/18.3/后续 Interaction UX/后续 Recovery UX。
 Pursuit wait/evidence 当前会在所选目标详情中完整显示最近有界集合，但尚无全历史 cursor。页面不会
 自动恢复。UI-18 因此保持 partial。

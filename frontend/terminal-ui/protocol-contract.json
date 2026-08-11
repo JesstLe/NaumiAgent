@@ -3,6 +3,7 @@
   "transport": "jsonl",
   "compatibility": {
     "previous_registry_sha256": [
+      "ea8c8c0d1f6b59485a0dead99e4bcd21b57105b842af03b1ad3a1bea53df6504",
       "4fc5c46ebf049471a125d4c98d64b82439d432a98c71553a2bbc966d05f658b0",
       "96a5cfac756bbe47f4e0224b0e77d626b25189ac6c3d9aaa72a54d8f879eb70f",
       "291a99a4d8e4586673bfd75ed93b23561007929fa3d64f7a92ed8d440359a058",
@@ -21,6 +22,7 @@
     "capabilities": [
       "agent_recovery_actions",
       "evolution_evaluation_lane",
+      "goal_lifecycle_actions",
       "doctor_export",
       "doctor_live_probe",
       "doctor_trace_index",
@@ -61,6 +63,10 @@
       "client_events": ["evolution/evaluation-lane/request"],
       "server_events": ["evolution/evaluation-lane"]
     },
+    "goal_lifecycle_actions": {
+      "client_events": ["goal/lifecycle/update"],
+      "server_events": ["goal/lifecycle/action_result"]
+    },
     "pursuit_recovery_actions": {
       "client_events": ["pursuit/recovery/resume", "pursuit/terminal-outbox/run_now", "pursuit/terminal-outbox/dead-letter/requeue", "pursuit/terminal-outbox/dead-letter/abandon"],
       "server_events": ["pursuit/recovery/action_result", "pursuit/terminal-outbox/action_result", "pursuit/terminal-outbox/dead-letter/requeue_result", "pursuit/terminal-outbox/dead-letter/abandon_result"]
@@ -92,6 +98,7 @@
     "workbench/request",
     "workbench/review/request",
     "workbench/proposal/action",
+    "goal/lifecycle/update",
     "pursuit/recovery/resume",
     "pursuit/terminal-outbox/run_now",
     "pursuit/terminal-outbox/dead-letter/requeue",
@@ -176,6 +183,7 @@
     "workbench/event",
     "workbench/review",
     "workbench/proposal/action_result",
+    "goal/lifecycle/action_result",
     "pursuit/recovery/action_result",
     "pursuit/terminal-outbox/action_result",
     "pursuit/terminal-outbox/dead-letter/requeue_result",
@@ -207,6 +215,7 @@
       "workbench/request": {"owner":"workbench","stability":"stable","criticality":"informational","persistence":"never","sensitive_fields":[],"redaction":"none"},
       "workbench/review/request": {"owner":"workbench","stability":"experimental","criticality":"informational","persistence":"never","sensitive_fields":[],"redaction":"none"},
       "workbench/proposal/action": {"owner":"workbench","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":["payload.decision_note"],"redaction":"required"},
+      "goal/lifecycle/update": {"owner":"runtime","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":[],"redaction":"none"},
       "pursuit/recovery/resume": {"owner":"runtime","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":[],"redaction":"none"},
       "pursuit/terminal-outbox/run_now": {"owner":"runtime","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":[],"redaction":"none"},
       "pursuit/terminal-outbox/dead-letter/requeue": {"owner":"runtime","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":[],"redaction":"none"},
@@ -290,6 +299,7 @@
       "workbench/snapshot": {"owner":"workbench","stability":"stable","criticality":"informational","persistence":"snapshot","sensitive_fields":["payload.tasks","payload.events"],"redaction":"required"},
       "workbench/review": {"owner":"workbench","stability":"experimental","criticality":"informational","persistence":"snapshot","sensitive_fields":["payload.evidence.diff_hunks","payload.evidence.agent_notes","payload.evidence.events"],"redaction":"required"},
       "workbench/proposal/action_result": {"owner":"workbench","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":["payload.message","payload.proposal"],"redaction":"required"},
+      "goal/lifecycle/action_result": {"owner":"runtime","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":["payload.message"],"redaction":"required"},
       "pursuit/recovery/action_result": {"owner":"runtime","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":["payload.message"],"redaction":"required"},
       "pursuit/terminal-outbox/action_result": {"owner":"runtime","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":["payload.message"],"redaction":"required"},
       "pursuit/terminal-outbox/dead-letter/requeue_result": {"owner":"runtime","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":["payload.message"],"redaction":"required"},

@@ -28,6 +28,7 @@ PROTOCOL_CAPABILITIES = (
     "doctor_live_probe",
     "doctor_trace_index",
     "evolution_evaluation_lane",
+    "goal_lifecycle_actions",
     "goal_snapshot",
     "heartbeat",
     "pursuit_recovery_actions",
@@ -76,6 +77,7 @@ class ClientEventType(StrEnum):
     WORKBENCH_REQUEST = "workbench/request"
     WORKBENCH_REVIEW_REQUEST = "workbench/review/request"
     WORKBENCH_PROPOSAL_ACTION = "workbench/proposal/action"
+    GOAL_LIFECYCLE_UPDATE = "goal/lifecycle/update"
     PURSUIT_RECOVERY_RESUME = "pursuit/recovery/resume"
     PURSUIT_TERMINAL_OUTBOX_RUN_NOW = "pursuit/terminal-outbox/run_now"
     PURSUIT_TERMINAL_DEAD_LETTER_REQUEUE = (
@@ -175,6 +177,7 @@ class ServerEventType(StrEnum):
     WORKBENCH_EVENT = "workbench/event"
     WORKBENCH_REVIEW = "workbench/review"
     WORKBENCH_PROPOSAL_ACTION_RESULT = "workbench/proposal/action_result"
+    GOAL_LIFECYCLE_ACTION_RESULT = "goal/lifecycle/action_result"
     PURSUIT_RECOVERY_ACTION_RESULT = "pursuit/recovery/action_result"
     PURSUIT_TERMINAL_OUTBOX_ACTION_RESULT = "pursuit/terminal-outbox/action_result"
     PURSUIT_TERMINAL_DEAD_LETTER_REQUEUE_RESULT = (
@@ -663,6 +666,18 @@ def _normalize_client_payload(
         if action == "merge":
             normalized["merge_into_id"] = merge_into_id
         return normalized
+
+    if event_type == ClientEventType.GOAL_LIFECYCLE_UPDATE:
+        unknown = set(payload) - {"goal_id", "action"}
+        if unknown:
+            raise ValueError("Goal 生命周期 payload 包含未知字段。")
+        goal_id = str(payload.get("goal_id") or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", goal_id):
+            raise ValueError("Goal 生命周期 goal_id 格式无效。")
+        action = str(payload.get("action") or "").strip().lower()
+        if action not in {"pause", "resume"}:
+            raise ValueError("Goal 生命周期 action 仅支持 pause 或 resume。")
+        return {"goal_id": goal_id, "action": action}
 
     if event_type == ClientEventType.PURSUIT_RECOVERY_RESUME:
         return {

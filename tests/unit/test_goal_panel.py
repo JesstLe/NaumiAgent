@@ -139,6 +139,7 @@ def test_snapshot_preserves_stable_link_and_bounds_public_details(tmp_path) -> N
     )
     assert "最近裁判" in rendered
     assert "waiting_for_interaction" in rendered
+    assert "`/goal pause`（New UI：`m`）" in rendered
 
 
 @pytest.mark.asyncio

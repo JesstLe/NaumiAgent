@@ -90,6 +90,10 @@ UI-18.2a 已把 Goal 页面从历史目标平铺升级为稳定目录选择：Ne
 Python snapshot。所选详情显示当前快照内全部有界 wait/evidence，不再由 Node 二次裁成最后 5 条；
 Goal 历史与完整 evidence 时间线 cursor 仍属于 UI-18.2 后续切片。
 
+UI-18.3a 已把首个可逆 Goal 写动作接入共享 ToolExecution：New UI 对所选 active/paused Goal 使用
+`m` 暂停/恢复，结果以 GoalStore 重读为准；Textual TUI 与 Agent Tool 继续使用同源 `/goal pause`、
+`/goal resume`，旧 Bridge 明确降级到命令通道。create/block/complete/cancel 仍属于 UI-18.3 后续切片。
+
 ## 未来顺序
 
 UI-10/11/12/13 可按顺序独立交付；UI-14/15/16 可并行；UI-18 按 Goal/Pursuit 后端依赖分段推进；

@@ -18,9 +18,18 @@ export function renderGoalPursuitPage(view, width, height) {
     color(ANSI.cyan, "Goal / Pursuit"),
     color(
       ANSI.dim,
-      "r 刷新 · ←/→ 选择 Goal · x 恢复当前 Pursuit · o 恢复终态队列 · d 选择死信 · u 重入队 · a 原因 · z 放弃 · ↑/↓ 滚动 · j/k 选择交互 · Enter 详情 · f 筛选 · n/p 翻页 · Esc 返回",
+      "r 刷新 · ←/→ 选择 Goal · m 暂停/恢复 · x 恢复当前 Pursuit · o 恢复终态队列 · d 选择死信 · u 重入队 · a 原因 · z 放弃 · ↑/↓ 滚动 · j/k 选择交互 · Enter 详情 · f 筛选 · n/p 翻页 · Esc 返回",
     ),
   ];
+  if (value.lifecycleActionPending) {
+    logical.push(color(ANSI.yellow, "正在通过 ToolExecution 校验权限并更新 Goal…"));
+  }
+  if (value.lifecycleActionNotice) {
+    logical.push(color(ANSI.green, compactText(value.lifecycleActionNotice, 4_000)));
+  }
+  if (value.lifecycleActionError) {
+    logical.push(color(ANSI.red, compactText(value.lifecycleActionError, 4_000)));
+  }
   if (value.recoveryActionPending) {
     logical.push(color(ANSI.yellow, "正在通过 ToolExecution 校验恢复权限与持久边界…"));
   }
@@ -215,6 +224,13 @@ function renderGoal(goal, currentGoalId) {
     ),
   ];
   if (goal.note) lines.push(color(ANSI.dim, `说明 · ${compactText(goal.note, 2_000)}`));
+  if (goal.status === "active") {
+    lines.push(color(ANSI.yellow, "可用操作 · m 暂停 · fallback /goal pause"));
+  } else if (goal.status === "paused") {
+    lines.push(color(ANSI.green, "可用操作 · m 恢复 · fallback /goal resume"));
+  } else {
+    lines.push(color(ANSI.dim, "页内可逆操作 · 当前状态不可用"));
+  }
   if (goal.pursuit) {
     lines.push(...renderPursuit(goal.pursuit));
   } else if (goal.pursuit_link_status === "missing") {
