@@ -9,6 +9,9 @@ from naumi_agent.daemons.agent_worker_supervisor import AgentWorkerSupervisorFac
 from naumi_agent.evolution.stable_population_candidate_previews import (
     EvolutionStableStageCompletionInspectionPort,
 )
+from naumi_agent.evolution.stable_promotion_observation_revision_delivery_worker import (
+    EvolutionStablePromotionObservationRevisionControlPlaneTransport,
+)
 from naumi_agent.evolution.stable_promotion_runtime_admission_delivery_worker import (
     EvolutionStablePromotionRuntimeAdmissionControlPlaneTransport,
 )
@@ -43,6 +46,9 @@ class RuntimeServices:
     ) = None
     stable_promotion_runtime_admission_transport: (
         EvolutionStablePromotionRuntimeAdmissionControlPlaneTransport | None
+    ) = None
+    stable_promotion_observation_revision_transport: (
+        EvolutionStablePromotionObservationRevisionControlPlaneTransport | None
     ) = None
     stable_remote_finalization_result_transport: (
         EvolutionStableRemoteFinalizationResultTransport | None
@@ -117,6 +123,17 @@ class RuntimeServices:
                 "Control Plane 传输契约。"
             )
         if (
+            self.stable_promotion_observation_revision_transport is not None
+            and not isinstance(
+                self.stable_promotion_observation_revision_transport,
+                EvolutionStablePromotionObservationRevisionControlPlaneTransport,
+            )
+        ):
+            raise TypeError(
+                "stable_promotion_observation_revision_transport 必须实现认证 "
+                "Control Plane 传输契约。"
+            )
+        if (
             self.stable_remote_finalization_result_transport is not None
             and not isinstance(
                 self.stable_remote_finalization_result_transport,
@@ -155,6 +172,9 @@ class RuntimeServiceOverrides:
     ) = None
     stable_promotion_runtime_admission_transport: (
         EvolutionStablePromotionRuntimeAdmissionControlPlaneTransport | None
+    ) = None
+    stable_promotion_observation_revision_transport: (
+        EvolutionStablePromotionObservationRevisionControlPlaneTransport | None
     ) = None
     stable_remote_finalization_result_transport: (
         EvolutionStableRemoteFinalizationResultTransport | None

@@ -126,6 +126,11 @@ class _RuntimeAdmissionTransport:
         raise AssertionError(submission)
 
 
+class _ObservationRevisionTransport:
+    async def submit(self, submission):
+        raise AssertionError(submission)
+
+
 def test_agent_worker_factory_bounds_per_process_capacity(tmp_path) -> None:
     factory = _agent_worker_factory(tmp_path)
 
@@ -178,6 +183,7 @@ def test_composition_builds_service_from_exact_resources_and_copies_policy(
     assert services.agent_worker_supervisor_factory.agent_job_store is (
         resources.agent_job_store
     )
+    assert services.stable_promotion_observation_revision_transport is None
     assert not paths.harness_db_path.exists()
     assert not paths.agent_worker_runtime_dir.exists()
 
@@ -271,6 +277,15 @@ def test_service_override_identity_and_invalid_bundle_fail_closed(tmp_path) -> N
             agent_worker_supervisor_factory=supervisor_factory,
             stable_promotion_runtime_admission_transport=object(),  # type: ignore[arg-type]
         )
+    with pytest.raises(TypeError, match="observation_revision_transport"):
+        RuntimeServices(
+            terminal_runtime_lifecycle_factory=factory,
+            agent_execution_heartbeat_factory=agent_factory,
+            browser_execution_heartbeat_factory=browser_factory,
+            agent_worker_process_factory=agent_worker_factory,
+            agent_worker_supervisor_factory=supervisor_factory,
+            stable_promotion_observation_revision_transport=object(),  # type: ignore[arg-type]
+        )
     with pytest.raises(TypeError, match="RuntimeServiceOverrides"):
         build_runtime_services(
             config,
@@ -288,6 +303,7 @@ def test_root_factory_preserves_service_override_in_engine(tmp_path) -> None:
     supervisor_factory = _agent_worker_supervisor_factory(tmp_path)
     inspector = _StableStageCompletionInspector()
     runtime_admission_transport = _RuntimeAdmissionTransport()
+    observation_revision_transport = _ObservationRevisionTransport()
     engine = create_agent_engine(
         _config(tmp_path),
         service_overrides=RuntimeServiceOverrides(
@@ -299,6 +315,9 @@ def test_root_factory_preserves_service_override_in_engine(tmp_path) -> None:
             stable_stage_completion_inspector=inspector,
             stable_promotion_runtime_admission_transport=(
                 runtime_admission_transport
+            ),
+            stable_promotion_observation_revision_transport=(
+                observation_revision_transport
             ),
         ),
     )
@@ -322,12 +341,32 @@ def test_root_factory_preserves_service_override_in_engine(tmp_path) -> None:
         engine._services.stable_promotion_runtime_admission_transport
         is runtime_admission_transport
     )
+    assert (
+        engine._services.stable_promotion_observation_revision_transport
+        is observation_revision_transport
+    )
     assert engine.evolution_stable_promotion_runtime_admission_delivery_worker is not None
+    assert (
+        engine.evolution_stable_promotion_observation_revision_delivery_worker
+        is not None
+    )
     assert engine.evolution_stable_stage_completion_inspector is inspector
     assert (
         engine.evolution_stable_population_candidate_preview_service
         .stage_completion_inspector
         is inspector
+    )
+
+
+def test_root_factory_does_not_start_revision_worker_without_transport(
+    tmp_path,
+) -> None:
+    engine = create_agent_engine(_config(tmp_path))
+
+    assert engine._services.stable_promotion_observation_revision_transport is None
+    assert (
+        engine.evolution_stable_promotion_observation_revision_delivery_worker
+        is None
     )
 
 

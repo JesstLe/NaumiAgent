@@ -230,6 +230,12 @@ from naumi_agent.evolution.stable_promotion_observation_revision_deliveries impo
     encode_stable_promotion_observation_revision_submission,
     render_stable_promotion_observation_revision_delivery,
 )
+from naumi_agent.evolution.stable_promotion_observation_revision_delivery_worker import (
+    EvolutionStablePromotionObservationRevisionDispatchError,
+    render_stable_promotion_observation_revision_dispatch,
+    render_stable_promotion_observation_revision_worker,
+    render_stable_promotion_observation_revision_worker_pass,
+)
 from naumi_agent.evolution.stable_promotion_runtime_admission_deliveries import (
     EvolutionStablePromotionRuntimeAdmissionDeliveryError,
     decode_stable_promotion_runtime_admission_submission,
@@ -4142,7 +4148,16 @@ class EvolutionStablePromotionObservationRevisionDeliveryTool(Tool):
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["prepare", "export", "receive", "inspect"],
+                    "enum": [
+                        "prepare",
+                        "export",
+                        "receive",
+                        "inspect",
+                        "queue",
+                        "inspect-dispatch",
+                        "run-worker",
+                        "inspect-worker",
+                    ],
                 },
                 "admission_id": {
                     "type": "string",
@@ -4237,10 +4252,53 @@ class EvolutionStablePromotionObservationRevisionDeliveryTool(Tool):
                     receipt=stored[1],
                 )
                 return render_stable_promotion_observation_revision_delivery(result)
-            raise ValueError("action 必须是 prepare、export、receive 或 inspect。")
+            if operation == "queue":
+                if not admission_id:
+                    raise ValueError("queue 需要 Runtime Admission ID。")
+                result = await (
+                    self._engine.enqueue_stable_promotion_observation_revision_delivery(
+                        admission_id
+                    )
+                )
+                return render_stable_promotion_observation_revision_dispatch(result)
+            if operation == "inspect-dispatch":
+                if submission_id:
+                    result = await (
+                        self._engine.evolution_stable_promotion_observation_revision_dispatch_store.get(
+                            submission_id
+                        )
+                    )
+                elif admission_id:
+                    result = await (
+                        self._engine.evolution_stable_promotion_observation_revision_dispatch_store.latest_for_admission(
+                            admission_id
+                        )
+                    )
+                else:
+                    raise ValueError(
+                        "inspect-dispatch 需要 Admission 或 Submission ID。"
+                    )
+                if result is None:
+                    raise ValueError("指定 Observation Revision Dispatch 不存在。")
+                return render_stable_promotion_observation_revision_dispatch(result)
+            if operation == "run-worker":
+                result = await (
+                    self._engine.run_stable_promotion_observation_revision_delivery_once()
+                )
+                return render_stable_promotion_observation_revision_worker_pass(result)
+            if operation == "inspect-worker":
+                result = (
+                    self._engine.stable_promotion_observation_revision_delivery_worker_snapshot()
+                )
+                return render_stable_promotion_observation_revision_worker(result)
+            raise ValueError(
+                "action 必须是 prepare、export、receive、inspect、queue、"
+                "inspect-dispatch、run-worker 或 inspect-worker。"
+            )
         except (
             AttributeError,
             EvolutionStablePromotionObservationRevisionDeliveryError,
+            EvolutionStablePromotionObservationRevisionDispatchError,
             OSError,
             RuntimeError,
             TypeError,

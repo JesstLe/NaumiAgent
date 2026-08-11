@@ -106,5 +106,7 @@ Receipt ACK、重试/dead-letter 和本地真实 adapter；
 传输；[EVO-05.7b3a](../self-evolution/EVO-05-7b3a-stable-promotion-observation-chain-cursor.md) 已建立逐 Admission 的
 installation 本地 durable cursor，但没有把本地 HAR sample 冒充成 Control Plane authority。下一步必须先完成 7b3b signed
 revision delivery；[EVO-05.7b3b1](../self-evolution/EVO-05-7b3b1-signed-observation-revision-delivery.md) 已完成有界签名批次与
-本地真实 Control Plane 顺序验签/Receipt，7b3b2a/2b 仍需补齐自动 worker 与 mTLS。之后才由 7b3c 聚合长期窗口，最后设计
+本地真实 Control Plane 顺序验签/Receipt；
+[EVO-05.7b3b2a](../self-evolution/EVO-05-7b3b2a-fenced-observation-revision-delivery-worker.md) 已补齐 fenced Worker、自动
+next-batch、Receipt ACK 与 retry/dead-letter；7b3b2b mTLS 仍未完成。之后才由 7b3c 聚合长期窗口，最后设计
 promoted/superseded ledger；不得复用本 recovery Outcome 越权推广。

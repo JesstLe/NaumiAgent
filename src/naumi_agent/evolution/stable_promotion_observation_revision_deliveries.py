@@ -1000,6 +1000,14 @@ def render_stable_promotion_observation_revision_delivery(
     ))
 
 
+def stable_promotion_observation_revision_receipt_matches_submission(
+    receipt: EvolutionStablePromotionObservationRevisionDeliveryReceipt,
+    submission: EvolutionStablePromotionObservationRevisionSubmission,
+) -> bool:
+    """Return the strict typed Receipt-to-Submission binding for workers."""
+    return _receipt_matches_submission(_receipt(receipt), _submission(submission))
+
+
 def _build_payload(
     *,
     admission_submission,
@@ -1332,4 +1340,5 @@ __all__ = [
     "decode_stable_promotion_observation_revision_submission",
     "encode_stable_promotion_observation_revision_submission",
     "render_stable_promotion_observation_revision_delivery",
+    "stable_promotion_observation_revision_receipt_matches_submission",
 ]

@@ -128,5 +128,6 @@ Control Plane server 使用 `StablePromotionRuntimeAdmissionHTTPServerPolicy` �
 [EVO-05.7b3a](EVO-05-7b3a-stable-promotion-observation-chain-cursor.md) 已为每个 acknowledged Admission 从 installation
 本地 HAR ledger 建立逐 sample content-addressed、可恢复的 durable cursor。下一步 7b3b 必须把 revision 签名传到 Control Plane；
 [EVO-05.7b3b1](EVO-05-7b3b1-signed-observation-revision-delivery.md) 已完成独立签名域、有界批次和本地真实 Control Plane
-顺序验签/Receipt；7b3b2a/2b 仍须复用本 worker/mTLS 基础设施完成自动跨安装交付。只有 7b3c 完整 Population aggregation
+顺序验签/Receipt，[EVO-05.7b3b2a](EVO-05-7b3b2a-fenced-observation-revision-delivery-worker.md) 已完成自动 fenced Worker；
+7b3b2b 仍须复用本 mTLS 基础设施完成自动跨安装交付。只有 7b3c 完整 Population aggregation
 达标，才能进入 7b4 promoted/superseded ledger。

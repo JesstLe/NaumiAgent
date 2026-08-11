@@ -1160,6 +1160,24 @@ if TYPE_CHECKING:
         decode_stable_promotion_observation_revision_submission,
         encode_stable_promotion_observation_revision_submission,
         render_stable_promotion_observation_revision_delivery,
+        stable_promotion_observation_revision_receipt_matches_submission,
+    )
+    from naumi_agent.evolution.stable_promotion_observation_revision_delivery_worker import (
+        EvolutionStablePromotionObservationRevisionControlPlaneTransport,
+        EvolutionStablePromotionObservationRevisionDeliveryWorker,
+        EvolutionStablePromotionObservationRevisionDispatchError,
+        EvolutionStablePromotionObservationRevisionDispatchEvent,
+        EvolutionStablePromotionObservationRevisionDispatchStore,
+        EvolutionStablePromotionObservationRevisionDispatchView,
+        EvolutionStablePromotionObservationRevisionPassResult,
+        EvolutionStablePromotionObservationRevisionTransportError,
+        EvolutionStablePromotionObservationRevisionWorkerPolicy,
+        EvolutionStablePromotionObservationRevisionWorkerSnapshot,
+        EvolutionStablePromotionObservationRevisionWorkerState,
+        LocalStablePromotionObservationRevisionControlPlaneTransport,
+        render_stable_promotion_observation_revision_dispatch,
+        render_stable_promotion_observation_revision_worker,
+        render_stable_promotion_observation_revision_worker_pass,
     )
     from naumi_agent.evolution.stable_promotion_runtime_admission_deliveries import (
         EVOLUTION_STABLE_PROMOTION_RUNTIME_ADMISSION_DELIVERY_POLICY,
@@ -1908,6 +1926,22 @@ __all__ = [
     "decode_stable_promotion_observation_revision_submission",
     "encode_stable_promotion_observation_revision_submission",
     "render_stable_promotion_observation_revision_delivery",
+    "stable_promotion_observation_revision_receipt_matches_submission",
+    "EvolutionStablePromotionObservationRevisionControlPlaneTransport",
+    "EvolutionStablePromotionObservationRevisionDeliveryWorker",
+    "EvolutionStablePromotionObservationRevisionDispatchError",
+    "EvolutionStablePromotionObservationRevisionDispatchEvent",
+    "EvolutionStablePromotionObservationRevisionDispatchStore",
+    "EvolutionStablePromotionObservationRevisionDispatchView",
+    "EvolutionStablePromotionObservationRevisionPassResult",
+    "EvolutionStablePromotionObservationRevisionTransportError",
+    "EvolutionStablePromotionObservationRevisionWorkerPolicy",
+    "EvolutionStablePromotionObservationRevisionWorkerSnapshot",
+    "EvolutionStablePromotionObservationRevisionWorkerState",
+    "LocalStablePromotionObservationRevisionControlPlaneTransport",
+    "render_stable_promotion_observation_revision_dispatch",
+    "render_stable_promotion_observation_revision_worker",
+    "render_stable_promotion_observation_revision_worker_pass",
     "EVOLUTION_STABLE_PROMOTION_RUNTIME_OBSERVATION_ADMISSION_POLICY",
     "EvolutionStablePromotionRuntimeObservationAdmission",
     "EvolutionStablePromotionRuntimeObservationAdmissionError",
@@ -3360,6 +3394,24 @@ def __getattr__(name: str) -> object:
         "decode_stable_promotion_observation_revision_submission",
         "encode_stable_promotion_observation_revision_submission",
         "render_stable_promotion_observation_revision_delivery",
+        "stable_promotion_observation_revision_receipt_matches_submission",
+    }
+    stable_promotion_observation_revision_worker_exports = {
+        "EvolutionStablePromotionObservationRevisionControlPlaneTransport",
+        "EvolutionStablePromotionObservationRevisionDeliveryWorker",
+        "EvolutionStablePromotionObservationRevisionDispatchError",
+        "EvolutionStablePromotionObservationRevisionDispatchEvent",
+        "EvolutionStablePromotionObservationRevisionDispatchStore",
+        "EvolutionStablePromotionObservationRevisionDispatchView",
+        "EvolutionStablePromotionObservationRevisionPassResult",
+        "EvolutionStablePromotionObservationRevisionTransportError",
+        "EvolutionStablePromotionObservationRevisionWorkerPolicy",
+        "EvolutionStablePromotionObservationRevisionWorkerSnapshot",
+        "EvolutionStablePromotionObservationRevisionWorkerState",
+        "LocalStablePromotionObservationRevisionControlPlaneTransport",
+        "render_stable_promotion_observation_revision_dispatch",
+        "render_stable_promotion_observation_revision_worker",
+        "render_stable_promotion_observation_revision_worker_pass",
     }
     stable_promotion_runtime_observation_admission_exports = {
         "EVOLUTION_STABLE_PROMOTION_RUNTIME_OBSERVATION_ADMISSION_POLICY",
@@ -4197,6 +4249,8 @@ def __getattr__(name: str) -> object:
         module_name = "stable_promotion_observation_chain_cursors"
     elif name in stable_promotion_observation_revision_delivery_exports:
         module_name = "stable_promotion_observation_revision_deliveries"
+    elif name in stable_promotion_observation_revision_worker_exports:
+        module_name = "stable_promotion_observation_revision_delivery_worker"
     elif name in stable_promotion_runtime_observation_admission_exports:
         module_name = "stable_promotion_runtime_observation_admissions"
     elif name in stable_promotion_runtime_admission_delivery_exports:
