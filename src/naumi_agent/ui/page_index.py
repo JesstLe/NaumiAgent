@@ -140,7 +140,6 @@ _PAGE_DEFINITIONS = (
             "outcome",
             "proposal",
             "population",
-            "stable",
             "候选",
             "审查",
             "进化",
