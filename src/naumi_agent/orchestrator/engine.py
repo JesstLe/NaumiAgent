@@ -3448,6 +3448,9 @@ class AgentEngine:
                 outcome_service=(
                     self.evolution_revalidation_rollback_outcome_service
                 ),
+                stable_outcome_service=(
+                    self.evolution_stable_promotion_outcome_service
+                ),
                 candidate_store=self.evolution_candidate_store,
             )
         )

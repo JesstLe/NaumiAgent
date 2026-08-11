@@ -208,6 +208,10 @@
   有效态使用绿色，撤权态使用红色并显示原因。Promoted 不再误用 rollback 面板，也不会开放 Contract、Learning、
   Promotion 或 Execution action。完整契约见
   `../self-evolution/EVO-05-7b4d-stable-promotion-proposal-outcome-projection.md`。
+- EVO-06.1b 已让 `/evolution discover-outcome <stable-promoted-outcome-id>` 在 Agent Tool、New UI 与
+  Textual TUI 中共享同一回注路径，并允许 Reviews 按 `promoted_outcome` 过滤；界面不保存独立副本，
+  每次审查前重验 current promoted authority。完整契约见
+  `../self-evolution/EVO-06-1b-promoted-outcome-opportunity-discovery.md`。
 
 ### UI-10.6b1 已实现：Proposal defer
 

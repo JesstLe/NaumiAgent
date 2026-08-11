@@ -79,14 +79,11 @@ def test_protocol_exposes_typed_harness_receipt_event() -> None:
     assert ServerEventType.HARNESS_RECEIPT == "harness/receipt"
 
 
-def test_evolution_review_accepts_rollback_outcome_filter() -> None:
+@pytest.mark.parametrize("source_kind", ["rollback_outcome", "promoted_outcome"])
+def test_evolution_review_accepts_outcome_filters(source_kind: str) -> None:
     record = normalize_client_record({
         "type": ClientEventType.EVOLUTION_REVIEW_REQUEST,
-        "payload": {
-            "action": "list",
-            "source_kind": "rollback_outcome",
-            "limit": 20,
-        },
+        "payload": {"action": "list", "source_kind": source_kind, "limit": 20},
     })
 
     assert record["payload"] == {
@@ -94,7 +91,7 @@ def test_evolution_review_accepts_rollback_outcome_filter() -> None:
         "candidate_id": "",
         "query": "",
         "risk": "",
-        "source_kind": "rollback_outcome",
+        "source_kind": source_kind,
         "limit": 20,
     }
 

@@ -63,6 +63,7 @@ _FINDING_LABELS = MappingProxyType({
     "user_reported_defect": "用户报告缺陷",
     "verification_failure": "机械验证失败",
     "rollback_guardrail_breach": "发布后护栏回退",
+    "stable_promotion_improvement": "稳定晋升能力的下一轮改进",
 })
 
 
@@ -337,6 +338,14 @@ def _expected_metrics(
                 direction="decrease",
                 target=0,
                 verifier="feedback_recurrence",
+            )
+        elif item.source_kind == "promoted_outcome":
+            source_key = item.source_kind
+            metric = CandidateExpectedMetric(
+                name="harness.stable_promotion_improvement.regression_rate",
+                direction="decrease",
+                target=0,
+                verifier="harness_replay",
             )
         else:
             source_key = item.source_kind

@@ -12,6 +12,7 @@ EligibilityDecision = Literal["blocked", "needs_evidence", "review_ready"]
 _MECHANICAL_SOURCES = frozenset({
     "harness_failure",
     "rollback_outcome",
+    "promoted_outcome",
     "self_review_static",
 })
 _FEEDBACK_SOURCES = frozenset({"user_feedback", "agent_interpreted_feedback"})

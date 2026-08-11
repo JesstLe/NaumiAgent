@@ -9,17 +9,25 @@ from types import SimpleNamespace
 
 import pytest
 
+from naumi_agent.config.settings import AppConfig, MemoryConfig
 from naumi_agent.evolution.opportunity_discovery import (
     EvolutionOutcomeOpportunityError,
     EvolutionOutcomeOpportunityService,
     adapt_rollback_outcome_evidence,
+    adapt_stable_promotion_outcome_evidence,
 )
 from naumi_agent.evolution.revalidation_rollback_outcomes import (
     EvolutionRevalidationRollbackOutcome,
     EvolutionRevalidationRollbackOutcomeError,
 )
-from naumi_agent.evolution.review import EvolutionReviewService
+from naumi_agent.evolution.review import EvolutionReviewFilter, EvolutionReviewService
+from naumi_agent.evolution.stable_promotion_outcomes import (
+    EvolutionStablePromotionOutcome,
+    EvolutionStablePromotionOutcomeError,
+)
 from naumi_agent.evolution.store import EvolutionCandidateStore
+from naumi_agent.orchestrator.engine import AgentEngine
+from naumi_agent.tools.evolution_review import EvolutionOutcomeOpportunityTool
 from naumi_agent.workbench.models import RiskLevel
 from naumi_agent.workbench.proposal_governance import ProposalCooldownDecision
 
@@ -39,6 +47,24 @@ class _OutcomeService:
         return SimpleNamespace(
             outcome=outcome,
             outcome_authority=self.valid,
+        )
+
+
+class _StableOutcomeService:
+    def __init__(self, outcomes: tuple[EvolutionStablePromotionOutcome, ...]) -> None:
+        self.outcomes = {item.outcome_id: item for item in outcomes}
+        self.valid = True
+
+    async def inspect(self, *, outcome_id: str):
+        outcome = self.outcomes.get(outcome_id)
+        if outcome is None:
+            raise EvolutionStablePromotionOutcomeError(
+                "stable_promotion_outcome_missing",
+                "Stable Promotion Outcome 不存在。",
+            )
+        return SimpleNamespace(
+            outcome=outcome,
+            promoted_outcome_authority=self.valid,
         )
 
 
@@ -143,6 +169,59 @@ def _outcome(
     })
 
 
+def _stable_outcome(
+    root: Path,
+    *,
+    marker: str,
+    promoted_at: datetime,
+) -> EvolutionStablePromotionOutcome:
+    token = hashlib.sha256(marker.encode()).hexdigest()
+    core = {
+        "schema_version": 1,
+        "policy_version": "evolution-stable-promotion-outcome-v1",
+        "workspace_root": str(root.resolve()),
+        "status": "promoted",
+        "sequence": 1,
+        "previous_outcome_id": "",
+        "previous_outcome_sha256": "",
+        "decision_id": f"evstablepromdecision_{token[:24]}",
+        "decision_sha256": hashlib.sha256(f"decision:{marker}".encode()).hexdigest(),
+        "eligibility_id": f"evstablepromeligible_{token[1:25]}",
+        "eligibility_sha256": hashlib.sha256(
+            f"eligibility:{marker}".encode()
+        ).hexdigest(),
+        "contract_id": f"evstablepromobserve_{token[2:26]}",
+        "population_assessment_id": f"evstableprompopobserve_{token[3:27]}",
+        "population_denominator": 2,
+        "passing_count": 2,
+        "assessment_coverage_bps": 10_000,
+        "duration_coverage_bps": 10_000,
+        "workbench_session_id": f"session-{marker}",
+        "workbench_proposal_id": f"proposal-{marker}",
+        "proposal_id": f"evp_{token[4:28]}",
+        "candidate_id": f"evc_{token[5:29]}",
+        "candidate_revision": 3,
+        "candidate_sha256": hashlib.sha256(f"candidate:{marker}".encode()).hexdigest(),
+        "candidate_version": "v3",
+        "candidate_target": "src/naumi_agent/model/router.py",
+        "promoted_at": promoted_at.isoformat(),
+        "post_observation_decision_verified": True,
+        "population_sustained_health_verified": True,
+        "promoted": True,
+        "superseded": False,
+        "long_term_metrics_recorded": True,
+        "learning_authority": False,
+        "promotion_authority": False,
+        "execution_authority": False,
+    }
+    digest = _digest(core)
+    return EvolutionStablePromotionOutcome.model_validate({
+        **core,
+        "outcome_id": f"evstablepromout_{digest[:24]}",
+        "outcome_sha256": digest,
+    })
+
+
 @pytest.mark.asyncio
 async def test_discovery_is_concurrent_idempotent_and_privacy_bounded(
     tmp_path: Path,
@@ -153,6 +232,7 @@ async def test_discovery_is_concurrent_idempotent_and_privacy_bounded(
     service = EvolutionOutcomeOpportunityService(
         workspace_root=tmp_path,
         outcome_service=source,  # type: ignore[arg-type]
+        stable_outcome_service=_StableOutcomeService(()),  # type: ignore[arg-type]
         candidate_store=store,
     )
 
@@ -161,6 +241,9 @@ async def test_discovery_is_concurrent_idempotent_and_privacy_bounded(
     )
 
     assert all(result == results[0] for result in results)
+    assert results[0].schema_version == 2
+    assert results[0].policy_version == "evolution-outcome-opportunity-v2"
+    assert results[0].outcome_kind == "rollback"
     assert results[0].occurrence_count == 1
     assert results[0].candidate_revision == 1
     stored = await store.get_candidate(tmp_path, results[0].candidate_id)
@@ -190,6 +273,7 @@ async def test_discovery_clusters_same_guardrail_root_and_revalidates_review(
     service = EvolutionOutcomeOpportunityService(
         workspace_root=tmp_path,
         outcome_service=source,  # type: ignore[arg-type]
+        stable_outcome_service=_StableOutcomeService(()),  # type: ignore[arg-type]
         candidate_store=store,
     )
 
@@ -223,15 +307,112 @@ async def test_discovery_clusters_same_guardrail_root_and_revalidates_review(
     assert authority.hard_block
 
 
+@pytest.mark.asyncio
+async def test_promoted_outcome_starts_new_candidate_and_revalidates_authority(
+    tmp_path: Path,
+) -> None:
+    outcome = _stable_outcome(
+        tmp_path,
+        marker="promoted-one",
+        promoted_at=datetime.now(UTC),
+    )
+    stable_source = _StableOutcomeService((outcome,))
+    store = EvolutionCandidateStore(tmp_path / "candidate.db")
+    service = EvolutionOutcomeOpportunityService(
+        workspace_root=tmp_path,
+        outcome_service=_OutcomeService(()),  # type: ignore[arg-type]
+        stable_outcome_service=stable_source,  # type: ignore[arg-type]
+        candidate_store=store,
+    )
+
+    results = await asyncio.gather(
+        *(service.discover(outcome_id=outcome.outcome_id) for _ in range(8))
+    )
+
+    assert all(result == results[0] for result in results)
+    result = results[0]
+    assert result.outcome_kind == "promoted"
+    assert result.candidate_id != outcome.candidate_id
+    assert result.candidate_revision == 1
+    assert result.occurrence_count == 1
+    stored = await store.get_candidate(tmp_path, result.candidate_id)
+    assert stored is not None
+    evidence = stored.draft.evidence[0]
+    assert evidence.source_kind == "promoted_outcome"
+    assert evidence.refs[0].sha256 == outcome.outcome_sha256
+    assert stored.draft.finding_code == "stable_promotion_improvement"
+    assert stored.draft.expected_metrics[0].name == (
+        "harness.stable_promotion_improvement.regression_rate"
+    )
+    encoded = evidence.model_dump_json()
+    assert outcome.candidate_target not in encoded
+    assert outcome.workbench_proposal_id not in encoded
+    assert str(tmp_path) not in encoded
+    assert await service.validate_candidate_sources(stored.draft)
+    review = EvolutionReviewService(
+        store,
+        governance_reader=_GovernanceReader(),
+        source_authority_reader=service,
+    )
+    filtered = await review.list_snapshot(
+        tmp_path,
+        filters=EvolutionReviewFilter(source_kind="promoted_outcome"),
+    )
+    assert [item.candidate_id for item in filtered.items] == [result.candidate_id]
+    assert filtered.items[0].source_kinds == ("promoted_outcome",)
+
+    stable_source.valid = False
+    assert not await service.validate_candidate_sources(stored.draft)
+    with pytest.raises(EvolutionOutcomeOpportunityError) as stale:
+        await service.discover(outcome_id=outcome.outcome_id)
+    assert stale.value.code == "outcome_opportunity_source_stale"
+
+
 def test_adapter_rejects_non_outcome_and_service_rejects_bad_id(tmp_path: Path) -> None:
     with pytest.raises(TypeError, match="Rollback Outcome"):
         adapt_rollback_outcome_evidence(SimpleNamespace())  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="Stable Promotion Outcome"):
+        adapt_stable_promotion_outcome_evidence(SimpleNamespace())  # type: ignore[arg-type]
 
     service = EvolutionOutcomeOpportunityService(
         workspace_root=tmp_path,
         outcome_service=_OutcomeService(()),  # type: ignore[arg-type]
+        stable_outcome_service=_StableOutcomeService(()),  # type: ignore[arg-type]
         candidate_store=EvolutionCandidateStore(tmp_path / "candidate.db"),
     )
     with pytest.raises(EvolutionOutcomeOpportunityError) as invalid:
         asyncio.run(service.discover(outcome_id="../forged"))
     assert invalid.value.code == "outcome_opportunity_id_invalid"
+
+
+@pytest.mark.asyncio
+async def test_engine_binds_both_outcome_authorities(tmp_path: Path) -> None:
+    engine = AgentEngine(
+        AppConfig(
+            workspace_root=str(tmp_path),
+            memory=MemoryConfig(
+                session_db_path=str(tmp_path / "sessions.db"),
+                vector_db_path=str(tmp_path / "vectors"),
+                long_term_enabled=False,
+            ),
+        )
+    )
+    try:
+        service = engine.evolution_outcome_opportunity_service
+        assert service.outcome_service is (
+            engine.evolution_revalidation_rollback_outcome_service
+        )
+        assert service.stable_outcome_service is (
+            engine.evolution_stable_promotion_outcome_service
+        )
+    finally:
+        await engine.shutdown()
+
+
+def test_tool_schema_accepts_both_outcome_ids() -> None:
+    tool = EvolutionOutcomeOpportunityTool(SimpleNamespace())
+
+    assert tool.parameters_schema["properties"]["outcome_id"]["pattern"] == (
+        "^(?:evrerollbackout|evstablepromout)_[0-9a-f]{24}$"
+    )
+    assert "stable promoted" in tool.description
