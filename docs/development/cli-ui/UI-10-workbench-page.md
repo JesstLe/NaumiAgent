@@ -225,4 +225,6 @@
 
 ### 尚未完成
 
-- UI-10.5b：Timeline revisioned 增量事件生产、断线 cursor 与 gap 恢复。
+- UI-10.5b2：Timeline Bridge 增量事件生产、断线 cursor replay、New UI/TUI 连续消费与 gap 完整快照恢复。
+  UI-10.5b1 的持久 stream/cursor authority、旧库迁移、并发分配和有界 gap replay 已完成，详见
+  `UI-10-5b-timeline-cursor-authority.md`。

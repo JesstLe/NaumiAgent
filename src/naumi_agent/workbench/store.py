@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -165,9 +166,34 @@ CREATE TABLE IF NOT EXISTS workbench_audit_events (
     timestamp TEXT NOT NULL,
     correlation_id TEXT,
     parent_event_id TEXT,
-    severity TEXT NOT NULL DEFAULT 'info'
+    severity TEXT NOT NULL DEFAULT 'info',
+    cursor INTEGER NOT NULL DEFAULT 0
 )
 """
+
+_CREATE_EVENT_STREAMS = """
+CREATE TABLE IF NOT EXISTS workbench_audit_streams (
+    session_id TEXT PRIMARY KEY,
+    stream_id TEXT NOT NULL,
+    latest_cursor INTEGER NOT NULL DEFAULT 0 CHECK (latest_cursor >= 0)
+)
+"""
+
+_MAX_TIMELINE_REPLAY_LIMIT = 100
+
+
+@dataclass(frozen=True)
+class WorkbenchTimelineReplayWindow:
+    """One bounded, session-scoped audit Timeline recovery decision."""
+
+    session_id: str
+    stream_id: str
+    requested_cursor: int
+    earliest_cursor: int
+    latest_cursor: int
+    gap: bool
+    gap_reason: str
+    events: tuple[WorkbenchEvent, ...]
 
 _CREATE_INTENT_LOCKS = """
 CREATE TABLE IF NOT EXISTS workbench_intent_locks (
@@ -329,6 +355,7 @@ class WorkbenchStore:
         await db.execute(_CREATE_AGENT_PROFILES)
         await db.execute(_CREATE_DECISIONS)
         await db.execute(_CREATE_EVENTS)
+        await db.execute(_CREATE_EVENT_STREAMS)
         await db.execute(_CREATE_INTENT_LOCKS)
         await db.execute(_CREATE_LEASES)
         await db.execute(_CREATE_CONTEXT_SNAPSHOTS)
@@ -372,6 +399,10 @@ class WorkbenchStore:
         await self._ensure_column(
             db, "workbench_audit_events", "severity", "TEXT NOT NULL DEFAULT 'info'"
         )
+        await self._ensure_column(
+            db, "workbench_audit_events", "cursor", "INTEGER NOT NULL DEFAULT 0"
+        )
+        await self._migrate_event_streams(db)
         proposal_columns = {
             "source_kind": "TEXT NOT NULL DEFAULT 'manual'",
             "source_id": "TEXT NOT NULL DEFAULT ''",
@@ -395,6 +426,59 @@ class WorkbenchStore:
                idx_workbench_proposals_session_idempotency
                ON workbench_proposals(session_id, idempotency_key)
                WHERE idempotency_key <> ''"""
+        )
+
+    async def _migrate_event_streams(self, db: aiosqlite.Connection) -> None:
+        """Backfill stable per-session cursors without rotating existing streams."""
+        cursor = await db.execute(
+            """SELECT 1
+               FROM workbench_audit_events
+               WHERE cursor <= 0
+               LIMIT 1"""
+        )
+        if await cursor.fetchone() is not None:
+            await db.execute(
+                """WITH ranked AS (
+                       SELECT rowid AS event_rowid,
+                              ROW_NUMBER() OVER (
+                                  PARTITION BY session_id
+                                  ORDER BY timestamp, rowid
+                              ) AS event_cursor
+                       FROM workbench_audit_events
+                   )
+                   UPDATE workbench_audit_events
+                   SET cursor = -(
+                       SELECT event_cursor
+                       FROM ranked
+                       WHERE ranked.event_rowid = workbench_audit_events.rowid
+                   )"""
+            )
+            await db.execute(
+                "UPDATE workbench_audit_events SET cursor = -cursor WHERE cursor < 0"
+            )
+        cursor = await db.execute(
+            """SELECT session_id, MAX(cursor)
+               FROM workbench_audit_events
+               WHERE cursor > 0
+               GROUP BY session_id"""
+        )
+        for session_id, latest_cursor in await cursor.fetchall():
+            await db.execute(
+                """INSERT INTO workbench_audit_streams
+                   (session_id, stream_id, latest_cursor)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(session_id) DO UPDATE SET
+                       latest_cursor = MAX(
+                           workbench_audit_streams.latest_cursor,
+                           excluded.latest_cursor
+                       )""",
+                (str(session_id), uuid.uuid4().hex, int(latest_cursor)),
+            )
+        await db.execute(
+            """CREATE UNIQUE INDEX IF NOT EXISTS
+               idx_workbench_audit_events_session_cursor
+               ON workbench_audit_events(session_id, cursor)
+               WHERE cursor > 0"""
         )
 
     async def _ensure_column(
@@ -855,26 +939,176 @@ class WorkbenchStore:
         )
         async with aiosqlite.connect(self._db_path) as db:
             await self._ensure_tables(db)
-            await db.execute(
-                """INSERT INTO workbench_audit_events
-                   (id, session_id, type, actor, subject_id, payload, timestamp,
-                    correlation_id, parent_event_id, severity)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    event.id,
-                    event.session_id,
-                    event.type,
-                    event.actor,
-                    event.subject_id,
-                    json.dumps(event.payload, ensure_ascii=False),
-                    event.timestamp,
-                    event.correlation_id,
-                    event.parent_event_id,
-                    event.severity.value,
-                ),
-            )
+            await db.execute("BEGIN IMMEDIATE")
+            event.cursor = await self._reserve_event_cursor(db, session_id)
+            await self._insert_event(db, event)
             await db.commit()
         return event
+
+    async def _reserve_event_cursor(
+        self,
+        db: aiosqlite.Connection,
+        session_id: str,
+    ) -> int:
+        """Reserve one cursor while the caller holds an IMMEDIATE transaction."""
+        await db.execute(
+            """INSERT OR IGNORE INTO workbench_audit_streams
+               (session_id, stream_id, latest_cursor)
+               VALUES (?, ?, 0)""",
+            (session_id, uuid.uuid4().hex),
+        )
+        await db.execute(
+            """UPDATE workbench_audit_streams
+               SET latest_cursor = latest_cursor + 1
+               WHERE session_id = ?""",
+            (session_id,),
+        )
+        cursor = await db.execute(
+            """SELECT latest_cursor
+               FROM workbench_audit_streams
+               WHERE session_id = ?""",
+            (session_id,),
+        )
+        row = await cursor.fetchone()
+        if row is None or int(row[0]) <= 0:
+            raise RuntimeError("Timeline 游标分配失败")
+        return int(row[0])
+
+    async def _insert_event(
+        self,
+        db: aiosqlite.Connection,
+        event: WorkbenchEvent,
+    ) -> None:
+        await db.execute(
+            """INSERT INTO workbench_audit_events
+               (id, session_id, type, actor, subject_id, payload, timestamp,
+                correlation_id, parent_event_id, severity, cursor)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                event.id,
+                event.session_id,
+                event.type,
+                event.actor,
+                event.subject_id,
+                json.dumps(event.payload, ensure_ascii=False),
+                event.timestamp,
+                event.correlation_id,
+                event.parent_event_id,
+                event.severity.value,
+                event.cursor,
+            ),
+        )
+
+    async def timeline_replay_window(
+        self,
+        session_id: str,
+        *,
+        after_cursor: int,
+        expected_stream_id: str = "",
+        limit: int = _MAX_TIMELINE_REPLAY_LIMIT,
+    ) -> WorkbenchTimelineReplayWindow:
+        """Return a bounded replay or an explicit gap without mutating state."""
+        if isinstance(after_cursor, bool) or not isinstance(after_cursor, int):
+            raise TypeError("Timeline cursor 必须是整数")
+        if after_cursor < 0:
+            raise ValueError("Timeline cursor 不能小于 0")
+        if isinstance(limit, bool) or not isinstance(limit, int):
+            raise TypeError("Timeline replay limit 必须是整数")
+        if limit < 1 or limit > _MAX_TIMELINE_REPLAY_LIMIT:
+            raise ValueError(
+                f"Timeline replay limit 必须在 1..{_MAX_TIMELINE_REPLAY_LIMIT} 之间"
+            )
+        if not isinstance(expected_stream_id, str):
+            raise TypeError("Timeline stream_id 必须是字符串")
+        expected_stream_id = expected_stream_id.strip()
+        if len(expected_stream_id) > 128 or any(
+            ord(char) < 32 or ord(char) == 127 for char in expected_stream_id
+        ):
+            raise ValueError("Timeline stream_id 非法")
+
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """SELECT stream_id, latest_cursor
+                   FROM workbench_audit_streams
+                   WHERE session_id = ?""",
+                (session_id,),
+            )
+            stream_row = await cursor.fetchone()
+            if stream_row is None:
+                gap_reason = (
+                    "stream_unavailable"
+                    if expected_stream_id or after_cursor > 0
+                    else ""
+                )
+                return WorkbenchTimelineReplayWindow(
+                    session_id=session_id,
+                    stream_id="",
+                    requested_cursor=after_cursor,
+                    earliest_cursor=0,
+                    latest_cursor=0,
+                    gap=bool(gap_reason),
+                    gap_reason=gap_reason,
+                    events=(),
+                )
+
+            stream_id = str(stream_row["stream_id"])
+            latest_cursor = int(stream_row["latest_cursor"])
+            cursor = await db.execute(
+                """SELECT MIN(cursor)
+                   FROM workbench_audit_events
+                   WHERE session_id = ? AND cursor > 0""",
+                (session_id,),
+            )
+            earliest_row = await cursor.fetchone()
+            earliest_cursor = int(
+                earliest_row[0]
+                if earliest_row is not None and earliest_row[0] is not None
+                else latest_cursor + 1
+                if latest_cursor > 0
+                else 0
+            )
+
+            gap_reason = ""
+            if expected_stream_id and expected_stream_id != stream_id:
+                gap_reason = "stream_changed"
+            elif after_cursor > 0 and not expected_stream_id:
+                gap_reason = "stream_identity_required"
+            elif after_cursor > latest_cursor:
+                gap_reason = "cursor_ahead"
+            elif earliest_cursor and after_cursor < earliest_cursor - 1:
+                gap_reason = "cursor_before_retention"
+            if gap_reason:
+                return WorkbenchTimelineReplayWindow(
+                    session_id=session_id,
+                    stream_id=stream_id,
+                    requested_cursor=after_cursor,
+                    earliest_cursor=earliest_cursor,
+                    latest_cursor=latest_cursor,
+                    gap=True,
+                    gap_reason=gap_reason,
+                    events=(),
+                )
+
+            cursor = await db.execute(
+                """SELECT * FROM workbench_audit_events
+                   WHERE session_id = ? AND cursor > ?
+                   ORDER BY cursor
+                   LIMIT ?""",
+                (session_id, after_cursor, limit),
+            )
+            rows = await cursor.fetchall()
+        return WorkbenchTimelineReplayWindow(
+            session_id=session_id,
+            stream_id=stream_id,
+            requested_cursor=after_cursor,
+            earliest_cursor=earliest_cursor,
+            latest_cursor=latest_cursor,
+            gap=False,
+            gap_reason="",
+            events=tuple(_row_to_event(dict(row)) for row in rows),
+        )
 
     async def list_events(
         self,
@@ -2108,24 +2342,8 @@ class WorkbenchStore:
                 ),
                 timestamp=now,
             )
-            await db.execute(
-                """INSERT INTO workbench_audit_events
-                   (id, session_id, type, actor, subject_id, payload, timestamp,
-                    correlation_id, parent_event_id, severity)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    event.id,
-                    event.session_id,
-                    event.type,
-                    event.actor,
-                    event.subject_id,
-                    json.dumps(event.payload, ensure_ascii=False),
-                    event.timestamp,
-                    event.correlation_id,
-                    event.parent_event_id,
-                    event.severity.value,
-                ),
-            )
+            event.cursor = await self._reserve_event_cursor(db, session_id)
+            await self._insert_event(db, event)
             await db.commit()
         return approval
 
@@ -2236,6 +2454,7 @@ def _row_to_event(row: dict[str, Any]) -> WorkbenchEvent:
         correlation_id=row.get("correlation_id"),
         parent_event_id=row.get("parent_event_id"),
         severity=EventSeverity(row.get("severity") or "info"),
+        cursor=int(row.get("cursor") or 0),
     )
 
 

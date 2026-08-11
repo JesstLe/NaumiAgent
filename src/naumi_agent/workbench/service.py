@@ -1759,6 +1759,37 @@ class WorkbenchService:
             "limit": limit,
         }
 
+    async def timeline_replay_window(
+        self,
+        session_id: str,
+        *,
+        after_cursor: int,
+        expected_stream_id: str = "",
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """Expose the authoritative audit cursor window without leaking Store types."""
+        window = await self._workbench_store.timeline_replay_window(
+            session_id,
+            after_cursor=after_cursor,
+            expected_stream_id=expected_stream_id,
+            limit=limit,
+        )
+        tasks = await self._tasks_for_session(session_id).list_tasks()
+        tasks_by_id = {task.id: task for task in tasks}
+        return {
+            "schema_version": 1,
+            "session_id": window.session_id,
+            "stream_id": window.stream_id,
+            "requested_cursor": window.requested_cursor,
+            "earliest_cursor": window.earliest_cursor,
+            "latest_cursor": window.latest_cursor,
+            "gap": window.gap,
+            "gap_reason": window.gap_reason,
+            "events": [
+                self._event_to_dict(event, tasks_by_id) for event in window.events
+            ],
+        }
+
     async def get_event(self, session_id: str, event_id: str) -> dict[str, Any] | None:
         event = await self._workbench_store.get_event(session_id, event_id)
         if event is None:

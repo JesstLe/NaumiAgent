@@ -291,6 +291,7 @@ class WorkbenchEvent:
     correlation_id: str | None = None
     parent_event_id: str | None = None
     severity: EventSeverity = EventSeverity.INFO
+    cursor: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
