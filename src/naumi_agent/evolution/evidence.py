@@ -62,6 +62,7 @@ class EvolutionEvidence(_StrictModel):
         "user_feedback",
         "agent_interpreted_feedback",
         "rollback_outcome",
+        "promoted_outcome",
     ] = "harness_failure"
     source_uri: str
     observed_at: str = Field(min_length=1, max_length=128)

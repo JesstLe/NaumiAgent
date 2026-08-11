@@ -382,6 +382,7 @@ class EvolutionCandidatesTool(Tool):
                         "user_feedback",
                         "agent_interpreted_feedback",
                         "rollback_outcome",
+                        "promoted_outcome",
                     ],
                 },
                 "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50},
@@ -443,7 +444,7 @@ class EvolutionOutcomeOpportunityTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "把一个当前有效的 rolled_back Outcome 确定性回注为下一轮 "
+            "把一个当前有效的 rolled_back 或 stable promoted Outcome 确定性回注为下一轮 "
             "Evolution Candidate。实时重验来源、去重并保留审计引用；"
             "不读取源码，不生成补丁，也不授予实验或推广权限。"
         )
@@ -455,7 +456,7 @@ class EvolutionOutcomeOpportunityTool(Tool):
             "properties": {
                 "outcome_id": {
                     "type": "string",
-                    "pattern": "^evrerollbackout_[0-9a-f]{24}$",
+                    "pattern": "^(?:evrerollbackout|evstablepromout)_[0-9a-f]{24}$",
                 },
             },
             "required": ["outcome_id"],

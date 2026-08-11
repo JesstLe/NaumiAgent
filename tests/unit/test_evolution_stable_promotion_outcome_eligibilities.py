@@ -12,6 +12,10 @@ from pydantic import ValidationError
 import naumi_agent.evolution as evolution_api
 from naumi_agent.cli.slash_router import execute_slash_command
 from naumi_agent.config.settings import AppConfig, MemoryConfig
+from naumi_agent.evolution.opportunity_discovery import (
+    EvolutionOutcomeOpportunityError,
+    EvolutionOutcomeOpportunityService,
+)
 from naumi_agent.evolution.proposal_outcomes import (
     EvolutionProposalOutcomeProjectionService,
 )
@@ -41,6 +45,7 @@ from naumi_agent.evolution.stable_promotion_population_observation_assessments i
     EvolutionStablePromotionPopulationObservationMember,
     build_stable_promotion_population_observation_assessment,
 )
+from naumi_agent.evolution.store import EvolutionCandidateStore
 from naumi_agent.harness.interaction import answer_interaction, new_interaction_record
 from naumi_agent.harness.interaction_runtime import DurableInteractionAuthorityClient
 from naumi_agent.harness.store import HarnessStore
@@ -48,6 +53,7 @@ from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
 from naumi_agent.tools.base import ToolCall, ToolRegistry, ToolResult
 from naumi_agent.tools.evolution_review import (
+    EvolutionOutcomeOpportunityTool,
     EvolutionStablePromotionOutcomeDecisionTool,
     EvolutionStablePromotionOutcomeEligibilityTool,
     EvolutionStablePromotionOutcomeTool,
@@ -599,6 +605,39 @@ async def test_passing_population_creates_review_only_eligibility_and_revokes(
     assert outcome_two.supersede_event.previous_event_id == (outcome_left.supersede_event.event_id)
     assert outcome_two.supersede_event.prior_outcome_superseded
     assert outcome_two.promoted_outcome_authority
+    opportunity_service = EvolutionOutcomeOpportunityService(
+        workspace_root=tmp_path,
+        outcome_service=SimpleNamespace(),  # promoted ID 不访问 rollback 服务
+        stable_outcome_service=outcome_service(),
+        candidate_store=EvolutionCandidateStore(tmp_path / "evolution-candidates.db"),
+    )
+    with pytest.raises(EvolutionOutcomeOpportunityError) as superseded_opportunity:
+        await opportunity_service.discover(outcome_id=outcome_left.outcome.outcome_id)
+    assert superseded_opportunity.value.code == "outcome_opportunity_source_stale"
+    promoted_opportunity = await opportunity_service.discover(
+        outcome_id=outcome_two.outcome.outcome_id
+    )
+    assert promoted_opportunity.outcome_kind == "promoted"
+    assert promoted_opportunity.candidate_id != outcome_two.outcome.candidate_id
+    stored_opportunity = await opportunity_service.candidate_store.get_candidate(
+        tmp_path,
+        promoted_opportunity.candidate_id,
+    )
+    assert stored_opportunity is not None
+    assert stored_opportunity.draft.source_kinds == ("promoted_outcome",)
+    assert await opportunity_service.validate_candidate_sources(
+        stored_opportunity.draft
+    )
+    opportunity_tool = EvolutionOutcomeOpportunityTool(
+        SimpleNamespace(evolution_outcome_opportunity_service=opportunity_service)
+    )
+    registry.register(opportunity_tool)
+    opportunity_slash = await execute_slash_command(
+        _SlashEngine(),
+        "/evolution discover-outcome " + outcome_two.outcome.outcome_id,
+    )
+    assert promoted_opportunity.candidate_id in opportunity_slash
+    assert "（promoted）" in opportunity_slash
     async def no_rollback_outcomes(_session_id: str):
         return ()
 
@@ -666,6 +705,9 @@ async def test_passing_population_creates_review_only_eligibility_and_revokes(
         )
 
     port.authority = False
+    assert not await opportunity_service.validate_candidate_sources(
+        stored_opportunity.draft
+    )
     stale_decision = await decision_service.inspect(decision_id=decision_view.decision.decision_id)
     assert not stale_decision.outcome_decision_authority
     assert not stale_decision.promoted_outcome_ready_authority

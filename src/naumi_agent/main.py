@@ -3402,7 +3402,9 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
         action = parts[0].lower() if parts else "list"
         if action == "discover-outcome":
             if len(parts) != 2:
-                raise ValueError("discover-outcome 需要一个 Rollback Outcome ID。")
+                raise ValueError(
+                    "discover-outcome 需要一个 Rollback 或 Stable Promotion Outcome ID。"
+                )
             await _run_tool_slash_command(
                 engine,
                 slash_command="/evolution",
@@ -5054,7 +5056,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution stable-promotion-admission-delivery prepare|export|inspect|"
             "queue|inspect-dispatch <runtime-admission-id>；"
             "receive <submission-base64>；run-worker；inspect-worker；"
-            "/evolution discover-outcome <rollback-outcome-id>；"
+            "/evolution discover-outcome <rollback|stable-promoted-outcome-id>；"
             "/evolution revalidation-rollback-execute <rollback-request-id>；"
             "/evolution revalidation-rollback-outcome <rollback-request-id>；"
             "/evolution outcome-before-after <rollback-request-id>；"

@@ -840,6 +840,7 @@ async def test_rollback_outcome_binds_real_receipt_to_proposal_and_fails_closed(
     opportunity_service = EvolutionOutcomeOpportunityService(
         workspace_root=root,
         outcome_service=outcome_service,
+        stable_outcome_service=SimpleNamespace(),  # rollback ID 不访问 promoted 服务
         candidate_store=candidate_store,
     )
     opportunities = await asyncio.gather(*(

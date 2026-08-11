@@ -68,8 +68,9 @@ Candidate，而不是产生无法治理的建议文本。
 
 ## 未包含的后续模块
 
-- EVO-06.1b：从 accepted/promoted Outcome、成本/延迟热点和明确缺失能力发现机会。
-- EVO-06.1c：跨 Outcome 类型的时间窗聚类、优先级和预算排序。
+- [EVO-06.1b](EVO-06-1b-promoted-outcome-opportunity-discovery.md)：从 current stable promoted
+  Outcome 发现下一轮机会（已实现）。
+- EVO-06.1c：从成本/延迟热点、明确缺失能力和跨 Outcome 时间窗发现、聚类并排序机会。
 - EVO-06.2：从 review-ready Opportunity 形成完整 Capability Proposal。
 - EVO-06.3+：临时注册、shadow、limited activation、选择和退休。
 

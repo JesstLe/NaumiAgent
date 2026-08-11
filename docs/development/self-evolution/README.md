@@ -243,10 +243,11 @@ restore/remove step 并写入只读 content-addressed storage。
 [EVO-05.7a](EVO-05-7a-rollback-outcome-authority.md) 已把真实 rollback Receipt 反向绑定到原始 Experiment Contract
 与 Workbench Proposal，形成动态可撤权的 `rolled_back` Outcome；该阶段尚缺的长期恢复指标与 successful-rollout
 promoted/superseded 路径已分别由 HAR-09.6d/e 与 EVO-05.7b4a–7b4d 后续补齐。
-[EVO-06.1a](EVO-06-1a-outcome-backed-opportunity-discovery.md) 已把该真实 `rolled_back` Outcome 确定性回注
-现有 Candidate Store：同源并发幂等、同根失败聚合，Review/Workbench 入队前动态重验来源 authority；它不复制源码/补丁，
-也不授予实验、学习或推广权限。Successful-rollout promoted Outcome 已由 EVO-05.7b4a–7b4d 独立完成，但其回注
-Capability Proposal/Shadow/Activation 与 learning authority 仍未完成。
+[EVO-06.1a](EVO-06-1a-outcome-backed-opportunity-discovery.md) 已把真实 `rolled_back` Outcome 确定性回注
+现有 Candidate Store；[EVO-06.1b](EVO-06-1b-promoted-outcome-opportunity-discovery.md) 进一步把 current
+stable `promoted` Outcome 回注为不同于上一轮的新 Candidate。两者均具备同源并发幂等和 Review/Workbench
+入队前动态 authority 重验，不复制源码/补丁，也不授予实验、学习或推广权限。热点/需求发现、Capability
+Proposal、Shadow/Activation 与 learning authority 仍未完成。
 
 [EVO-05.5f5x3a](EVO-05-5f5x3a-authenticated-remote-readiness-claim.md) 已为跨安装 Stable Finalization
 补齐 Population Credential-bound challenge、Ed25519 assertion 与 durable authenticated claim；它不把远端签名声明冒充

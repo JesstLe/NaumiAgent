@@ -33,6 +33,7 @@ _SOURCE_KINDS = frozenset({
     "user_feedback",
     "agent_interpreted_feedback",
     "rollback_outcome",
+    "promoted_outcome",
 })
 
 
@@ -221,7 +222,10 @@ class EvolutionReviewService:
         reader = self._source_authority_reader
         if reader is None:
             return {
-                item.draft.candidate_id: "rollback_outcome" not in item.draft.source_kinds
+                item.draft.candidate_id: not bool(
+                    {"rollback_outcome", "promoted_outcome"}
+                    & set(item.draft.source_kinds)
+                )
                 for item in candidates
             }
 
