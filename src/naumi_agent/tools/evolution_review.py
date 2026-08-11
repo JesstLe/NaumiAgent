@@ -220,6 +220,13 @@ from naumi_agent.evolution.stable_remote_finalization_authorizations import (
     EvolutionStableRemoteFinalizationAuthorizationError,
     render_stable_remote_finalization_authorization,
 )
+from naumi_agent.evolution.stable_remote_finalization_deliveries import (
+    EvolutionStableRemoteFinalizationDeliveryError,
+    EvolutionStableRemoteFinalizationTargetJournal,
+    decode_stable_remote_finalization_delivery_package,
+    encode_stable_remote_finalization_delivery_ack,
+    render_stable_remote_finalization_delivery,
+)
 from naumi_agent.evolution.stable_remote_finalizations import (
     EvolutionStableRemoteFinalizationError,
     decode_stable_remote_finalization_execution_package,
@@ -3435,13 +3442,25 @@ class EvolutionStableRemoteFinalizationTool(Tool):
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["prepare", "export", "execute-local", "ingest", "inspect"],
+                    "enum": [
+                        "prepare", "export", "execute-local", "ingest", "inspect",
+                        "queue-delivery", "claim-delivery", "retry-delivery",
+                        "receive-delivery-local", "execute-delivery-local",
+                        "recover-delivery-local", "ack-delivery",
+                        "ingest-delivery", "ingest-delivery-late", "inspect-delivery",
+                    ],
                 },
                 "authorization_id": {"type": "string"},
                 "grant_id": {"type": "string"},
                 "package_base64": {"type": "string", "maxLength": 699052},
                 "submission_base64": {"type": "string", "maxLength": 699052},
                 "receipt_id": {"type": "string"},
+                "delivery_id": {"type": "string"},
+                "delivery_package_base64": {"type": "string", "maxLength": 1048576},
+                "ack_base64": {"type": "string", "maxLength": 1048576},
+                "owner_id": {"type": "string", "maxLength": 256},
+                "claim_epoch": {"type": "integer", "minimum": 1},
+                "failure_code": {"type": "string", "maxLength": 128},
             },
             "required": ["action"],
             "additionalProperties": False,
@@ -3471,10 +3490,132 @@ class EvolutionStableRemoteFinalizationTool(Tool):
         package_base64: str = "",
         submission_base64: str = "",
         receipt_id: str = "",
+        delivery_id: str = "",
+        delivery_package_base64: str = "",
+        ack_base64: str = "",
+        owner_id: str = "",
+        claim_epoch: int = 0,
+        failure_code: str = "",
     ) -> str:
         normalized = str(action or "").strip().lower()
         try:
             service = self._engine.evolution_stable_remote_finalization_service
+            delivery_service = delivery_store = None
+            if "delivery" in normalized:
+                delivery_service = (
+                    self._engine.evolution_stable_remote_finalization_delivery_service
+                )
+                delivery_store = (
+                    self._engine.evolution_stable_remote_finalization_delivery_store
+                )
+            if normalized == "queue-delivery":
+                delivery = await delivery_service.queue(grant_id=grant_id)
+                return render_stable_remote_finalization_delivery(delivery)
+            if normalized == "claim-delivery":
+                delivery = await delivery_store.claim(
+                    owner_id=owner_id,
+                    now=delivery_service.clock().isoformat(),
+                )
+                if delivery is None:
+                    return "## Remote Stable Finalization Delivery\n\n- 状态：**暂无到期任务**"
+                return render_stable_remote_finalization_delivery(
+                    delivery, include_package=True
+                )
+            if normalized == "retry-delivery":
+                delivery = await delivery_store.retry(
+                    delivery_id=delivery_id,
+                    owner_id=owner_id,
+                    claim_epoch=claim_epoch,
+                    failure_code=failure_code,
+                    now=delivery_service.clock().isoformat(),
+                )
+                return render_stable_remote_finalization_delivery(delivery)
+            if normalized in {
+                "receive-delivery-local",
+                "execute-delivery-local",
+                "recover-delivery-local",
+            }:
+                delivery_package = decode_stable_remote_finalization_delivery_package(
+                    delivery_package_base64
+                )
+                auth = delivery_package.execution_package.authorization.authorization
+                snapshot = await (
+                    self._engine.evolution_release_population_snapshot_store.inspect(
+                        snapshot_id=auth.population_snapshot_id
+                    )
+                )
+                credential = next(
+                    (
+                        item for item in snapshot.snapshot.payload.credentials
+                        if item.payload.member_id == auth.installation_member_id
+                    ),
+                    None,
+                )
+                if not snapshot.population_snapshot_authority or credential is None:
+                    raise EvolutionStableRemoteFinalizationError(
+                        "stable_remote_finalization_member_not_local",
+                        "本机 current Population Snapshot 不包含目标 member。",
+                    )
+                trust_policy = load_release_rollout_control_trust_policy(
+                    self._engine.evolution_release_rollout_control_trust_policy_path
+                )
+                journal = EvolutionStableRemoteFinalizationTargetJournal(
+                    self._engine.evolution_release_slot_store.release_root
+                )
+                if normalized == "receive-delivery-local":
+                    ack = await asyncio.to_thread(
+                        journal.receive,
+                        package=delivery_package,
+                        trust_policy=trust_policy,
+                        credential=credential,
+                        installation_key_service=(
+                            self._engine.release_installation_key_service
+                        ),
+                        clock=self._engine.release_installation_key_service.clock,
+                    )
+                    return "\n".join((
+                        "## Remote Stable Finalization Delivery ACK",
+                        "",
+                        "- 状态：**已验证并写入目标 journal**",
+                        f"- Delivery：`{ack.payload.delivery_id}`",
+                        "- Writer executed：`false`",
+                        "",
+                        "### Delivery ACK Base64",
+                        "",
+                        encode_stable_remote_finalization_delivery_ack(ack),
+                    ))
+                submission = await asyncio.to_thread(
+                    journal.execute,
+                    package=delivery_package,
+                    trust_policy=trust_policy,
+                    credential=credential,
+                    release_slot_store=self._engine.evolution_release_slot_store,
+                    installation_key_service=(
+                        self._engine.release_installation_key_service
+                    ),
+                    recover_existing_only=normalized == "recover-delivery-local",
+                    clock=self._engine.release_installation_key_service.clock,
+                )
+                return render_stable_remote_finalization_submission(submission)
+            if normalized == "ack-delivery":
+                delivery = await delivery_service.acknowledge(
+                    delivery_id=delivery_id, ack_base64=ack_base64
+                )
+                return render_stable_remote_finalization_delivery(delivery)
+            if normalized in {"ingest-delivery", "ingest-delivery-late"}:
+                delivery = await delivery_service.ingest_result(
+                    delivery_id=delivery_id,
+                    submission_base64=submission_base64,
+                    late_recovery=normalized == "ingest-delivery-late",
+                )
+                return render_stable_remote_finalization_delivery(delivery)
+            if normalized == "inspect-delivery":
+                delivery = await delivery_store.get(delivery_id)
+                if delivery is None:
+                    raise EvolutionStableRemoteFinalizationDeliveryError(
+                        "stable_remote_delivery_missing", "Delivery 不存在。"
+                    )
+                return render_stable_remote_finalization_delivery(delivery)
             if normalized == "prepare":
                 package = await service.prepare(authorization_id=authorization_id)
                 return render_stable_remote_finalization(package)
@@ -3535,11 +3676,12 @@ class EvolutionStableRemoteFinalizationTool(Tool):
                 view = await service.inspect(receipt_id=receipt_id)
             else:
                 raise ValueError(
-                    "action 必须是 prepare、export、execute-local、ingest 或 inspect。"
+                    "action 不是受支持的 Stable Remote Finalization 操作。"
                 )
         except (
             AttributeError,
             EvolutionStableRemoteFinalizationError,
+            EvolutionStableRemoteFinalizationDeliveryError,
             OSError,
             RuntimeError,
             TypeError,

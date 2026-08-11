@@ -211,7 +211,10 @@
   installer-owned Trust Policy、kill-switch 与 durable consumption 动态撤权；目标 writer 与结果回传由 x3d 接续完成；
 - [EVO-05.5f5x3d Remote Stable Member Finalization Executor](EVO-05-5f5x3d-remote-stable-member-finalization-executor.md)：
   已交付；Control Plane 消费 Authorization 并签署 Execution Grant，目标安装重验真实 Release Store 后执行 expected-pointer
-  CAS、签署 typed Result，Control Plane 动态重验后形成 Receipt；自动 transport、超期恢复与 Population aggregation 仍未完成；
+  CAS、签署 typed Result，Control Plane 动态重验后形成 Receipt；
+- [EVO-05.5f5x3e Remote Finalization Delivery and Recovery](EVO-05-5f5x3e-remote-finalization-delivery-recovery.md)：
+  已交付；durable outbox 以 owner/epoch/lease fencing 重试，目标以独立 installation domain 签 ACK 并写 journal；writer 已提交但
+  keyring 暂不可用时只补签既有事实。真实 daemon transport worker 与 Population aggregation 仍未完成；
 - [EVO-05.6a Automatic Pause and Rollback Request](EVO-05-6a-automatic-pause-rollback-request.md)：已交付；
   exact breach 会触发或复用 kill switch，并冻结只读 exact Rollback Request，不虚报执行完成。
 - [EVO-05.6b1 Immutable Rollback Source](EVO-05-6b1-immutable-rollback-source.md)：已交付；从 exact Git

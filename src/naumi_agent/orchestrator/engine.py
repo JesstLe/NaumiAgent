@@ -506,6 +506,10 @@ from naumi_agent.evolution.stable_remote_finalization_authorizations import (
     EvolutionStableRemoteFinalizationAuthorizationService,
     EvolutionStableRemoteFinalizationAuthorizationStore,
 )
+from naumi_agent.evolution.stable_remote_finalization_deliveries import (
+    EvolutionStableRemoteFinalizationDeliveryService,
+    EvolutionStableRemoteFinalizationDeliveryStore,
+)
 from naumi_agent.evolution.stable_remote_finalizations import (
     EvolutionStableRemoteFinalizationService,
     EvolutionStableRemoteFinalizationStore,
@@ -2698,6 +2702,19 @@ class AgentEngine:
                     self.evolution_release_rollout_control_trust_policy_path
                 ),
                 store=self.evolution_stable_remote_finalization_store,
+            )
+        )
+        self.evolution_stable_remote_finalization_delivery_store = (
+            EvolutionStableRemoteFinalizationDeliveryStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_stable_remote_finalization_delivery_service = (
+            EvolutionStableRemoteFinalizationDeliveryService(
+                finalization_service=(
+                    self.evolution_stable_remote_finalization_service
+                ),
+                store=self.evolution_stable_remote_finalization_delivery_store,
             )
         )
         self.evolution_stable_rollout_authorization_store = (

@@ -135,6 +135,6 @@ CLI、Textual TUI 与 New UI 继续共用 Slash Router 和同一 Agent Tool Serv
 - Population member Receipt aggregation、缺员/替换成员策略与 population-level Completion Authority；
 - ARC-07.6 配置/数据迁移与独立 Promotion authority。
 
-下一最小切片应为 **EVO-05.5f5x3e Remote Finalization Delivery and Recovery**：复用现有 authenticated installation
-transport 前置，加入 durable delivery outbox、ack/retry、target execution journal 与受限 late-result reconciliation；完成后再进入
-Population aggregation，不能直接跳到 fleet completion。
+[EVO-05.5f5x3e Remote Finalization Delivery and Recovery](EVO-05-5f5x3e-remote-finalization-delivery-recovery.md)
+已完成 transport-neutral durable outbox、安装端签名 ACK、claim/retry fencing、目标 journal 与只补签既有 writer fact 的受限
+late-result recovery。下一步先接真实 authenticated transport worker，再进入 Population aggregation，不能直接跳到 fleet completion。

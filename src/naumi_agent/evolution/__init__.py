@@ -1148,6 +1148,23 @@ if TYPE_CHECKING:
         render_stable_remote_finalization_authorization,
         verify_stable_remote_finalization_authorization,
     )
+    from naumi_agent.evolution.stable_remote_finalization_deliveries import (
+        EVOLUTION_STABLE_REMOTE_FINALIZATION_DELIVERY_POLICY,
+        EvolutionStableRemoteFinalizationDeliveryAck,
+        EvolutionStableRemoteFinalizationDeliveryAckPayload,
+        EvolutionStableRemoteFinalizationDeliveryError,
+        EvolutionStableRemoteFinalizationDeliveryEvent,
+        EvolutionStableRemoteFinalizationDeliveryPackage,
+        EvolutionStableRemoteFinalizationDeliveryService,
+        EvolutionStableRemoteFinalizationDeliveryStore,
+        EvolutionStableRemoteFinalizationDeliveryView,
+        EvolutionStableRemoteFinalizationTargetJournal,
+        decode_stable_remote_finalization_delivery_ack,
+        decode_stable_remote_finalization_delivery_package,
+        encode_stable_remote_finalization_delivery_ack,
+        encode_stable_remote_finalization_delivery_package,
+        render_stable_remote_finalization_delivery,
+    )
     from naumi_agent.evolution.stable_remote_finalizations import (
         EVOLUTION_STABLE_REMOTE_FINALIZATION_POLICY,
         EvolutionStableRemoteFinalizationError,
@@ -1164,6 +1181,7 @@ if TYPE_CHECKING:
         encode_stable_remote_finalization_execution_package,
         encode_stable_remote_finalization_submission,
         execute_stable_remote_finalization,
+        recover_stable_remote_finalization_submission,
         render_stable_remote_finalization,
         render_stable_remote_finalization_submission,
         verify_stable_remote_finalization_execution_package,
@@ -1693,9 +1711,25 @@ __all__ = [
     "encode_stable_remote_finalization_execution_package",
     "encode_stable_remote_finalization_submission",
     "execute_stable_remote_finalization",
+    "recover_stable_remote_finalization_submission",
     "render_stable_remote_finalization",
     "render_stable_remote_finalization_submission",
     "verify_stable_remote_finalization_execution_package",
+    "EVOLUTION_STABLE_REMOTE_FINALIZATION_DELIVERY_POLICY",
+    "EvolutionStableRemoteFinalizationDeliveryAck",
+    "EvolutionStableRemoteFinalizationDeliveryAckPayload",
+    "EvolutionStableRemoteFinalizationDeliveryError",
+    "EvolutionStableRemoteFinalizationDeliveryEvent",
+    "EvolutionStableRemoteFinalizationDeliveryPackage",
+    "EvolutionStableRemoteFinalizationDeliveryService",
+    "EvolutionStableRemoteFinalizationDeliveryStore",
+    "EvolutionStableRemoteFinalizationDeliveryView",
+    "EvolutionStableRemoteFinalizationTargetJournal",
+    "decode_stable_remote_finalization_delivery_ack",
+    "decode_stable_remote_finalization_delivery_package",
+    "encode_stable_remote_finalization_delivery_ack",
+    "encode_stable_remote_finalization_delivery_package",
+    "render_stable_remote_finalization_delivery",
     "EVOLUTION_STABLE_ROLLOUT_AUTHORIZATION_POLICY",
     "EvolutionStableRolloutAuthorization",
     "EvolutionStableRolloutAuthorizationError",
@@ -2989,9 +3023,27 @@ def __getattr__(name: str) -> object:
         "encode_stable_remote_finalization_execution_package",
         "encode_stable_remote_finalization_submission",
         "execute_stable_remote_finalization",
+        "recover_stable_remote_finalization_submission",
         "render_stable_remote_finalization",
         "render_stable_remote_finalization_submission",
         "verify_stable_remote_finalization_execution_package",
+    }
+    stable_remote_finalization_delivery_exports = {
+        "EVOLUTION_STABLE_REMOTE_FINALIZATION_DELIVERY_POLICY",
+        "EvolutionStableRemoteFinalizationDeliveryAck",
+        "EvolutionStableRemoteFinalizationDeliveryAckPayload",
+        "EvolutionStableRemoteFinalizationDeliveryError",
+        "EvolutionStableRemoteFinalizationDeliveryEvent",
+        "EvolutionStableRemoteFinalizationDeliveryPackage",
+        "EvolutionStableRemoteFinalizationDeliveryService",
+        "EvolutionStableRemoteFinalizationDeliveryStore",
+        "EvolutionStableRemoteFinalizationDeliveryView",
+        "EvolutionStableRemoteFinalizationTargetJournal",
+        "decode_stable_remote_finalization_delivery_ack",
+        "decode_stable_remote_finalization_delivery_package",
+        "encode_stable_remote_finalization_delivery_ack",
+        "encode_stable_remote_finalization_delivery_package",
+        "render_stable_remote_finalization_delivery",
     }
     stable_rollout_authorization_exports = {
         "EVOLUTION_STABLE_ROLLOUT_AUTHORIZATION_POLICY",
@@ -3692,6 +3744,8 @@ def __getattr__(name: str) -> object:
         module_name = "stable_remote_finalization_authorizations"
     elif name in stable_remote_finalization_exports:
         module_name = "stable_remote_finalizations"
+    elif name in stable_remote_finalization_delivery_exports:
+        module_name = "stable_remote_finalization_deliveries"
     elif name in stable_rollout_authorization_exports:
         module_name = "stable_rollout_authorizations"
     elif name in stable_rollout_finalization_exports:
