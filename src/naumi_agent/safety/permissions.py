@@ -936,6 +936,19 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         risk_level=PermissionRiskLevel.MEDIUM,
         tool_family="evolution_release_observation",
     ),
+    "evolution_stable_remote_finalization_authorization": PermissionRule(
+        tool_name="evolution_stable_remote_finalization_authorization",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+        max_calls_per_session=50,
+        risk_level=PermissionRiskLevel.MEDIUM,
+        tool_family="evolution_release_authorization",
+    ),
     "evolution_stable_rollout_authorization": PermissionRule(
         tool_name="evolution_stable_rollout_authorization",
         allowed_modes=[

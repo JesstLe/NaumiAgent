@@ -1134,6 +1134,23 @@ class TestPermissionChecker:
         assert bypass.allowed and not bypass.requires_confirmation
         assert not lockdown.allowed
 
+    def test_remote_finalization_authorization_never_prompts_in_bypass(self) -> None:
+        moderate = PermissionChecker(PermissionMode.MODERATE).check(
+            "evolution_stable_remote_finalization_authorization",
+            {},
+        )
+        bypass = PermissionChecker(PermissionMode.BYPASS).check(
+            "evolution_stable_remote_finalization_authorization",
+            {},
+        )
+        lockdown = PermissionChecker(PermissionMode.LOCKDOWN).check(
+            "evolution_stable_remote_finalization_authorization",
+            {},
+        )
+        assert moderate.allowed and not moderate.requires_confirmation
+        assert bypass.allowed and not bypass.requires_confirmation
+        assert not lockdown.allowed
+
     def test_shell_confirmation_is_medium_and_session_grantable(self, tmp_path) -> None:
         checker = PermissionChecker(
             PermissionMode.MODERATE,

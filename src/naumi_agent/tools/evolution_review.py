@@ -216,6 +216,10 @@ from naumi_agent.evolution.stable_population_completions import (
     EvolutionStablePopulationCompletionError,
     render_stable_population_completion,
 )
+from naumi_agent.evolution.stable_remote_finalization_authorizations import (
+    EvolutionStableRemoteFinalizationAuthorizationError,
+    render_stable_remote_finalization_authorization,
+)
 from naumi_agent.evolution.stable_remote_readiness_claims import (
     EvolutionStableRemoteReadinessClaimError,
     render_stable_remote_readiness_challenge,
@@ -3291,6 +3295,113 @@ class EvolutionStableRemoteReadinessProbeTool(Tool):
         return render_stable_remote_readiness_probe(view)
 
 
+class EvolutionStableRemoteFinalizationAuthorizationTool(Tool):
+    """Issue, inspect, or export one signed remote finalization capability."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_stable_remote_finalization_authorization"
+
+    @property
+    def description(self) -> str:
+        return (
+            "消费 current installation-signed Remote Readiness Probe 与 rollout "
+            "kill-switch，为 exact member 签发独立 Rollout Control key 签名的短期、"
+            "single-use、binary-only finalization envelope；不执行远端写入。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["issue", "inspect", "export"],
+                },
+                "probe_receipt_id": {
+                    "type": "string",
+                    "pattern": "^evstableremoteprobereceipt_[0-9a-f]{24}$",
+                },
+                "authorization_id": {
+                    "type": "string",
+                    "pattern": "^evstableremotefinalauth_[0-9a-f]{24}$",
+                },
+                "validity_seconds": {
+                    "type": "integer",
+                    "minimum": 60,
+                    "maximum": 300,
+                },
+            },
+            "required": ["action"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="Stable 远端最终化签名授权",
+            search_hint=(
+                "evolution stable remote finalization signed authorization envelope "
+                "自进化 稳定发布 远端 最终化 签名 授权"
+            ),
+        )
+
+    async def execute(
+        self,
+        action: str,
+        probe_receipt_id: str = "",
+        authorization_id: str = "",
+        validity_seconds: int = 180,
+    ) -> str:
+        normalized = str(action or "").strip().lower()
+        try:
+            service = (
+                self._engine.evolution_stable_remote_finalization_authorization_service
+            )
+            if normalized == "issue":
+                view = await service.issue(
+                    probe_receipt_id=probe_receipt_id,
+                    validity_seconds=validity_seconds,
+                )
+            elif normalized in {"inspect", "export"}:
+                view = await service.inspect(authorization_id=authorization_id)
+                if normalized == "export" and not view.remote_finalization_authority:
+                    raise EvolutionStableRemoteFinalizationAuthorizationError(
+                        "stable_remote_finalization_authorization_not_current",
+                        "只有 current Authorization 可以导出。",
+                    )
+            else:
+                raise ValueError("action 必须是 issue、inspect 或 export。")
+        except (
+            AttributeError,
+            EvolutionStableRemoteFinalizationAuthorizationError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(
+                exc,
+                "code",
+                "stable_remote_finalization_authorization_failed",
+            )
+            return f"Signed Remote Finalization Authorization 未完成（`{code}`）：{exc}"
+        return render_stable_remote_finalization_authorization(
+            view,
+            include_envelope=normalized == "export",
+        )
+
+
 class EvolutionStableRolloutAuthorizationTool(Tool):
     """Issue or inspect one member-scoped stable rollout capability."""
 
@@ -4847,6 +4958,7 @@ def create_evolution_review_tools(
         EvolutionRolloutControlKeyTool(engine),
         EvolutionStableRemoteReadinessClaimTool(engine),
         EvolutionStableRemoteReadinessProbeTool(engine),
+        EvolutionStableRemoteFinalizationAuthorizationTool(engine),
         EvolutionStableRolloutAuthorizationTool(engine),
         EvolutionStableRolloutFinalizationTool(engine),
         EvolutionOutcomeOpportunityTool(engine),
@@ -4910,6 +5022,7 @@ __all__ = [
     "EvolutionStableRollbackReadinessTool",
     "EvolutionStableRemoteReadinessClaimTool",
     "EvolutionStableRemoteReadinessProbeTool",
+    "EvolutionStableRemoteFinalizationAuthorizationTool",
     "EvolutionStableRolloutAuthorizationTool",
     "EvolutionStableRolloutFinalizationTool",
     "EvolutionRevalidationRollbackExecutionTool",

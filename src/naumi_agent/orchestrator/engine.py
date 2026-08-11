@@ -502,6 +502,10 @@ from naumi_agent.evolution.stable_read_graph import (
     EvolutionLazyStableReadGraphInspector,
     build_evolution_stable_read_graph_inspector,
 )
+from naumi_agent.evolution.stable_remote_finalization_authorizations import (
+    EvolutionStableRemoteFinalizationAuthorizationService,
+    EvolutionStableRemoteFinalizationAuthorizationStore,
+)
 from naumi_agent.evolution.stable_remote_readiness_claims import (
     EvolutionStableRemoteReadinessClaimService,
     EvolutionStableRemoteReadinessClaimStore,
@@ -2655,6 +2659,25 @@ class AgentEngine:
                     self.evolution_stable_remote_readiness_claim_service
                 ),
                 store=self.evolution_stable_remote_readiness_probe_store,
+            )
+        )
+        self.evolution_stable_remote_finalization_authorization_store = (
+            EvolutionStableRemoteFinalizationAuthorizationStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_stable_remote_finalization_authorization_service = (
+            EvolutionStableRemoteFinalizationAuthorizationService(
+                workspace_root=paths.workspace_root,
+                probe_service=self.evolution_stable_remote_readiness_probe_service,
+                control_store=self.evolution_revalidation_rollout_control_store,
+                rollout_key_service=self.release_rollout_control_key_service,
+                trust_policy_path=(
+                    self.evolution_release_rollout_control_trust_policy_path
+                ),
+                store=(
+                    self.evolution_stable_remote_finalization_authorization_store
+                ),
             )
         )
         self.evolution_stable_rollout_authorization_store = (
