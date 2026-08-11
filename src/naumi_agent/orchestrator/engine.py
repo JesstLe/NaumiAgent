@@ -632,6 +632,7 @@ from naumi_agent.release import (
     ReleaseChannelCatalogStore,
     ReleaseInstallationKeyService,
     ReleasePopulationSnapshotStore,
+    ReleaseRolloutControlKeyService,
     ReleaseSlotStore,
     default_release_root,
     load_release_build_trust_policy,
@@ -2438,6 +2439,9 @@ class AgentEngine:
         self.release_installation_key_service = ReleaseInstallationKeyService(
             release_root
         )
+        self.release_rollout_control_key_service = (
+            ReleaseRolloutControlKeyService(release_root)
+        )
         self.evolution_release_slot_store = ReleaseSlotStore(release_root)
         self.evolution_release_build_trust_policy_path = (
             release_root / "trust" / "trusted-builders.json"
@@ -2447,6 +2451,9 @@ class AgentEngine:
         )
         self.evolution_release_population_trust_policy_path = (
             release_root / "trust" / "trusted-population.json"
+        )
+        self.evolution_release_rollout_control_trust_policy_path = (
+            release_root / "trust" / "trusted-rollout-controls.json"
         )
         self.evolution_release_channel_catalog_store = ReleaseChannelCatalogStore(
             release_root / "state" / "release-channel-catalog.db",

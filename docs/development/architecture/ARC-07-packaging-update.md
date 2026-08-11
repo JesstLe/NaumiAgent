@@ -25,7 +25,9 @@
     已交付独立 Registry Trust Policy、隐私化 signed installation credential、完整 hash-chained population snapshot 与客户端
     动态撤权 Store；[ARC-07.5c1](ARC-07-5c1-installation-key-provisioning.md) 已补齐显式 OS-keyring installation key
     provisioning、跨进程收敛与固定 readiness-probe 签名域。远端 Registry 服务、credential renewal/rotation 和大规模
-    Merkle 分页仍未实现。
+    Merkle 分页仍未实现。[ARC-07.5c2](ARC-07-5c2-rollout-control-signing-authority.md) 已进一步增加与 Build、Channel、
+    Population、Installation key 分离的 rollout-control signing root、installer-owned Trust Policy 和固定 authorization 域；
+    signed remote authorization 与 daemon transport 仍待 EVO-05 后续切片。
   - [ARC-07.5d1 Signed Release Channel Catalog](ARC-07-5d1-signed-release-channel-catalog.md)：已交付独立
     channel/build 双信任根、hash-chained target catalog、release generation rollback resistance 与 pinned-origin
     Resolution。

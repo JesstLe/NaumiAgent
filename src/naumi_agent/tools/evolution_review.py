@@ -246,6 +246,10 @@ from naumi_agent.release.installation_keys import (
     ReleaseInstallationKeyError,
     render_release_installation_key,
 )
+from naumi_agent.release.rollout_control_keys import (
+    ReleaseRolloutControlKeyError,
+    render_release_rollout_control_key,
+)
 from naumi_agent.tools.base import Tool, ToolMetadata
 
 
@@ -2965,6 +2969,91 @@ class EvolutionInstallationKeyTool(Tool):
         return render_release_installation_key(handle)
 
 
+class EvolutionRolloutControlKeyTool(Tool):
+    """Explicitly provision or publicly inspect the rollout-control signer."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_rollout_control_key"
+
+    @property
+    def description(self) -> str:
+        return (
+            "显式初始化或只读检查独立 Rollout Control Ed25519 signing identity；"
+            "私钥只进入 OS keyring，不自动安装客户端 Trust Policy，也不直接授予 rollout。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["provision", "inspect"]},
+                "control_plane_id": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9._-]{2,63}$",
+                },
+                "key_generation": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000000,
+                },
+            },
+            "required": ["action"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="Rollout Control 签名密钥",
+            search_hint=(
+                "release rollout control signing key provision inspect trust "
+                "发行 稳定发布 控制面 签名 密钥 信任根"
+            ),
+        )
+
+    async def execute(
+        self,
+        action: str,
+        control_plane_id: str = "naumi-control-plane",
+        key_generation: int = 1,
+    ) -> str:
+        normalized = str(action or "").strip().lower()
+        try:
+            service = self._engine.release_rollout_control_key_service
+            if normalized == "provision":
+                handle = await asyncio.to_thread(
+                    service.provision,
+                    control_plane_id=control_plane_id,
+                    key_generation=key_generation,
+                )
+            elif normalized == "inspect":
+                handle = await asyncio.to_thread(service.inspect)
+            else:
+                raise ValueError("action 必须是 provision 或 inspect。")
+        except (
+            AttributeError,
+            OSError,
+            ReleaseRolloutControlKeyError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "release_rollout_control_key_failed")
+            return f"Rollout Control signing key 操作未完成（`{code}`）：{exc}"
+        return render_release_rollout_control_key(handle)
+
+
 class EvolutionStableRemoteReadinessClaimTool(Tool):
     """Issue, ingest, or inspect an authenticated installation readiness claim."""
 
@@ -4755,6 +4844,7 @@ def create_evolution_review_tools(
         EvolutionStablePopulationCompletionTool(engine),
         EvolutionStableRollbackReadinessTool(engine),
         EvolutionInstallationKeyTool(engine),
+        EvolutionRolloutControlKeyTool(engine),
         EvolutionStableRemoteReadinessClaimTool(engine),
         EvolutionStableRemoteReadinessProbeTool(engine),
         EvolutionStableRolloutAuthorizationTool(engine),
@@ -4785,6 +4875,7 @@ __all__ = [
     "EvolutionInstallationKeyTool",
     "EvolutionMechanicalGateTool",
     "EvolutionProposalQueueTool",
+    "EvolutionRolloutControlKeyTool",
     "EvolutionPromotionApprovalRequirementTool",
     "EvolutionPromotionApprovalDecisionTool",
     "EvolutionPromotionPackageInputTool",

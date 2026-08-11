@@ -2826,6 +2826,22 @@ test("installation key provisioning uses the shared slash execution path", () =>
   }]);
 });
 
+test("rollout control key provisioning uses the shared slash execution path", () => {
+  const state = createInitialState();
+  const sent = [];
+  handleSubmitText(
+    state,
+    "/evolution rollout-control-key provision naumi-control-plane 1",
+    (type, payload) => sent.push({ type, payload }),
+  );
+  assert.deepEqual(sent, [{
+    type: "submit",
+    payload: {
+      text: "/evolution rollout-control-key provision naumi-control-plane 1",
+    },
+  }]);
+});
+
 test("evaluation lane command opens typed receipt route and stays out of chat", () => {
   const state = createInitialState();
   state.protocolNegotiated = true;

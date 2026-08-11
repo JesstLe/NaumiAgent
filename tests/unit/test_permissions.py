@@ -1117,6 +1117,23 @@ class TestPermissionChecker:
         assert bypass.allowed and not bypass.requires_confirmation
         assert not lockdown.allowed
 
+    def test_rollout_control_key_is_explicit_and_bypass_never_prompts(self) -> None:
+        moderate = PermissionChecker(PermissionMode.MODERATE).check(
+            "evolution_rollout_control_key",
+            {},
+        )
+        bypass = PermissionChecker(PermissionMode.BYPASS).check(
+            "evolution_rollout_control_key",
+            {},
+        )
+        lockdown = PermissionChecker(PermissionMode.LOCKDOWN).check(
+            "evolution_rollout_control_key",
+            {},
+        )
+        assert moderate.allowed and not moderate.requires_confirmation
+        assert bypass.allowed and not bypass.requires_confirmation
+        assert not lockdown.allowed
+
     def test_shell_confirmation_is_medium_and_session_grantable(self, tmp_path) -> None:
         checker = PermissionChecker(
             PermissionMode.MODERATE,
