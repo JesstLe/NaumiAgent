@@ -4258,6 +4258,7 @@ test("initial state includes empty workbench bucket", () => {
     review_loading: false,
     review_error: "",
     review_detail: null,
+    approval_action: null,
     proposal_action: null,
     experiment_contract: null,
     action_notice: "",
