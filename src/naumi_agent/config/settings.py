@@ -491,6 +491,51 @@ class StableRemoteFinalizationDeliveryWorkerConfig(BaseSettings):
         return self
 
 
+class StableRemoteFinalizationHTTPTransportConfig(BaseSettings):
+    """Authenticated control-plane to installation HTTPS transport."""
+
+    enabled: bool = False
+    endpoint_url: str = ""
+    server_ca_path: str = ""
+    client_certificate_path: str = ""
+    client_private_key_path: str = ""
+    server_certificate_sha256_pins: list[str] = Field(default_factory=list)
+    connect_timeout_seconds: float = Field(default=5.0, ge=0.1, le=120)
+    request_timeout_seconds: float = Field(default=15.0, ge=0.1, le=600)
+    max_response_bytes: int = Field(default=512 * 1024, ge=1, le=512 * 1024)
+
+    @model_validator(mode="after")
+    def _validate_stable_remote_http(
+        self,
+    ) -> StableRemoteFinalizationHTTPTransportConfig:
+        configured = bool(
+            self.endpoint_url
+            or self.server_ca_path
+            or self.client_certificate_path
+            or self.client_private_key_path
+            or self.server_certificate_sha256_pins
+        )
+        if configured and not self.enabled:
+            raise ValueError("Remote Finalization HTTP 已配置证书或端点，但未显式 enabled")
+        if self.enabled and not all((
+            self.endpoint_url,
+            self.server_ca_path,
+            self.client_certificate_path,
+            self.client_private_key_path,
+        )):
+            raise ValueError("Remote Finalization HTTP 启用时必须完整配置端点与 mTLS 文件")
+        if self.enabled and not 1 <= len(self.server_certificate_sha256_pins) <= 2:
+            raise ValueError("Remote Finalization HTTP 必须配置 1–2 个服务端证书 pin")
+        if self.enabled and any(
+            re.fullmatch(r"[0-9a-f]{64}", item) is None
+            for item in self.server_certificate_sha256_pins
+        ):
+            raise ValueError("Remote Finalization HTTP 服务端证书 pin 必须是小写 SHA-256")
+        if self.request_timeout_seconds < self.connect_timeout_seconds:
+            raise ValueError("Remote Finalization HTTP request timeout 不能小于 connect timeout")
+        return self
+
+
 class HarnessConfig(BaseSettings):
     """Harness runtime policy configuration."""
 
@@ -508,6 +553,19 @@ class HarnessConfig(BaseSettings):
     stable_remote_finalization_delivery: (
         StableRemoteFinalizationDeliveryWorkerConfig
     ) = Field(default_factory=StableRemoteFinalizationDeliveryWorkerConfig)
+    stable_remote_finalization_http_transport: (
+        StableRemoteFinalizationHTTPTransportConfig
+    ) = Field(default_factory=StableRemoteFinalizationHTTPTransportConfig)
+
+    @model_validator(mode="after")
+    def _validate_stable_remote_transport_timeouts(self) -> HarnessConfig:
+        http = self.stable_remote_finalization_http_transport
+        delivery = self.stable_remote_finalization_delivery
+        if http.enabled and http.request_timeout_seconds >= delivery.ack_timeout_seconds:
+            raise ValueError(
+                "Remote Finalization HTTP request timeout 必须小于 Worker ACK timeout"
+            )
+        return self
 
 
 class AppConfig(BaseSettings):

@@ -1177,6 +1177,15 @@ if TYPE_CHECKING:
         render_stable_remote_finalization_delivery_pass,
         render_stable_remote_finalization_delivery_worker,
     )
+    from naumi_agent.evolution.stable_remote_finalization_http_transport import (
+        STABLE_REMOTE_FINALIZATION_ACK_MEDIA_TYPE,
+        STABLE_REMOTE_FINALIZATION_HTTP_PATH,
+        STABLE_REMOTE_FINALIZATION_PACKAGE_MEDIA_TYPE,
+        MTLSStableRemoteFinalizationInstallationTransport,
+        StableRemoteFinalizationHTTPClientPolicy,
+        StableRemoteFinalizationHTTPServer,
+        StableRemoteFinalizationHTTPServerPolicy,
+    )
     from naumi_agent.evolution.stable_remote_finalizations import (
         EVOLUTION_STABLE_REMOTE_FINALIZATION_POLICY,
         EvolutionStableRemoteFinalizationError,
@@ -1752,6 +1761,13 @@ __all__ = [
     "LocalStableRemoteFinalizationInstallationTransport",
     "render_stable_remote_finalization_delivery_pass",
     "render_stable_remote_finalization_delivery_worker",
+    "MTLSStableRemoteFinalizationInstallationTransport",
+    "STABLE_REMOTE_FINALIZATION_ACK_MEDIA_TYPE",
+    "STABLE_REMOTE_FINALIZATION_HTTP_PATH",
+    "STABLE_REMOTE_FINALIZATION_PACKAGE_MEDIA_TYPE",
+    "StableRemoteFinalizationHTTPClientPolicy",
+    "StableRemoteFinalizationHTTPServer",
+    "StableRemoteFinalizationHTTPServerPolicy",
     "EVOLUTION_STABLE_ROLLOUT_AUTHORIZATION_POLICY",
     "EvolutionStableRolloutAuthorization",
     "EvolutionStableRolloutAuthorizationError",
@@ -3079,6 +3095,15 @@ def __getattr__(name: str) -> object:
         "render_stable_remote_finalization_delivery_pass",
         "render_stable_remote_finalization_delivery_worker",
     }
+    stable_remote_finalization_http_transport_exports = {
+        "MTLSStableRemoteFinalizationInstallationTransport",
+        "STABLE_REMOTE_FINALIZATION_ACK_MEDIA_TYPE",
+        "STABLE_REMOTE_FINALIZATION_HTTP_PATH",
+        "STABLE_REMOTE_FINALIZATION_PACKAGE_MEDIA_TYPE",
+        "StableRemoteFinalizationHTTPClientPolicy",
+        "StableRemoteFinalizationHTTPServer",
+        "StableRemoteFinalizationHTTPServerPolicy",
+    }
     stable_rollout_authorization_exports = {
         "EVOLUTION_STABLE_ROLLOUT_AUTHORIZATION_POLICY",
         "EvolutionStableRolloutAuthorization",
@@ -3782,6 +3807,8 @@ def __getattr__(name: str) -> object:
         module_name = "stable_remote_finalization_deliveries"
     elif name in stable_remote_finalization_delivery_worker_exports:
         module_name = "stable_remote_finalization_delivery_worker"
+    elif name in stable_remote_finalization_http_transport_exports:
+        module_name = "stable_remote_finalization_http_transport"
     elif name in stable_rollout_authorization_exports:
         module_name = "stable_rollout_authorizations"
     elif name in stable_rollout_finalization_exports:

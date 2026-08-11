@@ -17,6 +17,10 @@ from naumi_agent.daemons.permission_decisions import PermissionDecisionReceiptSt
 from naumi_agent.daemons.run_delegation_grants import RunDelegationGrantStore
 from naumi_agent.daemons.tool_jobs import ToolJobStore
 from naumi_agent.daemons.worker_registry import WorkerRegistryStore
+from naumi_agent.evolution.stable_remote_finalization_http_transport import (
+    MTLSStableRemoteFinalizationInstallationTransport,
+    StableRemoteFinalizationHTTPClientPolicy,
+)
 from naumi_agent.evolution.store import (
     EvolutionCandidateStore,
     resolve_evolution_db_path,
@@ -349,6 +353,23 @@ def build_runtime_services(
             agent_job_store=resources.agent_job_store,
             workspace_root=paths.workspace_root,
         )
+    stable_remote_transport = resolved.stable_remote_finalization_transport
+    http_transport = config.harness.stable_remote_finalization_http_transport
+    if stable_remote_transport is None and http_transport.enabled:
+        stable_remote_transport = MTLSStableRemoteFinalizationInstallationTransport(
+            StableRemoteFinalizationHTTPClientPolicy(
+                endpoint_url=http_transport.endpoint_url,
+                server_ca_path=Path(http_transport.server_ca_path),
+                client_certificate_path=Path(http_transport.client_certificate_path),
+                client_private_key_path=Path(http_transport.client_private_key_path),
+                server_certificate_sha256_pins=tuple(
+                    http_transport.server_certificate_sha256_pins
+                ),
+                connect_timeout_seconds=http_transport.connect_timeout_seconds,
+                request_timeout_seconds=http_transport.request_timeout_seconds,
+                max_response_bytes=http_transport.max_response_bytes,
+            )
+        )
     return RuntimeServices(
         terminal_runtime_lifecycle_factory=factory,
         agent_execution_heartbeat_factory=agent_factory,
@@ -358,9 +379,7 @@ def build_runtime_services(
         stable_stage_completion_inspector=(
             resolved.stable_stage_completion_inspector
         ),
-        stable_remote_finalization_transport=(
-            resolved.stable_remote_finalization_transport
-        ),
+        stable_remote_finalization_transport=stable_remote_transport,
     )
 
 

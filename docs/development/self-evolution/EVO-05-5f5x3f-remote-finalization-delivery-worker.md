@@ -138,6 +138,6 @@ Pydantic 与 Worker policy 双层验证 timeout/lease、retry、backoff、scan �
 - 没有 macOS/Linux/Windows 三端真实网络故障矩阵；
 - Snapshot 已进入 Tool/Slash，但尚未做专用 Workbench 队列页面。
 
-下一最小切片应优先实现 **EVO-05.5f5x3g Authenticated Remote Installation HTTP Transport**：复用本 Protocol，交付双向认证、
-endpoint 身份绑定、请求大小/超时、幂等 ACK、证书轮换与三平台 loopback 集成验证。只有远端网络 transport 和 Result 回传闭环完成后，
-才进入 Population member Receipt aggregation。
+[EVO-05.5f5x3g Authenticated Remote Installation HTTP Transport](EVO-05-5f5x3g-authenticated-remote-installation-http-transport.md)
+已复用本 Protocol，交付双向认证、endpoint 身份绑定、请求大小/超时、幂等 ACK、current/next 证书轮换与真实 TLS loopback。
+下一最小切片转为 x3h Result Return Worker；只有远端 Result 回传闭环完成后，才进入 Population member Receipt aggregation。
