@@ -80,7 +80,9 @@ installation signature；同一 challenge 的相同并发结果幂等收敛，�
 ## 自我审视与下一步
 
 本切片真实重验远端安装数据源，但 transport 仍是显式 Base64 搬运，不是自动 daemon dispatch；Challenge 也不授权任何
-writer。下一最小切片应先设计受 fencing、租约、重放保护和网络身份约束的 remote authorization/delivery，再让远端成员消费
-x3b readiness 签发 member-scoped x2 等价 Authorization。只有每个 Population member 都产生 current readiness、受限
+writer。[ARC-07.5c2](../architecture/ARC-07-5c2-rollout-control-signing-authority.md) 已补齐独立 rollout-control
+Ed25519 signing root 与 installer-owned Trust Policy，避免把 Channel/Build/Population/Installation key 错当 writer authority。
+下一最小切片 EVO-05.5f5x3c 应消费 x3b readiness 签发 member-scoped x2 等价的 signed、single-use Authorization，并继续受
+fencing、expiry 与重放保护约束。只有每个 Population member 都产生 current readiness、受限
 Authorization 和 Finalization Receipt，才可聚合 Population Stable Rollout Completion。配置/数据恢复继续等待 ARC-07.6；
 三平台 OS keyring 的真实发布 runner 验收仍是 ARC-07.5c1 的外部发布门禁。

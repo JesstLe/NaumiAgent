@@ -2919,6 +2919,7 @@ def _print_help() -> None:
             "stable-population-preview|stable-population-completion|"
             "stable-rollback-readiness|"
             "installation-key|"
+            "rollout-control-key|"
             "stable-remote-readiness|"
             "stable-remote-readiness-probe|"
             "stable-rollout-authorization|"
@@ -3823,6 +3824,30 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 arg="",
             )
             return
+        if action == "rollout-control-key":
+            if len(parts) in {2, 3, 4} and parts[1] == "provision":
+                arguments = {
+                    "action": "provision",
+                    "control_plane_id": (
+                        parts[2] if len(parts) >= 3 else "naumi-control-plane"
+                    ),
+                    "key_generation": int(parts[3]) if len(parts) == 4 else 1,
+                }
+            elif len(parts) == 2 and parts[1] == "inspect":
+                arguments = {"action": "inspect"}
+            else:
+                raise ValueError(
+                    "rollout-control-key 需要 provision [control-plane-id] "
+                    "[key-generation] 或 inspect。"
+                )
+            await _run_tool_slash_command(
+                engine,
+                slash_command="/evolution",
+                tool_name="evolution_rollout_control_key",
+                parse_args=lambda _arg: arguments,
+                arg="",
+            )
+            return
         if action == "stable-remote-readiness":
             if len(parts) in {4, 5} and parts[1] == "challenge":
                 arguments = {
@@ -4269,6 +4294,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "stable-population-preview、stable-population-completion、"
                 "stable-rollback-readiness、"
                 "installation-key、"
+                "rollout-control-key、"
                 "stable-remote-readiness、"
                 "stable-remote-readiness-probe、"
                 "stable-rollout-authorization、"
@@ -4479,6 +4505,8 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution stable-rollout-finalization execute <authorization-id>；"
             "inspect <authorization-id>；"
             "/evolution installation-key provision [channel]；inspect；"
+            "/evolution rollout-control-key provision [control-plane-id] "
+            "[key-generation]；inspect；"
             "/evolution stable-remote-readiness challenge <completion-id> "
             "<member-id> [validity-seconds]；"
             "/evolution stable-remote-readiness-probe prepare <claim-id> "

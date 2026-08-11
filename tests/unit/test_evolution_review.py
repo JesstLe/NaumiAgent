@@ -74,6 +74,7 @@ from naumi_agent.tools.evolution_review import (
     EvolutionRevalidationValidationPlanTool,
     EvolutionRevalidationValidationTool,
     EvolutionRewardHackingEvidenceTool,
+    EvolutionRolloutControlKeyTool,
     EvolutionStablePopulationCandidatePreviewTool,
     EvolutionStablePopulationCompletionTool,
     EvolutionStableRemoteReadinessClaimTool,
@@ -280,6 +281,7 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
         "evolution_stable_population_completion",
         "evolution_stable_rollback_readiness",
         "evolution_installation_key",
+        "evolution_rollout_control_key",
         "evolution_stable_remote_readiness_claim",
         "evolution_stable_remote_readiness_probe",
         "evolution_stable_rollout_authorization",
@@ -352,12 +354,13 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
     assert isinstance(tools[53], EvolutionStablePopulationCompletionTool)
     assert isinstance(tools[54], EvolutionStableRollbackReadinessTool)
     assert isinstance(tools[55], EvolutionInstallationKeyTool)
-    assert isinstance(tools[56], EvolutionStableRemoteReadinessClaimTool)
-    assert isinstance(tools[57], EvolutionStableRemoteReadinessProbeTool)
-    assert isinstance(tools[58], EvolutionStableRolloutAuthorizationTool)
-    assert isinstance(tools[59], EvolutionStableRolloutFinalizationTool)
-    assert isinstance(tools[60], EvolutionOutcomeOpportunityTool)
-    assert isinstance(tools[61], EvolutionProposalQueueTool)
+    assert isinstance(tools[56], EvolutionRolloutControlKeyTool)
+    assert isinstance(tools[57], EvolutionStableRemoteReadinessClaimTool)
+    assert isinstance(tools[58], EvolutionStableRemoteReadinessProbeTool)
+    assert isinstance(tools[59], EvolutionStableRolloutAuthorizationTool)
+    assert isinstance(tools[60], EvolutionStableRolloutFinalizationTool)
+    assert isinstance(tools[61], EvolutionOutcomeOpportunityTool)
+    assert isinstance(tools[62], EvolutionProposalQueueTool)
 
 
 class _FakeEngine:
