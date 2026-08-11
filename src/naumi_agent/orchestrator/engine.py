@@ -506,6 +506,10 @@ from naumi_agent.evolution.stable_promotion_observation_contracts import (
     EvolutionStablePromotionObservationContractService,
     EvolutionStablePromotionObservationContractStore,
 )
+from naumi_agent.evolution.stable_promotion_observation_revision_deliveries import (
+    EvolutionStablePromotionObservationRevisionDeliveryService,
+    EvolutionStablePromotionObservationRevisionDeliveryStore,
+)
 from naumi_agent.evolution.stable_promotion_runtime_admission_deliveries import (
     EvolutionStablePromotionRuntimeAdmissionDeliveryService,
     EvolutionStablePromotionRuntimeAdmissionDeliveryStore,
@@ -2886,6 +2890,29 @@ class AgentEngine:
                 harness_store=self._harness_store,
                 store=(
                     self.evolution_stable_promotion_observation_chain_cursor_store
+                ),
+            )
+        )
+        self.evolution_stable_promotion_observation_revision_delivery_store = (
+            EvolutionStablePromotionObservationRevisionDeliveryStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_stable_promotion_observation_revision_delivery_service = (
+            EvolutionStablePromotionObservationRevisionDeliveryService(
+                cursor_store=(
+                    self.evolution_stable_promotion_observation_chain_cursor_store
+                ),
+                cursor_service=(
+                    self.evolution_stable_promotion_observation_chain_cursor_service
+                ),
+                admission_delivery_service=(
+                    self.evolution_stable_promotion_runtime_admission_delivery_service
+                ),
+                population_store=self.evolution_release_population_snapshot_store,
+                installation_key_service=self.release_installation_key_service,
+                store=(
+                    self.evolution_stable_promotion_observation_revision_delivery_store
                 ),
             )
         )

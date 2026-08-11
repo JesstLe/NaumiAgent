@@ -224,6 +224,12 @@ from naumi_agent.evolution.stable_promotion_observation_contracts import (
     EvolutionStablePromotionObservationContractError,
     render_stable_promotion_observation_contract,
 )
+from naumi_agent.evolution.stable_promotion_observation_revision_deliveries import (
+    EvolutionStablePromotionObservationRevisionDeliveryError,
+    decode_stable_promotion_observation_revision_submission,
+    encode_stable_promotion_observation_revision_submission,
+    render_stable_promotion_observation_revision_delivery,
+)
 from naumi_agent.evolution.stable_promotion_runtime_admission_deliveries import (
     EvolutionStablePromotionRuntimeAdmissionDeliveryError,
     decode_stable_promotion_runtime_admission_submission,
@@ -4111,6 +4117,143 @@ class EvolutionStablePromotionObservationChainCursorTool(Tool):
         return render_stable_promotion_observation_chain_cursor(view)
 
 
+class EvolutionStablePromotionObservationRevisionDeliveryTool(Tool):
+    """Prepare, export, receive, or inspect signed observation revisions."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_stable_promotion_observation_revision_delivery"
+
+    @property
+    def description(self) -> str:
+        return (
+            "把 installation 本地 Observation Cursor revisions 形成有界 Ed25519 "
+            "签名批次，并在 Control Plane 顺序验签、幂等接收或动态重验；"
+            "不计算长期窗口或推广结论。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["prepare", "export", "receive", "inspect"],
+                },
+                "admission_id": {
+                    "type": "string",
+                    "pattern": "^evstablepromadmit_[0-9a-f]{24}$",
+                },
+                "after_sequence": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 4999,
+                    "default": 0,
+                },
+                "submission_id": {
+                    "type": "string",
+                    "pattern": "^evstablepromrevsubmit_[0-9a-f]{24}$",
+                },
+                "receipt_id": {
+                    "type": "string",
+                    "pattern": "^evstablepromrevreceive_[0-9a-f]{24}$",
+                },
+                "payload_base64": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2796204,
+                },
+            },
+            "required": ["action"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="稳定推广 Observation Revision Delivery",
+            search_hint=(
+                "evolution stable promotion observation revision signed delivery "
+                "自进化 稳定推广 观察签名 批次 交付"
+            ),
+        )
+
+    async def execute(
+        self,
+        action: str,
+        admission_id: str = "",
+        after_sequence: int = 0,
+        submission_id: str = "",
+        receipt_id: str = "",
+        payload_base64: str = "",
+    ) -> str:
+        operation = str(action or "").strip().lower()
+        service = (
+            self._engine.evolution_stable_promotion_observation_revision_delivery_service
+        )
+        try:
+            if operation == "prepare":
+                if not admission_id:
+                    raise ValueError("prepare 需要 Runtime Admission ID。")
+                result = await service.prepare(
+                    admission_id=admission_id,
+                    after_sequence=after_sequence,
+                )
+                return render_stable_promotion_observation_revision_delivery(result)
+            if operation == "export":
+                if not submission_id:
+                    raise ValueError("export 需要 Submission ID。")
+                result = await service.store.get_outbound_by_id(submission_id)
+                if result is None:
+                    raise ValueError("指定 Observation Revision Submission 不存在。")
+                return encode_stable_promotion_observation_revision_submission(result)
+            if operation == "receive":
+                result = await service.receive(
+                    submission=(
+                        decode_stable_promotion_observation_revision_submission(
+                            payload_base64
+                        )
+                    )
+                )
+                return render_stable_promotion_observation_revision_delivery(result)
+            if operation == "inspect":
+                if not receipt_id:
+                    raise ValueError("inspect 需要 Receipt ID。")
+                stored = await service.store.get_received_by_receipt(receipt_id)
+                if stored is None:
+                    raise ValueError("指定 Observation Revision Receipt 不存在。")
+                result = await service.inspect(
+                    submission=stored[0],
+                    receipt=stored[1],
+                )
+                return render_stable_promotion_observation_revision_delivery(result)
+            raise ValueError("action 必须是 prepare、export、receive 或 inspect。")
+        except (
+            AttributeError,
+            EvolutionStablePromotionObservationRevisionDeliveryError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(
+                exc,
+                "code",
+                "stable_promotion_observation_revision_delivery_failed",
+            )
+            return f"稳定推广 Observation Revision Delivery 未完成（`{code}`）：{exc}"
+
+
 class EvolutionStablePromotionRuntimeAdmissionDeliveryTool(Tool):
     """Prepare, export, receive, or inspect one signed runtime Admission."""
 
@@ -5831,6 +5974,7 @@ def create_evolution_review_tools(
         EvolutionStablePromotionObservationContractTool(engine),
         EvolutionStablePromotionRuntimeObservationAdmissionTool(engine),
         EvolutionStablePromotionObservationChainCursorTool(engine),
+        EvolutionStablePromotionObservationRevisionDeliveryTool(engine),
         EvolutionStablePromotionRuntimeAdmissionDeliveryTool(engine),
         EvolutionStableRolloutAuthorizationTool(engine),
         EvolutionStableRolloutFinalizationTool(engine),
@@ -5901,6 +6045,7 @@ __all__ = [
     "EvolutionStablePromotionObservationContractTool",
     "EvolutionStablePromotionRuntimeAdmissionDeliveryTool",
     "EvolutionStablePromotionObservationChainCursorTool",
+    "EvolutionStablePromotionObservationRevisionDeliveryTool",
     "EvolutionStablePromotionRuntimeObservationAdmissionTool",
     "EvolutionStableRolloutAuthorizationTool",
     "EvolutionStableRolloutFinalizationTool",

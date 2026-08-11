@@ -1148,6 +1148,19 @@ if TYPE_CHECKING:
         EvolutionStablePromotionObservationContractView,
         render_stable_promotion_observation_contract,
     )
+    from naumi_agent.evolution.stable_promotion_observation_revision_deliveries import (
+        EVOLUTION_STABLE_PROMOTION_OBSERVATION_REVISION_DELIVERY_POLICY,
+        EvolutionStablePromotionObservationRevisionDeliveryError,
+        EvolutionStablePromotionObservationRevisionDeliveryReceipt,
+        EvolutionStablePromotionObservationRevisionDeliveryService,
+        EvolutionStablePromotionObservationRevisionDeliveryStore,
+        EvolutionStablePromotionObservationRevisionDeliveryView,
+        EvolutionStablePromotionObservationRevisionSubmission,
+        EvolutionStablePromotionObservationRevisionSubmissionPayload,
+        decode_stable_promotion_observation_revision_submission,
+        encode_stable_promotion_observation_revision_submission,
+        render_stable_promotion_observation_revision_delivery,
+    )
     from naumi_agent.evolution.stable_promotion_runtime_admission_deliveries import (
         EVOLUTION_STABLE_PROMOTION_RUNTIME_ADMISSION_DELIVERY_POLICY,
         EvolutionStablePromotionRuntimeAdmissionDeliveryError,
@@ -1884,6 +1897,17 @@ __all__ = [
     "EvolutionStablePromotionObservationChainCursorView",
     "EvolutionStablePromotionObservationChainRevision",
     "render_stable_promotion_observation_chain_cursor",
+    "EVOLUTION_STABLE_PROMOTION_OBSERVATION_REVISION_DELIVERY_POLICY",
+    "EvolutionStablePromotionObservationRevisionDeliveryError",
+    "EvolutionStablePromotionObservationRevisionDeliveryReceipt",
+    "EvolutionStablePromotionObservationRevisionDeliveryService",
+    "EvolutionStablePromotionObservationRevisionDeliveryStore",
+    "EvolutionStablePromotionObservationRevisionDeliveryView",
+    "EvolutionStablePromotionObservationRevisionSubmission",
+    "EvolutionStablePromotionObservationRevisionSubmissionPayload",
+    "decode_stable_promotion_observation_revision_submission",
+    "encode_stable_promotion_observation_revision_submission",
+    "render_stable_promotion_observation_revision_delivery",
     "EVOLUTION_STABLE_PROMOTION_RUNTIME_OBSERVATION_ADMISSION_POLICY",
     "EvolutionStablePromotionRuntimeObservationAdmission",
     "EvolutionStablePromotionRuntimeObservationAdmissionError",
@@ -3324,6 +3348,19 @@ def __getattr__(name: str) -> object:
         "EvolutionStablePromotionObservationChainRevision",
         "render_stable_promotion_observation_chain_cursor",
     }
+    stable_promotion_observation_revision_delivery_exports = {
+        "EVOLUTION_STABLE_PROMOTION_OBSERVATION_REVISION_DELIVERY_POLICY",
+        "EvolutionStablePromotionObservationRevisionDeliveryError",
+        "EvolutionStablePromotionObservationRevisionDeliveryReceipt",
+        "EvolutionStablePromotionObservationRevisionDeliveryService",
+        "EvolutionStablePromotionObservationRevisionDeliveryStore",
+        "EvolutionStablePromotionObservationRevisionDeliveryView",
+        "EvolutionStablePromotionObservationRevisionSubmission",
+        "EvolutionStablePromotionObservationRevisionSubmissionPayload",
+        "decode_stable_promotion_observation_revision_submission",
+        "encode_stable_promotion_observation_revision_submission",
+        "render_stable_promotion_observation_revision_delivery",
+    }
     stable_promotion_runtime_observation_admission_exports = {
         "EVOLUTION_STABLE_PROMOTION_RUNTIME_OBSERVATION_ADMISSION_POLICY",
         "EvolutionStablePromotionRuntimeObservationAdmission",
@@ -4158,6 +4195,8 @@ def __getattr__(name: str) -> object:
         module_name = "stable_promotion_observation_contracts"
     elif name in stable_promotion_observation_chain_cursor_exports:
         module_name = "stable_promotion_observation_chain_cursors"
+    elif name in stable_promotion_observation_revision_delivery_exports:
+        module_name = "stable_promotion_observation_revision_deliveries"
     elif name in stable_promotion_runtime_observation_admission_exports:
         module_name = "stable_promotion_runtime_observation_admissions"
     elif name in stable_promotion_runtime_admission_delivery_exports:

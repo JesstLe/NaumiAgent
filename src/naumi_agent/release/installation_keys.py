@@ -40,6 +40,9 @@ RELEASE_INSTALLATION_FINALIZATION_DELIVERY_ACK_SIGNATURE_DOMAIN = (
 RELEASE_INSTALLATION_STABLE_PROMOTION_ADMISSION_SIGNATURE_DOMAIN = (
     "naumi.release.stable-promotion-runtime-admission.v1"
 )
+RELEASE_INSTALLATION_STABLE_PROMOTION_OBSERVATION_SIGNATURE_DOMAIN = (
+    "naumi.release.stable-promotion-observation-revisions.v1"
+)
 _SERVICE_NAME = "NaumiAgent"
 _CHANNEL_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _MAX_METADATA_BYTES = 64 * 1024
@@ -124,6 +127,7 @@ class ReleaseInstallationSignature(_StrictModel):
         "naumi.release.stable-remote-finalization-result.v1",
         "naumi.release.stable-remote-finalization-delivery-ack.v1",
         "naumi.release.stable-promotion-runtime-admission.v1",
+        "naumi.release.stable-promotion-observation-revisions.v1",
     ] = (
         RELEASE_INSTALLATION_SIGNATURE_DOMAIN
     )
@@ -327,6 +331,20 @@ class ReleaseInstallationKeyService:
         return self._sign(
             domain=(
                 RELEASE_INSTALLATION_STABLE_PROMOTION_ADMISSION_SIGNATURE_DOMAIN
+            ),
+            credential=credential,
+            payload=payload,
+        )
+
+    def sign_stable_promotion_observation_revisions(
+        self,
+        *,
+        credential: ReleaseManagedInstallationCredential,
+        payload: bytes,
+    ) -> ReleaseInstallationSignature:
+        return self._sign(
+            domain=(
+                RELEASE_INSTALLATION_STABLE_PROMOTION_OBSERVATION_SIGNATURE_DOMAIN
             ),
             credential=credential,
             payload=payload,
@@ -544,6 +562,7 @@ def _signature_domain(value: str) -> str:
         RELEASE_INSTALLATION_FINALIZATION_SIGNATURE_DOMAIN,
         RELEASE_INSTALLATION_FINALIZATION_DELIVERY_ACK_SIGNATURE_DOMAIN,
         RELEASE_INSTALLATION_STABLE_PROMOTION_ADMISSION_SIGNATURE_DOMAIN,
+        RELEASE_INSTALLATION_STABLE_PROMOTION_OBSERVATION_SIGNATURE_DOMAIN,
     }:
         raise ValueError("installation signature domain 无效。")
     return value
@@ -732,6 +751,7 @@ __all__ = [
     "RELEASE_INSTALLATION_FINALIZATION_DELIVERY_ACK_SIGNATURE_DOMAIN",
     "RELEASE_INSTALLATION_KEY_POLICY",
     "RELEASE_INSTALLATION_STABLE_PROMOTION_ADMISSION_SIGNATURE_DOMAIN",
+    "RELEASE_INSTALLATION_STABLE_PROMOTION_OBSERVATION_SIGNATURE_DOMAIN",
     "RELEASE_INSTALLATION_SIGNATURE_DOMAIN",
     "InstallationCredentialBackend",
     "ReleaseInstallationKeyError",

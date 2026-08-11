@@ -2981,6 +2981,7 @@ def _print_help() -> None:
             "stable-promotion-observation-contract|"
             "stable-promotion-admit-runtime|"
             "stable-promotion-observation-chain|"
+            "stable-promotion-observation-revisions|"
             "stable-promotion-admission-delivery|"
             "stable-rollout-authorization|"
             "stable-rollout-finalization|"
@@ -4166,6 +4167,49 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 arg="",
             )
             return
+        if action == "stable-promotion-observation-revisions":
+            if len(parts) >= 3 and parts[1] == "prepare" and len(parts) <= 4:
+                await _run_tool_slash_command(
+                    engine,
+                    slash_command="/evolution",
+                    tool_name=(
+                        "evolution_stable_promotion_observation_revision_delivery"
+                    ),
+                    parse_args=lambda _arg: {
+                        "action": "prepare",
+                        "admission_id": parts[2],
+                        "after_sequence": (
+                            0 if len(parts) == 3 else int(parts[3])
+                        ),
+                    },
+                    arg="",
+                )
+                return
+            if len(parts) == 3 and parts[1] in {"export", "receive", "inspect"}:
+                operation = parts[1]
+                field = {
+                    "export": "submission_id",
+                    "receive": "payload_base64",
+                    "inspect": "receipt_id",
+                }[operation]
+                await _run_tool_slash_command(
+                    engine,
+                    slash_command="/evolution",
+                    tool_name=(
+                        "evolution_stable_promotion_observation_revision_delivery"
+                    ),
+                    parse_args=lambda _arg: {
+                        "action": operation,
+                        field: parts[2],
+                    },
+                    arg="",
+                )
+                return
+            raise ValueError(
+                "stable-promotion-observation-revisions 需要 prepare "
+                "<admission-id> [after-sequence]、export <submission-id>、"
+                "receive <payload-base64> 或 inspect <receipt-id>。"
+            )
         if action == "stable-promotion-admission-delivery":
             if len(parts) == 3 and parts[1] in {
                 "prepare",
@@ -4599,6 +4643,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "stable-promotion-observation-contract、"
                 "stable-promotion-admit-runtime、"
                 "stable-promotion-observation-chain、"
+                "stable-promotion-observation-revisions、"
                 "stable-promotion-admission-delivery、"
                 "stable-rollout-authorization、"
                 "stable-rollout-finalization、"
@@ -4837,6 +4882,9 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "<runtime-subject-id>；"
             "/evolution stable-promotion-observation-chain advance|inspect "
             "<runtime-admission-id>；"
+            "/evolution stable-promotion-observation-revisions prepare "
+            "<runtime-admission-id> [after-sequence]；export <submission-id>；"
+            "receive <payload-base64>；inspect <receipt-id>；"
             "/evolution stable-promotion-admission-delivery prepare|export|inspect|"
             "queue|inspect-dispatch <runtime-admission-id>；"
             "receive <submission-base64>；run-worker；inspect-worker；"

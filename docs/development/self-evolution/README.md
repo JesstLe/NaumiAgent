@@ -283,7 +283,10 @@ owner/epoch/lease Worker、Receipt ACK、重试/dead-letter、真实本地 Contr
 mTLS HTTP、member↔certificate pin、strict HTTP bounds、并发/限流和配置自动装配；Population 长期聚合仍未完成。
 [EVO-05.7b3a](EVO-05-7b3a-stable-promotion-observation-chain-cursor.md) 已继续把 acknowledged Admission 与 installation 本地
 HAR-10.2j ledger 组合为逐 sample content-addressed、可并发恢复的 durable cursor；Tool/Slash 共享同一 Service，但 signed revision
-delivery、Control Plane 逐 revision 验签和 Population long-term assessment 仍明确为 false。下一步是 7b3b signed revision delivery。
+delivery、Control Plane 逐 revision 验签和 Population long-term assessment 仍明确为 false。
+[EVO-05.7b3b1](EVO-05-7b3b1-signed-observation-revision-delivery.md) 已增加独立 Ed25519 domain、64 KiB 有界 batch、
+Control Plane 顺序 head、逐 revision 验签和幂等 Receipt；自动 fenced worker、mTLS transport 与 Population long-term assessment
+仍未完成。下一步是 7b3b2a fenced delivery worker。
 [EVO-05.3f2c3b1](EVO-05-3f2c3b1-platform-dispatch-outbox.md) 已把实时准入的 required-platform Worker lane 转为 durable
 queued dispatch，并在 exact Worker incarnation 上预留容量。[EVO-05.3f2c3b2a](EVO-05-3f2c3b2a-authenticated-worker-claim.md)
 已增加 supervisor-attested Ed25519 Worker Identity、一次性 claim challenge 和可续期 lease hash chain。
@@ -302,5 +305,5 @@ managed runtime identity 与 startup-origin Harness ledger；6d3 已完成长期
 已进一步签发 rollback-recovery-observed Outcome revision 与 append-only supersede event，保留 immutable rollback fact；
 [HAR-09.6e2](../harness/HAR-09-6e2-long-term-outcome-projection-parity.md) 又通过 Projection v2 同源同步
 Workbench/New UI/Textual TUI，并保持 Contract 终态阻断。promoted Outcome、配置/数据 rollback 与 policy learning
-authority 仍未完成。成功 rollout 路径的下一步是 EVO-05.7b3b signed observation revision delivery，而不是复用 rollback recovery
+authority 仍未完成。成功 rollout 路径的下一步是 EVO-05.7b3b2a fenced observation revision delivery worker，而不是复用 rollback recovery
 Outcome、把 installation 本地 Cursor 冒充 Control Plane evidence，或把单 member Admission 冒充 Population 长期健康。

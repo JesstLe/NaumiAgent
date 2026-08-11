@@ -108,5 +108,6 @@ Control Plane adapter、owner/epoch/lease fencing、Receipt ACK、指数退避�
 [EVO-05.7b2a2b](EVO-05-7b2a2b-authenticated-runtime-admission-http-transport.md) 已补齐 mTLS HTTP、证书 pin、严格
 网络边界和配置自动装配；
 [EVO-05.7b3a](EVO-05-7b3a-stable-promotion-observation-chain-cursor.md) 已继续建立 installation 本地 durable cursor。
-下一步是 7b3b signed revision delivery；任何单个 signed Admission、Delivery Receipt 或本地 Cursor 都不得被投影为 fleet
+随后 [EVO-05.7b3b1](EVO-05-7b3b1-signed-observation-revision-delivery.md) 已完成有界 signed revision batch 与 Control Plane
+顺序验签/Receipt；下一步是 7b3b2a/2b 自动 worker 与 mTLS。任何单个 signed Admission、Delivery Receipt 或本地 Cursor 都不得被投影为 fleet
 sustained health 或 `promoted` Outcome。
