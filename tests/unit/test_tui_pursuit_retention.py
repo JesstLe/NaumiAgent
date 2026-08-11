@@ -26,6 +26,7 @@ class _TuiFacade:
         self.engine = SimpleNamespace(tool_registry={
             "pursuit_terminal_outbox_retention_preview": object(),
             "pursuit_terminal_outbox_retention_admission": object(),
+            "pursuit_terminal_outbox_retention_prune": object(),
         })
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
@@ -95,6 +96,29 @@ async def test_tui_pursue_outbox_routes_retention_admission() -> None:
             "limit": 5,
             "scan_limit": 10,
             "assessed_at": "2026-08-11T08:00:00+08:00",
+        },
+    )]
+    assert tui.status.status_text == "就绪"
+    assert len(tui.chat.mounted) == 1
+
+
+@pytest.mark.asyncio
+async def test_tui_pursue_outbox_routes_retention_prune() -> None:
+    tui = _TuiFacade()
+    digest = "a" * 64
+
+    await NaumiApp._run_pursue_meta(
+        tui,  # type: ignore[arg-type]
+        "outbox",
+        f"retention-prune ptora_{digest[:24]} {digest} --execute",
+    )
+
+    assert tui.calls == [(
+        "pursuit_terminal_outbox_retention_prune",
+        {
+            "admission_id": f"ptora_{digest[:24]}",
+            "admission_sha256": digest,
+            "execute": True,
         },
     )]
     assert tui.status.status_text == "就绪"

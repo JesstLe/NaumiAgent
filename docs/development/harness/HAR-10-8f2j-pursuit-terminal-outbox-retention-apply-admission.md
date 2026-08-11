@@ -102,5 +102,6 @@ New UI 只把原始 Slash 命令发送给后端，不在前端复制准入或计
 - 计划声明未来写点的故障矩阵，但只有 admission 自身的 insert 已做真实故障注入；delete 写点必须在执行切片逐点验证；
 - disposed history/preview 尚无 cursor 翻页，push stream、跨 Store 原子 terminal commit 与长时 soak 仍未完成。
 
-下一最小切片为 HAR-10.8f2k：实现 admission 消费器、不可变 prune tombstone、逐候选原子执行、每个 delete 写点的
-before/after 故障注入与机械恢复。它必须保持默认 dry-run，只有精确 admission authority 才能进入显式 apply。
+HAR-10.8f2k 已实现 admission 消费器、append-only prune member tombstone、原子物理执行、每个 delete 写点的
+before/after 故障注入与 SQLite 机械回滚，并保持默认 dry-run；只有精确 admission authority、bypass 与显式
+`--execute` 同时成立才会 prune。后续不继续扩张 retention 子树，回到跨文档依赖图选择下一最小纵切。

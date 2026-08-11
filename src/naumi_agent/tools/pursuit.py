@@ -27,6 +27,10 @@ from naumi_agent.orchestrator.pursuit_terminal_retention import (
 from naumi_agent.orchestrator.pursuit_terminal_retention_admission import (
     render_terminal_outbox_retention_admission,
 )
+from naumi_agent.orchestrator.pursuit_terminal_retention_prune import (
+    render_terminal_outbox_retention_prune,
+)
+from naumi_agent.safety.permissions import PermissionMode
 from naumi_agent.tools.base import Tool, ToolMetadata
 
 if TYPE_CHECKING:
@@ -47,6 +51,9 @@ if TYPE_CHECKING:
     )
     from naumi_agent.orchestrator.pursuit_terminal_retention_admission import (
         PursuitTerminalOutboxRetentionAdmission,
+    )
+    from naumi_agent.orchestrator.pursuit_terminal_retention_prune import (
+        PursuitTerminalOutboxRetentionPruneReceipt,
     )
     from naumi_agent.runtime.ports.model import ModelPort
 
@@ -133,6 +140,31 @@ def parse_terminal_outbox_retention_admission_args(
         "preview_id": preview_id,
         "preview_sha256": preview_sha256,
         **parsed,
+    }
+
+
+def parse_terminal_outbox_retention_prune_args(
+    tokens: list[str],
+) -> dict[str, Any]:
+    """Parse one exact admission identity and an optional explicit execute flag."""
+    if len(tokens) < 2:
+        raise ValueError("retention-prune 缺少 admission ID 或摘要。")
+    admission_id, admission_sha256 = tokens[:2]
+    if not re.fullmatch(r"ptora_[0-9a-f]{24}", admission_id):
+        raise ValueError("retention-prune admission ID 格式无效。")
+    if not re.fullmatch(r"[0-9a-f]{64}", admission_sha256):
+        raise ValueError("retention-prune admission 摘要格式无效。")
+    if admission_id != f"ptora_{admission_sha256[:24]}":
+        raise ValueError("retention-prune admission ID 与摘要不一致。")
+    options = tokens[2:]
+    if any(option != "--execute" for option in options):
+        raise ValueError("retention-prune 仅支持可选参数 --execute。")
+    if options.count("--execute") > 1:
+        raise ValueError("retention-prune 参数重复：--execute")
+    return {
+        "admission_id": admission_id,
+        "admission_sha256": admission_sha256,
+        "execute": bool(options),
     }
 
 
@@ -1012,6 +1044,95 @@ class PursuitTerminalOutboxRetentionAdmissionTool(Tool):
         return render_terminal_outbox_retention_admission(admission)
 
 
+class PursuitTerminalOutboxRetentionPruneTool(Tool):
+    """Dry-run by default; execute one admitted prune only under bypass."""
+
+    def __init__(
+        self,
+        runner: Callable[
+            [str, str, bool, str],
+            Awaitable[PursuitTerminalOutboxRetentionPruneReceipt],
+        ],
+    ) -> None:
+        self._runner = runner
+
+    @property
+    def name(self) -> str:
+        return "pursuit_terminal_outbox_retention_prune"
+
+    @property
+    def description(self) -> str:
+        return (
+            "验证一个精确 retention admission；默认只做 dry-run，"
+            "仅 bypass 下显式 execute 才原子删除并写入防复活 tombstone。"
+        )
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            user_facing_name="执行 Pursuit 终态 Outbox 保留清理",
+            search_hint="pursuit terminal outbox retention prune tombstone dry run",
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "admission_id": {
+                    "type": "string",
+                    "pattern": r"^ptora_[0-9a-f]{24}$",
+                },
+                "admission_sha256": {
+                    "type": "string",
+                    "pattern": r"^[0-9a-f]{64}$",
+                },
+                "execute": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "默认 false；true 仅在 bypass 权限模式可用。",
+                },
+            },
+            "required": ["admission_id", "admission_sha256"],
+            "additionalProperties": False,
+        }
+
+    async def execute(self, **kwargs: Any) -> str:
+        admission_id = kwargs.get("admission_id")
+        admission_sha256 = kwargs.get("admission_sha256")
+        execute = kwargs.get("execute", False)
+        if not isinstance(execute, bool):
+            raise ValueError("retention-prune execute 必须是布尔值。")
+        parsed = parse_terminal_outbox_retention_prune_args([
+            str(admission_id or ""),
+            str(admission_sha256 or ""),
+            *(["--execute"] if execute else []),
+        ])
+        permission_receipt = current_permission_receipt()
+        if parsed["execute"] and (
+            permission_receipt is None
+            or permission_receipt.permission_mode is not PermissionMode.BYPASS
+        ):
+            raise ValueError(
+                "物理 retention prune 仅允许在 bypass 模式显式执行。"
+            )
+        source_request_id = (
+            permission_receipt.call_id
+            if permission_receipt is not None
+            else f"local-tool-{uuid.uuid4()}"
+        )
+        receipt = await self._runner(
+            parsed["admission_id"],
+            parsed["admission_sha256"],
+            parsed["execute"],
+            source_request_id,
+        )
+        return render_terminal_outbox_retention_prune(receipt)
+
+
 def create_pursuit_tool(
     *,
     terminal_outbox_runner: (
@@ -1046,6 +1167,13 @@ def create_pursuit_tool(
         ]
         | None
     ) = None,
+    terminal_outbox_retention_prune: (
+        Callable[
+            [str, str, bool, str],
+            Awaitable[PursuitTerminalOutboxRetentionPruneReceipt],
+        ]
+        | None
+    ) = None,
 ) -> list[Tool]:
     tools: list[Tool] = [
         PursueTool(),
@@ -1074,5 +1202,9 @@ def create_pursuit_tool(
     if terminal_outbox_retention_admission is not None:
         tools.append(PursuitTerminalOutboxRetentionAdmissionTool(
             terminal_outbox_retention_admission,
+        ))
+    if terminal_outbox_retention_prune is not None:
+        tools.append(PursuitTerminalOutboxRetentionPruneTool(
+            terminal_outbox_retention_prune,
         ))
     return tools

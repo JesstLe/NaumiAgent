@@ -228,6 +228,32 @@ async def test_shared_pursue_outbox_routes_retention_admission(
 
 
 @pytest.mark.asyncio
+async def test_shared_pursue_outbox_routes_retention_prune(
+    rendered_console: StringIO,
+) -> None:
+    engine = _EngineFacadeFake(content="默认 dry-run，未删除记录。")
+    engine.tool_registry = {
+        "pursuit_terminal_outbox_retention_prune": engine.tool,
+    }
+    digest = "a" * 64
+
+    await commands_meta.run_pursue(
+        engine,
+        f"outbox retention-prune ptora_{digest[:24]} {digest}",
+    )
+
+    tool_call, agent_name = engine.calls[0]
+    assert agent_name == "cli"
+    assert tool_call.name == "pursuit_terminal_outbox_retention_prune"
+    assert json.loads(tool_call.arguments) == {
+        "admission_id": f"ptora_{digest[:24]}",
+        "admission_sha256": digest,
+        "execute": False,
+    }
+    assert "默认 dry-run" in rendered_console.getvalue()
+
+
+@pytest.mark.asyncio
 async def test_delete_session_command_reports_durable_retry_request(
     rendered_console: StringIO,
 ) -> None:
