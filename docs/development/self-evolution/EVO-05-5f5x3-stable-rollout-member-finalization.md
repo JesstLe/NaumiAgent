@@ -74,7 +74,9 @@ Execution Grant、目标 Release Store CAS、installation-signed Result 与 Cont
 [EVO-05.5f5x3e](EVO-05-5f5x3e-remote-finalization-delivery-recovery.md) 已补 durable delivery、installation-signed ACK、
 claim/retry fencing、目标 journal 与受限 late-result recovery。
 [EVO-05.5f5x3f](EVO-05-5f5x3f-remote-finalization-delivery-worker.md) 已增加认证 transport Protocol、本机安装 adapter、周期 claim、
-ACK timeout、retry budget、dead-letter 与 shutdown drain。后续仍需生产 HTTP/mTLS 远端 adapter 与 Result 主动回传；只有每个
+ACK timeout、retry budget、dead-letter 与 shutdown drain。
+[EVO-05.5f5x3g](EVO-05-5f5x3g-authenticated-remote-installation-http-transport.md) 已继续交付独立 mTLS endpoint、同连接服务端
+证书 pin、客户端证书授权、current/next 轮换、严格限长/timeout 与 Runtime 自动装配。后续仍需 Result 主动回传与安装端 daemon；只有每个
 member 都形成 current readiness、Authorization 与 Finalization Receipt，才可
 聚合 population-level Stable Rollout Completion Authority。配置/数据 finalization 继续等待 ARC-07.6，Promotion authority
 继续独立。
