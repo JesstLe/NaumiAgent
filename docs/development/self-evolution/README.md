@@ -265,8 +265,11 @@ Worker、ACK timeout、retry budget、dead-letter 与 shutdown drain。
 [EVO-05.5f5x3h](EVO-05-5f5x3h-remote-finalization-result-return-worker.md) 已增加 ACK 后 writer/补签与 Result 回传的 durable
 双阶段 outbox、owner/epoch/lease fencing、anti-join 同步、retry/dead-letter、shutdown drain、Runtime 注入和 exact Receipt 绑定；
 [EVO-05.5f5x3i](EVO-05-5f5x3i-authenticated-result-return-http-transport.md) 已增加 installation→Control Plane 的独立 mTLS Result
-endpoint、同连接 pin、leaf→member 授权、严格 HTTP bounds、Control Plane 权威 late mode 与配置自动装配；安装端 daemon 和
-Population aggregation 仍未完成。
+endpoint、同连接 pin、leaf→member 授权、严格 HTTP bounds、Control Plane 权威 late mode 与配置自动装配；
+[HAR-10.9a](../harness/HAR-10-9a-remote-finalization-installation-daemon-supervision.md) 已组合 installation daemon；
+[EVO-05.5f5x3j](EVO-05-5f5x3j-population-finalization-receipt-aggregation.md) 已把 exact current Snapshot 的逐 member Receipt
+收口为 durable Population finalization fact 和动态 current authority，不把过期 bearer capability、daemon 健康或单成员成功
+冒充 fleet completion。
 [EVO-05.3f2c3b1](EVO-05-3f2c3b1-platform-dispatch-outbox.md) 已把实时准入的 required-platform Worker lane 转为 durable
 queued dispatch，并在 exact Worker incarnation 上预留容量。[EVO-05.3f2c3b2a](EVO-05-3f2c3b2a-authenticated-worker-claim.md)
 已增加 supervisor-attested Ed25519 Worker Identity、一次性 claim challenge 和可续期 lease hash chain。

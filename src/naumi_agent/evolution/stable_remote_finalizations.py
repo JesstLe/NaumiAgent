@@ -59,6 +59,7 @@ _RECEIPT_RE = re.compile(r"^evstableremotefinalreceipt_[0-9a-f]{24}$")
 _MAX_ARTIFACT_BYTES = 512 * 1024
 _MAX_ENCODED_CHARS = ((_MAX_ARTIFACT_BYTES + 2) // 3) * 4
 _MAX_LATE_RECOVERY_SECONDS = 24 * 60 * 60
+_MAX_POPULATION_RECEIPTS = 10_000
 
 
 class _StrictModel(BaseModel):
@@ -316,6 +317,48 @@ class EvolutionStableRemoteFinalizationView(_StrictModel):
         return self
 
 
+class EvolutionStableRemoteFinalizationAggregationMaterial(_StrictModel):
+    """Exact post-execution material safe for Population aggregation."""
+
+    receipt: EvolutionStableRemoteFinalizationReceipt
+    durable_package_current: bool
+    durable_consumption_current: bool
+    authorization_source_current: bool
+    rollout_control_current: bool
+    rollout_trust_current: bool
+    credential_current: bool
+    grant_signature_valid: bool
+    installation_signature_valid: bool
+    result_binding_valid: bool
+    stable_member_completion_fact: bool
+    aggregation_authority: bool
+    remote_active_pointer_current_unverified: Literal[True] = True
+    promotion_authority: Literal[False] = False
+
+    @model_validator(mode="after")
+    def _projection(self) -> Self:
+        fact = bool(
+            self.durable_package_current
+            and self.durable_consumption_current
+            and self.grant_signature_valid
+            and self.installation_signature_valid
+            and self.result_binding_valid
+        )
+        authority = bool(
+            fact
+            and self.authorization_source_current
+            and self.rollout_control_current
+            and self.rollout_trust_current
+            and self.credential_current
+        )
+        if not (
+            self.stable_member_completion_fact is fact
+            and self.aggregation_authority is authority
+        ):
+            raise ValueError("Remote Finalization aggregation material 投影不一致。")
+        return self
+
+
 class EvolutionStableRemoteFinalizationError(RuntimeError):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
@@ -443,6 +486,34 @@ class EvolutionStableRemoteFinalizationStore:
                 )
             ).fetchone()
         return None if row is None else _restore_receipt(row["receipt_json"])
+
+    async def list_receipts_for_population_snapshot(
+        self,
+        population_snapshot_id: str,
+    ) -> tuple[EvolutionStableRemoteFinalizationReceipt, ...]:
+        snapshot_id = _population_snapshot_id(population_snapshot_id)
+        if not self.db_path.is_file():
+            return ()
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            await _ensure_schema(db)
+            rows = await (
+                await db.execute(
+                    "SELECT receipt_json FROM "
+                    "evolution_stable_remote_finalization_receipts "
+                    "WHERE json_valid(receipt_json) = 1 AND "
+                    "json_extract(receipt_json, "
+                    "'$.execution_package.authorization.authorization."
+                    "population_snapshot_id') = ? ORDER BY receipt_id LIMIT ?",
+                    (snapshot_id, _MAX_POPULATION_RECEIPTS + 1),
+                )
+            ).fetchall()
+        if len(rows) > _MAX_POPULATION_RECEIPTS:
+            raise EvolutionStableRemoteFinalizationError(
+                "stable_remote_finalization_population_limit_exceeded",
+                "Population member Receipt 数量超过 10000 上限。",
+            )
+        return tuple(_restore_receipt(row["receipt_json"]) for row in rows)
 
     async def record_receipt(
         self,
@@ -787,6 +858,108 @@ class EvolutionStableRemoteFinalizationService:
             result_binding_valid=binding_ok,
             stable_member_completion_fact=fact,
             current_control_plane_authority=bool(fact and sources and credential_ok),
+        )
+
+    async def inspect_aggregation_material(
+        self,
+        *,
+        receipt_id: str,
+        credential: ReleaseManagedInstallationCredential,
+    ) -> EvolutionStableRemoteFinalizationAggregationMaterial:
+        """Revalidate a completed member without reviving its expired bearer grant."""
+        receipt = await self.store.get_receipt(receipt_id)
+        if receipt is None:
+            raise EvolutionStableRemoteFinalizationError(
+                "stable_remote_finalization_receipt_missing",
+                "Remote Finalization Receipt 不存在。",
+            )
+        durable_package = durable_consumption = False
+        source_current = control_current = trust_current = False
+        credential_current = grant_signature = installation_signature = False
+        result_binding = False
+        try:
+            package = await self.store.get_package(
+                receipt.execution_package.grant.grant_id
+            )
+            durable_package = package == receipt.execution_package
+            consumption = await self.authorization_service.store.consumption(
+                receipt.execution_package.grant.authorization_id
+            )
+            durable_consumption = consumption == receipt.execution_package.consumption
+            authorization_view = await self.authorization_service.inspect(
+                authorization_id=(
+                    receipt.execution_package.grant.authorization_id
+                )
+            )
+            source_current = authorization_view.source_current
+            control_current = authorization_view.control_current
+            trust_current = authorization_view.trust_policy_current
+            authorization = receipt.execution_package.authorization.authorization
+            result = receipt.submission.result
+            credential_current = bool(
+                credential.payload.member_id == authorization.installation_member_id
+                and credential.credential_id
+                == authorization.installation_credential_id
+                and credential.credential_sha256
+                == authorization.installation_credential_sha256
+                and credential.payload.installation_public_key_sha256
+                == authorization.installation_public_key_sha256
+                and result.installation_member_id == credential.payload.member_id
+                and result.installation_credential_id == credential.credential_id
+            )
+            policy = load_release_rollout_control_trust_policy(
+                self.trust_policy_path
+            )
+            verify_release_rollout_control_signature(
+                trust_policy=policy,
+                channel="stable",
+                payload=receipt.execution_package.grant.canonical_bytes(),
+                artifact=receipt.execution_package.signature,
+                expected_domain=(
+                    RELEASE_ROLLOUT_CONTROL_EXECUTION_GRANT_SIGNATURE_DOMAIN
+                ),
+            )
+            grant_signature = True
+            if credential_current:
+                verify_release_installation_signature(
+                    credential=credential,
+                    payload=result.canonical_bytes(),
+                    artifact=receipt.submission.signature,
+                    expected_domain=(
+                        RELEASE_INSTALLATION_FINALIZATION_SIGNATURE_DOMAIN
+                    ),
+                )
+                installation_signature = True
+            _validate_result_binding(receipt.execution_package, result)
+            result_binding = True
+        except (OSError, RuntimeError, TypeError, ValueError):
+            pass
+        fact = bool(
+            durable_package
+            and durable_consumption
+            and grant_signature
+            and installation_signature
+            and result_binding
+        )
+        return EvolutionStableRemoteFinalizationAggregationMaterial(
+            receipt=receipt,
+            durable_package_current=durable_package,
+            durable_consumption_current=durable_consumption,
+            authorization_source_current=source_current,
+            rollout_control_current=control_current,
+            rollout_trust_current=trust_current,
+            credential_current=credential_current,
+            grant_signature_valid=grant_signature,
+            installation_signature_valid=installation_signature,
+            result_binding_valid=result_binding,
+            stable_member_completion_fact=fact,
+            aggregation_authority=bool(
+                fact
+                and source_current
+                and control_current
+                and trust_current
+                and credential_current
+            ),
         )
 
 
@@ -1463,6 +1636,13 @@ def _receipt_id(value: str) -> str:
     return item
 
 
+def _population_snapshot_id(value: str) -> str:
+    item = str(value or "").strip()
+    if re.fullmatch(r"relpopsnapshot_[0-9a-f]{24}", item) is None:
+        raise ValueError("population_snapshot_id 格式无效。")
+    return item
+
+
 def _aware(value: str | datetime) -> datetime:
     parsed = datetime.fromisoformat(value) if isinstance(value, str) else value
     if not isinstance(parsed, datetime) or parsed.tzinfo is None or parsed.utcoffset() is None:
@@ -1487,6 +1667,7 @@ def _digest(value) -> str:
 __all__ = [
     "EVOLUTION_STABLE_REMOTE_FINALIZATION_POLICY",
     "EvolutionStableRemoteFinalizationError",
+    "EvolutionStableRemoteFinalizationAggregationMaterial",
     "EvolutionStableRemoteFinalizationExecutionGrant",
     "EvolutionStableRemoteFinalizationExecutionPackage",
     "EvolutionStableRemoteFinalizationReceipt",

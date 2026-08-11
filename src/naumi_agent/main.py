@@ -2975,6 +2975,7 @@ def _print_help() -> None:
             "stable-remote-readiness-probe|"
             "stable-remote-finalization-authorization|"
             "stable-remote-finalization|"
+            "stable-remote-population-finalization|"
             "stable-rollout-authorization|"
             "stable-rollout-finalization|"
             "discover-outcome|"
@@ -4077,6 +4078,33 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 arg="",
             )
             return
+        if action == "stable-remote-population-finalization":
+            if len(parts) not in {2, 3} or parts[1] not in {"complete", "inspect"}:
+                raise ValueError(
+                    "stable-remote-population-finalization 需要 complete "
+                    "[Snapshot ID] 或 inspect <Receipt ID>。"
+                )
+            operation = parts[1]
+            if operation == "inspect" and len(parts) != 3:
+                raise ValueError(
+                    "stable-remote-population-finalization inspect 需要 Receipt ID。"
+                )
+            await _run_tool_slash_command(
+                engine,
+                slash_command="/evolution",
+                tool_name="evolution_stable_remote_population_finalization",
+                parse_args=lambda _arg: {
+                    "action": operation,
+                    "snapshot_id": (
+                        parts[2]
+                        if operation == "complete" and len(parts) == 3
+                        else None
+                    ),
+                    "receipt_id": parts[2] if operation == "inspect" else None,
+                },
+                arg="",
+            )
+            return
         if action == "stable-rollout-authorization":
             if len(parts) == 4 and parts[1] == "issue":
                 arguments = {
@@ -4462,6 +4490,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "stable-remote-readiness-probe、"
                 "stable-remote-finalization-authorization、"
                 "stable-remote-finalization、"
+                "stable-remote-population-finalization、"
                 "stable-rollout-authorization、"
                 "stable-rollout-finalization、"
                 "discover-outcome、"
@@ -4690,6 +4719,8 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "inspect-delivery <delivery-id>；run-delivery-worker；"
             "inspect-delivery-worker；run-result-return-worker；"
             "inspect-result-return-worker；inspect-installation-daemon；"
+            "/evolution stable-remote-population-finalization complete "
+            "[population-snapshot-id]；inspect <population-finalization-receipt-id>；"
             "/evolution discover-outcome <rollback-outcome-id>；"
             "/evolution revalidation-rollback-execute <rollback-request-id>；"
             "/evolution revalidation-rollback-outcome <rollback-request-id>；"

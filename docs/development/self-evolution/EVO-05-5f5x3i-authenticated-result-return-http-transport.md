@@ -132,8 +132,9 @@ x3i 已完成单安装端 Result 的跨机器认证传输，但仍不能宣称 f
 - rate limiter 为 endpoint-local；多副本部署需共享网关/限流 authority；
 - dead-letter 的签名审查、requeue/abandon 和 retention 尚未接入 Result Worker；
 - Linux/Windows 真实 service 与网络故障矩阵仍缺发布证据；
-- 单 member Receipt 尚未聚合为 Population Stable Rollout Completion Authority。
+- 本切片自身只传输单 member Receipt；Population 聚合现由 x3j 独立负责。
 
 [HAR-10.9a Remote Finalization Installation Daemon Supervision](../harness/HAR-10-9a-remote-finalization-installation-daemon-supervision.md)
 已把 x3g server、x3h Worker、x3i transport、RunLease、heartbeat 与原子 discovery 组合成可恢复的安装端
-daemon。下一切片回到 EVO-05.5f5x3j，交付逐 member Receipt aggregation 和 Population completion authority。
+daemon。[EVO-05.5f5x3j](EVO-05-5f5x3j-population-finalization-receipt-aggregation.md) 已继续交付逐 member Receipt 的
+exact Population aggregation、writer fence 和动态 completion authority。
