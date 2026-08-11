@@ -18,7 +18,7 @@ export function renderGoalPursuitPage(view, width, height) {
     color(ANSI.cyan, "Goal / Pursuit"),
     color(
       ANSI.dim,
-      "r 刷新 · x 恢复当前 Pursuit · o 恢复终态队列 · d 选择死信 · u 重入队 · a 原因 · z 放弃 · ↑/↓ 滚动 · j/k 选择交互 · Enter 详情 · f 筛选 · n/p 翻页 · Esc 返回",
+      "r 刷新 · ←/→ 选择 Goal · x 恢复当前 Pursuit · o 恢复终态队列 · d 选择死信 · u 重入队 · a 原因 · z 放弃 · ↑/↓ 滚动 · j/k 选择交互 · Enter 详情 · f 筛选 · n/p 翻页 · Esc 返回",
     ),
   ];
   if (value.recoveryActionPending) {
@@ -53,9 +53,15 @@ export function renderGoalPursuitPage(view, width, height) {
       ),
     );
   } else {
-    for (const goal of snapshot.goals) {
-      logical.push(...renderGoal(goal, snapshot.current_goal_id));
-    }
+    logical.push(...renderGoalDirectory(
+      snapshot.goals,
+      snapshot.current_goal_id,
+      snapshot.selected_goal_id,
+    ));
+    const selectedGoal = snapshot.goals.find(
+      (goal) => goal.goal_id === snapshot.selected_goal_id,
+    ) ?? snapshot.goals[0];
+    logical.push(...renderGoal(selectedGoal, snapshot.current_goal_id));
     logical.push(...renderInteractionLedger(
       snapshot,
       Math.max(0, Number(value.selectedInteractionIndex) || 0),
@@ -200,7 +206,7 @@ function renderGoal(goal, currentGoalId) {
   const lines = [
     color(
       current ? ANSI.cyan : ANSI.dim,
-      `── ${current ? "当前目标" : "历史目标"} · ${goal.goal_id}`,
+      `── 目标详情 · ${goal.goal_id}${current ? " · 当前" : ""}`,
     ),
     color(goalColor(goal.status), `${goalLabel(goal.status)} · ${compactText(goal.objective, 4_000)}`),
     color(
@@ -215,6 +221,19 @@ function renderGoal(goal, currentGoalId) {
     lines.push(color(ANSI.red, `Pursuit ${goal.pursuit_run_id} · 追踪记录不可用`));
   } else {
     lines.push(color(ANSI.dim, "Pursuit · 未启动"));
+  }
+  return lines;
+}
+
+function renderGoalDirectory(goals, currentGoalId, selectedGoalId) {
+  const lines = [color(ANSI.cyan, `── 目标目录 · ${goals.length} 项`)];
+  for (const goal of goals) {
+    const selected = goal.goal_id === selectedGoalId;
+    const current = goal.goal_id === currentGoalId;
+    lines.push(color(
+      selected ? ANSI.cyan : goalColor(goal.status),
+      `${selected ? "▶" : " "} ${goal.goal_id} · ${goalLabel(goal.status)}${current ? " · 当前" : ""} · ${compactText(goal.objective, 300)}`,
+    ));
   }
   return lines;
 }
@@ -326,18 +345,20 @@ function renderPursuit(run) {
   if (run.recovery) {
     lines.push(...renderRecovery(run.recovery));
   }
-  if (run.waits?.length) {
-    lines.push(color(ANSI.yellow, `等待任务 · ${run.waits.length}`));
-    for (const wait of run.waits) {
-      lines.push(color(ANSI.dim, `  ${wait.task_id} · ${compactText(wait.command, 2_000)}`));
-    }
+  lines.push(color(run.waits?.length ? ANSI.yellow : ANSI.dim, `等待任务 · ${run.waits?.length || 0}`));
+  for (const wait of run.waits || []) {
+    lines.push(color(
+      ANSI.dim,
+      `  ${wait.task_id} · ${wait.action_id || "无 action"} · ${compactText(wait.command, 2_000)} · ${wait.created_at || "-"}`,
+    ));
   }
-  if (run.evidence?.length) {
-    lines.push(color(ANSI.cyan, `最近证据 · ${run.evidence.length}`));
-    for (const evidence of run.evidence.slice(-5)) {
-      const style = evidence.is_hard ? ANSI.green : ANSI.dim;
-      lines.push(color(style, `  ${evidence.kind} · ${evidence.source} · ${compactText(evidence.summary, 1_000)}`));
-    }
+  lines.push(color(run.evidence?.length ? ANSI.cyan : ANSI.dim, `最近证据 · ${run.evidence?.length || 0} / 20（快照上限）`));
+  for (const evidence of run.evidence || []) {
+    const style = evidence.is_hard ? ANSI.green : ANSI.dim;
+    lines.push(color(
+      style,
+      `  ${evidence.is_hard ? "强证据" : "辅助证据"} · ${evidence.kind} · ${evidence.timestamp || "-"} · ${evidence.source} · ${compactText(evidence.summary, 1_000)}`,
+    ));
   }
   return lines;
 }

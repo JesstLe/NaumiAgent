@@ -887,6 +887,11 @@ def _normalize_client_payload(
             r"ask-[A-Za-z0-9._:-]{1,128}", selected_interaction_id
         ):
             raise ValueError("Goal 所选 interaction_id 格式无效。")
+        selected_goal_id = str(payload.get("selected_goal_id") or "").strip()
+        if selected_goal_id and not re.fullmatch(
+            r"[A-Za-z0-9_.:-]{1,128}", selected_goal_id
+        ):
+            raise ValueError("Goal 所选 goal_id 格式无效。")
         return {
             "limit": _bounded_int(
                 payload.get("limit"),
@@ -897,6 +902,7 @@ def _normalize_client_payload(
             "include_finished": _to_bool(
                 payload.get("include_finished", True)
             ),
+            "selected_goal_id": selected_goal_id,
             "interaction_limit": _bounded_int(
                 payload.get("interaction_limit"), 10, lower=1, upper=50
             ),

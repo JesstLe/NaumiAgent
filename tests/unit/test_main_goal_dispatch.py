@@ -53,6 +53,7 @@ class _EngineFake:
     [
         ("", "goal_status", {}),
         ("status goal_demo", "goal_status", {"goal_id": "goal_demo"}),
+        ("detail goal_demo", "goal_status", {"goal_id": "goal_demo"}),
         ("list", "goal_list", {"include_finished": True}),
         ("list --active", "goal_list", {"include_finished": False}),
         ("完善 New UI", "goal_create", {"objective": "完善 New UI"}),

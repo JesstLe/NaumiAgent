@@ -147,8 +147,6 @@ class GoalStatusTool(Tool):
                     ),
                 )
             )
-        if goal_id:
-            return format_goal(goal)
         return render_goal_pursuit_snapshot(
             await build_goal_pursuit_snapshot_with_recovery(
                 self._store,
@@ -156,7 +154,8 @@ class GoalStatusTool(Tool):
                 self._recovery_authority,
                 workspace_root=self._workspace_root,
                 limit=1,
-                include_finished=False,
+                include_finished=bool(goal_id),
+                selected_goal_id=goal_id,
                 terminal_outbox_enabled=self._terminal_outbox_enabled,
                 terminal_outbox_worker_snapshot=(
                     self._terminal_outbox_worker_snapshot
@@ -230,6 +229,11 @@ class GoalListTool(Tool):
                     "description": "可选的页内交互详情 ID",
                     "default": "",
                 },
+                "selected_goal_id": {
+                    "type": "string",
+                    "description": "可选的历史目标详情 ID",
+                    "default": "",
+                },
             },
             "required": [],
         }
@@ -241,6 +245,7 @@ class GoalListTool(Tool):
         interaction_filter: str = "all",
         interaction_cursor: str = "",
         selected_interaction_id: str = "",
+        selected_goal_id: str = "",
         **kwargs: Any,
     ) -> str:
         return render_goal_pursuit_snapshot(
@@ -251,6 +256,7 @@ class GoalListTool(Tool):
                 workspace_root=self._workspace_root,
                 limit=50,
                 include_finished=include_finished,
+                selected_goal_id=selected_goal_id,
                 interaction_limit=10,
                 interaction_filter=interaction_filter,
                 interaction_cursor=interaction_cursor,

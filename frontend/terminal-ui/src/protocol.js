@@ -6195,6 +6195,13 @@ function normalizeGoalSnapshot(payload) {
   if (currentGoalId && !goals.some((item) => item.goal_id === currentGoalId)) {
     throw new Error("goals/snapshot current_goal_id 不在 goals 中");
   }
+  const selectedGoalId = schemaVersion >= 2 && payload.selected_goal_id != null
+    ? harnessText(payload.selected_goal_id, "goals/snapshot selected_goal_id")
+    : currentGoalId || goals[0]?.goal_id || "";
+  validateGoalId(selectedGoalId, "goals/snapshot selected_goal_id", true);
+  if (selectedGoalId && !goals.some((item) => item.goal_id === selectedGoalId)) {
+    throw new Error("goals/snapshot selected_goal_id 不在 goals 中");
+  }
   const interactions = harnessObjectArray(
     payload.interactions ?? [],
     "goals/snapshot interactions",
@@ -6244,6 +6251,7 @@ function normalizeGoalSnapshot(payload) {
     generated_at: harnessText(payload.generated_at, "goals/snapshot generated_at"),
     full: harnessBoolean(payload.full, "goals/snapshot full"),
     current_goal_id: currentGoalId,
+    selected_goal_id: selectedGoalId,
     goals,
     warnings: harnessTextArray(payload.warnings, "goals/snapshot warnings", 20),
     truncated: harnessBoolean(payload.truncated, "goals/snapshot truncated"),

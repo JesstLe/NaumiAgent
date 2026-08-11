@@ -7594,7 +7594,11 @@ async def test_bridge_emits_typed_goal_snapshot_and_legacy_fallback(
     await bridge.handle_client_record({
         "id": "goal-open",
         "type": ClientEventType.GOAL_PANEL,
-        "payload": {"limit": 7, "include_finished": False},
+        "payload": {
+            "limit": 7,
+            "include_finished": False,
+            "selected_goal_id": "goal_history",
+        },
     })
 
     records = _records(writer)
@@ -7605,6 +7609,7 @@ async def test_bridge_emits_typed_goal_snapshot_and_legacy_fallback(
         "workspace_root": engine.workspace_root,
         "limit": 7,
         "include_finished": False,
+        "selected_goal_id": "goal_history",
         "interaction_limit": 10,
         "interaction_filter": "all",
         "interaction_cursor": "",
@@ -7635,6 +7640,7 @@ async def test_bridge_emits_typed_goal_snapshot_and_legacy_fallback(
         "workspace_root": engine.workspace_root,
         "limit": 20,
         "include_finished": True,
+        "selected_goal_id": "",
         "interaction_limit": 10,
         "interaction_filter": "all",
         "interaction_cursor": "",

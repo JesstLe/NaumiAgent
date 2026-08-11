@@ -464,6 +464,7 @@ export function createInitialState() {
       error: "",
       limit: 20,
       includeFinished: true,
+      selectedGoalIndex: 0,
       scrollOffset: 0,
       interactionFilter: "all",
       interactionCursor: "",
@@ -914,6 +915,12 @@ export function reduceServerEvent(state, record) {
       state.goalPanel.error = "";
       state.goalPanel.interactionFilter = payload.interaction_filter || "all";
       state.goalPanel.interactionCursor = payload.interaction_cursor || "";
+      state.goalPanel.selectedGoalIndex = Math.max(
+        0,
+        (payload.goals || []).findIndex(
+          (item) => item.goal_id === payload.selected_goal_id,
+        ),
+      );
       state.goalPanel.selectedInteractionIndex = Math.min(
         Math.max(0, Number(state.goalPanel.selectedInteractionIndex) || 0),
         Math.max(0, (payload.interactions?.length || 1) - 1),
@@ -3272,12 +3279,17 @@ export function handleTodoPrepare(state, message) {
 }
 
 function parseGoalPanelCommand(commandText) {
-  const normalized = String(commandText || "").trim().toLowerCase();
+  const raw = String(commandText || "").trim();
+  const normalized = raw.toLowerCase();
   if (["/goal", "/goal status", "/goal list"].includes(normalized)) {
     return { limit: 20, include_finished: true };
   }
   if (normalized === "/goal list --active") {
     return { limit: 20, include_finished: false };
+  }
+  const detail = raw.match(/^\/goal\s+(?:detail|status)\s+([A-Za-z0-9_.:-]{1,128})$/i);
+  if (detail) {
+    return { limit: 20, include_finished: true, selected_goal_id: detail[1] };
   }
   return null;
 }
@@ -3536,6 +3548,7 @@ export function handleSubmitText(state, text, send) {
     state.goalPanel.interactionCursor = "";
     state.goalPanel.interactionCursorStack = [];
     state.goalPanel.selectedInteractionIndex = 0;
+    state.goalPanel.selectedGoalIndex = 0;
     send("goal_panel", goalPanelRequest);
     return;
   }
@@ -4817,7 +4830,10 @@ export function handleGoalPanelKey(state, key, send) {
   const lower = String(key || "").toLowerCase();
   if (
     state.goalPanel.loading
-    && ["r", "x", "o", "d", "u", "a", "z", "j", "k", "f", "n", "p", "\r", "\n"].includes(lower)
+    && (
+      ["r", "x", "o", "d", "u", "a", "z", "j", "k", "f", "n", "p", "[", "]", "\r", "\n"].includes(lower)
+      || [INPUT_KEYS.left, INPUT_KEYS.leftAlt, INPUT_KEYS.right, INPUT_KEYS.rightAlt].includes(key)
+    )
   ) {
     return true;
   }
@@ -4854,6 +4870,24 @@ export function handleGoalPanelKey(state, key, send) {
   }
   if (lower === "z") {
     requestSelectedTerminalDeadLetterAbandon(state, send);
+    return true;
+  }
+  const goals = state.goalPanel.snapshot?.goals ?? [];
+  if (["[", INPUT_KEYS.left, INPUT_KEYS.leftAlt].includes(key) && goals.length) {
+    const nextIndex = Math.max(0, state.goalPanel.selectedGoalIndex - 1);
+    state.goalPanel.selectedGoalIndex = nextIndex;
+    state.goalPanel.scrollOffset = 0;
+    requestGoalPanelPage(state, send, { selected_goal_id: goals[nextIndex].goal_id });
+    return true;
+  }
+  if (["]", INPUT_KEYS.right, INPUT_KEYS.rightAlt].includes(key) && goals.length) {
+    const nextIndex = Math.min(
+      goals.length - 1,
+      state.goalPanel.selectedGoalIndex + 1,
+    );
+    state.goalPanel.selectedGoalIndex = nextIndex;
+    state.goalPanel.scrollOffset = 0;
+    requestGoalPanelPage(state, send, { selected_goal_id: goals[nextIndex].goal_id });
     return true;
   }
   const interactions = state.goalPanel.snapshot?.interactions ?? [];
@@ -5177,6 +5211,7 @@ function requestGoalPanelPage(state, send, extra = {}) {
     interaction_filter: state.goalPanel.interactionFilter || "all",
     interaction_cursor: state.goalPanel.interactionCursor || "",
     selected_interaction_id: "",
+    selected_goal_id: state.goalPanel.snapshot?.selected_goal_id || "",
     ...extra,
   });
 }

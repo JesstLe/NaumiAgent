@@ -4458,6 +4458,7 @@ class JsonlEngineBridge:
             workspace_root=self.engine.workspace_root,
             limit=int(payload.get("limit", 20)),
             include_finished=bool(payload.get("include_finished", True)),
+            selected_goal_id=str(payload.get("selected_goal_id") or ""),
             interaction_limit=int(payload.get("interaction_limit", 10)),
             interaction_filter=str(payload.get("interaction_filter") or "all"),
             interaction_cursor=str(payload.get("interaction_cursor") or ""),

@@ -178,6 +178,7 @@ class GoalPursuitSnapshot:
     """Bounded public projection of durable Goal and Pursuit facts."""
 
     current_goal_id: str = ""
+    selected_goal_id: str = ""
     goals: tuple[dict[str, Any], ...] = ()
     warnings: tuple[str, ...] = ()
     truncated: bool = False
@@ -195,6 +196,7 @@ class GoalPursuitSnapshot:
             "generated_at": datetime.now(UTC).isoformat(),
             "full": True,
             "current_goal_id": _bounded_text(self.current_goal_id, 128),
+            "selected_goal_id": _bounded_text(self.selected_goal_id, 128),
             "goals": [dict(item) for item in self.goals[:MAX_GOAL_PANEL_ITEMS]],
             "warnings": [_bounded_text(item, 500) for item in self.warnings[:20]],
             "truncated": bool(self.truncated),
@@ -225,6 +227,7 @@ def build_goal_pursuit_snapshot(
     *,
     limit: int = 20,
     include_finished: bool = True,
+    selected_goal_id: str = "",
 ) -> GoalPursuitSnapshot:
     """Read one bounded snapshot without creating a missing database."""
     safe_limit = max(1, min(int(limit), MAX_GOAL_PANEL_ITEMS))
@@ -232,6 +235,7 @@ def build_goal_pursuit_snapshot(
         return GoalPursuitSnapshot(include_finished=include_finished)
 
     warnings: list[str] = []
+    requested_goal_id = _bounded_text(selected_goal_id, 128)
     try:
         goals = goal_store.list(
             include_finished=include_finished,
@@ -248,6 +252,34 @@ def build_goal_pursuit_snapshot(
     goals = goals[:safe_limit]
     if current is not None and all(goal.id != current.id for goal in goals):
         goals = [current, *goals[: max(0, safe_limit - 1)]]
+    selected_goal: Goal | None = None
+    if requested_goal_id:
+        try:
+            selected_goal = goal_store.get(requested_goal_id)
+        except Exception:
+            warnings.append("所选 Goal ID 无效，已回退到当前目标。")
+        if selected_goal is None and not warnings:
+            warnings.append(f"所选目标 {requested_goal_id} 不存在，已回退到当前目标。")
+        if selected_goal is not None and all(
+            goal.id != selected_goal.id for goal in goals
+        ):
+            selection_limit = min(
+                MAX_GOAL_PANEL_ITEMS,
+                max(
+                    safe_limit,
+                    2 if current is not None and current.id != selected_goal.id else 1,
+                ),
+            )
+            goals = [selected_goal, *goals[: max(0, selection_limit - 1)]]
+    selected_id = (
+        selected_goal.id
+        if selected_goal is not None
+        else current.id
+        if current is not None and any(goal.id == current.id for goal in goals)
+        else goals[0].id
+        if goals
+        else ""
+    )
     pursuit_available = pursuit_store.db_path.is_file()
     items: list[dict[str, Any]] = []
     for goal in goals:
@@ -272,6 +304,7 @@ def build_goal_pursuit_snapshot(
 
     return GoalPursuitSnapshot(
         current_goal_id=current.id if current is not None else "",
+        selected_goal_id=selected_id,
         goals=tuple(items),
         warnings=tuple(dict.fromkeys(warnings)),
         truncated=truncated,
@@ -287,6 +320,7 @@ async def build_goal_pursuit_snapshot_with_recovery(
     workspace_root: str | Path,
     limit: int = 20,
     include_finished: bool = True,
+    selected_goal_id: str = "",
     interaction_limit: int = 10,
     interaction_filter: str = "all",
     interaction_cursor: str = "",
@@ -303,6 +337,7 @@ async def build_goal_pursuit_snapshot_with_recovery(
         pursuit_store,
         limit=limit,
         include_finished=include_finished,
+        selected_goal_id=selected_goal_id,
     )
     items: list[dict[str, Any]] = []
     warnings = list(base.warnings)
@@ -403,6 +438,7 @@ async def build_goal_pursuit_snapshot_with_recovery(
                 warnings.append("Goal 用户交互详情读取失败，请刷新页面。")
     return GoalPursuitSnapshot(
         current_goal_id=base.current_goal_id,
+        selected_goal_id=base.selected_goal_id,
         goals=tuple(items),
         warnings=tuple(dict.fromkeys(warnings))[:20],
         truncated=base.truncated,
@@ -601,43 +637,23 @@ def render_goal_pursuit_snapshot(snapshot: GoalPursuitSnapshot) -> str:
             empty,
         ]
     else:
-        lines = ["### Goal / Pursuit", ""]
+        lines = ["### Goal / Pursuit", "", "#### 目标目录"]
         for item in snapshot.goals:
             current = " · 当前" if item["goal_id"] == snapshot.current_goal_id else ""
-            lines.extend([
-                f"#### `{item['goal_id']}` · {_goal_status_label(item['status'])}{current}",
-                f"- 目标：{item['objective']}",
-                f"- 会话：`{item['session_id'] or '未绑定'}`",
-            ])
-            if item["note"]:
-                lines.append(f"- 说明：{item['note']}")
-            pursuit = item["pursuit"]
-            if pursuit is not None:
-                lines.extend([
-                    f"- Pursuit：`{pursuit['run_id']}` · "
-                    f"{_pursuit_status_label(pursuit['status'])} · {pursuit['phase']}",
-                    f"- 成功标准：{pursuit['criteria_verified']}/"
-                    f"{pursuit['criteria_total']} · 轮次 {pursuit['iteration']}",
-                    f"- 下一步：{pursuit['next_action'] or '暂无'}",
-                    f"- 等待任务：{len(pursuit['waits'])} · 证据：{len(pursuit['evidence'])}",
-                ])
-                boundary = pursuit.get("boundary_decision")
-                if isinstance(boundary, dict):
-                    lines.extend([
-                        f"- 最近裁判：`{boundary['code']}` · "
-                        f"{boundary['status']} · `{boundary['decision_id'][:12]}`",
-                        f"- 裁判原因：{boundary['reason']}",
-                    ])
-                recovery = pursuit.get("recovery")
-                if isinstance(recovery, dict):
-                    lines.extend(_render_recovery(recovery))
-            elif item["pursuit_link_status"] == "missing":
-                lines.append(
-                    f"- Pursuit：`{item['pursuit_run_id']}` · ⚠️ 追踪记录不可用"
-                )
-            else:
-                lines.append("- Pursuit：未启动")
-            lines.append("")
+            selected = " · 已选择" if item["goal_id"] == snapshot.selected_goal_id else ""
+            lines.append(
+                f"- `{item['goal_id']}` · {_goal_status_label(item['status'])}"
+                f"{current}{selected} · {item['objective']}"
+            )
+        selected_item = next(
+            (
+                item
+                for item in snapshot.goals
+                if item["goal_id"] == snapshot.selected_goal_id
+            ),
+            snapshot.goals[0],
+        )
+        lines.extend(["", *_render_goal_detail(selected_item)])
     if snapshot.truncated:
         lines.append("> 目标记录较多，当前视图已按上限截断。")
     if snapshot.warnings:
@@ -682,6 +698,59 @@ def render_goal_pursuit_snapshot(snapshot: GoalPursuitSnapshot) -> str:
             _render_interaction_detail_projection(snapshot.selected_interaction),
         ])
     return "\n".join(lines).rstrip()
+
+
+def _render_goal_detail(item: dict[str, Any]) -> list[str]:
+    lines = [
+        f"#### 目标详情 · `{item['goal_id']}` · {_goal_status_label(item['status'])}",
+        f"- 目标：{item['objective']}",
+        f"- 会话：`{item['session_id'] or '未绑定'}`",
+        f"- 创建：{item['created_at'] or '-'} · 更新：{item['updated_at'] or '-'}",
+    ]
+    if item["note"]:
+        lines.append(f"- 说明：{item['note']}")
+    pursuit = item["pursuit"]
+    if pursuit is None:
+        if item["pursuit_link_status"] == "missing":
+            lines.append(
+                f"- Pursuit：`{item['pursuit_run_id']}` · ⚠️ 追踪记录不可用"
+            )
+        else:
+            lines.append("- Pursuit：未启动")
+        return lines
+    lines.extend([
+        f"- Pursuit：`{pursuit['run_id']}` · "
+        f"{_pursuit_status_label(pursuit['status'])} · {pursuit['phase']}",
+        f"- 成功标准：{pursuit['criteria_verified']}/"
+        f"{pursuit['criteria_total']} · 轮次 {pursuit['iteration']}",
+        f"- 下一步：{pursuit['next_action'] or '暂无'}",
+    ])
+    boundary = pursuit.get("boundary_decision")
+    if isinstance(boundary, dict):
+        lines.extend([
+            f"- 最近裁判：`{boundary['code']}` · "
+            f"{boundary['status']} · `{boundary['decision_id'][:12]}`",
+            f"- 裁判原因：{boundary['reason']}",
+        ])
+    recovery = pursuit.get("recovery")
+    if isinstance(recovery, dict):
+        lines.extend(_render_recovery(recovery))
+    waits = pursuit["waits"]
+    lines.append(f"- 等待任务：{len(waits)}")
+    for wait in waits:
+        lines.append(
+            f"  - `{wait['task_id']}` · `{wait['action_id'] or '-'}` · "
+            f"{wait['command']} · {wait['created_at'] or '-'}"
+        )
+    evidence = pursuit["evidence"]
+    lines.append(f"- 最近证据：{len(evidence)}（当前快照上限 {MAX_GOAL_PANEL_EVIDENCE}）")
+    for entry in evidence:
+        strength = "强证据" if entry["is_hard"] else "辅助证据"
+        lines.append(
+            f"  - {strength} · `{entry['kind']}` · {entry['timestamp'] or '-'} · "
+            f"{entry['source']}：{entry['summary']}"
+        )
+    return lines
 
 
 def _render_terminal_outbox(value: TerminalOutboxProjection) -> list[str]:

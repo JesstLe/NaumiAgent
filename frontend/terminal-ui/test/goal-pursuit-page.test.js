@@ -329,3 +329,58 @@ test("Goal page renders authority-owned resume action and attempt state", () => 
   assert.match(lines, /已准入/);
   assert.match(lines, new RegExp(`/pursue reconcile recovery-${"a".repeat(64)}`));
 });
+
+test("Goal page highlights selected history and renders every bounded evidence item", () => {
+  const evidence = Array.from({ length: 20 }, (_, index) => ({
+    kind: "test",
+    source: `case:${index}`,
+    summary: `证据 ${index}`,
+    is_hard: index % 2 === 0,
+    timestamp: `2026-08-11T00:00:${String(index).padStart(2, "0")}+00:00`,
+  }));
+  const lines = renderGoalPursuitPage({
+    snapshot: {
+      current_goal_id: "goal-current",
+      selected_goal_id: "goal-history",
+      goals: [{
+        goal_id: "goal-current",
+        objective: "当前目标",
+        status: "active",
+        note: "",
+        session_id: "session-1",
+        pursuit_run_id: "",
+        pursuit_link_status: "not_linked",
+        updated_at: "now",
+        pursuit: null,
+      }, {
+        goal_id: "goal-history",
+        objective: "历史目标",
+        status: "completed",
+        note: "已完成",
+        session_id: "session-0",
+        pursuit_run_id: "pursuit-history",
+        pursuit_link_status: "ready",
+        updated_at: "before",
+        pursuit: {
+          run_id: "pursuit-history",
+          status: "completed",
+          phase: "done",
+          criteria_verified: 1,
+          criteria_total: 1,
+          iteration: 2,
+          failure_count: 0,
+          next_action: "",
+          waits: [],
+          evidence,
+        },
+      }],
+      interactions: [],
+    },
+  }, 220, 50).map(stripAnsi).join("\n");
+
+  assert.match(lines, /▶ goal-history · 已完成 · 历史目标/);
+  assert.match(lines, /目标详情 · goal-history/);
+  assert.match(lines, /最近证据 · 20 \/ 20/);
+  assert.match(lines, /case:0 .* 证据 0/);
+  assert.match(lines, /case:19 .* 证据 19/);
+});
