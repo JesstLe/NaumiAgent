@@ -119,5 +119,6 @@ writer/result、Receipt、retry、dead-letter、failure、forced shutdown 与下
 
 [EVO-05.5f5x3i Authenticated Result Return HTTP Transport](EVO-05-5f5x3i-authenticated-result-return-http-transport.md) 已复用 x3g
 的独立 mTLS 身份、同连接 pin、限长、timeout、并发与安全错误边界，并增加 installation leaf→member 的精确授权。下一最小切片转为
-HAR-10.9a installation daemon supervision/service discovery；其后才进入 Population Receipt aggregation，不能把这些未交付能力压缩成
-一个不可验证的大切片。
+[HAR-10.9a installation daemon supervision/service discovery](../harness/HAR-10-9a-remote-finalization-installation-daemon-supervision.md)
+已完成；下一步才进入 EVO-05.5f5x3j Population Receipt aggregation，不能把单 member Result/daemon 健康
+冒充 Population completion。

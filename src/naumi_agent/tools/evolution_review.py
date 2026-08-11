@@ -231,6 +231,9 @@ from naumi_agent.evolution.stable_remote_finalization_delivery_worker import (
     render_stable_remote_finalization_delivery_pass,
     render_stable_remote_finalization_delivery_worker,
 )
+from naumi_agent.evolution.stable_remote_finalization_installation_daemon import (
+    render_stable_remote_finalization_installation_daemon,
+)
 from naumi_agent.evolution.stable_remote_finalization_result_return_worker import (
     render_stable_remote_finalization_result_return_pass,
     render_stable_remote_finalization_result_return_worker,
@@ -3458,6 +3461,7 @@ class EvolutionStableRemoteFinalizationTool(Tool):
                         "ingest-delivery", "ingest-delivery-late", "inspect-delivery",
                         "run-delivery-worker", "inspect-delivery-worker",
                         "run-result-return-worker", "inspect-result-return-worker",
+                        "inspect-installation-daemon",
                     ],
                 },
                 "authorization_id": {"type": "string"},
@@ -3549,6 +3553,12 @@ class EvolutionStableRemoteFinalizationTool(Tool):
                     .stable_remote_finalization_result_return_worker_snapshot()
                 )
                 return render_stable_remote_finalization_result_return_worker(snapshot)
+            if normalized == "inspect-installation-daemon":
+                snapshot = await (
+                    self._engine
+                    .inspect_stable_remote_finalization_installation_daemon()
+                )
+                return render_stable_remote_finalization_installation_daemon(snapshot)
             if normalized == "claim-delivery":
                 delivery = await delivery_store.claim(
                     owner_id=owner_id,

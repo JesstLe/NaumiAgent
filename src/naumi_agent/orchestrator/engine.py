@@ -517,6 +517,12 @@ from naumi_agent.evolution.stable_remote_finalization_delivery_worker import (
     EvolutionStableRemoteFinalizationDeliveryWorkerPolicy,
     EvolutionStableRemoteFinalizationDeliveryWorkerSnapshot,
 )
+from naumi_agent.evolution.stable_remote_finalization_installation_daemon import (
+    ResolvingStableRemoteFinalizationInstallationTransport,
+    StableRemoteFinalizationInstallationDaemon,
+    StableRemoteFinalizationInstallationDaemonInspection,
+    StableRemoteFinalizationInstallationDaemonSnapshot,
+)
 from naumi_agent.evolution.stable_remote_finalization_result_return_worker import (
     EvolutionStableRemoteFinalizationResultReturnPassResult,
     EvolutionStableRemoteFinalizationResultReturnStore,
@@ -2831,6 +2837,47 @@ class AgentEngine:
                     ),
                 )
             )
+        self.evolution_stable_remote_finalization_installation_daemon: (
+            StableRemoteFinalizationInstallationDaemon | None
+        ) = None
+        daemon_factory = (
+            services.stable_remote_finalization_installation_daemon_factory
+        )
+        if daemon_factory is not None:
+            result_worker = (
+                self.evolution_stable_remote_finalization_result_return_worker
+            )
+            if result_worker is None:
+                raise ValueError(
+                    "Installation daemon 缺少认证 Result transport/worker。"
+                )
+            inbound_transport = (
+                ResolvingStableRemoteFinalizationInstallationTransport(
+                    installation_member_id=(
+                        daemon_factory.policy.installation_member_id
+                    ),
+                    journal=(
+                        self.evolution_stable_remote_finalization_target_journal
+                    ),
+                    installation_key_service=(
+                        self.release_installation_key_service
+                    ),
+                    trust_policy_provider=lambda: (
+                        load_release_rollout_control_trust_policy(
+                            self.evolution_release_rollout_control_trust_policy_path
+                        )
+                    ),
+                    credential_resolver=(
+                        self._resolve_stable_remote_finalization_target_credential
+                    ),
+                )
+            )
+            self.evolution_stable_remote_finalization_installation_daemon = (
+                daemon_factory.create(
+                    inbound_transport=inbound_transport,
+                    result_worker=result_worker,
+                )
+            )
         self.evolution_stable_rollout_authorization_store = (
             EvolutionStableRolloutAuthorizationStore(config.memory.session_db_path)
         )
@@ -4088,12 +4135,21 @@ class AgentEngine:
                 "stable_remote_finalization_delivery_worker",
                 self.evolution_stable_remote_finalization_delivery_worker.stop,
             )
-        result_worker = self.evolution_stable_remote_finalization_result_return_worker
-        if result_worker is not None:
+        daemon = self.evolution_stable_remote_finalization_installation_daemon
+        if daemon is not None:
             await self._shutdown_component(
-                "stable_remote_finalization_result_return_worker",
-                result_worker.stop,
+                "stable_remote_finalization_installation_daemon",
+                daemon.stop,
             )
+        else:
+            result_worker = (
+                self.evolution_stable_remote_finalization_result_return_worker
+            )
+            if result_worker is not None:
+                await self._shutdown_component(
+                    "stable_remote_finalization_result_return_worker",
+                    result_worker.stop,
+                )
         if hasattr(self, "_agent_publication_recovery_worker"):
             await self._shutdown_component(
                 "agent_publication_recovery_worker",
@@ -4650,13 +4706,16 @@ class AgentEngine:
         ):
             await delivery_worker.run_once()
             delivery_worker.start()
-        result_worker = self.evolution_stable_remote_finalization_result_return_worker
-        if (
-            result_worker is not None
-            and self._config.harness.stable_remote_finalization_result_return.enabled
-        ):
-            await result_worker.run_once()
-            result_worker.start()
+        if self.evolution_stable_remote_finalization_installation_daemon is None:
+            result_worker = (
+                self.evolution_stable_remote_finalization_result_return_worker
+            )
+            if (
+                result_worker is not None
+                and self._config.harness.stable_remote_finalization_result_return.enabled
+            ):
+                await result_worker.run_once()
+                result_worker.start()
         self.start_session_retention_worker()
         return recovered
 
@@ -4699,6 +4758,36 @@ class AgentEngine:
                 "尚未绑定 authenticated Result transport，无法读取 Worker。"
             )
         return worker.snapshot()
+
+    async def start_stable_remote_finalization_installation_daemon(self) -> bool:
+        daemon = self.evolution_stable_remote_finalization_installation_daemon
+        if daemon is None:
+            raise RuntimeError("Installation daemon 未启用或配置不完整。")
+        return await daemon.start()
+
+    async def wait_stable_remote_finalization_installation_daemon(
+        self,
+    ) -> StableRemoteFinalizationInstallationDaemonSnapshot:
+        daemon = self.evolution_stable_remote_finalization_installation_daemon
+        if daemon is None:
+            raise RuntimeError("Installation daemon 未启用或配置不完整。")
+        return await daemon.wait_terminated()
+
+    def stable_remote_finalization_installation_daemon_snapshot(
+        self,
+    ) -> StableRemoteFinalizationInstallationDaemonSnapshot:
+        daemon = self.evolution_stable_remote_finalization_installation_daemon
+        if daemon is None:
+            raise RuntimeError("Installation daemon 未启用或配置不完整。")
+        return daemon.snapshot()
+
+    async def inspect_stable_remote_finalization_installation_daemon(
+        self,
+    ) -> StableRemoteFinalizationInstallationDaemonInspection:
+        daemon = self.evolution_stable_remote_finalization_installation_daemon
+        if daemon is None:
+            raise RuntimeError("Installation daemon 未启用或配置不完整。")
+        return await daemon.inspect()
 
     async def _resolve_stable_remote_finalization_target_credential(
         self,

@@ -12,6 +12,9 @@ from naumi_agent.evolution.stable_population_candidate_previews import (
 from naumi_agent.evolution.stable_remote_finalization_delivery_worker import (
     EvolutionStableRemoteFinalizationInstallationTransport,
 )
+from naumi_agent.evolution.stable_remote_finalization_installation_daemon import (
+    StableRemoteFinalizationInstallationDaemonFactory,
+)
 from naumi_agent.evolution.stable_remote_finalization_result_return_worker import (
     EvolutionStableRemoteFinalizationResultTransport,
 )
@@ -37,6 +40,9 @@ class RuntimeServices:
     ) = None
     stable_remote_finalization_result_transport: (
         EvolutionStableRemoteFinalizationResultTransport | None
+    ) = None
+    stable_remote_finalization_installation_daemon_factory: (
+        StableRemoteFinalizationInstallationDaemonFactory | None
     ) = None
 
     def __post_init__(self) -> None:
@@ -103,6 +109,16 @@ class RuntimeServices:
             raise TypeError(
                 "stable_remote_finalization_result_transport 必须实现认证结果回传契约。"
             )
+        if (
+            self.stable_remote_finalization_installation_daemon_factory is not None
+            and not isinstance(
+                self.stable_remote_finalization_installation_daemon_factory,
+                StableRemoteFinalizationInstallationDaemonFactory,
+            )
+        ):
+            raise TypeError(
+                "stable_remote_finalization_installation_daemon_factory 类型无效。"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +138,9 @@ class RuntimeServiceOverrides:
     ) = None
     stable_remote_finalization_result_transport: (
         EvolutionStableRemoteFinalizationResultTransport | None
+    ) = None
+    stable_remote_finalization_installation_daemon_factory: (
+        StableRemoteFinalizationInstallationDaemonFactory | None
     ) = None
 
 

@@ -20,6 +20,12 @@ from naumi_agent.daemons.worker_registry import WorkerRegistryStore
 from naumi_agent.evolution.stable_remote_finalization_http_transport import (
     MTLSStableRemoteFinalizationInstallationTransport,
     StableRemoteFinalizationHTTPClientPolicy,
+    StableRemoteFinalizationHTTPServerPolicy,
+)
+from naumi_agent.evolution.stable_remote_finalization_installation_daemon import (
+    StableRemoteFinalizationInstallationDaemonFactory,
+    StableRemoteFinalizationInstallationDaemonPolicy,
+    StableRemoteFinalizationInstallationDiscovery,
 )
 from naumi_agent.evolution.stable_remote_finalization_result_http_transport import (
     MTLSStableRemoteFinalizationResultTransport,
@@ -393,6 +399,45 @@ def build_runtime_services(
                 max_response_bytes=result_http.max_response_bytes,
             )
         )
+    daemon_factory = resolved.stable_remote_finalization_installation_daemon_factory
+    daemon_config = config.harness.stable_remote_finalization_installation_daemon
+    if daemon_factory is None and daemon_config.enabled:
+        daemon_factory = StableRemoteFinalizationInstallationDaemonFactory(
+            policy=StableRemoteFinalizationInstallationDaemonPolicy(
+                installation_member_id=daemon_config.installation_member_id,
+                bind_host=daemon_config.bind_host,
+                advertise_host=daemon_config.advertise_host,
+                port=daemon_config.port,
+                lease_seconds=daemon_config.lease_seconds,
+                renew_interval_seconds=daemon_config.renew_interval_seconds,
+                heartbeat_interval_seconds=(
+                    daemon_config.heartbeat_interval_seconds
+                ),
+                heartbeat_timeout_seconds=daemon_config.heartbeat_timeout_seconds,
+            ),
+            server_policy=StableRemoteFinalizationHTTPServerPolicy(
+                server_certificate_path=Path(daemon_config.server_certificate_path),
+                server_private_key_path=Path(daemon_config.server_private_key_path),
+                client_ca_path=Path(daemon_config.control_plane_ca_path),
+                authorized_client_certificate_sha256=tuple(
+                    daemon_config.authorized_control_plane_certificate_sha256
+                ),
+                max_request_bytes=daemon_config.max_request_bytes,
+                tls_handshake_timeout_seconds=(
+                    daemon_config.tls_handshake_timeout_seconds
+                ),
+                request_timeout_seconds=daemon_config.request_timeout_seconds,
+                requests_per_minute=daemon_config.requests_per_minute,
+                max_concurrent_requests=daemon_config.max_concurrent_requests,
+            ),
+            authority=resources.harness_store,
+            workspace_root=paths.workspace_root,
+            discovery=StableRemoteFinalizationInstallationDiscovery(
+                paths.runtime_data_dir
+                / "stable-finalization-installation"
+                / "endpoint.json"
+            ),
+        )
     return RuntimeServices(
         terminal_runtime_lifecycle_factory=factory,
         agent_execution_heartbeat_factory=agent_factory,
@@ -406,6 +451,7 @@ def build_runtime_services(
         stable_remote_finalization_result_transport=(
             stable_remote_result_transport
         ),
+        stable_remote_finalization_installation_daemon_factory=daemon_factory,
     )
 
 

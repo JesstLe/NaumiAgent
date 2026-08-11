@@ -1187,6 +1187,18 @@ if TYPE_CHECKING:
         StableRemoteFinalizationHTTPServer,
         StableRemoteFinalizationHTTPServerPolicy,
     )
+    from naumi_agent.evolution.stable_remote_finalization_installation_daemon import (
+        ResolvingStableRemoteFinalizationInstallationTransport,
+        StableRemoteFinalizationInstallationDaemon,
+        StableRemoteFinalizationInstallationDaemonFactory,
+        StableRemoteFinalizationInstallationDaemonInspection,
+        StableRemoteFinalizationInstallationDaemonPolicy,
+        StableRemoteFinalizationInstallationDaemonSnapshot,
+        StableRemoteFinalizationInstallationDaemonState,
+        StableRemoteFinalizationInstallationDiscovery,
+        StableRemoteFinalizationInstallationDiscoveryDescriptor,
+        render_stable_remote_finalization_installation_daemon,
+    )
     from naumi_agent.evolution.stable_remote_finalization_result_http_transport import (
         STABLE_REMOTE_FINALIZATION_RECEIPT_MEDIA_TYPE,
         STABLE_REMOTE_FINALIZATION_RESULT_HTTP_PATH,
@@ -1815,6 +1827,16 @@ __all__ = [
     "StableRemoteFinalizationHTTPClientPolicy",
     "StableRemoteFinalizationHTTPServer",
     "StableRemoteFinalizationHTTPServerPolicy",
+    "ResolvingStableRemoteFinalizationInstallationTransport",
+    "StableRemoteFinalizationInstallationDaemon",
+    "StableRemoteFinalizationInstallationDaemonFactory",
+    "StableRemoteFinalizationInstallationDaemonInspection",
+    "StableRemoteFinalizationInstallationDaemonPolicy",
+    "StableRemoteFinalizationInstallationDaemonSnapshot",
+    "StableRemoteFinalizationInstallationDaemonState",
+    "StableRemoteFinalizationInstallationDiscovery",
+    "StableRemoteFinalizationInstallationDiscoveryDescriptor",
+    "render_stable_remote_finalization_installation_daemon",
     "MTLSStableRemoteFinalizationResultTransport",
     "STABLE_REMOTE_FINALIZATION_RECEIPT_MEDIA_TYPE",
     "STABLE_REMOTE_FINALIZATION_RESULT_HTTP_PATH",
@@ -3161,6 +3183,18 @@ def __getattr__(name: str) -> object:
         "StableRemoteFinalizationHTTPServer",
         "StableRemoteFinalizationHTTPServerPolicy",
     }
+    stable_remote_finalization_installation_daemon_exports = {
+        "ResolvingStableRemoteFinalizationInstallationTransport",
+        "StableRemoteFinalizationInstallationDaemon",
+        "StableRemoteFinalizationInstallationDaemonFactory",
+        "StableRemoteFinalizationInstallationDaemonInspection",
+        "StableRemoteFinalizationInstallationDaemonPolicy",
+        "StableRemoteFinalizationInstallationDaemonSnapshot",
+        "StableRemoteFinalizationInstallationDaemonState",
+        "StableRemoteFinalizationInstallationDiscovery",
+        "StableRemoteFinalizationInstallationDiscoveryDescriptor",
+        "render_stable_remote_finalization_installation_daemon",
+    }
     stable_remote_finalization_result_http_transport_exports = {
         "MTLSStableRemoteFinalizationResultTransport",
         "STABLE_REMOTE_FINALIZATION_RECEIPT_MEDIA_TYPE",
@@ -3892,6 +3926,8 @@ def __getattr__(name: str) -> object:
         module_name = "stable_remote_finalization_delivery_worker"
     elif name in stable_remote_finalization_http_transport_exports:
         module_name = "stable_remote_finalization_http_transport"
+    elif name in stable_remote_finalization_installation_daemon_exports:
+        module_name = "stable_remote_finalization_installation_daemon"
     elif name in stable_remote_finalization_result_http_transport_exports:
         module_name = "stable_remote_finalization_result_http_transport"
     elif name in stable_remote_finalization_result_return_exports:
