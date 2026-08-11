@@ -21,6 +21,9 @@ UI-15.5a 已将 New UI 触摸板/滚轮方向 burst 从直接丢弃改为首步�
 反向可立即打断的控制器，慢滑可逐行定位，快速滑动不会形成长惯性队列。
 UI-15.5b 又将 Textual TUI 的全局 pointer sensitivity 从默认每事件 2 行收敛为 1 行，所有
 VerticalScroll 页面沿用同一逐行策略。
+UI-10.8 已把 EVO-05.5f5x3j 的 Stable Population finalization current View 投影到 Workbench；New UI 与
+Textual TUI 共享 `4 Release` 页，严格区分 pending/completed/revoked、显示撤权原因，并固定不授予
+config/data finalization 或 promotion 权限。
 UI-10.6b1 已让 New UI/Textual TUI 在同一 Workbench Reviews 页延后 open Proposal：原因必填，
 时长限定 1/7/30 天并由 Python authority clock 生成精确 cooldown；normal 一次确认，bypass 参数齐全后
 直接执行且不出现二次确认。UI-10.6b2 又补齐 merge：后端投影同 Candidate 的较新 open revision，

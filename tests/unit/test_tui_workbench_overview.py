@@ -18,6 +18,7 @@ from naumi_agent.tui.workbench_overview import (
     ProposalMergeScreen,
     WorkbenchOverviewScreen,
     format_workbench_overview_markdown,
+    format_workbench_release_markdown,
     format_workbench_reviews_markdown,
     format_workbench_worktrees_markdown,
 )
@@ -68,6 +69,52 @@ def test_workbench_formatter_has_bounded_empty_state() -> None:
     assert "暂无 Workbench 任务" in rendered
     assert "使用 `/task` 创建任务" in rendered
     assert len(rendered.splitlines()) < 20
+
+
+def test_release_formatter_renders_completed_revoked_and_rejects_forged_authority() -> None:
+    snapshot = _snapshot()
+    snapshot["stable_population_finalization"] = {
+        "schema_version": 1,
+        "status": "completed",
+        "receipt_id": f"evstableremotepopfinal_{'1' * 24}",
+        "receipt_sha256": "2" * 64,
+        "population_snapshot_id": f"relpopsnapshot_{'3' * 24}",
+        "population_snapshot_sha256": "4" * 64,
+        "candidate_version": "1.2.3",
+        "completed_members": 2,
+        "population_denominator": 2,
+        "finalized_at": "2026-08-11T08:00:00+00:00",
+        "historical_fact": True,
+        "current_authority": True,
+        "invalidation_reasons": [],
+        "config_data_finalization_authority": False,
+        "promotion_authority": False,
+    }
+    snapshot["stable_population_finalization_error"] = ""
+
+    completed = format_workbench_release_markdown(snapshot)
+    assert "已完成（authority current）" in completed
+    assert "evstableremotepopfinal_" in completed
+    assert "Promotion 否" in completed
+
+    revoked = dict(snapshot)
+    revoked_projection = dict(snapshot["stable_population_finalization"])
+    revoked_projection.update(
+        status="revoked",
+        current_authority=False,
+        invalidation_reasons=["population_snapshot_not_current"],
+    )
+    revoked["stable_population_finalization"] = revoked_projection
+    rendered = format_workbench_release_markdown(revoked)
+    assert "current authority 已撤销" in rendered
+    assert "Population Snapshot 已失效" in rendered
+
+    forged = dict(snapshot)
+    forged_projection = dict(snapshot["stable_population_finalization"])
+    forged_projection["promotion_authority"] = True
+    forged["stable_population_finalization"] = forged_projection
+    with pytest.raises(ValueError, match="projection 无效"):
+        format_workbench_release_markdown(forged)
 
 
 def test_worktree_formatter_renders_authoritative_detail_and_error_states() -> None:
@@ -274,6 +321,16 @@ async def test_textual_workbench_slash_route_refreshes_and_retains_last_snapshot
         await pilot.press("1")
         await pilot.pause(0.05)
         assert screen.selected_tab == "overview"
+
+        await pilot.press("4")
+        await pilot.pause(0.05)
+        assert screen.selected_tab == "release"
+        assert "Stable Population Finalization Authority" in screen.query_one(
+            "#workbench-content", Markdown
+        )._markdown
+
+        await pilot.press("1")
+        await pilot.pause(0.05)
 
         await pilot.press("r")
         await pilot.pause(0.1)

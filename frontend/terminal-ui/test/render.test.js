@@ -318,6 +318,26 @@ function workbenchOverviewFixture() {
   };
 }
 
+function stablePopulationFinalizationFixture() {
+  return {
+    schema_version: 1,
+    status: "completed",
+    receipt_id: `evstableremotepopfinal_${"1".repeat(24)}`,
+    receipt_sha256: "2".repeat(64),
+    population_snapshot_id: `relpopsnapshot_${"3".repeat(24)}`,
+    population_snapshot_sha256: "4".repeat(64),
+    candidate_version: "1.2.3",
+    completed_members: 2,
+    population_denominator: 2,
+    finalized_at: "2026-08-11T08:00:00+00:00",
+    historical_fact: true,
+    current_authority: true,
+    invalidation_reasons: [],
+    config_data_finalization_authority: false,
+    promotion_authority: false,
+  };
+}
+
 test("workbench overview renders authoritative wide and narrow fields", () => {
   const view = workbenchOverviewFixture();
   for (const width of [80, 120, 200]) {
@@ -339,6 +359,46 @@ test("workbench overview renders authoritative wide and narrow fields", () => {
   const wide = renderWorkbenchOverview(view, 120, 24).join("\n");
   assert(wide.includes(`${ANSI.red}`));
   assert(renderWorkbenchOverview(view, 120, 24).map(stripAnsi).some((line) => line.includes("│")));
+});
+
+test("workbench release tab renders completed revoked and unavailable authority", () => {
+  const completed = {
+    ...workbenchOverviewFixture(),
+    selected_tab: "release",
+    stable_population_finalization: stablePopulationFinalizationFixture(),
+    stable_population_finalization_error: "",
+  };
+  for (const width of [80, 120, 200]) {
+    const rendered = renderWorkbenchOverview(completed, width, 16);
+    const plain = rendered.map(stripAnsi).join("\n");
+    assert(rendered.every((line) => visibleWidth(line) <= width));
+    assert(plain.includes("Stable Population Finalization Authority"));
+    assert(plain.includes("已完成 · authority current"));
+    assert(plain.includes("Candidate · 1.2.3 · Members 2/2"));
+    assert(plain.includes("evstableremotepopfinal_"));
+    assert(plain.includes("Promotion：否"));
+  }
+
+  const revoked = {
+    ...completed,
+    stable_population_finalization: {
+      ...stablePopulationFinalizationFixture(),
+      status: "revoked",
+      current_authority: false,
+      invalidation_reasons: ["population_snapshot_not_current"],
+    },
+  };
+  const revokedText = renderWorkbenchOverview(revoked, 80, 16).map(stripAnsi).join("\n");
+  assert(revokedText.includes("current authority 已撤销"));
+  assert(revokedText.includes("Population Snapshot 已失效"));
+
+  const unavailableText = renderWorkbenchOverview({
+    ...completed,
+    stable_population_finalization: null,
+    stable_population_finalization_error: "stable_population_finalization_unavailable",
+  }, 80, 16).map(stripAnsi).join("\n");
+  assert(unavailableText.includes("状态不可用"));
+  assert(!unavailableText.includes("private"));
 });
 
 test("workbench overview distinguishes loading empty and error without list explosions", () => {

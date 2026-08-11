@@ -15,6 +15,9 @@ from naumi_agent.ui.bridge import JsonlEngineBridge
 from naumi_agent.ui.protocol import ClientEventType
 from naumi_agent.workbench.models import RiskLevel
 from naumi_agent.workbench.service import WorkbenchService
+from naumi_agent.workbench.stable_population_finalization import (
+    WorkbenchStablePopulationFinalizationProjection,
+)
 from naumi_agent.workbench.store import WorkbenchStore
 from naumi_agent.worktree.manager import WorktreeManager
 
@@ -56,6 +59,7 @@ for (const line of input.trim().split("\n").filter(Boolean)) {
 }
 const widths = {};
 const worktreeWidths = {};
+const releaseWidths = {};
 for (const width of [80, 120, 200]) {
   const lines = renderWorkbenchOverview(state.workbench, width, 24);
   widths[width] = {
@@ -68,6 +72,12 @@ for (const width of [80, 120, 200]) {
     bounded: worktreeLines.every((line) => visibleWidth(line) <= width),
     text: worktreeLines.map(stripAnsi).join("\n"),
   };
+  state.workbench.selected_tab = "release";
+  const releaseLines = renderWorkbenchOverview(state.workbench, width, 24);
+  releaseWidths[width] = {
+    bounded: releaseLines.every((line) => visibleWidth(line) <= width),
+    text: releaseLines.map(stripAnsi).join("\n"),
+  };
   state.workbench.selected_tab = "overview";
 }
 process.stdout.write(JSON.stringify({
@@ -79,6 +89,8 @@ process.stdout.write(JSON.stringify({
   loading: state.workbench.loading,
   widths,
   worktreeWidths,
+  releaseWidths,
+  populationFinalization: state.workbench.stable_population_finalization,
 }));
 """
     completed = subprocess.run(
@@ -190,6 +202,26 @@ async def test_real_workbench_store_bridge_and_node_keep_revisioned_snapshot(
             task_store=TaskStore(database),
         ),
     )
+    population_projection = WorkbenchStablePopulationFinalizationProjection(
+        status="completed",
+        receipt_id=f"evstableremotepopfinal_{'1' * 24}",
+        receipt_sha256="2" * 64,
+        population_snapshot_id=f"relpopsnapshot_{'3' * 24}",
+        population_snapshot_sha256="4" * 64,
+        candidate_version="1.2.3",
+        completed_members=2,
+        population_denominator=2,
+        finalized_at="2026-08-11T08:00:00+00:00",
+        historical_fact=True,
+        current_authority=True,
+        invalidation_reasons=(),
+    )
+
+    class _PopulationReader:
+        async def project(self):
+            return population_projection
+
+    reader_service.bind_stable_population_finalization_reader(_PopulationReader())
     engine = _WorkbenchBridgeEngine(reader_service, session_id)
     writer = io.StringIO()
     bridge = JsonlEngineBridge(engine, config_path="config.yaml")  # type: ignore[arg-type]
@@ -236,6 +268,7 @@ async def test_real_workbench_store_bridge_and_node_keep_revisioned_snapshot(
     assert reduced["activeSelection"]["review_id"] == approval.id
     assert reduced["taskStatus"] == "completed"
     assert reduced["loading"] is False
+    assert reduced["populationFinalization"]["status"] == "completed"
     for width in ("80", "120", "200"):
         rendered = reduced["widths"][width]
         assert rendered["bounded"] is True
@@ -250,6 +283,11 @@ async def test_real_workbench_store_bridge_and_node_keep_revisioned_snapshot(
         assert "naumi/worktree-ui-10-real" in worktree_rendered["text"]
         assert "Workbench-Agent" in worktree_rendered["text"]
         assert "未提交 1" in worktree_rendered["text"]
+        release_rendered = reduced["releaseWidths"][width]
+        assert release_rendered["bounded"] is True
+        assert "Stable Population Finalization Authority" in release_rendered["text"]
+        assert "Candidate · 1.2.3 · Members 2/2" in release_rendered["text"]
+        assert "Promotion：否" in release_rendered["text"]
 
 
 def _git(path: Path, *args: str) -> str:

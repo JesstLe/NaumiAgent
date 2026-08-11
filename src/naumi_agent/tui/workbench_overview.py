@@ -25,6 +25,9 @@ from naumi_agent.workbench.proposal_governance import (
     ProposalGovernanceConflictError,
     proposal_defer_until_for_preset,
 )
+from naumi_agent.workbench.stable_population_finalization import (
+    WorkbenchStablePopulationFinalizationProjection,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +52,13 @@ def format_workbench_overview_markdown(value: Mapping[str, Any]) -> str:
         ),
         f"最后更新：{_plain(snapshot.get('generated_at')) or '-'}",
     ]
+    lines.extend(
+        [
+            "",
+            "### Stable Population Finalization",
+            *_format_stable_population_finalization(snapshot),
+        ]
+    )
     missions = _records(snapshot.get("missions"))
     tasks = _records(snapshot.get("tasks"))
     if not missions and not tasks:
@@ -147,6 +157,68 @@ def format_workbench_overview_markdown(value: Mapping[str, Any]) -> str:
         else "- 待审：无"
     )
     return "\n".join(lines)
+
+
+def _format_stable_population_finalization(
+    snapshot: Mapping[str, Any],
+) -> list[str]:
+    if snapshot.get("stable_population_finalization_error"):
+        return [
+            "- 状态：暂不可用（内部错误已隐藏）",
+            "- 下一步：按 `r` 重新读取 Control Plane 权威状态",
+        ]
+    raw = snapshot.get("stable_population_finalization")
+    if raw is None:
+        return ["- 状态：尚未接入 Population finalization authority"]
+    projection = WorkbenchStablePopulationFinalizationProjection.model_validate(raw)
+    if projection.status == "pending":
+        return [
+            "- 状态：等待全部远端 member 完成",
+            "- 权限：尚未形成 Population Receipt；当前无发布权限",
+        ]
+    status = (
+        "已完成（authority current）"
+        if projection.status == "completed"
+        else "历史完成（current authority 已撤销）"
+    )
+    lines = [
+        f"- 状态：{status}",
+        f"- Candidate：`{_code(projection.candidate_version)}`",
+        f"- Members：{projection.completed_members}/{projection.population_denominator}",
+        f"- Receipt：`{_code(projection.receipt_id)}`",
+    ]
+    if projection.invalidation_reasons:
+        lines.append(
+            "- 撤权原因："
+            + "、".join(
+                _population_invalidation_reason(reason)
+                for reason in projection.invalidation_reasons
+            )
+        )
+    lines.append("- 权限范围：配置/数据 finalization 否；Promotion 否")
+    return lines
+
+
+def _population_invalidation_reason(reason: str) -> str:
+    return {
+        "member_finalization_authority_changed": "成员签名/控制/凭据已变化",
+        "member_receipt_set_changed": "成员回执集合已变化",
+        "newer_population_finalization_exists": "存在更新的 Population Receipt",
+        "population_finalization_receipt_changed": "Population Receipt 已变化",
+        "population_snapshot_not_current": "Population Snapshot 已失效",
+    }.get(reason, "权威来源已变化")
+
+
+def format_workbench_release_markdown(value: Mapping[str, Any]) -> str:
+    """Render the shared Stable Population finalization authority page."""
+    snapshot = _validate_snapshot(value)
+    return "\n".join(
+        [
+            "## Stable Population Finalization Authority",
+            "",
+            *_format_stable_population_finalization(snapshot),
+        ]
+    )
 
 
 def format_workbench_worktrees_markdown(
@@ -795,6 +867,7 @@ class WorkbenchOverviewScreen(Screen[None]):
         Binding("1", "overview_tab", "概览", show=False),
         Binding("2", "worktrees_tab", "Worktrees", show=False),
         Binding("3", "reviews_tab", "Reviews", show=False),
+        Binding("4", "release_tab", "Release", show=False),
         Binding("up", "select_previous", "上一项", show=False),
         Binding("down", "select_next", "下一项", show=False),
         Binding("a", "approve_proposal", "批准 Proposal", show=False),
@@ -907,14 +980,14 @@ class WorkbenchOverviewScreen(Screen[None]):
         self.app.pop_screen()
 
     def action_next_tab(self) -> None:
-        tabs = ("overview", "worktrees", "reviews")
+        tabs = ("overview", "worktrees", "reviews", "release")
         self.selected_tab = tabs[(tabs.index(self.selected_tab) + 1) % len(tabs)]
         self._render_snapshot()
         if self.selected_tab == "reviews":
             self.refresh_review_detail()
 
     def action_previous_tab(self) -> None:
-        tabs = ("overview", "worktrees", "reviews")
+        tabs = ("overview", "worktrees", "reviews", "release")
         self.selected_tab = tabs[(tabs.index(self.selected_tab) - 1) % len(tabs)]
         self._render_snapshot()
         if self.selected_tab == "reviews":
@@ -933,6 +1006,10 @@ class WorkbenchOverviewScreen(Screen[None]):
         self.review_error = ""
         self._render_snapshot()
         self.refresh_review_detail()
+
+    def action_release_tab(self) -> None:
+        self.selected_tab = "release"
+        self._render_snapshot()
 
     def action_select_previous(self) -> None:
         if self.selected_tab == "worktrees":
@@ -1363,7 +1440,12 @@ class WorkbenchOverviewScreen(Screen[None]):
 
     def _render_snapshot(self) -> None:
         title = self.query_one("#workbench-title", Static)
-        tabs = (("overview", "1 概览"), ("worktrees", "2 Worktrees"), ("reviews", "3 Reviews"))
+        tabs = (
+            ("overview", "1 概览"),
+            ("worktrees", "2 Worktrees"),
+            ("reviews", "3 Reviews"),
+            ("release", "4 Release"),
+        )
         title.update("Workbench · " + " · ".join(
             f"[{label}]" if self.selected_tab == name else label for name, label in tabs
         ))
@@ -1388,6 +1470,8 @@ class WorkbenchOverviewScreen(Screen[None]):
                     notice=self.review_notice,
                 )
             )
+        elif self.selected_tab == "release":
+            content.update(format_workbench_release_markdown(self.snapshot))
         else:
             content.update(format_workbench_overview_markdown(self.snapshot))
 
@@ -1408,7 +1492,23 @@ def _validate_snapshot(
         raise WorkbenchSnapshotError("Workbench snapshot contract 无效")
     if session_id is not None and _normalized(value.get("session_id")) != session_id:
         raise WorkbenchSnapshotError("Workbench snapshot 会话不匹配")
-    return value
+    normalized = dict(value)
+    error = _normalized(value.get("stable_population_finalization_error"))
+    if error not in {"", "stable_population_finalization_unavailable"}:
+        raise WorkbenchSnapshotError("Stable Population finalization error contract 无效")
+    raw_projection = value.get("stable_population_finalization")
+    if raw_projection is not None:
+        if error:
+            raise WorkbenchSnapshotError("Stable Population finalization availability 投影冲突")
+        try:
+            projection = WorkbenchStablePopulationFinalizationProjection.model_validate(
+                raw_projection
+            )
+        except (TypeError, ValueError) as exc:
+            raise WorkbenchSnapshotError("Stable Population finalization projection 无效") from exc
+        normalized["stable_population_finalization"] = projection.model_dump(mode="json")
+    normalized["stable_population_finalization_error"] = error
+    return normalized
 
 
 def _review_records(snapshot: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -1580,6 +1680,7 @@ __all__ = [
     "WorkbenchOverviewScreen",
     "WorkbenchSnapshotError",
     "format_workbench_overview_markdown",
+    "format_workbench_release_markdown",
     "format_workbench_reviews_markdown",
     "format_workbench_worktrees_markdown",
 ]

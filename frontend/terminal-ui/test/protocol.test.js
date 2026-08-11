@@ -4057,6 +4057,23 @@ test("event sender accepts explicit missing-receipt recovery requests", () => {
 });
 
 test("normalizes workbench snapshot events", () => {
+  const populationFinalization = {
+    schema_version: 1,
+    status: "completed",
+    receipt_id: `evstableremotepopfinal_${"6".repeat(24)}`,
+    receipt_sha256: "7".repeat(64),
+    population_snapshot_id: `relpopsnapshot_${"8".repeat(24)}`,
+    population_snapshot_sha256: "9".repeat(64),
+    candidate_version: "1.2.3",
+    completed_members: 2,
+    population_denominator: 2,
+    finalized_at: "2026-08-11T08:00:00+00:00",
+    historical_fact: true,
+    current_authority: true,
+    invalidation_reasons: [],
+    config_data_finalization_authority: false,
+    promotion_authority: false,
+  };
   const proposal = {
     id: "proposal-1", session_id: "s", mission_id: "m1", task_id: "7",
     agent_id: "Evolution-Agent", title: "优化 footer", impact_scope: "ui:footer",
@@ -4122,6 +4139,8 @@ test("normalizes workbench snapshot events", () => {
         task: { id: "7", subject: "协议", private_prompt: "do not expose" },
         lease: { id: "lease-1", state: "active", private_token: "secret" }, agent_id: "Agent-1",
       }],
+      stable_population_finalization: populationFinalization,
+      stable_population_finalization_error: "",
       missions: [{ id: "m1", title: "Mac 工作台" }],
       issues: [],
       tasks: [],
@@ -4158,6 +4177,36 @@ test("normalizes workbench snapshot events", () => {
   assert.equal(record.payload.worktrees[0].agent_id, "Agent-1");
   assert.equal(record.payload.worktrees[0].task.private_prompt, undefined);
   assert.equal(record.payload.worktrees[0].lease.private_token, undefined);
+  assert.equal(record.payload.stable_population_finalization.status, "completed");
+  assert.equal(record.payload.stable_population_finalization.completed_members, 2);
+  assert.equal(record.payload.stable_population_finalization.promotion_authority, false);
+  assert.throws(() => normalizeServerRecord({
+    type: "workbench/snapshot",
+    payload: {
+      ...record.payload,
+      stable_population_finalization: {
+        ...populationFinalization,
+        promotion_authority: true,
+      },
+    },
+  }), /authority 投影无效/);
+  assert.throws(() => normalizeServerRecord({
+    type: "workbench/snapshot",
+    payload: {
+      ...record.payload,
+      stable_population_finalization: {
+        ...populationFinalization,
+        private_token: "must-not-pass",
+      },
+    },
+  }), /字段集合无效/);
+  assert.throws(() => normalizeServerRecord({
+    type: "workbench/snapshot",
+    payload: {
+      ...record.payload,
+      stable_population_finalization_error: "stable_population_finalization_unavailable",
+    },
+  }), /availability 投影冲突/);
 
   const longTermOutcome = {
     schema_version: 1,

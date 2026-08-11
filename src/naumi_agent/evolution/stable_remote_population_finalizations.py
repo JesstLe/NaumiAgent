@@ -411,6 +411,16 @@ class EvolutionStableRemotePopulationFinalizationService:
             stable_population_finalization_authority=authority,
         )
 
+    async def latest_view(
+        self,
+    ) -> EvolutionStableRemotePopulationFinalizationView | None:
+        """Return the current Snapshot's latest Receipt view without creating one."""
+        snapshot = await self._current_snapshot(None)
+        receipt = await self.store.latest(snapshot.snapshot_id)
+        if receipt is None:
+            return None
+        return await self.inspect(receipt_id=receipt.receipt_id)
+
     async def _current_snapshot(
         self,
         snapshot_id: str | None,

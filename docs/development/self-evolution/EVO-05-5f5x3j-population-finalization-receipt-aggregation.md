@@ -159,5 +159,6 @@ newer finalization、Snapshot stale、member set changed 或 member authority ch
 - Result dead-letter review/requeue/abandon/retention、证书热重载和 OS service 安装仍是独立运维切片；
 - config/data finalization 等待 ARC-07.6；promotion 继续走独立审批、签名与 package authority。
 
-下一最小切片不再扩写 x3 transport。应跨文档选择能够消费 x3j current View 的下一个用户可交付闭环，优先补
-Population finalization 在 Workbench/Completion Receipt UI 的结构化可视化与失效原因，而不是继续堆叠执行权限。
+跨文档后续 `UI-10.8` 已消费 x3j current View：Workbench/New UI/Textual TUI 结构化展示 pending、completed、
+revoked 与稳定撤权原因，并固定不授予配置/数据 finalization 或 promotion 权限。实现边界与验收见
+`../cli-ui/UI-10-8-stable-population-finalization-authority.md`。

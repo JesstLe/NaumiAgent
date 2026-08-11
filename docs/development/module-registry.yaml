@@ -29,7 +29,8 @@ modules:
   - {id: HAR-10.8f2h, status: implemented, path: harness/HAR-10-8f2h-pursuit-terminal-outbox-effective-state-history.md, depends_on: [HAR-10.8f2g]}
   - {id: HAR-10.8f2i, status: implemented, path: harness/HAR-10-8f2i-pursuit-terminal-outbox-retention-preview.md, depends_on: [HAR-10.8f2h]}
   - {id: HAR-10.9a, status: implemented, path: harness/HAR-10-9a-remote-finalization-installation-daemon-supervision.md, depends_on: [EVO-05.5f5x3g, EVO-05.5f5x3h, EVO-05.5f5x3i, HAR-10.1a, HAR-10.2a]}
-  - {id: UI-10, status: partial, path: cli-ui/UI-10-workbench-page.md, depends_on: [], implemented_slices: [UI-10.1, UI-10.2, UI-10.3, UI-10.4a, UI-10.6a, UI-10.6b1, UI-10.6b2, UI-10.6c, UI-10.6d, UI-10.7]}
+  - {id: UI-10, status: partial, path: cli-ui/UI-10-workbench-page.md, depends_on: [], implemented_slices: [UI-10.1, UI-10.2, UI-10.3, UI-10.4a, UI-10.6a, UI-10.6b1, UI-10.6b2, UI-10.6c, UI-10.6d, UI-10.7, UI-10.8]}
+  - {id: UI-10.8, status: implemented, path: cli-ui/UI-10-8-stable-population-finalization-authority.md, depends_on: [UI-10.1, UI-10.2, UI-10.7, EVO-05.5f5x3j]}
   - {id: UI-11, status: partial, path: cli-ui/UI-11-task-navigation.md, depends_on: []}
   - {id: UI-12, status: partial, path: cli-ui/UI-12-permission-center.md, depends_on: []}
   - {id: UI-13, status: partial, path: cli-ui/UI-13-diagnostics.md, depends_on: [], implemented_slices: [UI-13.1a, UI-13.1b, UI-13.1c, UI-13.1d, UI-13.1e, UI-13.2a, UI-13.3a, UI-13.4a, UI-13.5a]}
