@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sqlite3
-from datetime import timedelta
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -12,6 +12,15 @@ from pydantic import ValidationError
 import naumi_agent.evolution as evolution_api
 from naumi_agent.cli.slash_router import execute_slash_command
 from naumi_agent.config.settings import AppConfig, MemoryConfig
+from naumi_agent.evolution.stable_promotion_outcome_decisions import (
+    EvolutionStablePromotionOutcomeDecisionAction,
+    EvolutionStablePromotionOutcomeDecisionError,
+    EvolutionStablePromotionOutcomeDecisionService,
+    EvolutionStablePromotionOutcomeDecisionStore,
+    _decision_request,
+    _interaction_id,
+    build_stable_promotion_outcome_decision,
+)
 from naumi_agent.evolution.stable_promotion_outcome_eligibilities import (
     EvolutionStablePromotionOutcomeEligibilityError,
     EvolutionStablePromotionOutcomeEligibilityService,
@@ -23,12 +32,17 @@ from naumi_agent.evolution.stable_promotion_population_observation_assessments i
     EvolutionStablePromotionPopulationObservationMember,
     build_stable_promotion_population_observation_assessment,
 )
+from naumi_agent.harness.interaction import answer_interaction, new_interaction_record
+from naumi_agent.harness.interaction_runtime import DurableInteractionAuthorityClient
+from naumi_agent.harness.store import HarnessStore
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
 from naumi_agent.tools.base import ToolCall, ToolRegistry, ToolResult
 from naumi_agent.tools.evolution_review import (
+    EvolutionStablePromotionOutcomeDecisionTool,
     EvolutionStablePromotionOutcomeEligibilityTool,
 )
+from naumi_agent.user_interaction import normalize_interaction_request
 from tests.unit.test_evolution_stable_promotion_population_observation_assessments import (
     _contract_for_finalization,
     _digest,
@@ -101,6 +115,10 @@ async def test_engine_composes_outcome_eligibility_service_and_tool(tmp_path) ->
         evolution_api.EvolutionStablePromotionOutcomeEligibilityService
         is EvolutionStablePromotionOutcomeEligibilityService
     )
+    assert (
+        evolution_api.EvolutionStablePromotionOutcomeDecisionService
+        is EvolutionStablePromotionOutcomeDecisionService
+    )
     session_db = tmp_path / ".naumi" / "sessions.db"
     engine = AgentEngine(
         AppConfig(
@@ -113,9 +131,7 @@ async def test_engine_composes_outcome_eligibility_service_and_tool(tmp_path) ->
         )
     )
     try:
-        tool = engine.tool_registry.get(
-            "evolution_stable_promotion_outcome_eligibility"
-        )
+        tool = engine.tool_registry.get("evolution_stable_promotion_outcome_eligibility")
         assert isinstance(tool, EvolutionStablePromotionOutcomeEligibilityTool)
         service = engine.evolution_stable_promotion_outcome_eligibility_service
         store = engine.evolution_stable_promotion_outcome_eligibility_store
@@ -123,6 +139,11 @@ async def test_engine_composes_outcome_eligibility_service_and_tool(tmp_path) ->
         assert store.db_path == session_db.resolve()
         assert service.population_assessment_service is (
             engine.evolution_stable_promotion_population_observation_assessment_service
+        )
+        decision_tool = engine.tool_registry.get("evolution_stable_promotion_outcome_decision")
+        assert isinstance(decision_tool, EvolutionStablePromotionOutcomeDecisionTool)
+        assert engine.evolution_stable_promotion_outcome_decision_service.store is (
+            engine.evolution_stable_promotion_outcome_decision_store
         )
     finally:
         await engine.shutdown()
@@ -219,9 +240,7 @@ async def test_passing_population_creates_review_only_eligibility_and_revokes(
     assert not left.promotion_authority
     assert not left.execution_authority
     tool = EvolutionStablePromotionOutcomeEligibilityTool(
-        SimpleNamespace(
-            evolution_stable_promotion_outcome_eligibility_service=service()
-        )
+        SimpleNamespace(evolution_stable_promotion_outcome_eligibility_service=service())
     )
     arguments = {
         "action": "inspect",
@@ -243,9 +262,7 @@ async def test_passing_population_creates_review_only_eligibility_and_revokes(
             return ToolResult(
                 call_id=call.id,
                 status="success",
-                content=await registered.execute(
-                    **registered.parse_arguments(call.arguments)
-                ),
+                content=await registered.execute(**registered.parse_arguments(call.arguments)),
             )
 
     slash = await execute_slash_command(
@@ -254,12 +271,201 @@ async def test_passing_population_creates_review_only_eligibility_and_revokes(
         + left.eligibility.eligibility_id,
     )
     assert "Outcome 审批资格" in slash
+
+    harness_store = HarnessStore(db_path)
+    interaction_authority = DurableInteractionAuthorityClient(
+        store=harness_store,
+        workspace_root=tmp_path,
+        owner_id="outcome-decision-test-owner",
+    )
+    answered_at = assessed_at + timedelta(seconds=10)
+    callback_calls: list[str] = []
+
+    async def answer_promote(payload):
+        request = normalize_interaction_request(payload)
+        callback_calls.append(str(payload["_interaction_id"]))
+        record = await interaction_authority.create(
+            request=request,
+            interaction_id=str(payload["_interaction_id"]),
+            subject_kind=str(payload["_durable_subject_kind"]),
+            subject_id=str(payload["_durable_subject_id"]),
+            session_id="outcome-decision-session",
+            agent_name="main",
+            now=(answered_at - timedelta(seconds=1)).isoformat(),
+        )
+        _record, response = await interaction_authority.answer(
+            record=record,
+            response={"kind": "option", "value": "promote"},
+            now=answered_at.isoformat(),
+        )
+        return response
+
+    eligibility_service_for_decision = service()
+    decision_store = EvolutionStablePromotionOutcomeDecisionStore(
+        db_path,
+        eligibility_store=eligibility_service_for_decision.store,
+        interaction_store=harness_store,
+    )
+    decision_service = EvolutionStablePromotionOutcomeDecisionService(
+        workspace_root=tmp_path,
+        eligibility_service=eligibility_service_for_decision,
+        interaction_store=harness_store,
+        store=decision_store,
+        request_user_input=answer_promote,
+    )
+    decision_view = await decision_service.decide(eligibility_id=left.eligibility.eligibility_id)
+    assert callback_calls == [
+        "ask-evstablepromdecision-"
+        + left.eligibility.eligibility_id.removeprefix("evstablepromeligible_")
+        + "-1"
+    ]
+    assert decision_view.outcome_decision_authority
+    assert decision_view.promoted_outcome_ready_authority
+    assert not decision_view.promoted_outcome_authority
+    assert not decision_view.learning_authority
+    assert not decision_view.promotion_authority
+    assert not decision_view.execution_authority
+    forged_promoted = decision_view.decision.model_copy(
+        update={"promoted_outcome_authority": True}
+    )
+    with pytest.raises(ValidationError, match="Input should be False"):
+        forged_promoted.model_validate_json(forged_promoted.model_dump_json())
+    deferred_decision = None
+    for action in ("reject", "defer"):
+        request = _decision_request(
+            left.eligibility,
+            1,
+            timeout_seconds=3_600,
+        )
+        pending = new_interaction_record(
+            request=request,
+            subject_kind="tool",
+            subject_id=left.eligibility.eligibility_id,
+            session_id=f"outcome-{action}-session",
+            agent_name="main",
+            owner_id=f"outcome-{action}-owner",
+            created_at=(answered_at + timedelta(seconds=20)).isoformat(),
+            owner_lease_seconds=30,
+            timeout_seconds=3_600,
+            interaction_id=_interaction_id(left.eligibility.eligibility_id, 1),
+        )
+        answered = answer_interaction(
+            pending,
+            owner_id=pending.owner_id,
+            owner_epoch=pending.owner_epoch,
+            response={"kind": "option", "value": action},
+            answered_by="local-user",
+            now=(answered_at + timedelta(seconds=21)).isoformat(),
+        )
+        alternative = build_stable_promotion_outcome_decision(
+            eligibility=left.eligibility,
+            interaction=answered,
+            revision=1,
+            previous=None,
+        )
+        assert alternative.action is EvolutionStablePromotionOutcomeDecisionAction(action)
+        assert not alternative.promoted_outcome_authority
+        if action == "defer":
+            deferred_decision = alternative
+            assert (
+                alternative.defer_until == (answered_at + timedelta(days=7, seconds=21)).isoformat()
+            )
+        else:
+            assert not alternative.defer_until
+    assert deferred_decision is not None
+    revision_two_request = _decision_request(
+        left.eligibility,
+        2,
+        timeout_seconds=3_600,
+    )
+    revision_two_pending = new_interaction_record(
+        request=revision_two_request,
+        subject_kind="tool",
+        subject_id=left.eligibility.eligibility_id,
+        session_id="outcome-revision-two-session",
+        agent_name="main",
+        owner_id="outcome-revision-two-owner",
+        created_at=datetime.fromisoformat(deferred_decision.defer_until).isoformat(),
+        owner_lease_seconds=30,
+        timeout_seconds=3_600,
+        interaction_id=_interaction_id(left.eligibility.eligibility_id, 2),
+    )
+    revision_two_answer = answer_interaction(
+        revision_two_pending,
+        owner_id=revision_two_pending.owner_id,
+        owner_epoch=revision_two_pending.owner_epoch,
+        response={"kind": "option", "value": "promote"},
+        answered_by="local-user",
+        now=(
+            datetime.fromisoformat(deferred_decision.defer_until) + timedelta(seconds=1)
+        ).isoformat(),
+    )
+    revision_two = build_stable_promotion_outcome_decision(
+        eligibility=left.eligibility,
+        interaction=revision_two_answer,
+        revision=2,
+        previous=deferred_decision,
+    )
+    assert revision_two.previous_decision_sha256 == deferred_decision.decision_sha256
+    assert revision_two.action is EvolutionStablePromotionOutcomeDecisionAction.PROMOTE
+    duplicate_left, duplicate_right = await asyncio.gather(
+        decision_store.record(decision_view.decision),
+        decision_store.record(decision_view.decision),
+    )
+    assert duplicate_left == duplicate_right == decision_view.decision
+    decision_tool = EvolutionStablePromotionOutcomeDecisionTool(
+        SimpleNamespace(evolution_stable_promotion_outcome_decision_service=decision_service)
+    )
+    decision_arguments = {
+        "action": "inspect",
+        "decision_id": decision_view.decision.decision_id,
+    }
+    for mode in (PermissionMode.MODERATE, PermissionMode.BYPASS):
+        permission = PermissionChecker(mode).check(
+            decision_tool.name,
+            decision_arguments,
+            tool=decision_tool,
+        )
+        assert permission.allowed and not permission.requires_confirmation
+    assert "Outcome 独立决策" in await decision_tool.execute(**decision_arguments)
+    assert "promote" not in decision_tool.parameters_schema["properties"]
+    registry.register(decision_tool)
+    decision_slash = await execute_slash_command(
+        _SlashEngine(),
+        "/evolution stable-promotion-outcome-decision inspect "
+        + decision_view.decision.decision_id,
+    )
+    assert "Outcome 独立决策" in decision_slash
+
+    with sqlite3.connect(db_path) as db:
+        db.execute(
+            "UPDATE evolution_stable_promotion_outcome_decisions "
+            "SET decision_json = '{}' WHERE decision_id = ?",
+            (decision_view.decision.decision_id,),
+        )
+    with pytest.raises(EvolutionStablePromotionOutcomeDecisionError) as corrupt_decision:
+        await decision_store.get(decision_view.decision.decision_id)
+    assert corrupt_decision.value.code == "stable_promotion_outcome_decision_store_corrupt"
+    with sqlite3.connect(db_path) as db:
+        db.execute(
+            "UPDATE evolution_stable_promotion_outcome_decisions "
+            "SET decision_json = ? WHERE decision_id = ?",
+            (
+                decision_view.decision.model_dump_json(),
+                decision_view.decision.decision_id,
+            ),
+        )
+
     with pytest.raises(ValidationError, match="Input should be False"):
         left.eligibility.model_copy(update={"promoted": True}).model_validate_json(
             left.eligibility.model_copy(update={"promoted": True}).model_dump_json()
         )
 
     port.authority = False
+    stale_decision = await decision_service.inspect(decision_id=decision_view.decision.decision_id)
+    assert not stale_decision.outcome_decision_authority
+    assert not stale_decision.promoted_outcome_ready_authority
+    assert "eligibility_stale" in stale_decision.invalidation_reasons
     stale = await service().inspect(eligibility_id=left.eligibility.eligibility_id)
     assert stale.current_eligibility is None
     assert not stale.outcome_review_ready_authority

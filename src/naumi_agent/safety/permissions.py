@@ -1068,6 +1068,19 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         risk_level=PermissionRiskLevel.MEDIUM,
         tool_family="evolution_evaluation_artifact",
     ),
+    "evolution_stable_promotion_outcome_decision": PermissionRule(
+        tool_name="evolution_stable_promotion_outcome_decision",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+        max_calls_per_session=100,
+        risk_level=PermissionRiskLevel.MEDIUM,
+        tool_family="evolution_governance_decision",
+    ),
     "evolution_stable_promotion_runtime_admission_delivery": PermissionRule(
         tool_name="evolution_stable_promotion_runtime_admission_delivery",
         allowed_modes=[

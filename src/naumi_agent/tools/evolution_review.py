@@ -240,6 +240,10 @@ from naumi_agent.evolution.stable_promotion_observation_revision_delivery_worker
     render_stable_promotion_observation_revision_worker,
     render_stable_promotion_observation_revision_worker_pass,
 )
+from naumi_agent.evolution.stable_promotion_outcome_decisions import (
+    EvolutionStablePromotionOutcomeDecisionError,
+    render_stable_promotion_outcome_decision,
+)
 from naumi_agent.evolution.stable_promotion_outcome_eligibilities import (
     EvolutionStablePromotionOutcomeEligibilityError,
     render_stable_promotion_outcome_eligibility,
@@ -4574,6 +4578,90 @@ class EvolutionStablePromotionOutcomeEligibilityTool(Tool):
         return render_stable_promotion_outcome_eligibility(view)
 
 
+class EvolutionStablePromotionOutcomeDecisionTool(Tool):
+    """Ask the local user for an exact post-observation decision."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_stable_promotion_outcome_decision"
+
+    @property
+    def description(self) -> str:
+        return (
+            "为 current Outcome Eligibility 发起 promote/reject/defer 三选一持久交互；"
+            "Agent 不能在参数中代替用户选择，也不会直接写 promoted Outcome。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["decide", "inspect"]},
+                "eligibility_id": {
+                    "type": "string",
+                    "pattern": "^evstablepromeligible_[0-9a-f]{24}$",
+                },
+                "decision_id": {
+                    "type": "string",
+                    "pattern": "^evstablepromdecision_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["action"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="稳定推广 Outcome 独立决策",
+            search_hint=(
+                "evolution stable promotion outcome decision promote reject defer "
+                "自进化 稳定推广 Outcome 独立决策"
+            ),
+        )
+
+    async def execute(
+        self,
+        action: str,
+        eligibility_id: str = "",
+        decision_id: str = "",
+    ) -> str:
+        operation = str(action or "").strip().lower()
+        service = self._engine.evolution_stable_promotion_outcome_decision_service
+        try:
+            if operation == "decide":
+                view = await service.decide(
+                    eligibility_id=str(eligibility_id or "").strip()
+                )
+            elif operation == "inspect":
+                view = await service.inspect(
+                    decision_id=str(decision_id or "").strip()
+                )
+            else:
+                raise ValueError("action 必须是 decide 或 inspect。")
+        except (
+            AttributeError,
+            EvolutionStablePromotionOutcomeDecisionError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "stable_promotion_outcome_decision_failed")
+            return f"稳定推广 Outcome 独立决策未完成（`{code}`）：{exc}"
+        return render_stable_promotion_outcome_decision(view)
+
+
 class EvolutionStablePromotionRuntimeAdmissionDeliveryTool(Tool):
     """Prepare, export, receive, or inspect one signed runtime Admission."""
 
@@ -6298,6 +6386,7 @@ def create_evolution_review_tools(
         EvolutionStablePromotionInstallationObservationAssessmentTool(engine),
         EvolutionStablePromotionPopulationObservationAssessmentTool(engine),
         EvolutionStablePromotionOutcomeEligibilityTool(engine),
+        EvolutionStablePromotionOutcomeDecisionTool(engine),
         EvolutionStablePromotionRuntimeAdmissionDeliveryTool(engine),
         EvolutionStableRolloutAuthorizationTool(engine),
         EvolutionStableRolloutFinalizationTool(engine),
@@ -6369,6 +6458,7 @@ __all__ = [
     "EvolutionStablePromotionInstallationObservationAssessmentTool",
     "EvolutionStablePromotionPopulationObservationAssessmentTool",
     "EvolutionStablePromotionOutcomeEligibilityTool",
+    "EvolutionStablePromotionOutcomeDecisionTool",
     "EvolutionStablePromotionRuntimeAdmissionDeliveryTool",
     "EvolutionStablePromotionObservationChainCursorTool",
     "EvolutionStablePromotionObservationRevisionDeliveryTool",

@@ -299,6 +299,10 @@ promoted Outcome 与 learning authority 仍等待 7b4。
 [EVO-05.7b4a](EVO-05-7b4a-stable-promotion-outcome-eligibility.md) 已继续把 current exact Population passing
 机械转换为 durable Outcome review eligibility，并绑定 Proposal/Candidate/原 approval lineage、writer fence 与动态撤权。
 它没有 `promote` 动作，固定 `promoted=false`；下一步必须先实现 7b4b 独立 post-observation Decision，再由 7b4c 写 ledger。
+
+[EVO-05.7b4b](EVO-05-7b4b-stable-promotion-outcome-decision.md) 已实现观察后的独立 Outcome Decision：Agent 只能发起
+Harness 持久三选一交互，不能在 Tool 参数中自行 promote/reject/defer。current `promote` 只签发 7b4c readiness，
+仍不产生 promoted、learning、promotion 或 execution authority。下一步是 7b4c append-only promoted/superseded ledger。
 [EVO-05.3f2c3b1](EVO-05-3f2c3b1-platform-dispatch-outbox.md) 已把实时准入的 required-platform Worker lane 转为 durable
 queued dispatch，并在 exact Worker incarnation 上预留容量。[EVO-05.3f2c3b2a](EVO-05-3f2c3b2a-authenticated-worker-claim.md)
 已增加 supervisor-attested Ed25519 Worker Identity、一次性 claim challenge 和可续期 lease hash chain。
