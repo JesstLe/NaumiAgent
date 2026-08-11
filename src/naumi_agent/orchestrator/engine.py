@@ -502,6 +502,10 @@ from naumi_agent.evolution.stable_promotion_observation_contracts import (
     EvolutionStablePromotionObservationContractService,
     EvolutionStablePromotionObservationContractStore,
 )
+from naumi_agent.evolution.stable_promotion_runtime_admission_deliveries import (
+    EvolutionStablePromotionRuntimeAdmissionDeliveryService,
+    EvolutionStablePromotionRuntimeAdmissionDeliveryStore,
+)
 from naumi_agent.evolution.stable_promotion_runtime_observation_admissions import (
     EvolutionStablePromotionRuntimeObservationAdmissionService,
     EvolutionStablePromotionRuntimeObservationAdmissionStore,
@@ -2809,6 +2813,35 @@ class AgentEngine:
                 harness_store=self._harness_store,
                 store=(
                     self.evolution_stable_promotion_runtime_observation_admission_store
+                ),
+            )
+        )
+        self.evolution_stable_promotion_runtime_admission_delivery_store = (
+            EvolutionStablePromotionRuntimeAdmissionDeliveryStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_stable_promotion_runtime_admission_delivery_service = (
+            EvolutionStablePromotionRuntimeAdmissionDeliveryService(
+                admission_store=(
+                    self.evolution_stable_promotion_runtime_observation_admission_store
+                ),
+                admission_service=(
+                    self.evolution_stable_promotion_runtime_observation_admission_service
+                ),
+                contract_store=(
+                    self.evolution_stable_promotion_observation_contract_store
+                ),
+                contract_service=(
+                    self.evolution_stable_promotion_observation_contract_service
+                ),
+                finalization_service=(
+                    self.evolution_stable_remote_population_finalization_service
+                ),
+                population_store=self.evolution_release_population_snapshot_store,
+                installation_key_service=self.release_installation_key_service,
+                store=(
+                    self.evolution_stable_promotion_runtime_admission_delivery_store
                 ),
             )
         )

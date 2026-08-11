@@ -78,6 +78,8 @@ View 分项暴露 Contract、Population member、active Deployment、Runtime Bin
 本切片建立的是单 installation 的 observation input。当前 Service 读取该安装实例可访问的 Harness Store，不把本机 ledger
 冒充远端 fleet 证据；跨安装 admission 的签名传输、幂等接收和 Population 完整性聚合仍需独立 authority。
 
-下一步应先实现 `EVO-05.7b2a Stable Promotion Runtime Admission Delivery`，把每个 installation 的 Admission 与 origin
-proof 安全送达 control plane；随后 `EVO-05.7b3` 才能按 7b1 冻结规则分页读取每个 admitted chain，形成
+后续 [EVO-05.7b2a1](EVO-05-7b2a1-stable-promotion-runtime-admission-signed-delivery.md) 已完成独立 domain 的
+installation 签名、durable outbound、Control Plane current Credential/Contract/Finalization 复验与幂等 Receipt；它没有
+冒充已完成网络投递。下一步应实现 `EVO-05.7b2a2` authenticated transport/worker，再由 `EVO-05.7b3` 按 7b1 冻结规则
+分页读取每个 admitted chain，形成
 `insufficient / passing / breached / censored` 的 Population 长期评估。任何单 member Admission 都不得冒充完整稳定推广。

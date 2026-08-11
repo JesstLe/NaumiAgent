@@ -20,6 +20,9 @@ from naumi_agent.evolution.stable_promotion_observation_contracts import (
     EvolutionStablePromotionObservationContractService,
     EvolutionStablePromotionObservationContractStore,
 )
+from naumi_agent.evolution.stable_promotion_runtime_admission_deliveries import (
+    EvolutionStablePromotionRuntimeAdmissionDeliveryService,
+)
 from naumi_agent.evolution.stable_promotion_runtime_observation_admissions import (
     EvolutionStablePromotionRuntimeObservationAdmissionService,
 )
@@ -28,6 +31,7 @@ from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
 from naumi_agent.tools.base import ToolCall, ToolRegistry, ToolResult
 from naumi_agent.tools.evolution_review import (
     EvolutionStablePromotionObservationContractTool,
+    EvolutionStablePromotionRuntimeAdmissionDeliveryTool,
     EvolutionStablePromotionRuntimeObservationAdmissionTool,
 )
 from tests.unit.test_evolution_stable_remote_population_finalizations import (
@@ -563,6 +567,10 @@ async def test_engine_composes_contract_service_and_tool(tmp_path: Path) -> None
         evolution_api.EvolutionStablePromotionRuntimeObservationAdmissionService
         is EvolutionStablePromotionRuntimeObservationAdmissionService
     )
+    assert (
+        evolution_api.EvolutionStablePromotionRuntimeAdmissionDeliveryService
+        is EvolutionStablePromotionRuntimeAdmissionDeliveryService
+    )
     session_db = tmp_path / ".naumi" / "sessions.db"
     engine = AgentEngine(
         AppConfig(
@@ -598,6 +606,21 @@ async def test_engine_composes_contract_service_and_tool(tmp_path: Path) -> None
         assert isinstance(
             engine.evolution_stable_promotion_runtime_observation_admission_service,
             EvolutionStablePromotionRuntimeObservationAdmissionService,
+        )
+        delivery_tool = engine.tool_registry.get(
+            "evolution_stable_promotion_runtime_admission_delivery"
+        )
+        assert isinstance(
+            delivery_tool,
+            EvolutionStablePromotionRuntimeAdmissionDeliveryTool,
+        )
+        assert isinstance(
+            engine.evolution_stable_promotion_runtime_admission_delivery_service,
+            EvolutionStablePromotionRuntimeAdmissionDeliveryService,
+        )
+        assert (
+            engine.evolution_stable_promotion_runtime_admission_delivery_service.store
+            is engine.evolution_stable_promotion_runtime_admission_delivery_store
         )
     finally:
         await engine.shutdown()

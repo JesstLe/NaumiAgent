@@ -251,7 +251,10 @@
 - [EVO-05.7b2 Stable Promotion Runtime Observation Admission](EVO-05-7b2-stable-promotion-runtime-observation-admission.md)：
   已交付；把单个 finalized installation member 绑定到 exact Stable Deployment 和 Finalization 后新启动的 managed
   runtime chain，仍不计算长期窗口或 promoted Outcome。
-- EVO-05.7 后续：7b2a admission delivery、7b3 long-term assessment、7b4 promoted/superseded ledger 与 policy learning。
+- [EVO-05.7b2a1 Stable Promotion Runtime Admission Signed Delivery](EVO-05-7b2a1-stable-promotion-runtime-admission-signed-delivery.md)：
+  已交付；installation 使用 current Population Credential 对完整 Admission 签名，Control Plane 幂等接收并动态撤权；
+  authenticated network transport/worker 尚未完成。
+- EVO-05.7 后续：7b2a2 authenticated delivery worker、7b3 long-term assessment、7b4 promoted/superseded ledger 与 policy learning。
 
 ## 验收标准
 
@@ -273,7 +276,7 @@ Authority、版本化 Fresh Promotion Input、新 Approval Requirement/Response�
 activation/crash reconcile、percentage assignment/runtime/window/outcome aggregation、stable entry authorization、逐安装 stable
 Deployment Intent/Boot Preparation/Activation/Runtime Exposure/Observation Window/Durable Assessment/Release-bound Outcome、逐成员 binary-only finalization 与 automatic pause/rollback request；无数据迁移的 version-slot rollback 已能
 authority-bound 执行和崩溃对账，真实 rollback 也已形成 Proposal-bound `rolled_back` Outcome；Population-level binary
-finalization aggregation、成功路径观察契约与单 member runtime admission 已完成，但尚未实现配置/数据 rollback、跨安装
-Admission delivery、长期指标回注或 promoted/superseded Outcome。任何界面不得把 stable entry、Deployment Intent、
+finalization aggregation、成功路径观察契约、单 member runtime admission 与签名接收 artifact 已完成，但尚未实现配置/数据
+rollback、Admission 网络 transport/worker、长期指标回注或 promoted/superseded Outcome。任何界面不得把 stable entry、Deployment Intent、
 单 member finalization、观察契约或单 member Admission 宣称为 promoted Outcome，
 也不得把 rollback source 冻结宣称为已回滚。
