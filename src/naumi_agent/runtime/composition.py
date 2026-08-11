@@ -17,6 +17,10 @@ from naumi_agent.daemons.permission_decisions import PermissionDecisionReceiptSt
 from naumi_agent.daemons.run_delegation_grants import RunDelegationGrantStore
 from naumi_agent.daemons.tool_jobs import ToolJobStore
 from naumi_agent.daemons.worker_registry import WorkerRegistryStore
+from naumi_agent.evolution.stable_promotion_observation_revision_http_transport import (
+    MTLSStablePromotionObservationRevisionControlPlaneTransport,
+    StablePromotionObservationRevisionHTTPClientPolicy,
+)
 from naumi_agent.evolution.stable_promotion_runtime_admission_http_transport import (
     MTLSStablePromotionRuntimeAdmissionControlPlaneTransport,
     StablePromotionRuntimeAdmissionHTTPClientPolicy,
@@ -434,6 +438,40 @@ def build_runtime_services(
                 )
             )
         )
+    stable_observation_revision_transport = (
+        resolved.stable_promotion_observation_revision_transport
+    )
+    observation_revision_http = (
+        config.harness.stable_promotion_observation_revision_http_transport
+    )
+    if (
+        stable_observation_revision_transport is None
+        and observation_revision_http.enabled
+    ):
+        stable_observation_revision_transport = (
+            MTLSStablePromotionObservationRevisionControlPlaneTransport(
+                StablePromotionObservationRevisionHTTPClientPolicy(
+                    endpoint_url=observation_revision_http.endpoint_url,
+                    server_ca_path=Path(observation_revision_http.server_ca_path),
+                    client_certificate_path=Path(
+                        observation_revision_http.client_certificate_path
+                    ),
+                    client_private_key_path=Path(
+                        observation_revision_http.client_private_key_path
+                    ),
+                    server_certificate_sha256_pins=tuple(
+                        observation_revision_http.server_certificate_sha256_pins
+                    ),
+                    connect_timeout_seconds=(
+                        observation_revision_http.connect_timeout_seconds
+                    ),
+                    request_timeout_seconds=(
+                        observation_revision_http.request_timeout_seconds
+                    ),
+                    max_response_bytes=observation_revision_http.max_response_bytes,
+                )
+            )
+        )
     daemon_factory = resolved.stable_remote_finalization_installation_daemon_factory
     daemon_config = config.harness.stable_remote_finalization_installation_daemon
     if daemon_factory is None and daemon_config.enabled:
@@ -487,7 +525,7 @@ def build_runtime_services(
             stable_runtime_admission_transport
         ),
         stable_promotion_observation_revision_transport=(
-            resolved.stable_promotion_observation_revision_transport
+            stable_observation_revision_transport
         ),
         stable_remote_finalization_result_transport=(
             stable_remote_result_transport

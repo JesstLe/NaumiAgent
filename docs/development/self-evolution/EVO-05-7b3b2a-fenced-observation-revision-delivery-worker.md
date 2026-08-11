@@ -7,8 +7,9 @@
 attempt 必须先获得 owner/epoch/lease claim，Receipt 只能由仍持有 live claim 的 Worker ACK；失败按有界指数退避重试或进入
 dead-letter。
 
-本切片使用真实 in-process Control Plane adapter 验证完整 sender→receiver 边界，不实现跨主机 mTLS。下一切片 7b3b2b 只替换
-Transport Port，不改变 Store、Worker、Tool 或 Receipt 语义。
+本切片使用真实 in-process Control Plane adapter 验证完整 sender→receiver 边界；后续
+[EVO-05.7b3b2b](EVO-05-7b3b2b-authenticated-observation-revision-http-transport.md) 已用跨主机 mTLS Transport 替换该 Port，未改变
+Store、Worker、Tool 或 Receipt 语义。
 
 ## Dispatch 状态机
 
@@ -99,13 +100,12 @@ Dispatch/ACK 只证明 signed revisions 已经由当前 transport 收口。以�
 - [x] Tool、Slash、Engine config/lifecycle 与 public API；
 - [x] Ruff、compile、YAML/diff 与真实小模块 pytest 通过；按用户要求未运行全量测试。
 
-## 当前不足与下一步
+## 当前不足与后续
 
-- 生产组合根当前不提供默认 Transport；同进程真实 adapter 仅用于测试或显式注入，不证明跨主机 TLS；
+- 本切片自身不提供生产 Transport；7b3b2b 已补齐配置驱动的 mTLS Transport；
 - dead-letter 尚无人工签名 requeue/abandon 与 retention；
 - Control Plane remote head 与 installation local ACK head 的主动 reconcile 尚未实现；
 - Windows/Linux 发布矩阵仍需在网络 transport 切片补证。
 
-下一独立切片 `EVO-05.7b3b2b Authenticated Observation Revision HTTP Transport` 应复用 bounded TLS HTTP common，交付固定
-endpoint/media type、mTLS、member certificate pin、current/next server pin、strict request/response limits、timeout、并发和 rate limit。
-只有跨安装 signed revision ledger 闭合后，7b3c 才能计算 Population long-term assessment。
+下一独立切片是 `EVO-05.7b3c Population Long-term Observation Assessment`。它只能读取 7b3b2b 已认证并由 7b3b1 验签的远端
+revision ledger，按 7b1 Contract 计算 Population coverage 与长期窗口，不得使用 installation 本地 ACK head 越权聚合。

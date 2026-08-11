@@ -788,6 +788,61 @@ class StablePromotionRuntimeAdmissionHTTPTransportConfig(BaseSettings):
         return self
 
 
+class StablePromotionObservationRevisionHTTPTransportConfig(BaseSettings):
+    """Authenticated installation-to-Control-Plane revision HTTPS."""
+
+    enabled: bool = False
+    endpoint_url: str = ""
+    server_ca_path: str = ""
+    client_certificate_path: str = ""
+    client_private_key_path: str = ""
+    server_certificate_sha256_pins: list[str] = Field(default_factory=list)
+    connect_timeout_seconds: float = Field(default=5.0, ge=0.1, le=120)
+    request_timeout_seconds: float = Field(default=15.0, ge=0.1, le=600)
+    max_response_bytes: int = Field(default=128 * 1024, ge=1, le=128 * 1024)
+
+    @model_validator(mode="after")
+    def _validate_observation_revision_http(
+        self,
+    ) -> StablePromotionObservationRevisionHTTPTransportConfig:
+        configured = bool(
+            self.endpoint_url
+            or self.server_ca_path
+            or self.client_certificate_path
+            or self.client_private_key_path
+            or self.server_certificate_sha256_pins
+        )
+        if configured and not self.enabled:
+            raise ValueError(
+                "Observation Revision HTTP 已配置证书或端点，但未显式 enabled"
+            )
+        if self.enabled and not all((
+            self.endpoint_url,
+            self.server_ca_path,
+            self.client_certificate_path,
+            self.client_private_key_path,
+        )):
+            raise ValueError(
+                "Observation Revision HTTP 启用时必须完整配置端点与 mTLS 文件"
+            )
+        if self.enabled and not 1 <= len(self.server_certificate_sha256_pins) <= 2:
+            raise ValueError(
+                "Observation Revision HTTP 必须配置 1–2 个 Control Plane pin"
+            )
+        if self.enabled and any(
+            re.fullmatch(r"[0-9a-f]{64}", item) is None
+            for item in self.server_certificate_sha256_pins
+        ):
+            raise ValueError(
+                "Observation Revision HTTP Control Plane pin 必须是小写 SHA-256"
+            )
+        if self.request_timeout_seconds < self.connect_timeout_seconds:
+            raise ValueError(
+                "Observation Revision HTTP request timeout 不能小于 connect timeout"
+            )
+        return self
+
+
 class HarnessConfig(BaseSettings):
     """Harness runtime policy configuration."""
 
@@ -822,6 +877,9 @@ class HarnessConfig(BaseSettings):
     stable_promotion_runtime_admission_http_transport: (
         StablePromotionRuntimeAdmissionHTTPTransportConfig
     ) = Field(default_factory=StablePromotionRuntimeAdmissionHTTPTransportConfig)
+    stable_promotion_observation_revision_http_transport: (
+        StablePromotionObservationRevisionHTTPTransportConfig
+    ) = Field(default_factory=StablePromotionObservationRevisionHTTPTransportConfig)
     stable_remote_finalization_result_http_transport: (
         StableRemoteFinalizationResultHTTPTransportConfig
     ) = Field(default_factory=StableRemoteFinalizationResultHTTPTransportConfig)
@@ -856,6 +914,16 @@ class HarnessConfig(BaseSettings):
         ):
             raise ValueError(
                 "Runtime Admission HTTP request timeout 必须小于 Worker Receipt timeout"
+            )
+        revision_http = self.stable_promotion_observation_revision_http_transport
+        revision_delivery = self.stable_promotion_observation_revision_delivery
+        if (
+            revision_http.enabled
+            and revision_http.request_timeout_seconds
+            >= revision_delivery.receipt_timeout_seconds
+        ):
+            raise ValueError(
+                "Observation Revision HTTP request timeout 必须小于 Worker Receipt timeout"
             )
         daemon = self.stable_remote_finalization_installation_daemon
         if daemon.enabled and not (

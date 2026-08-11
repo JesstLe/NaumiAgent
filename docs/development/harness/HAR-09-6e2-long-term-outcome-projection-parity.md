@@ -108,5 +108,7 @@ installation 本地 durable cursor，但没有把本地 HAR sample 冒充成 Con
 revision delivery；[EVO-05.7b3b1](../self-evolution/EVO-05-7b3b1-signed-observation-revision-delivery.md) 已完成有界签名批次与
 本地真实 Control Plane 顺序验签/Receipt；
 [EVO-05.7b3b2a](../self-evolution/EVO-05-7b3b2a-fenced-observation-revision-delivery-worker.md) 已补齐 fenced Worker、自动
-next-batch、Receipt ACK 与 retry/dead-letter；7b3b2b mTLS 仍未完成。之后才由 7b3c 聚合长期窗口，最后设计
+next-batch、Receipt ACK 与 retry/dead-letter；
+[EVO-05.7b3b2b](../self-evolution/EVO-05-7b3b2b-authenticated-observation-revision-http-transport.md) 已补齐 mTLS 网络交付。
+之后才由 7b3c 聚合长期窗口，最后设计
 promoted/superseded ledger；不得复用本 recovery Outcome 越权推广。

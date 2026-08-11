@@ -96,9 +96,9 @@ remote evidence 不依赖 installation retention 才存在。
 
 7b3b1 只提供可由 adapter 调用的本地真实 Control Plane boundary；后续
 [EVO-05.7b3b2a](EVO-05-7b3b2a-fenced-observation-revision-delivery-worker.md) 已完成 durable owner/epoch/lease Worker、
-自动 next-batch chaining、Receipt ACK、retry/dead-letter 与 Engine lifecycle。当前仍未跨主机传输。下一步：
+自动 next-batch chaining、Receipt ACK、retry/dead-letter 与 Engine lifecycle；
+[EVO-05.7b3b2b](EVO-05-7b3b2b-authenticated-observation-revision-http-transport.md) 已完成跨主机 mTLS 传输。下一步：
 
-1. `EVO-05.7b3b2b` 复用 bounded TLS HTTP common、mTLS certificate pin、strict media type/size/timeout/rate limit；
-2. `EVO-05.7b3c` 只读取远端已验签 revision ledger，按 7b1 contract 计算 installation verdict 与 Population coverage。
+1. `EVO-05.7b3c` 只读取远端已验签 revision ledger，按 7b1 contract 计算 installation verdict 与 Population coverage。
 
 任何本地 Cursor、signed batch 或单 member Receipt 都不得被投影为 Population sustained health 或 promoted Outcome。

@@ -264,7 +264,9 @@
   已交付；有界 Ed25519 batch、Control Plane 顺序验签、幂等 Receipt 与动态撤权已闭合，但尚无自动 worker/mTLS。
 - [EVO-05.7b3b2a Fenced Observation Revision Delivery Worker](EVO-05-7b3b2a-fenced-observation-revision-delivery-worker.md)：
   已交付；owner/epoch/lease、next-batch chaining、retry/dead-letter、Receipt ACK 与 Engine lifecycle 已闭合。
-- EVO-05.7 后续：7b3b2b 网络交付、7b3c Population long-term assessment、7b4 promoted/superseded ledger 与 policy learning。
+- [EVO-05.7b3b2b Authenticated Observation Revision HTTP Transport](EVO-05-7b3b2b-authenticated-observation-revision-http-transport.md)：
+  已交付；mTLS、成员证书绑定、current/next pin、严格 HTTP bounds 与配置自动装配已闭合。
+- EVO-05.7 后续：7b3c Population long-term assessment、7b4 promoted/superseded ledger 与 policy learning。
 
 ## 验收标准
 

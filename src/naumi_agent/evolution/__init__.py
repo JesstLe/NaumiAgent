@@ -1157,7 +1157,9 @@ if TYPE_CHECKING:
         EvolutionStablePromotionObservationRevisionDeliveryView,
         EvolutionStablePromotionObservationRevisionSubmission,
         EvolutionStablePromotionObservationRevisionSubmissionPayload,
+        decode_stable_promotion_observation_revision_receipt,
         decode_stable_promotion_observation_revision_submission,
+        encode_stable_promotion_observation_revision_receipt,
         encode_stable_promotion_observation_revision_submission,
         render_stable_promotion_observation_revision_delivery,
         stable_promotion_observation_revision_receipt_matches_submission,
@@ -1178,6 +1180,15 @@ if TYPE_CHECKING:
         render_stable_promotion_observation_revision_dispatch,
         render_stable_promotion_observation_revision_worker,
         render_stable_promotion_observation_revision_worker_pass,
+    )
+    from naumi_agent.evolution.stable_promotion_observation_revision_http_transport import (
+        STABLE_PROMOTION_OBSERVATION_REVISION_HTTP_PATH,
+        STABLE_PROMOTION_OBSERVATION_REVISION_RECEIPT_MEDIA_TYPE,
+        STABLE_PROMOTION_OBSERVATION_REVISION_SUBMISSION_MEDIA_TYPE,
+        MTLSStablePromotionObservationRevisionControlPlaneTransport,
+        StablePromotionObservationRevisionHTTPClientPolicy,
+        StablePromotionObservationRevisionHTTPServer,
+        StablePromotionObservationRevisionHTTPServerPolicy,
     )
     from naumi_agent.evolution.stable_promotion_runtime_admission_deliveries import (
         EVOLUTION_STABLE_PROMOTION_RUNTIME_ADMISSION_DELIVERY_POLICY,
@@ -1923,7 +1934,9 @@ __all__ = [
     "EvolutionStablePromotionObservationRevisionDeliveryView",
     "EvolutionStablePromotionObservationRevisionSubmission",
     "EvolutionStablePromotionObservationRevisionSubmissionPayload",
+    "decode_stable_promotion_observation_revision_receipt",
     "decode_stable_promotion_observation_revision_submission",
+    "encode_stable_promotion_observation_revision_receipt",
     "encode_stable_promotion_observation_revision_submission",
     "render_stable_promotion_observation_revision_delivery",
     "stable_promotion_observation_revision_receipt_matches_submission",
@@ -1942,6 +1955,13 @@ __all__ = [
     "render_stable_promotion_observation_revision_dispatch",
     "render_stable_promotion_observation_revision_worker",
     "render_stable_promotion_observation_revision_worker_pass",
+    "MTLSStablePromotionObservationRevisionControlPlaneTransport",
+    "STABLE_PROMOTION_OBSERVATION_REVISION_HTTP_PATH",
+    "STABLE_PROMOTION_OBSERVATION_REVISION_RECEIPT_MEDIA_TYPE",
+    "STABLE_PROMOTION_OBSERVATION_REVISION_SUBMISSION_MEDIA_TYPE",
+    "StablePromotionObservationRevisionHTTPClientPolicy",
+    "StablePromotionObservationRevisionHTTPServer",
+    "StablePromotionObservationRevisionHTTPServerPolicy",
     "EVOLUTION_STABLE_PROMOTION_RUNTIME_OBSERVATION_ADMISSION_POLICY",
     "EvolutionStablePromotionRuntimeObservationAdmission",
     "EvolutionStablePromotionRuntimeObservationAdmissionError",
@@ -3391,7 +3411,9 @@ def __getattr__(name: str) -> object:
         "EvolutionStablePromotionObservationRevisionDeliveryView",
         "EvolutionStablePromotionObservationRevisionSubmission",
         "EvolutionStablePromotionObservationRevisionSubmissionPayload",
+        "decode_stable_promotion_observation_revision_receipt",
         "decode_stable_promotion_observation_revision_submission",
+        "encode_stable_promotion_observation_revision_receipt",
         "encode_stable_promotion_observation_revision_submission",
         "render_stable_promotion_observation_revision_delivery",
         "stable_promotion_observation_revision_receipt_matches_submission",
@@ -3412,6 +3434,15 @@ def __getattr__(name: str) -> object:
         "render_stable_promotion_observation_revision_dispatch",
         "render_stable_promotion_observation_revision_worker",
         "render_stable_promotion_observation_revision_worker_pass",
+    }
+    stable_promotion_observation_revision_http_exports = {
+        "MTLSStablePromotionObservationRevisionControlPlaneTransport",
+        "STABLE_PROMOTION_OBSERVATION_REVISION_HTTP_PATH",
+        "STABLE_PROMOTION_OBSERVATION_REVISION_RECEIPT_MEDIA_TYPE",
+        "STABLE_PROMOTION_OBSERVATION_REVISION_SUBMISSION_MEDIA_TYPE",
+        "StablePromotionObservationRevisionHTTPClientPolicy",
+        "StablePromotionObservationRevisionHTTPServer",
+        "StablePromotionObservationRevisionHTTPServerPolicy",
     }
     stable_promotion_runtime_observation_admission_exports = {
         "EVOLUTION_STABLE_PROMOTION_RUNTIME_OBSERVATION_ADMISSION_POLICY",
@@ -4251,6 +4282,8 @@ def __getattr__(name: str) -> object:
         module_name = "stable_promotion_observation_revision_deliveries"
     elif name in stable_promotion_observation_revision_worker_exports:
         module_name = "stable_promotion_observation_revision_delivery_worker"
+    elif name in stable_promotion_observation_revision_http_exports:
+        module_name = "stable_promotion_observation_revision_http_transport"
     elif name in stable_promotion_runtime_observation_admission_exports:
         module_name = "stable_promotion_runtime_observation_admissions"
     elif name in stable_promotion_runtime_admission_delivery_exports:

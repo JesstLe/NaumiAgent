@@ -959,6 +959,35 @@ def decode_stable_promotion_observation_revision_submission(
         ) from exc
 
 
+def encode_stable_promotion_observation_revision_receipt(
+    receipt: EvolutionStablePromotionObservationRevisionDeliveryReceipt,
+) -> str:
+    raw = _receipt(receipt).model_dump_json().encode()
+    _artifact_bound(raw)
+    return base64.b64encode(raw).decode("ascii")
+
+
+def decode_stable_promotion_observation_revision_receipt(
+    encoded: str,
+) -> EvolutionStablePromotionObservationRevisionDeliveryReceipt:
+    value = str(encoded or "").strip()
+    try:
+        if not 1 <= len(value) <= _MAX_ENCODED_CHARS:
+            raise ValueError("encoded bounds")
+        raw = base64.b64decode(value, validate=True)
+        if base64.b64encode(raw).decode("ascii") != value:
+            raise ValueError("non-canonical base64")
+        _artifact_bound(raw)
+        return EvolutionStablePromotionObservationRevisionDeliveryReceipt.model_validate_json(
+            raw
+        )
+    except (binascii.Error, TypeError, ValueError) as exc:
+        raise EvolutionStablePromotionObservationRevisionDeliveryError(
+            "stable_promotion_observation_revision_receipt_payload_invalid",
+            "Observation revision Receipt 不是 canonical bounded artifact。",
+        ) from exc
+
+
 def render_stable_promotion_observation_revision_delivery(
     value: EvolutionStablePromotionObservationRevisionSubmission
     | EvolutionStablePromotionObservationRevisionDeliveryView,
@@ -1337,7 +1366,9 @@ __all__ = [
     "EvolutionStablePromotionObservationRevisionDeliveryView",
     "EvolutionStablePromotionObservationRevisionSubmission",
     "EvolutionStablePromotionObservationRevisionSubmissionPayload",
+    "decode_stable_promotion_observation_revision_receipt",
     "decode_stable_promotion_observation_revision_submission",
+    "encode_stable_promotion_observation_revision_receipt",
     "encode_stable_promotion_observation_revision_submission",
     "render_stable_promotion_observation_revision_delivery",
     "stable_promotion_observation_revision_receipt_matches_submission",
