@@ -19,6 +19,7 @@ runtime metric 或其他动态来源时，第二次 `bind_source_authority_reade
 
 `EVOLUTION_DYNAMIC_EVIDENCE_SOURCE_KINDS` 是动态 Evidence 的唯一代码注册表。当前包含：
 
+- `eval_metric_regression`
 - `rollback_outcome`
 - `promoted_outcome`
 
@@ -30,8 +31,8 @@ runtime metric 或其他动态来源时，第二次 `bind_source_authority_reade
 - reader 没有 async `validate_candidate_sources()`：启动失败；
 - source kind 不合法或注册数量超出 16：启动失败。
 
-未来新增 `eval_metric_regression` 等动态 Evidence 时，必须同时更新注册表和 Engine 映射；只扩展 Evidence
-schema 而漏接 authority reader 会在 composition 阶段失败，不能降级成“默认有效”。
+新增动态 Evidence 时必须同时更新注册表和 Engine 映射；只扩展 Evidence schema 而漏接 authority reader
+会在 composition 阶段失败，不能降级成“默认有效”。EVO-06.1c1 已按此约束注册 H5c reader。
 
 ## 路由与并发
 
@@ -50,8 +51,9 @@ schema 而漏接 authority reader 会在 composition 阶段失败，不能降级
 ## Engine Composition
 
 `AgentEngine` 在 Outcome Opportunity Service 构造完成后创建
-`evolution_candidate_source_authority_router`，将 rollback/promoted 两个 kind 都映射到同一 Outcome
-Service，再把完整 router 一次性绑定到 `EvolutionReviewService`。New UI、Textual TUI、Slash 和 Agent Tool
+`evolution_candidate_source_authority_router`，将 rollback/promoted 映射到 Outcome Service，并将
+`eval_metric_regression` 映射到 H5c Opportunity Service，再把完整 router 一次性绑定到
+`EvolutionReviewService`。New UI、Textual TUI、Slash 和 Agent Tool
 仍通过 Review Service 消费同一个 `source_authority` Gate，没有界面专属判断。
 
 未绑定任何 reader 的 Review 保留 fail-closed fallback，并直接消费动态来源注册表；因此未来注册表扩展后，
@@ -71,7 +73,5 @@ Service，再把完整 router 一次性绑定到 `EvolutionReviewService`。New 
 
 ## 非目标与下一步
 
-本切片不新增 Evidence 类型、不读取 H5c、不产生 Candidate、不改变 UI schema，也不实现优先级。
-下一独立切片是 EVO-01.1c / EVO-06.1c1：从 workspace-scoped、可重算的 H5c typed quantitative
-regression 形成 `eval_metric_regression` Evidence，并把该 reader 显式加入本 router。之后再分别实现
-跨 Outcome 时间窗和 EVO-01.5 可解释 Prioritization。
+EVO-01.1c / EVO-06.1c1 已在本前置之上形成 `eval_metric_regression` Evidence 并接入独立 reader。
+后续分别实现缺失能力/明确需求 Evidence、跨 Outcome 时间窗和 EVO-01.5 可解释 Prioritization。

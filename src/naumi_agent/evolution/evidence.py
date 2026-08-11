@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from datetime import datetime
 from typing import Literal
@@ -30,13 +31,14 @@ _SAFE_URI_SCHEMES = frozenset({
 
 # Every kind in this registry requires a live authority reader before review.
 EVOLUTION_DYNAMIC_EVIDENCE_SOURCE_KINDS = frozenset({
+    "eval_metric_regression",
     "promoted_outcome",
     "rollback_outcome",
 })
 
 
 class _StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
 
 class EvolutionEvidenceRef(_StrictModel):
@@ -59,14 +61,50 @@ class EvolutionEvidenceRef(_StrictModel):
         return value
 
 
+class EvolutionQuantitativeMetric(_StrictModel):
+    """A direction-aware statistical regression copied from authoritative H5c."""
+
+    name: str = Field(pattern=r"^[a-z][a-z0-9_.-]{0,127}$")
+    case_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    unit: Literal["count", "ratio", "milliseconds", "tokens", "usd", "scalar"]
+    direction: Literal["decrease", "increase"]
+    target: float
+    baseline_mean: float
+    current_mean: float
+    delta: float
+    confidence_low: float
+    confidence_high: float
+
+    @model_validator(mode="after")
+    def _is_a_statistical_regression(self) -> EvolutionQuantitativeMetric:
+        if not self.confidence_low <= self.delta <= self.confidence_high:
+            raise ValueError("quantitative metric delta 必须落在置信区间内。")
+        if not math.isclose(
+            self.current_mean - self.baseline_mean,
+            self.delta,
+            rel_tol=1e-9,
+            abs_tol=1e-12,
+        ):
+            raise ValueError("quantitative metric delta 与均值不一致。")
+        regressed = (
+            self.confidence_low > 0
+            if self.direction == "decrease"
+            else self.confidence_high < 0
+        )
+        if not regressed:
+            raise ValueError("quantitative metric 必须是 95% 置信区间确认的回归。")
+        return self
+
+
 class EvolutionEvidence(_StrictModel):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[1, 2] = 1
     evidence_id: str
     source_kind: Literal[
         "harness_failure",
         "self_review_static",
         "user_feedback",
         "agent_interpreted_feedback",
+        "eval_metric_regression",
         "rollback_outcome",
         "promoted_outcome",
     ] = "harness_failure"
@@ -83,6 +121,7 @@ class EvolutionEvidence(_StrictModel):
     provider: str = Field(default="", max_length=128)
     model: str = Field(default="", max_length=256)
     platform: str = Field(default="", max_length=64)
+    quantitative_metric: EvolutionQuantitativeMetric | None = None
 
     @field_validator("observed_at")
     @classmethod
@@ -114,6 +153,13 @@ class EvolutionEvidence(_StrictModel):
                 raise ValueError("Harness evidence 的 finding_code 必须匹配 failure_class。")
         elif self.failure_class is not None:
             raise ValueError("非 Harness 证据不得伪造 Harness failure_class。")
+        if self.source_kind == "eval_metric_regression":
+            if self.schema_version != 2 or self.quantitative_metric is None:
+                raise ValueError(
+                    "Eval metric regression 必须使用 Evidence v2 并携带定量指标。"
+                )
+        elif self.schema_version != 1 or self.quantitative_metric is not None:
+            raise ValueError("非 Eval metric regression 必须使用 Evidence v1 且不得携带定量指标。")
         feedback_source = self.source_kind in {
             "user_feedback",
             "agent_interpreted_feedback",
@@ -397,6 +443,7 @@ __all__ = [
     "EVOLUTION_DYNAMIC_EVIDENCE_SOURCE_KINDS",
     "EvolutionEvidence",
     "EvolutionEvidenceRef",
+    "EvolutionQuantitativeMetric",
     "adapt_harness_failure_evidence",
     "adapt_self_review_static_evidence",
 ]

@@ -116,6 +116,9 @@ from naumi_agent.evolution.decision_states import (
     EvolutionDecisionStateExecutor,
     EvolutionDecisionStateStore,
 )
+from naumi_agent.evolution.eval_metric_opportunities import (
+    EvolutionEvalMetricOpportunityService,
+)
 from naumi_agent.evolution.evaluation_aggregation_contracts import (
     EvolutionEvaluationAggregationContractBuilder,
     EvolutionEvaluationAggregationContractIssuer,
@@ -3457,8 +3460,18 @@ class AgentEngine:
                 candidate_store=self.evolution_candidate_store,
             )
         )
+        self.evolution_eval_metric_opportunity_service = (
+            EvolutionEvalMetricOpportunityService(
+                workspace_root=paths.workspace_root,
+                harness_store=self._harness_store,
+                candidate_store=self.evolution_candidate_store,
+            )
+        )
         self.evolution_candidate_source_authority_router = (
             EvolutionCandidateSourceAuthorityRouter({
+                "eval_metric_regression": (
+                    self.evolution_eval_metric_opportunity_service
+                ),
                 "promoted_outcome": self.evolution_outcome_opportunity_service,
                 "rollback_outcome": self.evolution_outcome_opportunity_service,
             })

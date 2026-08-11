@@ -46,6 +46,10 @@ from naumi_agent.evolution.decision_states import (
     EvolutionDecisionStateError,
     render_evolution_decision_state,
 )
+from naumi_agent.evolution.eval_metric_opportunities import (
+    EvolutionEvalMetricOpportunityError,
+    render_eval_metric_opportunity,
+)
 from naumi_agent.evolution.evaluation_aggregation_contracts import (
     EvolutionEvaluationAggregationContractError,
     render_evaluation_aggregation_contract,
@@ -491,6 +495,69 @@ class EvolutionOutcomeOpportunityTool(Tool):
             code = getattr(exc, "code", "outcome_opportunity_failed")
             return f"Outcome 机会发现未完成（`{code}`）：{exc}"
         return render_outcome_opportunity(result)
+
+
+class EvolutionEvalMetricOpportunityTool(Tool):
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_discover_eval_metric_opportunity"
+
+    @property
+    def description(self) -> str:
+        return (
+            "从当前工作区的权威 H5c Comparison 中发现主定量指标回归。"
+            "重读两组 H5a cohort、重建完整回执并验证 95% 置信区间，"
+            "再确定性写入不可执行的 Evolution Candidate。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "comparison_id": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                },
+            },
+            "required": ["comparison_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            user_facing_name="H5c 定量回归机会发现",
+            search_hint=(
+                "evolution h5c quantitative metric latency cost regression "
+                "自进化 定量 指标 延迟 成本 回归 机会发现"
+            ),
+        )
+
+    async def execute(self, comparison_id: str) -> str:
+        try:
+            result = await (
+                self._engine.evolution_eval_metric_opportunity_service.discover(
+                    comparison_id=comparison_id
+                )
+            )
+        except (
+            EvolutionEvalMetricOpportunityError,
+            EvolutionStoreError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "eval_metric_opportunity_failed")
+            return f"H5c 定量回归机会发现未完成（`{code}`）：{exc}"
+        return render_eval_metric_opportunity(result)
 
 
 class EvolutionExperimentContractAuthorityTool(Tool):
@@ -6481,6 +6548,7 @@ def create_evolution_review_tools(
         EvolutionStableRolloutAuthorizationTool(engine),
         EvolutionStableRolloutFinalizationTool(engine),
         EvolutionOutcomeOpportunityTool(engine),
+        EvolutionEvalMetricOpportunityTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -6492,6 +6560,7 @@ __all__ = [
     "EvolutionApprovalSignatureAuthorityTool",
     "EvolutionApprovalSignatureTool",
     "EvolutionCandidatesTool",
+    "EvolutionEvalMetricOpportunityTool",
     "EvolutionOutcomeOpportunityTool",
     "EvolutionCounterfactualEvidenceTool",
     "EvolutionDecisionInputTool",
