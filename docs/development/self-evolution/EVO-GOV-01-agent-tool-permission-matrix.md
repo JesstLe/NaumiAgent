@@ -69,6 +69,7 @@ authority 并保持所有 Git/Promotion 字段为 false；Revalidation Request T
 | `evolution_rollout_control_key` | explicit independent rollout-control signing identity provisioning | `evolution_release_identity` | 20 |
 | `evolution_stable_remote_readiness_claim` | authenticated remote installation claim without readiness authority | `evolution_release_observation` | 50 |
 | `evolution_stable_remote_readiness_probe` | fresh signed remote Release Store probe without mutation authority | `evolution_release_observation` | 50 |
+| `evolution_stable_remote_finalization_authorization` | signed member-scoped remote finalization capability without writer execution | `evolution_release_authorization` | 50 |
 | `evolution_discover_outcome_opportunity` | Outcome-backed Candidate Evidence | `evolution_opportunity` | 50 |
 
 Independent Review 的上限更低，因为首次成功路径会调用 Reviewer 模型；durable single-flight 仍负责同一 Gate

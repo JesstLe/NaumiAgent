@@ -2842,6 +2842,21 @@ test("rollout control key provisioning uses the shared slash execution path", ()
   }]);
 });
 
+test("signed remote finalization authorization uses shared slash execution", () => {
+  const state = createInitialState();
+  const sent = [];
+  const command =
+    "/evolution stable-remote-finalization-authorization issue " +
+    "evstableremoteprobereceipt_aaaaaaaaaaaaaaaaaaaaaaaa 120";
+  handleSubmitText(state, command, (type, payload) => {
+    sent.push({ type, payload });
+  });
+  assert.deepEqual(sent, [{
+    type: "submit",
+    payload: { text: command },
+  }]);
+});
+
 test("evaluation lane command opens typed receipt route and stays out of chat", () => {
   const state = createInitialState();
   state.protocolNegotiated = true;

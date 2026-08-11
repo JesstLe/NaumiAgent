@@ -1134,6 +1134,20 @@ if TYPE_CHECKING:
         EvolutionStableReadGraphInspector,
         build_evolution_stable_read_graph_inspector,
     )
+    from naumi_agent.evolution.stable_remote_finalization_authorizations import (
+        EVOLUTION_STABLE_REMOTE_FINALIZATION_AUTHORIZATION_POLICY,
+        EvolutionStableRemoteFinalizationAuthorization,
+        EvolutionStableRemoteFinalizationAuthorizationEnvelope,
+        EvolutionStableRemoteFinalizationAuthorizationError,
+        EvolutionStableRemoteFinalizationAuthorizationService,
+        EvolutionStableRemoteFinalizationAuthorizationStore,
+        EvolutionStableRemoteFinalizationAuthorizationView,
+        EvolutionStableRemoteFinalizationConsumptionReceipt,
+        decode_stable_remote_finalization_authorization,
+        encode_stable_remote_finalization_authorization,
+        render_stable_remote_finalization_authorization,
+        verify_stable_remote_finalization_authorization,
+    )
     from naumi_agent.evolution.stable_remote_readiness_claims import (
         EVOLUTION_STABLE_REMOTE_READINESS_CLAIM_POLICY,
         EvolutionStableRemoteReadinessAssertion,
@@ -1632,6 +1646,18 @@ __all__ = [
     "render_stable_remote_readiness_probe",
     "render_stable_remote_readiness_probe_challenge",
     "render_stable_remote_readiness_probe_submission",
+    "EVOLUTION_STABLE_REMOTE_FINALIZATION_AUTHORIZATION_POLICY",
+    "EvolutionStableRemoteFinalizationAuthorization",
+    "EvolutionStableRemoteFinalizationAuthorizationEnvelope",
+    "EvolutionStableRemoteFinalizationAuthorizationError",
+    "EvolutionStableRemoteFinalizationAuthorizationService",
+    "EvolutionStableRemoteFinalizationAuthorizationStore",
+    "EvolutionStableRemoteFinalizationAuthorizationView",
+    "EvolutionStableRemoteFinalizationConsumptionReceipt",
+    "decode_stable_remote_finalization_authorization",
+    "encode_stable_remote_finalization_authorization",
+    "render_stable_remote_finalization_authorization",
+    "verify_stable_remote_finalization_authorization",
     "EVOLUTION_STABLE_ROLLOUT_AUTHORIZATION_POLICY",
     "EvolutionStableRolloutAuthorization",
     "EvolutionStableRolloutAuthorizationError",
@@ -2895,6 +2921,20 @@ def __getattr__(name: str) -> object:
         "render_stable_remote_readiness_probe_challenge",
         "render_stable_remote_readiness_probe_submission",
     }
+    stable_remote_finalization_authorization_exports = {
+        "EVOLUTION_STABLE_REMOTE_FINALIZATION_AUTHORIZATION_POLICY",
+        "EvolutionStableRemoteFinalizationAuthorization",
+        "EvolutionStableRemoteFinalizationAuthorizationEnvelope",
+        "EvolutionStableRemoteFinalizationAuthorizationError",
+        "EvolutionStableRemoteFinalizationAuthorizationService",
+        "EvolutionStableRemoteFinalizationAuthorizationStore",
+        "EvolutionStableRemoteFinalizationAuthorizationView",
+        "EvolutionStableRemoteFinalizationConsumptionReceipt",
+        "decode_stable_remote_finalization_authorization",
+        "encode_stable_remote_finalization_authorization",
+        "render_stable_remote_finalization_authorization",
+        "verify_stable_remote_finalization_authorization",
+    }
     stable_rollout_authorization_exports = {
         "EVOLUTION_STABLE_ROLLOUT_AUTHORIZATION_POLICY",
         "EvolutionStableRolloutAuthorization",
@@ -3590,6 +3630,8 @@ def __getattr__(name: str) -> object:
         module_name = "stable_remote_readiness_claims"
     elif name in stable_remote_readiness_probe_exports:
         module_name = "stable_remote_readiness_probes"
+    elif name in stable_remote_finalization_authorization_exports:
+        module_name = "stable_remote_finalization_authorizations"
     elif name in stable_rollout_authorization_exports:
         module_name = "stable_rollout_authorizations"
     elif name in stable_rollout_finalization_exports:

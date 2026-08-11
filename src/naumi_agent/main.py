@@ -2922,6 +2922,7 @@ def _print_help() -> None:
             "rollout-control-key|"
             "stable-remote-readiness|"
             "stable-remote-readiness-probe|"
+            "stable-remote-finalization-authorization|"
             "stable-rollout-authorization|"
             "stable-rollout-finalization|"
             "discover-outcome|"
@@ -3914,6 +3915,34 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 arg="",
             )
             return
+        if action == "stable-remote-finalization-authorization":
+            if len(parts) in {3, 4} and parts[1] == "issue":
+                arguments = {
+                    "action": "issue",
+                    "probe_receipt_id": parts[2],
+                    "validity_seconds": int(parts[3]) if len(parts) == 4 else 180,
+                }
+            elif len(parts) == 3 and parts[1] in {"inspect", "export"}:
+                arguments = {
+                    "action": parts[1],
+                    "authorization_id": parts[2],
+                }
+            else:
+                raise ValueError(
+                    "stable-remote-finalization-authorization 需要 issue "
+                    "<probe-receipt-id> [validity-seconds]、inspect "
+                    "<authorization-id> 或 export <authorization-id>。"
+                )
+            await _run_tool_slash_command(
+                engine,
+                slash_command="/evolution",
+                tool_name=(
+                    "evolution_stable_remote_finalization_authorization"
+                ),
+                parse_args=lambda _arg: arguments,
+                arg="",
+            )
+            return
         if action == "stable-rollout-authorization":
             if len(parts) == 4 and parts[1] == "issue":
                 arguments = {
@@ -4297,6 +4326,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "rollout-control-key、"
                 "stable-remote-readiness、"
                 "stable-remote-readiness-probe、"
+                "stable-remote-finalization-authorization、"
                 "stable-rollout-authorization、"
                 "stable-rollout-finalization、"
                 "discover-outcome、"
@@ -4512,6 +4542,9 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution stable-remote-readiness-probe prepare <claim-id> "
             "[validity-seconds]；execute-local <challenge-base64>；"
             "ingest <challenge-id> <submission-base64>；inspect <receipt-id>；"
+            "/evolution stable-remote-finalization-authorization issue "
+            "<probe-receipt-id> [validity-seconds]；inspect <authorization-id>；"
+            "export <authorization-id>；"
             "/evolution discover-outcome <rollback-outcome-id>；"
             "/evolution revalidation-rollback-execute <rollback-request-id>；"
             "/evolution revalidation-rollback-outcome <rollback-request-id>；"
