@@ -248,6 +248,10 @@ from naumi_agent.evolution.stable_promotion_outcome_eligibilities import (
     EvolutionStablePromotionOutcomeEligibilityError,
     render_stable_promotion_outcome_eligibility,
 )
+from naumi_agent.evolution.stable_promotion_outcomes import (
+    EvolutionStablePromotionOutcomeError,
+    render_stable_promotion_outcome,
+)
 from naumi_agent.evolution.stable_promotion_population_observation_assessments import (
     EvolutionStablePromotionPopulationObservationAssessmentError,
     render_stable_promotion_population_observation_assessment,
@@ -4662,6 +4666,90 @@ class EvolutionStablePromotionOutcomeDecisionTool(Tool):
         return render_stable_promotion_outcome_decision(view)
 
 
+class EvolutionStablePromotionOutcomeTool(Tool):
+    """Record or inspect the append-only promoted Outcome ledger."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_stable_promotion_outcome"
+
+    @property
+    def description(self) -> str:
+        return (
+            "只消费 current promote Decision，原子追加 promoted Outcome 与 supersede "
+            "hash chain；不授予学习、代码修改或执行权限。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["record", "inspect"]},
+                "decision_id": {
+                    "type": "string",
+                    "pattern": "^evstablepromdecision_[0-9a-f]{24}$",
+                },
+                "outcome_id": {
+                    "type": "string",
+                    "pattern": "^evstablepromout_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["action"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="稳定推广 Outcome Ledger",
+            search_hint=(
+                "evolution stable promotion promoted outcome supersede ledger "
+                "自进化 稳定推广 Outcome 替代链"
+            ),
+        )
+
+    async def execute(
+        self,
+        action: str,
+        decision_id: str = "",
+        outcome_id: str = "",
+    ) -> str:
+        operation = str(action or "").strip().lower()
+        service = self._engine.evolution_stable_promotion_outcome_service
+        try:
+            if operation == "record":
+                view = await service.record(
+                    decision_id=str(decision_id or "").strip()
+                )
+            elif operation == "inspect":
+                view = await service.inspect(
+                    outcome_id=str(outcome_id or "").strip()
+                )
+            else:
+                raise ValueError("action 必须是 record 或 inspect。")
+        except (
+            AttributeError,
+            EvolutionStablePromotionOutcomeError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "stable_promotion_outcome_failed")
+            return f"稳定推广 Outcome Ledger 未完成（`{code}`）：{exc}"
+        return render_stable_promotion_outcome(view)
+
+
 class EvolutionStablePromotionRuntimeAdmissionDeliveryTool(Tool):
     """Prepare, export, receive, or inspect one signed runtime Admission."""
 
@@ -6387,6 +6475,7 @@ def create_evolution_review_tools(
         EvolutionStablePromotionPopulationObservationAssessmentTool(engine),
         EvolutionStablePromotionOutcomeEligibilityTool(engine),
         EvolutionStablePromotionOutcomeDecisionTool(engine),
+        EvolutionStablePromotionOutcomeTool(engine),
         EvolutionStablePromotionRuntimeAdmissionDeliveryTool(engine),
         EvolutionStableRolloutAuthorizationTool(engine),
         EvolutionStableRolloutFinalizationTool(engine),
@@ -6459,6 +6548,7 @@ __all__ = [
     "EvolutionStablePromotionPopulationObservationAssessmentTool",
     "EvolutionStablePromotionOutcomeEligibilityTool",
     "EvolutionStablePromotionOutcomeDecisionTool",
+    "EvolutionStablePromotionOutcomeTool",
     "EvolutionStablePromotionRuntimeAdmissionDeliveryTool",
     "EvolutionStablePromotionObservationChainCursorTool",
     "EvolutionStablePromotionObservationRevisionDeliveryTool",

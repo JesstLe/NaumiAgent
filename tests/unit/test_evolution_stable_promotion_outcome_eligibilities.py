@@ -26,6 +26,12 @@ from naumi_agent.evolution.stable_promotion_outcome_eligibilities import (
     EvolutionStablePromotionOutcomeEligibilityService,
     EvolutionStablePromotionOutcomeEligibilityStore,
 )
+from naumi_agent.evolution.stable_promotion_outcomes import (
+    EvolutionStablePromotionOutcomeError,
+    EvolutionStablePromotionOutcomeService,
+    EvolutionStablePromotionOutcomeStore,
+    build_stable_promotion_outcome_pair,
+)
 from naumi_agent.evolution.stable_promotion_population_observation_assessments import (
     EvolutionStablePromotionPopulationMemberObservationStatus,
     EvolutionStablePromotionPopulationObservationAssessmentView,
@@ -41,6 +47,7 @@ from naumi_agent.tools.base import ToolCall, ToolRegistry, ToolResult
 from naumi_agent.tools.evolution_review import (
     EvolutionStablePromotionOutcomeDecisionTool,
     EvolutionStablePromotionOutcomeEligibilityTool,
+    EvolutionStablePromotionOutcomeTool,
 )
 from naumi_agent.user_interaction import normalize_interaction_request
 from tests.unit.test_evolution_stable_promotion_population_observation_assessments import (
@@ -57,22 +64,28 @@ class _PopulationAssessmentPort:
     def __init__(self, store, assessment) -> None:
         self.store = store
         self.assessment = assessment
+        self.assessments = {assessment.assessment_id: assessment}
         self.authority = True
 
     async def inspect(self, *, assessment_id: str):
-        assert assessment_id == self.assessment.assessment_id
-        current = self.assessment if self.authority else None
+        assessment = self.assessments[assessment_id]
+        current = (
+            assessment
+            if self.authority and assessment_id == self.assessment.assessment_id
+            else None
+        )
+        current_authority = current is not None
         return EvolutionStablePromotionPopulationObservationAssessmentView(
-            receipt=self.assessment,
+            receipt=assessment,
             current_assessment=current,
             durable_receipt_valid=True,
-            latest_receipt_current=True,
+            latest_receipt_current=current_authority,
             contract_authority=True,
             population_finalization_authority=True,
             member_source_set_current=True,
-            assessment_temporally_current=self.authority,
-            invalidation_reasons=() if self.authority else ("population_assessment_expired",),
-            population_long_term_observation_authority=self.authority,
+            assessment_temporally_current=current_authority,
+            invalidation_reasons=(() if current_authority else ("population_assessment_expired",)),
+            population_long_term_observation_authority=current_authority,
             population_health_alert_authority=False,
         )
 
@@ -144,6 +157,11 @@ async def test_engine_composes_outcome_eligibility_service_and_tool(tmp_path) ->
         assert isinstance(decision_tool, EvolutionStablePromotionOutcomeDecisionTool)
         assert engine.evolution_stable_promotion_outcome_decision_service.store is (
             engine.evolution_stable_promotion_outcome_decision_store
+        )
+        outcome_tool = engine.tool_registry.get("evolution_stable_promotion_outcome")
+        assert isinstance(outcome_tool, EvolutionStablePromotionOutcomeTool)
+        assert engine.evolution_stable_promotion_outcome_service.store is (
+            engine.evolution_stable_promotion_outcome_store
         )
     finally:
         await engine.shutdown()
@@ -280,8 +298,10 @@ async def test_passing_population_creates_review_only_eligibility_and_revokes(
     )
     answered_at = assessed_at + timedelta(seconds=10)
     callback_calls: list[str] = []
+    callback_now = [answered_at]
 
     async def answer_promote(payload):
+        current_answered_at = callback_now[0]
         request = normalize_interaction_request(payload)
         callback_calls.append(str(payload["_interaction_id"]))
         record = await interaction_authority.create(
@@ -291,13 +311,14 @@ async def test_passing_population_creates_review_only_eligibility_and_revokes(
             subject_id=str(payload["_durable_subject_id"]),
             session_id="outcome-decision-session",
             agent_name="main",
-            now=(answered_at - timedelta(seconds=1)).isoformat(),
+            now=(current_answered_at - timedelta(seconds=1)).isoformat(),
         )
         _record, response = await interaction_authority.answer(
             record=record,
             response={"kind": "option", "value": "promote"},
-            now=answered_at.isoformat(),
+            now=current_answered_at.isoformat(),
         )
+        callback_now[0] = current_answered_at + timedelta(seconds=30)
         return response
 
     eligibility_service_for_decision = service()
@@ -325,9 +346,7 @@ async def test_passing_population_creates_review_only_eligibility_and_revokes(
     assert not decision_view.learning_authority
     assert not decision_view.promotion_authority
     assert not decision_view.execution_authority
-    forged_promoted = decision_view.decision.model_copy(
-        update={"promoted_outcome_authority": True}
-    )
+    forged_promoted = decision_view.decision.model_copy(update={"promoted_outcome_authority": True})
     with pytest.raises(ValidationError, match="Input should be False"):
         forged_promoted.model_validate_json(forged_promoted.model_dump_json())
     deferred_decision = None
@@ -436,6 +455,147 @@ async def test_passing_population_creates_review_only_eligibility_and_revokes(
         + decision_view.decision.decision_id,
     )
     assert "Outcome 独立决策" in decision_slash
+
+    outcome_store = EvolutionStablePromotionOutcomeStore(
+        db_path,
+        decision_store=decision_store,
+        eligibility_store=eligibility_service_for_decision.store,
+    )
+
+    def outcome_service():
+        return EvolutionStablePromotionOutcomeService(
+            decision_service=decision_service,
+            eligibility_service=eligibility_service_for_decision,
+            store=outcome_store,
+        )
+
+    outcome_left, outcome_right = await asyncio.gather(
+        outcome_service().record(decision_id=decision_view.decision.decision_id),
+        outcome_service().record(decision_id=decision_view.decision.decision_id),
+    )
+    assert outcome_left == outcome_right
+    assert outcome_left.current_outcome == outcome_left.outcome
+    assert outcome_left.promoted_outcome_authority
+    assert outcome_left.promoted
+    assert not outcome_left.superseded
+    assert not outcome_left.learning_authority
+    assert not outcome_left.promotion_authority
+    assert not outcome_left.execution_authority
+    assert outcome_left.supersede_event.sequence == 1
+    assert not outcome_left.supersede_event.prior_outcome_superseded
+    forged_unpromoted = outcome_left.outcome.model_copy(update={"promoted": False})
+    with pytest.raises(ValidationError, match="Input should be True"):
+        forged_unpromoted.model_validate_json(forged_unpromoted.model_dump_json())
+    with pytest.raises(EvolutionStablePromotionOutcomeError) as rejected_outcome:
+        build_stable_promotion_outcome_pair(
+            decision=alternative,
+            eligibility=left.eligibility,
+            head=None,
+            previous_event=None,
+        )
+    assert rejected_outcome.value.code == "stable_promotion_outcome_lineage_mismatch"
+    outcome_tool = EvolutionStablePromotionOutcomeTool(
+        SimpleNamespace(evolution_stable_promotion_outcome_service=outcome_service())
+    )
+    outcome_arguments = {
+        "action": "inspect",
+        "outcome_id": outcome_left.outcome.outcome_id,
+    }
+    for mode in (
+        PermissionMode.PERMISSIVE,
+        PermissionMode.MODERATE,
+        PermissionMode.STRICT,
+        PermissionMode.BYPASS,
+    ):
+        permission = PermissionChecker(mode).check(
+            outcome_tool.name,
+            outcome_arguments,
+            tool=outcome_tool,
+        )
+        assert permission.allowed and not permission.requires_confirmation
+    lockdown = PermissionChecker(PermissionMode.LOCKDOWN).check(
+        outcome_tool.name,
+        outcome_arguments,
+        tool=outcome_tool,
+    )
+    assert not lockdown.allowed
+    assert "Outcome Ledger" in await outcome_tool.execute(**outcome_arguments)
+    registry.register(outcome_tool)
+    outcome_record_slash = await execute_slash_command(
+        _SlashEngine(),
+        "/evolution stable-promotion-outcome record "
+        + decision_view.decision.decision_id,
+    )
+    assert "Outcome Ledger" in outcome_record_slash
+    outcome_slash = await execute_slash_command(
+        _SlashEngine(),
+        "/evolution stable-promotion-outcome inspect " + outcome_left.outcome.outcome_id,
+    )
+    assert "Outcome Ledger" in outcome_slash
+
+    with sqlite3.connect(db_path) as db:
+        db.execute(
+            "UPDATE evolution_stable_promotion_outcome_supersede_events "
+            "SET event_json = '{}' WHERE event_id = ?",
+            (outcome_left.supersede_event.event_id,),
+        )
+    with pytest.raises(EvolutionStablePromotionOutcomeError) as corrupt_chain:
+        await outcome_store.chain_valid(
+            workbench_session_id=outcome_left.outcome.workbench_session_id,
+            workbench_proposal_id=outcome_left.outcome.workbench_proposal_id,
+        )
+    assert corrupt_chain.value.code == "stable_promotion_outcome_store_corrupt"
+    with sqlite3.connect(db_path) as db:
+        db.execute(
+            "UPDATE evolution_stable_promotion_outcome_supersede_events "
+            "SET event_json = ? WHERE event_id = ?",
+            (
+                outcome_left.supersede_event.model_dump_json(),
+                outcome_left.supersede_event.event_id,
+            ),
+        )
+
+    assessed_at_two = assessed_at + timedelta(seconds=60)
+    assessment_two = build_stable_promotion_population_observation_assessment(
+        workspace_root=tmp_path,
+        contract=contract,
+        finalization=finalization,
+        members=_passing_members(finalization, assessed_at_two),
+        assessed_at=assessed_at_two,
+    )
+    with sqlite3.connect(db_path) as db:
+        db.execute(
+            "INSERT INTO evolution_stable_promotion_population_observation_assessments "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                assessment_two.assessment_id,
+                assessment_two.assessment_sha256,
+                assessment_two.source_set_sha256,
+                assessment_two.contract_id,
+                assessment_two.population_finalization_receipt_id,
+                assessment_two.status.value,
+                assessment_two.model_dump_json(),
+                assessment_two.assessed_at,
+            ),
+        )
+    port.assessment = assessment_two
+    port.assessments[assessment_two.assessment_id] = assessment_two
+    eligibility_two = await eligibility_service_for_decision.record(
+        population_assessment_id=assessment_two.assessment_id
+    )
+    decision_two = await decision_service.decide(
+        eligibility_id=eligibility_two.eligibility.eligibility_id
+    )
+    outcome_two = await outcome_service().record(decision_id=decision_two.decision.decision_id)
+    assert outcome_two.outcome.sequence == 2
+    assert outcome_two.outcome.previous_outcome_id == outcome_left.outcome.outcome_id
+    assert outcome_two.supersede_event.previous_event_id == (outcome_left.supersede_event.event_id)
+    assert outcome_two.supersede_event.prior_outcome_superseded
+    assert outcome_two.promoted_outcome_authority
+    superseded_first = await outcome_service().inspect(outcome_id=outcome_left.outcome.outcome_id)
+    assert superseded_first.superseded
+    assert not superseded_first.promoted_outcome_authority
+    assert "newer_promoted_outcome_exists" in superseded_first.invalidation_reasons
 
     with sqlite3.connect(db_path) as db:
         db.execute(
