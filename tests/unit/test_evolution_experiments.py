@@ -283,7 +283,9 @@ async def test_approved_proposal_issues_stable_non_executable_contract(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("terminal_status", ["rolled_back", "rollback_recovery_observed"])
+@pytest.mark.parametrize(
+    "terminal_status", ["rolled_back", "rollback_recovery_observed", "promoted"]
+)
 async def test_contract_issuer_fails_closed_for_terminal_or_unavailable_outcome(
     tmp_path: Path,
     terminal_status: str,

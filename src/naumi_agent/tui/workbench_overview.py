@@ -538,7 +538,46 @@ def _append_proposal_review(
     validation = _strings(proposal.get("validation_plan"))
     outcome = _mapping(proposal.get("outcome"))
     outcome_status = _normalized(proposal.get("outcome_status"))
-    if outcome:
+    if outcome and _normalized(outcome.get("status")) == "promoted":
+        authority = "可验证" if outcome.get("authority_valid") is True else "证据已失效"
+        previous = _normalized(outcome.get("stable_previous_outcome_id"))
+        lines.extend(
+            [
+                "",
+                "### 稳定推广 Outcome",
+                f"- 终态：promoted · {authority}",
+                f"- Outcome：`{_code(outcome.get('outcome_id'))}` · "
+                f"sequence {_integer(outcome.get('stable_promotion_sequence'))}",
+                f"- Decision：`{_code(outcome.get('stable_decision_id'))}`",
+                f"- Eligibility：`{_code(outcome.get('stable_eligibility_id'))}`",
+                "- Observation Contract："
+                f"`{_code(outcome.get('stable_observation_contract_id'))}`",
+                "- Population Assessment："
+                f"`{_code(outcome.get('stable_population_assessment_id'))}`",
+                "- Prior Outcome："
+                + (
+                    f"`{_code(previous)}` · 已由当前 Outcome 替代"
+                    if previous
+                    else "无 · 首个 promoted Outcome"
+                ),
+                "- Supersede Event："
+                f"`{_code(outcome.get('stable_supersede_event_id'))}`",
+                "- Authority："
+                f"head={str(outcome.get('projection_head_authority') is True).lower()} · "
+                "outcome="
+                f"{str(outcome.get('stable_promotion_outcome_authority') is True).lower()}",
+                *(
+                    [
+                        "- 撤权原因："
+                        + ", ".join(_strings(outcome.get("invalidation_reasons")))
+                    ]
+                    if _strings(outcome.get("invalidation_reasons"))
+                    else []
+                ),
+                "- 长期观察已记录；Learning / Promotion / Execution authority：false",
+            ]
+        )
+    elif outcome:
         authority = "可验证" if outcome.get("authority_valid") is True else "证据已失效"
         before_after = _mapping(outcome.get("before_after_evidence"))
         before_after_label = (
@@ -673,7 +712,20 @@ def _append_proposal_review(
     lines.extend(f"- {_plain(step)}" for step in validation[:8])
     if not validation:
         lines.append("- 未声明")
-    if outcome:
+    if outcome and _normalized(outcome.get("status")) == "promoted":
+        lines.extend(
+            [
+                "",
+                (
+                    "> 该 Proposal 已形成 post-observation promoted Outcome；"
+                    "治理审计与 supersession 历史仍保留，但不得再次签发 Experiment "
+                    "Contract，也不会自动进入 policy learning。"
+                ),
+                "",
+                "`r` 刷新 · `Esc` 返回",
+            ]
+        )
+    elif outcome:
         lines.extend(
             [
                 "",

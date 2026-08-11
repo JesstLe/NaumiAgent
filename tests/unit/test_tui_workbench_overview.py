@@ -243,6 +243,40 @@ def test_reviews_formatter_renders_rollback_outcome_without_contract_action() ->
     assert "`c` 签发" not in rendered
 
 
+def test_reviews_formatter_renders_promoted_outcome_lineage() -> None:
+    snapshot = _rolled_back_proposal_snapshot()
+    proposal = snapshot["proposals"][0]  # type: ignore[index]
+    proposal["outcome_status"] = "promoted"
+    proposal["outcome"] = {
+        "status": "promoted",
+        "outcome_id": f"evstablepromout_{'1' * 24}",
+        "authority_valid": True,
+        "stable_promotion_sequence": 2,
+        "stable_previous_outcome_id": f"evstablepromout_{'2' * 24}",
+        "stable_decision_id": f"evstablepromdecision_{'3' * 24}",
+        "stable_eligibility_id": f"evstablepromeligible_{'4' * 24}",
+        "stable_observation_contract_id": f"evstablepromobserve_{'5' * 24}",
+        "stable_population_assessment_id": f"evstableprompopobserve_{'6' * 24}",
+        "stable_supersede_event_id": f"evstablepromoutsup_{'7' * 24}",
+        "stable_promotion_outcome_authority": True,
+        "projection_head_authority": True,
+        "invalidation_reasons": [],
+    }
+
+    rendered = format_workbench_reviews_markdown(snapshot)
+
+    assert "稳定推广 Outcome" in rendered
+    assert "promoted · 可验证" in rendered
+    assert "sequence 2" in rendered
+    assert "Decision" in rendered
+    assert "Eligibility" in rendered
+    assert "已由当前 Outcome 替代" in rendered
+    assert "Learning / Promotion / Execution authority：false" in rendered
+    assert "不会自动进入 policy learning" in rendered
+    assert "Rollback Receipt" not in rendered
+    assert "`c` 签发" not in rendered
+
+
 def test_reviews_formatter_renders_long_term_outcome_head() -> None:
     snapshot = _rolled_back_proposal_snapshot()
     proposal = snapshot["proposals"][0]  # type: ignore[index]

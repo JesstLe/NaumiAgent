@@ -44,8 +44,15 @@ from naumi_agent.evolution.revalidation_rollback_outcomes import (
     EvolutionRevalidationRollbackOutcomeStore,
     EvolutionRevalidationRollbackOutcomeView,
 )
+from naumi_agent.evolution.stable_promotion_outcomes import (
+    EvolutionStablePromotionOutcome,
+    EvolutionStablePromotionOutcomeError,
+    EvolutionStablePromotionOutcomeService,
+    EvolutionStablePromotionOutcomeStore,
+    EvolutionStablePromotionOutcomeView,
+)
 
-EVOLUTION_PROPOSAL_OUTCOME_PROJECTION_POLICY = "evolution-proposal-outcome-projection-v2"
+EVOLUTION_PROPOSAL_OUTCOME_PROJECTION_POLICY = "evolution-proposal-outcome-projection-v3"
 _SAFE_BINDING_RE = r"^[^\x00\r\n]{1,128}$"
 _SHA256_RE = r"^[0-9a-f]{64}$"
 
@@ -59,31 +66,35 @@ class _StrictModel(BaseModel):
 class EvolutionProposalOutcomeProjection(_StrictModel):
     """Dynamic display projection; never a replacement for Proposal governance state."""
 
-    schema_version: Literal[2] = 2
-    policy_version: Literal["evolution-proposal-outcome-projection-v2"] = (
+    schema_version: Literal[3] = 3
+    policy_version: Literal["evolution-proposal-outcome-projection-v3"] = (
         EVOLUTION_PROPOSAL_OUTCOME_PROJECTION_POLICY
     )
     workbench_session_id: str = Field(pattern=_SAFE_BINDING_RE)
     workbench_proposal_id: str = Field(pattern=_SAFE_BINDING_RE)
     governance_state_unchanged: Literal[True] = True
-    status: Literal["rolled_back", "rollback_recovery_observed"] = "rolled_back"
+    status: Literal["rolled_back", "rollback_recovery_observed", "promoted"] = (
+        "rolled_back"
+    )
     outcome_id: str = Field(
-        pattern=r"^(?:evrerollbackout|evpostlongout)_[0-9a-f]{24}$"
+        pattern=r"^(?:evrerollbackout|evpostlongout|evstablepromout)_[0-9a-f]{24}$"
     )
     outcome_sha256: str = Field(pattern=_SHA256_RE)
     root_rollback_outcome_id: str = Field(
-        pattern=r"^evrerollbackout_[0-9a-f]{24}$"
+        default="", pattern=r"^(?:|evrerollbackout_[0-9a-f]{24})$"
     )
-    root_rollback_outcome_sha256: str = Field(pattern=_SHA256_RE)
-    rollback_receipt_id: str = Field(pattern=r"^evrerollbackexec_[0-9a-f]{24}$")
-    experiment_contract_id: str = Field(pattern=r"^evx_[0-9a-f]{24}$")
+    root_rollback_outcome_sha256: str = Field(default="", pattern=r"^(?:|[0-9a-f]{64})$")
+    rollback_receipt_id: str = Field(
+        default="", pattern=r"^(?:|evrerollbackexec_[0-9a-f]{24})$"
+    )
+    experiment_contract_id: str = Field(default="", pattern=r"^(?:|evx_[0-9a-f]{24})$")
     candidate_id: str = Field(pattern=r"^evc_[0-9a-f]{24}$")
     candidate_revision: int = Field(ge=1)
-    breach_reasons: tuple[str, ...] = Field(min_length=1, max_length=16)
+    breach_reasons: tuple[str, ...] = Field(default=(), max_length=16)
     recorded_at: str = Field(min_length=1, max_length=100)
     authority_valid: bool
-    rollback_outcome_authority: bool
-    active_baseline: bool
+    rollback_outcome_authority: bool = False
+    active_baseline: bool = False
     contract_issue_allowed: Literal[False] = False
     before_after_evidence: EvolutionProposalBeforeAfterEvidence | None = None
     before_after_recorded: bool = False
@@ -98,9 +109,36 @@ class EvolutionProposalOutcomeProjection(_StrictModel):
     long_term_outcome_authority: bool = False
     current_long_term_health_authority: bool = False
     projection_head_authority: bool = False
-    promoted: Literal[False] = False
+    stable_promotion_sequence: int = Field(default=0, ge=0, le=10_000)
+    stable_previous_outcome_id: str = Field(
+        default="", pattern=r"^(?:|evstablepromout_[0-9a-f]{24})$"
+    )
+    stable_decision_id: str = Field(
+        default="", pattern=r"^(?:|evstablepromdecision_[0-9a-f]{24})$"
+    )
+    stable_eligibility_id: str = Field(
+        default="", pattern=r"^(?:|evstablepromeligible_[0-9a-f]{24})$"
+    )
+    stable_observation_contract_id: str = Field(
+        default="", pattern=r"^(?:|evstablepromobserve_[0-9a-f]{24})$"
+    )
+    stable_population_assessment_id: str = Field(
+        default="", pattern=r"^(?:|evstableprompopobserve_[0-9a-f]{24})$"
+    )
+    stable_supersede_event_id: str = Field(
+        default="", pattern=r"^(?:|evstablepromoutsup_[0-9a-f]{24})$"
+    )
+    stable_supersede_event_sha256: str = Field(
+        default="", pattern=r"^(?:|[0-9a-f]{64})$"
+    )
+    stable_prior_outcome_superseded: bool = False
+    stable_promotion_outcome_authority: bool = False
+    superseded: bool = False
+    invalidation_reasons: tuple[str, ...] = Field(default=(), max_length=8)
+    promoted: bool = False
     learning_authority: Literal[False] = False
     promotion_authority: Literal[False] = False
+    execution_authority: Literal[False] = False
 
     @model_validator(mode="before")
     @classmethod
@@ -122,6 +160,29 @@ class EvolutionProposalOutcomeProjection(_StrictModel):
 
     @model_validator(mode="after")
     def _projection(self) -> Self:
+        if self.status == "promoted":
+            return self._stable_projection()
+        if not (
+            self.root_rollback_outcome_id
+            and self.root_rollback_outcome_sha256
+            and self.rollback_receipt_id
+            and self.experiment_contract_id
+            and self.breach_reasons
+            and not self.promoted
+            and self.stable_promotion_sequence == 0
+            and not self.stable_previous_outcome_id
+            and not self.stable_decision_id
+            and not self.stable_eligibility_id
+            and not self.stable_observation_contract_id
+            and not self.stable_population_assessment_id
+            and not self.stable_supersede_event_id
+            and not self.stable_supersede_event_sha256
+            and not self.stable_prior_outcome_superseded
+            and not self.stable_promotion_outcome_authority
+            and not self.superseded
+            and not self.invalidation_reasons
+        ):
+            raise ValueError("Proposal Outcome rollback/stable 分支混用。")
         if self.active_baseline and not self.authority_valid:
             raise ValueError("Proposal Outcome active baseline 超出 authority。")
         if self.before_after_recorded is not (self.before_after_evidence is not None):
@@ -247,6 +308,70 @@ class EvolutionProposalOutcomeProjection(_StrictModel):
             raise ValueError("Proposal Outcome Long-Term lineage 无效。")
         return self
 
+    def _stable_projection(self) -> Self:
+        first = self.stable_promotion_sequence == 1
+        stable_fields_present = bool(
+            self.stable_promotion_sequence
+            and self.stable_decision_id
+            and self.stable_eligibility_id
+            and self.stable_observation_contract_id
+            and self.stable_population_assessment_id
+            and self.stable_supersede_event_id
+            and self.stable_supersede_event_sha256
+        )
+        rollback_fields_empty = bool(
+            not self.root_rollback_outcome_id
+            and not self.root_rollback_outcome_sha256
+            and not self.rollback_receipt_id
+            and not self.experiment_contract_id
+            and not self.breach_reasons
+            and self.before_after_evidence is None
+            and not self.before_after_recorded
+            and self.post_rollback_verification is None
+            and not self.post_rollback_verification_recorded
+            and not self.post_rollback_evaluation_recorded
+            and self.post_rollback_behavioral_matrix is None
+            and not self.post_rollback_behavioral_evaluation_recorded
+            and self.long_term_outcome is None
+            and self.long_term_supersede_event is None
+            and not self.rollback_outcome_authority
+            and not self.long_term_outcome_authority
+            and not self.current_long_term_health_authority
+            and not self.active_baseline
+        )
+        chain_shape_valid = bool(
+            (
+                first
+                and not self.stable_previous_outcome_id
+                and not self.stable_prior_outcome_superseded
+            )
+            or (
+                not first
+                and self.stable_previous_outcome_id
+                and self.stable_prior_outcome_superseded
+            )
+        )
+        if not (
+            stable_fields_present
+            and rollback_fields_empty
+            and chain_shape_valid
+            and self.outcome_id.startswith("evstablepromout_")
+            and self.recorded_at
+            and self.long_term_metrics_recorded
+            and self.promoted
+            and not self.superseded
+            and self.authority_valid is self.stable_promotion_outcome_authority
+            and (not self.authority_valid or self.projection_head_authority)
+            and self.invalidation_reasons
+            == tuple(sorted(set(self.invalidation_reasons)))
+            and (self.authority_valid or self.invalidation_reasons)
+            and (not self.authority_valid or not self.invalidation_reasons)
+            and self.governance_state_unchanged
+            and not self.contract_issue_allowed
+        ):
+            raise ValueError("Proposal Outcome promoted projection 无效。")
+        return self
+
 
 class EvolutionProposalOutcomeProjectionError(RuntimeError):
     def __init__(self, code: str, message: str) -> None:
@@ -272,6 +397,10 @@ class EvolutionProposalOutcomeProjectionService:
         long_term_outcome_store: EvolutionPostRollbackLongTermOutcomeStore
         | None = None,
         long_term_outcome_service: EvolutionPostRollbackLongTermOutcomeService
+        | None = None,
+        stable_promotion_outcome_store: EvolutionStablePromotionOutcomeStore
+        | None = None,
+        stable_promotion_outcome_service: EvolutionStablePromotionOutcomeService
         | None = None,
     ) -> None:
         self.rollback_outcome_store = rollback_outcome_store
@@ -300,6 +429,18 @@ class EvolutionProposalOutcomeProjectionService:
             raise ValueError("Long-Term Outcome projection dependency 不一致。")
         self.long_term_outcome_store = long_term_outcome_store
         self.long_term_outcome_service = long_term_outcome_service
+        if (stable_promotion_outcome_store is None) != (
+            stable_promotion_outcome_service is None
+        ):
+            raise ValueError("Stable Promotion Outcome Store 与 Service 必须同时绑定。")
+        if stable_promotion_outcome_store is not None and not (
+            stable_promotion_outcome_service is not None
+            and stable_promotion_outcome_service.store
+            is stable_promotion_outcome_store
+        ):
+            raise ValueError("Stable Promotion Outcome projection dependency 不一致。")
+        self.stable_promotion_outcome_store = stable_promotion_outcome_store
+        self.stable_promotion_outcome_service = stable_promotion_outcome_service
 
     async def project_session(
         self,
@@ -318,6 +459,19 @@ class EvolutionProposalOutcomeProjectionService:
                 "proposal_outcome_source_unavailable",
                 "Proposal Outcome source 暂不可用。",
             ) from exc
+        try:
+            stable_outcomes = (
+                await self.stable_promotion_outcome_store.list_heads_by_session(
+                    normalized
+                )
+                if self.stable_promotion_outcome_store is not None
+                else ()
+            )
+        except (EvolutionStablePromotionOutcomeError, TypeError, ValueError) as exc:
+            raise EvolutionProposalOutcomeProjectionError(
+                "proposal_outcome_source_unavailable",
+                "Stable Promotion Outcome source 暂不可用。",
+            ) from exc
         by_proposal: dict[str, EvolutionRevalidationRollbackOutcome] = {}
         for outcome in outcomes:
             if outcome.workbench_proposal_id in by_proposal:
@@ -326,7 +480,25 @@ class EvolutionProposalOutcomeProjectionService:
                     "同一 Workbench Proposal 存在多个未 supersede Outcome。",
                 )
             by_proposal[outcome.workbench_proposal_id] = outcome
-        if not by_proposal:
+        stable_by_proposal = {
+            outcome.workbench_proposal_id: outcome for outcome in stable_outcomes
+        }
+        if len(stable_by_proposal) != len(stable_outcomes):
+            raise EvolutionProposalOutcomeProjectionError(
+                "proposal_outcome_ambiguous",
+                "同一 Workbench Proposal 存在多个 Stable Promotion head。",
+            )
+        if set(by_proposal).intersection(stable_by_proposal):
+            raise EvolutionProposalOutcomeProjectionError(
+                "proposal_outcome_ambiguous",
+                "同一 Workbench Proposal 同时存在 rollback 与 promoted Outcome。",
+            )
+        if len(by_proposal) + len(stable_by_proposal) > 100:
+            raise EvolutionProposalOutcomeProjectionError(
+                "proposal_outcome_projection_limit_exceeded",
+                "Proposal Outcome 数量超过单次投影上限。",
+            )
+        if not by_proposal and not stable_by_proposal:
             return {}
         views = await asyncio.gather(
             *(
@@ -375,6 +547,26 @@ class EvolutionProposalOutcomeProjectionService:
                 matrix_view,
                 long_term_view,
             )
+        if stable_by_proposal:
+            assert self.stable_promotion_outcome_service is not None
+            stable_views = await asyncio.gather(
+                *(
+                    self.stable_promotion_outcome_service.inspect(
+                        outcome_id=outcome.outcome_id
+                    )
+                    for outcome in stable_by_proposal.values()
+                ),
+                return_exceptions=True,
+            )
+            for (proposal_id, outcome), result in zip(
+                stable_by_proposal.items(), stable_views, strict=True
+            ):
+                if isinstance(result, BaseException):
+                    raise EvolutionProposalOutcomeProjectionError(
+                        "proposal_outcome_source_unavailable",
+                        "Stable Promotion Outcome source 暂不可用。",
+                    ) from result
+                projections[proposal_id] = _project_stable(outcome, result)
         return projections
 
     async def _before_after_views(
@@ -613,6 +805,50 @@ def _project(
         promoted=False,
         learning_authority=False,
         promotion_authority=False,
+    )
+
+
+def _project_stable(
+    outcome: EvolutionStablePromotionOutcome,
+    view: EvolutionStablePromotionOutcomeView,
+) -> EvolutionProposalOutcomeProjection:
+    if outcome != view.outcome or view.superseded:
+        raise EvolutionProposalOutcomeProjectionError(
+            "proposal_outcome_source_changed",
+            "Stable Promotion Outcome projection head 已变化。",
+        )
+    event = view.supersede_event
+    return EvolutionProposalOutcomeProjection(
+        workbench_session_id=outcome.workbench_session_id,
+        workbench_proposal_id=outcome.workbench_proposal_id,
+        governance_state_unchanged=True,
+        status="promoted",
+        outcome_id=outcome.outcome_id,
+        outcome_sha256=outcome.outcome_sha256,
+        candidate_id=outcome.candidate_id,
+        candidate_revision=outcome.candidate_revision,
+        recorded_at=outcome.promoted_at,
+        authority_valid=view.promoted_outcome_authority,
+        active_baseline=False,
+        contract_issue_allowed=False,
+        long_term_metrics_recorded=True,
+        projection_head_authority=view.projection_head_authority,
+        stable_promotion_sequence=outcome.sequence,
+        stable_previous_outcome_id=outcome.previous_outcome_id,
+        stable_decision_id=outcome.decision_id,
+        stable_eligibility_id=outcome.eligibility_id,
+        stable_observation_contract_id=outcome.contract_id,
+        stable_population_assessment_id=outcome.population_assessment_id,
+        stable_supersede_event_id=event.event_id,
+        stable_supersede_event_sha256=event.event_sha256,
+        stable_prior_outcome_superseded=event.prior_outcome_superseded,
+        stable_promotion_outcome_authority=view.promoted_outcome_authority,
+        superseded=False,
+        invalidation_reasons=view.invalidation_reasons,
+        promoted=True,
+        learning_authority=False,
+        promotion_authority=False,
+        execution_authority=False,
     )
 
 

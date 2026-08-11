@@ -4229,6 +4229,88 @@ test("normalizes workbench snapshot events", () => {
   assert.equal(record.payload.stable_population_finalization.status, "completed");
   assert.equal(record.payload.stable_population_finalization.completed_members, 2);
   assert.equal(record.payload.stable_population_finalization.promotion_authority, false);
+  const promotedProposal = {
+    ...record.payload.proposals[0],
+    outcome_status: "promoted",
+    outcome: {
+      schema_version: 3,
+      policy_version: "evolution-proposal-outcome-projection-v3",
+      workbench_session_id: "s",
+      workbench_proposal_id: "proposal-1",
+      governance_state_unchanged: true,
+      status: "promoted",
+      outcome_id: `evstablepromout_${"1".repeat(24)}`,
+      outcome_sha256: "2".repeat(64),
+      root_rollback_outcome_id: "",
+      root_rollback_outcome_sha256: "",
+      rollback_receipt_id: "",
+      experiment_contract_id: "",
+      candidate_id: `evc_${"5".repeat(24)}`,
+      candidate_revision: 2,
+      breach_reasons: [],
+      recorded_at: "2026-08-11T00:00:00+00:00",
+      authority_valid: true,
+      rollback_outcome_authority: false,
+      active_baseline: false,
+      contract_issue_allowed: false,
+      before_after_recorded: false,
+      before_after_evidence: null,
+      post_rollback_verification: null,
+      post_rollback_verification_recorded: false,
+      post_rollback_evaluation_recorded: false,
+      post_rollback_behavioral_matrix: null,
+      post_rollback_behavioral_evaluation_recorded: false,
+      long_term_metrics_recorded: true,
+      long_term_outcome: null,
+      long_term_supersede_event: null,
+      long_term_outcome_authority: false,
+      current_long_term_health_authority: false,
+      projection_head_authority: true,
+      stable_promotion_sequence: 2,
+      stable_previous_outcome_id: `evstablepromout_${"3".repeat(24)}`,
+      stable_decision_id: `evstablepromdecision_${"4".repeat(24)}`,
+      stable_eligibility_id: `evstablepromeligible_${"5".repeat(24)}`,
+      stable_observation_contract_id: `evstablepromobserve_${"6".repeat(24)}`,
+      stable_population_assessment_id: `evstableprompopobserve_${"7".repeat(24)}`,
+      stable_supersede_event_id: `evstablepromoutsup_${"8".repeat(24)}`,
+      stable_supersede_event_sha256: "9".repeat(64),
+      stable_prior_outcome_superseded: true,
+      stable_promotion_outcome_authority: true,
+      superseded: false,
+      invalidation_reasons: [],
+      promoted: true,
+      learning_authority: false,
+      promotion_authority: false,
+      execution_authority: false,
+    },
+  };
+  const promoted = normalizeServerRecord({
+    type: "workbench/snapshot",
+    payload: { ...record.payload, proposals: [promotedProposal] },
+  });
+  assert.equal(promoted.payload.proposals[0].outcome_status, "promoted");
+  assert.equal(promoted.payload.proposals[0].outcome.stable_promotion_sequence, 2);
+  assert.equal(promoted.payload.proposals[0].outcome.promoted, true);
+  assert.throws(() => normalizeServerRecord({
+    type: "workbench/snapshot",
+    payload: {
+      ...record.payload,
+      proposals: [{
+        ...promotedProposal,
+        outcome: { ...promotedProposal.outcome, stable_supersede_event_id: "" },
+      }],
+    },
+  }), /promoted Outcome 字段无效/);
+  assert.throws(() => normalizeServerRecord({
+    type: "workbench/snapshot",
+    payload: {
+      ...record.payload,
+      proposals: [{
+        ...promotedProposal,
+        outcome: { ...promotedProposal.outcome, projection_head_authority: false },
+      }],
+    },
+  }), /promoted Outcome 字段无效/);
   assert.throws(() => normalizeServerRecord({
     type: "workbench/snapshot",
     payload: {

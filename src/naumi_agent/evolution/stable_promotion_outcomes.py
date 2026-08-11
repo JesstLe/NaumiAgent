@@ -34,8 +34,10 @@ EVOLUTION_STABLE_PROMOTION_OUTCOME_SUPERSEDE_POLICY = (
     "evolution-stable-promotion-outcome-supersede-v1"
 )
 _OUTCOME_RE = re.compile(r"^evstablepromout_[0-9a-f]{24}$")
+_SAFE_BINDING_RE = re.compile(r"^[^\x00\r\n]{1,128}$")
 _MAX_ARTIFACT_BYTES = 1024 * 1024
 _MAX_CHAIN_LENGTH = 10_000
+_MAX_SESSION_PROJECTIONS = 100
 
 
 class _StrictModel(BaseModel):
@@ -320,6 +322,50 @@ class EvolutionStablePromotionOutcomeStore:
             raise EvolutionStablePromotionOutcomeError(
                 "stable_promotion_outcome_store_corrupt",
                 "Stable Promotion Supersede Event head 损坏或无法读取。",
+            ) from exc
+
+    async def list_heads_by_session(
+        self,
+        session_id: str,
+        *,
+        limit: int = _MAX_SESSION_PROJECTIONS,
+    ) -> tuple[EvolutionStablePromotionOutcome, ...]:
+        normalized = str(session_id or "").strip()
+        if _SAFE_BINDING_RE.fullmatch(normalized) is None:
+            raise ValueError("Workbench Session ID 格式无效。")
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100:
+            raise ValueError("Stable Promotion Outcome 查询上限必须为 1..100。")
+        if not self.db_path.is_file():
+            return ()
+        try:
+            async with aiosqlite.connect(self.db_path, timeout=5.0) as db:
+                db.row_factory = aiosqlite.Row
+                await _ensure_schema(db)
+                rows = await (
+                    await db.execute(
+                        "SELECT outcome.* FROM evolution_stable_promotion_outcomes outcome "
+                        "JOIN (SELECT workbench_proposal_id, MAX(sequence) AS head_sequence "
+                        "FROM evolution_stable_promotion_outcomes "
+                        "WHERE workbench_session_id = ? GROUP BY workbench_proposal_id) head "
+                        "ON head.workbench_proposal_id = outcome.workbench_proposal_id "
+                        "AND head.head_sequence = outcome.sequence "
+                        "WHERE outcome.workbench_session_id = ? "
+                        "ORDER BY outcome.promoted_at DESC, outcome.outcome_id DESC LIMIT ?",
+                        (normalized, normalized, limit + 1),
+                    )
+                ).fetchall()
+            if len(rows) > limit:
+                raise EvolutionStablePromotionOutcomeError(
+                    "stable_promotion_outcome_projection_limit_exceeded",
+                    "Stable Promotion Outcome 数量超过单次投影上限。",
+                )
+            return tuple(_row_outcome(row) for row in rows)
+        except EvolutionStablePromotionOutcomeError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise EvolutionStablePromotionOutcomeError(
+                "stable_promotion_outcome_store_corrupt",
+                "Stable Promotion Outcome projection head 损坏或无法读取。",
             ) from exc
 
     async def chain_valid(self, *, workbench_session_id: str, workbench_proposal_id: str) -> bool:

@@ -65,15 +65,15 @@ UI 隐藏按钮不是权限控制。`EvolutionExperimentContractIssuer` 绑定�
 - New UI/TUI 在 80/120/200 列宽或 Textual 测试环境中展示相同终态，且不能再次发送签发动作；
 - 仅运行相关 Python/Node 小模块测试、Ruff、编译、public export、YAML 和 diff 检查，不以全量测试冒充本切片证据。
 
-## 未完成边界
+## 后续完成情况与当前边界
 
-HAR-09 整体仍为 partial。本切片没有实现：
+HAR-09.6a 初始切片没有实现的内容，后续状态如下：
 
-1. HAR-08 Proposal before/after comparison；
-2. rollback 后长期观察窗口和指标；
-3. 成功 rollout 的 `promoted` Outcome；
-4. Outcome supersede ledger；
-5. 由长期结果驱动的 EVO-06 policy learning。
+1. HAR-08 Proposal before/after comparison：已由 HAR-09.6b 完成；
+2. rollback 后长期观察窗口和指标：已由 HAR-09.6d/e 完成；
+3. 成功 rollout 的 `promoted` Outcome：已由 EVO-05.7b4a–7b4c 完成；
+4. Outcome supersede ledger 与三端 projection：已由 EVO-05.7b4c/7b4d 完成；
+5. 由长期结果驱动的 EVO-06 policy learning：仍未开放。
 
 HAR-09.6b 已消费原 Promotion Input 中 proposal-bound Final Evaluation 与 HAR-08 H5c authority，形成
 `implementation_before_after` durable evidence；它没有把历史实验结果冒充为回滚后评测，也没有开放 learning
