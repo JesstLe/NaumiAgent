@@ -197,6 +197,7 @@ test("agent control page renders bounded wide and narrow authoritative layouts",
       durable_reclaimable_jobs: 0,
       durable_recovery_required_jobs: 0,
       durable_results_visible: 1,
+      durable_unread_results: 1,
       durable_publications_pending: 0,
       durable_publications_claimed: 0,
       durable_publications_expired: 0,
@@ -204,7 +205,7 @@ test("agent control page renders bounded wide and narrow authoritative layouts",
     },
     agents: [{ name: "coder", description: "编程 Agent", kind: "preset", state: "running", task_count: 1, model_tier: "capable", capabilities: ["代码"], tools: ["file_read"], permission_level: "moderate", age_ms: 500, heartbeat_age_ms: 100 }],
     executions: [{ task_id: "task-1", session_id: "session-agents", agent_name: "coder", description: "实现控制中心", status: "running", phase: "running_tool", worker_backend: "independent", started_at: 1, finished_at: null, elapsed_ms: 1000, heartbeat_age_ms: 100, heartbeat_subject_id: "agent-execution-test", heartbeat_phase: "running", heartbeat_failure_code: "", worker_request_sha256: "a".repeat(64), worker_result_sha256: "", worker_tool_scope: ["file_read"], worker_contract_failure_code: "", worker_job_id: "agent-job-1234567890", worker_job_state: "running", worker_claim_epoch: 2, worker_job_failure_code: "", current_tool: "file_read", recent_tools: ["file_read"], total_tokens: 42, total_cost_usd: 0.01, turns: 2, error: "", stop_supported: true, stop_requested: false }],
-    results: [{ delivery_id: "delivery-1", publication_id: "publication-1", job_id: "agent-job-result", task_id: "result-task", agent_name: "coder", status: "completed", delivered_at: "2026-07-13T00:00:01+00:00", result_sha256: "b".repeat(64), delivery_sha256: "c".repeat(64), task_excerpt: "验证结果投影", response_excerpt: "结果正文", error_excerpt: "", content_truncated: false, response_bytes: 12, total_tokens: 8, total_cost_usd: 0.001, turns: 1, reason_code: "agent_completed" }],
+    results: [{ delivery_id: "delivery-1", publication_id: "publication-1", job_id: "agent-job-result", task_id: "result-task", agent_name: "coder", status: "completed", delivered_at: "2026-07-13T00:00:01+00:00", result_sha256: "b".repeat(64), delivery_sha256: "c".repeat(64), task_excerpt: "验证结果投影", response_excerpt: "结果正文", error_excerpt: "", content_truncated: false, response_bytes: 12, total_tokens: 8, total_cost_usd: 0.001, turns: 1, reason_code: "agent_completed", acknowledged: false, acknowledged_at: "", acknowledgement_receipt_sha256: "" }],
     recovery_catalog: {
       assessed_at: "2026-07-13T00:00:02+00:00",
       items: [{ kind: "job", item_id: "agent-job-recovery", job_id: "agent-job-recovery", publication_id: "", agent_name: "coder", job_state: "running", recovery_state: "recovery_required", session_scope: "current", claim_epoch: 3, claim_expires_at: "2026-07-13T00:00:01+00:00", attempt_count: 0, occurred_at: "2026-07-13T00:00:00+00:00", request_sha256: "d".repeat(64), receipt_sha256: "e".repeat(64), reason_code: "agent_job_running" }],
@@ -240,6 +241,8 @@ test("agent control page renders bounded wide and narrow authoritative layouts",
   assert(resultWide.some((line) => line.includes("持久结果详情")));
   assert(resultWide.some((line) => line.includes("结果正文")));
   assert(resultWide.some((line) => line.includes("投递摘要 · cccccccccccc")));
+  assert(resultWide.some((line) => line.includes("未读 · 按 v")));
+  assert(resultWide.some((line) => line.includes("未读 1")));
   assert(resultNarrow.some((line) => line.includes("持久结果详情")));
   assert(renderAgentControlPage(state.agents, 72, 16).every((line) => visibleWidth(line) <= 72));
 

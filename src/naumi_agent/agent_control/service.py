@@ -163,6 +163,7 @@ class AgentControlService:
                 for entry in inbox:
                     content = entry.content
                     delivery = entry.delivery
+                    acknowledgement = entry.acknowledgement
                     task_excerpt, task_truncated = _public_excerpt(
                         content.payload.task
                     )
@@ -197,6 +198,17 @@ class AgentControlService:
                         ),
                         turns=content.result.turns,
                         reason_code=_public(content.result.reason_code),
+                        acknowledged=acknowledgement is not None,
+                        acknowledged_at=(
+                            acknowledgement.acknowledged_at
+                            if acknowledgement is not None
+                            else ""
+                        ),
+                        acknowledgement_receipt_sha256=(
+                            acknowledgement.receipt.receipt_sha256
+                            if acknowledgement is not None
+                            else ""
+                        ),
                     ))
                 results = tuple(result_items)
         except Exception as exc:
@@ -268,6 +280,9 @@ class AgentControlService:
                 capacity.recovery_required_jobs if capacity else 0
             ),
             durable_results_visible=len(results),
+            durable_unread_results=sum(
+                not result.acknowledged for result in results
+            ),
             durable_publications_pending=(
                 publication_backlog.pending if publication_backlog else 0
             ),

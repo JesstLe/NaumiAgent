@@ -37,12 +37,14 @@ from naumi_agent.daemons.agent_jobs import (
     AgentJobPublicationContent,
     AgentJobPublicationDeliveryTransition,
     AgentJobRecoveryCatalog,
+    AgentJobResultAcknowledgementTransition,
     AgentJobState,
     AgentJobStore,
     AgentJobTerminalPayload,
     AgentJobTransitionResult,
     StoredAgentJob,
     StoredAgentJobPublicationDelivery,
+    StoredAgentJobResultAcknowledgement,
 )
 from naumi_agent.daemons.agent_worker_contract import (
     AgentWorkerRequest,
@@ -206,6 +208,20 @@ class AgentRecoveryActionResult:
 
 
 @dataclass(frozen=True)
+class AgentResultAcknowledgementActionResult:
+    """Public result of one current-session durable result acknowledgement."""
+
+    delivery_id: str
+    accepted: bool
+    applied: bool
+    code: str
+    message: str
+    acknowledgement_id: str
+    acknowledged_at: str
+    receipt_sha256: str
+
+
+@dataclass(frozen=True)
 class AgentPublicationRecoverySummary:
     """Content-free summary of one bounded durable publication recovery pass."""
 
@@ -223,6 +239,7 @@ class AgentPublicationInboxEntry:
 
     delivery: StoredAgentJobPublicationDelivery
     content: AgentJobPublicationContent
+    acknowledgement: StoredAgentJobResultAcknowledgement | None = None
 
 
 @dataclass
@@ -588,19 +605,85 @@ class SubAgentManager:
         if isinstance(limit, bool) or not isinstance(limit, int):
             raise TypeError("limit 必须是整数。")
         safe_limit = max(1, min(limit, 50))
-        deliveries = await self._agent_job_store.list_result_inbox(
+        records = await self._agent_job_store.list_result_inbox_records(
             session_id,
             limit=safe_limit,
             newest_first=True,
         )
         entries: list[AgentPublicationInboxEntry] = []
-        for delivery in deliveries:
+        for record in records:
+            delivery = record.delivery
             content = await self._agent_job_store.recover_delivered_result(
                 delivery.delivery_id,
                 expected_delivery_sha256=delivery.delivery_sha256,
             )
-            entries.append(AgentPublicationInboxEntry(delivery, content))
+            entries.append(AgentPublicationInboxEntry(
+                delivery,
+                content,
+                record.acknowledgement,
+            ))
         return tuple(entries)
+
+    async def acknowledge_result_inbox(
+        self,
+        *,
+        session_id: str,
+        delivery_id: str,
+        expected_delivery_sha256: str,
+    ) -> AgentResultAcknowledgementActionResult:
+        """Acknowledge one exact current-session result without deleting it."""
+        normalized_delivery = str(delivery_id or "").strip()
+        try:
+            transition: AgentJobResultAcknowledgementTransition = (
+                await self._agent_job_store.acknowledge_result_inbox_delivery(
+                    str(session_id or "").strip(),
+                    normalized_delivery,
+                    expected_delivery_sha256=str(
+                        expected_delivery_sha256 or ""
+                    ).strip(),
+                )
+            )
+        except AgentJobLifecycleConflictError:
+            return AgentResultAcknowledgementActionResult(
+                normalized_delivery,
+                False,
+                False,
+                "result_ack_fence_changed",
+                "结果投递事实或当前会话已变化，请刷新后重试。",
+                "",
+                "",
+                "",
+            )
+        except (AgentJobError, TypeError, ValueError):
+            return AgentResultAcknowledgementActionResult(
+                normalized_delivery,
+                False,
+                False,
+                "result_ack_unavailable",
+                "当前无法确认该结果；持久结果和已读状态均未被改写。",
+                "",
+                "",
+                "",
+            )
+        acknowledgement = transition.acknowledgement
+        return AgentResultAcknowledgementActionResult(
+            delivery_id=acknowledgement.delivery_id,
+            accepted=True,
+            applied=transition.applied,
+            code=(
+                "result_acknowledged"
+                if transition.applied
+                else "result_already_acknowledged"
+            ),
+            message=(
+                "已将该持久结果标记为已读；加密结果仍完整保留。"
+                if transition.applied
+                else "该持久结果已经确认过；未重复写入回执。"
+            ),
+            acknowledgement_id=acknowledgement.acknowledgement_id,
+            acknowledged_at=acknowledgement.acknowledged_at,
+            receipt_sha256=acknowledgement.receipt.receipt_sha256,
+        )
 
     async def publication_backlog(self) -> AgentJobPublicationBacklog:
         """Expose content-free durable publication backlog counters."""

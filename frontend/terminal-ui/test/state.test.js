@@ -657,6 +657,7 @@ function agentSnapshot(revision = 1) {
       stoppable_executions: 1,
       pending_messages: 1,
       durable_results_visible: 1,
+      durable_unread_results: 1,
     },
     agents: [{
       name: "coder",
@@ -676,6 +677,8 @@ function agentSnapshot(revision = 1) {
       task_id: "result-task",
       agent_name: "coder",
       status: "completed",
+      delivery_sha256: "c".repeat(64),
+      acknowledged: false,
     }],
     recovery_catalog: {
       assessed_at: "2026-07-13T00:00:02+00:00",
@@ -962,6 +965,54 @@ test("agent recovery action is capability-gated exact and has no second confirma
     false,
   );
   assert.match(unsupported.agents.actionMessage, /不支持 Agent 恢复裁决/);
+});
+
+test("agent result acknowledgement sends one exact unread fence", () => {
+  const state = createInitialState();
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+  state.currentSessionId = "session-agents";
+  state.protocolNegotiated = true;
+  state.protocolNegotiation = {
+    selected_version: 1,
+    capabilities: ["agent_result_acknowledgement", "typed_ui_messages"],
+  };
+  toggleAgentControlCenter(state, send, true);
+  reduceServerEvent(state, { type: "agents/snapshot", payload: agentSnapshot(1) });
+  handleAgentControlKey(state, INPUT_KEYS.tab, send);
+  handleAgentControlKey(state, INPUT_KEYS.tab, send);
+  assert.equal(state.agents.selectedTab, "results");
+
+  handleAgentControlKey(state, "v", send);
+  handleAgentControlKey(state, "v", send);
+
+  assert.deepEqual(sent.filter(
+    (item) => item.type === "agents/result/acknowledge",
+  ), [{
+    type: "agents/result/acknowledge",
+    payload: {
+      session_id: "session-agents",
+      delivery_id: "delivery-1",
+      delivery_sha256: "c".repeat(64),
+    },
+  }]);
+  assert.equal(state.agents.resultAckPendingId, "delivery-1");
+
+  reduceServerEvent(state, {
+    type: "agents/result/acknowledgement",
+    payload: {
+      delivery_id: "delivery-1",
+      accepted: true,
+      applied: true,
+      code: "result_acknowledged",
+      message: "已确认。",
+      acknowledgement_id: "agent-result-ack-1",
+      acknowledged_at: "2026-07-13T00:00:03+00:00",
+      receipt_sha256: "9".repeat(64),
+    },
+  });
+  assert.equal(state.agents.resultAckPendingId, "");
+  assert.equal(state.agents.actionMessage, "已确认。");
 });
 
 test("assistant stream updates one active message", () => {

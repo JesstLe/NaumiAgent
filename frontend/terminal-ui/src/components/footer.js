@@ -125,7 +125,9 @@ export function AgentControlFooter({ agents }) {
       if (!agents?.open) return [];
       const message = agents.stopConfirmationTaskId
         ? `agents: 确认停止 ${agents.stopConfirmationTaskId} · y 确认 · n/Esc 取消`
-        : "agents: Tab/Shift+Tab 标签 · ↑/↓ 选择 · Enter 详情 · r 刷新 · x 停止 · Esc 返回";
+        : agents.selectedTab === "results"
+          ? "agents: 结果 · ↑/↓ 选择 · Enter 详情 · v 标记已读 · r 刷新 · Esc 返回"
+          : "agents: Tab/Shift+Tab 标签 · ↑/↓ 选择 · Enter 详情 · r 刷新 · x 停止 · Esc 返回";
       return wrapAnsiLine(
         color(agents.stopConfirmationTaskId ? ANSI.yellow : ANSI.cyan, message),
         ctx.width,

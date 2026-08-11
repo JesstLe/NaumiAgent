@@ -72,7 +72,9 @@ summary，并以 `waiting_capacity` 呈现尚未调用模型的执行：New UI �
 复用同一权威状态；
 ARC-04.5d2c 已在 Agent Control schema v3 增加只读 `results` section：New UI/TUI 都能查看
 当前 session 已认证投递的结果、usage 与摘要，公开摘录统一脱敏并限制为 2000 字符；两端不直接读取
-AgentJob SQLite，也没有伪造 read/ack/retry 操作；
+AgentJob SQLite；ARC-04.5d2d 又以 Agent Control schema v7 增加持久未读计数和精确 delivery 已读
+回执：New UI 与 Textual TUI 均可在结果页按 `v`，也可执行
+`/agents result ack <delivery-id> <delivery-sha256>`，操作并发幂等且不删除结果；
 HAR-10.7d 已将 Agent Control 升级到 schema v4，增加严格有界、逐条认证的只读 `recovery_catalog`；
 两端“恢复”标签用红/黄/蓝区分需裁决、可接管/待投递和 live 状态，只公开稳定 ID、epoch、expiry、
 摘要与 reason code，不公开 owner 或 task/context/response；HAR-10.7e 又为当前会话

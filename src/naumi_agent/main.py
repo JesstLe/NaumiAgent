@@ -2792,6 +2792,8 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             await _run_todo(engine, arg)
         case "/team":
             await _run_team(engine, arg)
+        case "/agents":
+            await _run_agents(engine, arg)
         case "/runtime":
             await _run_runtime(engine, arg)
         case "/self-review":
@@ -3060,6 +3062,10 @@ def _print_help() -> None:
         ("/schedule <子命令>", "调度提醒 — create/list/cancel/pause/resume"),
         ("/todo <子命令>", "todo 清单 — list/add/start/done/pending/delete/clear"),
         ("/team <子命令>", "团队协议 — status/handoff/blocker/decision/request/result"),
+        (
+            "/agents result ack <投递ID> <SHA256>",
+            "Agent Control — 确认一条持久结果已读",
+        ),
         ("/runtime [分区]", "运行时状态 — all/context/todo/team/subagent/hooks/resources"),
         ("/self-review [模块]", "自我审查 — 扫描自身源码质量与架构"),
         ("/reload [域]", "热重载 — 重载模块无需重启 (tools/memory/skills/all)"),
@@ -6785,6 +6791,33 @@ async def _run_team(engine: Any, arg: str) -> None:
             border_style="cyan",
             padding=(1, 2),
         )
+    )
+
+
+async def _run_agents(engine: Any, arg: str) -> None:
+    """Run Agent Control actions through registered shared tools."""
+    try:
+        parts = shlex.split(str(arg or "").strip())
+    except ValueError:
+        parts = []
+    if len(parts) != 4 or [item.lower() for item in parts[:2]] != [
+        "result",
+        "ack",
+    ]:
+        console.print(
+            "[yellow]用法：/agents result ack <delivery-id> "
+            "<delivery-sha256>[/yellow]"
+        )
+        return
+    await _run_tool_slash_command(
+        engine,
+        slash_command="agents-result-ack",
+        tool_name="agent_result_acknowledge",
+        parse_args=lambda _: {
+            "delivery_id": parts[2],
+            "delivery_sha256": parts[3],
+        },
+        arg=arg,
     )
 
 

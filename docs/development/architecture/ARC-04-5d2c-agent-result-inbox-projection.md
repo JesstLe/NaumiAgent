@@ -113,7 +113,8 @@ Python Bridge 继续使用现有 `agents/snapshot` / `agents/update`，`changed_
 
 本切片已把“结果可靠存在”变成用户可见事实，但没有完成：
 
-- read/unread、ack cursor、跨设备同步或多消费者语义；
+- ARC-04.5d2d 已补齐当前本地 session 的单条认证 read acknowledgement；跨设备同步、per-consumer
+  cursor 与多消费者语义仍未实现；
 - inbox pagination、搜索、过滤和完整结果导出；
 - HAR-10.7f/7g 已补齐 retry/backoff 与 quarantine/dead-letter；exact quarantine requeue、result read/ack
   与人工恢复动作仍未完成；
@@ -121,6 +122,8 @@ Python Bridge 继续使用现有 `agents/snapshot` / `agents/update`，`changed_
 - 大输出按页读取；当前只展示 2000 字符安全摘录；
 - 独立 Agent Worker、Supervisor、跨进程 drain/upgrade；
 - 跨主机 sink、数据库复制或 exactly-once 声明。
+
+后续已实现的精确已读回执见 `ARC-04-5d2d-agent-result-acknowledgement.md`。
 
 下一步应重新检查 Harness、UI 与 Supervisor 文档依赖，优先实现消费现有权威事实的下一项用户能力；
 不能因为 ARC-04.5d2 已连续推进，就线性把整个 Agent daemon/Supervisor 一次做完。

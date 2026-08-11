@@ -13,7 +13,8 @@
       "b013b4e5df1d767a220d676d8443347ea9291d2decca063cecdec4b8574864a4",
       "69aaabb584c1f1c364e969ca7b66352684fc938765f63bd5829bae8d3a5516d2",
       "140d07efe9b8b6e946d1f0948c7e8f68215dea4dd3c388ed4268612cc0279a4d",
-      "71ce1cab1ccf4c6ee32ee224dfa577e78c3e4da8365f1e760846bffd5fc11ae8"
+      "71ce1cab1ccf4c6ee32ee224dfa577e78c3e4da8365f1e760846bffd5fc11ae8",
+      "6cf1ff76e0bac3519196d95498bc532b7afcd45051f799d1acaf924b6b656071"
     ],
     "unknown_informational_events": "ignore_and_audit"
   },
@@ -22,6 +23,7 @@
     "maximum_version": 1,
     "capabilities": [
       "agent_recovery_actions",
+      "agent_result_acknowledgement",
       "evolution_evaluation_lane",
       "goal_lifecycle_actions",
       "doctor_export",
@@ -49,6 +51,10 @@
     "agent_recovery_actions": {
       "client_events": ["agents/recovery/resolve_unknown"],
       "server_events": ["agents/recovery/action_result"]
+    },
+    "agent_result_acknowledgement": {
+      "client_events": ["agents/result/acknowledge"],
+      "server_events": ["agents/result/acknowledgement"]
     },
     "doctor_export": {
       "client_events": ["doctor/export"],
@@ -102,6 +108,7 @@
     "agents/request",
     "agents/stop",
     "agents/recovery/resolve_unknown",
+    "agents/result/acknowledge",
     "workbench/request",
     "workbench/review/request",
     "workbench/approval/action",
@@ -166,6 +173,7 @@
     "agents/update",
     "agents/action",
     "agents/recovery/action_result",
+    "agents/result/acknowledgement",
     "run/queued",
     "run/queue_promoted",
     "run/queue_cancelled",
@@ -221,6 +229,7 @@
       "agents/request": {"owner":"agents","stability":"stable","criticality":"informational","persistence":"never","sensitive_fields":[],"redaction":"none"},
       "agents/stop": {"owner":"agents","stability":"stable","criticality":"control","persistence":"audit","sensitive_fields":[],"redaction":"none"},
       "agents/recovery/resolve_unknown": {"owner":"agents","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":[],"redaction":"none"},
+      "agents/result/acknowledge": {"owner":"agents","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":[],"redaction":"none"},
       "workbench/request": {"owner":"workbench","stability":"stable","criticality":"informational","persistence":"never","sensitive_fields":[],"redaction":"none"},
       "workbench/review/request": {"owner":"workbench","stability":"experimental","criticality":"informational","persistence":"never","sensitive_fields":[],"redaction":"none"},
       "workbench/approval/action": {"owner":"workbench","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":["payload.decision_note"],"redaction":"required"},
@@ -285,6 +294,7 @@
       "agents/update": {"owner":"agents","stability":"stable","criticality":"informational","persistence":"snapshot","sensitive_fields":[],"redaction":"none"},
       "agents/action": {"owner":"agents","stability":"stable","criticality":"terminal","persistence":"audit","sensitive_fields":[],"redaction":"none"},
       "agents/recovery/action_result": {"owner":"agents","stability":"experimental","criticality":"terminal","persistence":"audit","sensitive_fields":[],"redaction":"none"},
+      "agents/result/acknowledgement": {"owner":"agents","stability":"experimental","criticality":"terminal","persistence":"audit","sensitive_fields":[],"redaction":"none"},
       "run/queued": {"owner":"runtime","stability":"stable","criticality":"control","persistence":"timeline","sensitive_fields":["payload.task"],"redaction":"required"},
       "run/queue_promoted": {"owner":"runtime","stability":"experimental","criticality":"control","persistence":"timeline","sensitive_fields":[],"redaction":"none"},
       "run/queue_cancelled": {"owner":"runtime","stability":"experimental","criticality":"terminal","persistence":"audit","sensitive_fields":["payload.reason"],"redaction":"required"},
@@ -329,7 +339,7 @@
     }
   },
   "agent_control": {
-    "schema_version": 6,
+    "schema_version": 7,
     "summary_capacity_fields": [
       "durable_capacity_configured",
       "durable_active_jobs",
@@ -339,6 +349,7 @@
       "durable_reclaimable_jobs",
       "durable_recovery_required_jobs",
       "durable_results_visible",
+      "durable_unread_results",
       "durable_publications_pending",
       "durable_publications_claimed",
       "durable_publications_expired",
@@ -362,7 +373,10 @@
       "total_tokens",
       "total_cost_usd",
       "turns",
-      "reason_code"
+      "reason_code",
+      "acknowledged",
+      "acknowledged_at",
+      "acknowledgement_receipt_sha256"
     ],
     "result_statuses": [
       "completed",

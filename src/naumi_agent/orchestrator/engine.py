@@ -3661,7 +3661,12 @@ class AgentEngine:
             session_id_getter=lambda: self._session.id if self._session else "",
         )
         set_analysis_subagent_manager(self.subagent_manager)
-        for tool in create_subagent_tools(self.subagent_manager):
+        for tool in create_subagent_tools(
+            self.subagent_manager,
+            session_id_getter=lambda: (
+                self._session.id if self._session else ""
+            ),
+        ):
             self._tool_registry.register(tool)
 
         # Goal pursuit tool

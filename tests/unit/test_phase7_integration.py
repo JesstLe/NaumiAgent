@@ -230,6 +230,32 @@ class TestSlashCommandRouting:
         assert args_payload[1]["path"] == "src/main.py"
         assert args_payload[2]["path"] == "src/tmp.txt"
 
+    @pytest.mark.asyncio
+    async def test_agents_result_ack_dispatches_exact_fence(self) -> None:
+        from naumi_agent.main import _handle_command
+        from naumi_agent.tools.base import ToolResult
+
+        engine = MagicMock()
+        engine.tool_registry = {"agent_result_acknowledge": MagicMock()}
+        engine.execute_tool = AsyncMock(return_value=ToolResult(
+            call_id="call-ack",
+            status="success",
+            content="已确认",
+        ))
+
+        await _handle_command(
+            engine,
+            "/agents result ack delivery-1 " + "a" * 64,
+        )
+
+        call = engine.execute_tool.await_args
+        assert call.kwargs == {"agent_name": "cli"}
+        assert call.args[0].name == "agent_result_acknowledge"
+        assert json.loads(call.args[0].arguments) == {
+            "delivery_id": "delivery-1",
+            "delivery_sha256": "a" * 64,
+        }
+
 
 class TestSlashBatchParsing:
     @pytest.mark.asyncio

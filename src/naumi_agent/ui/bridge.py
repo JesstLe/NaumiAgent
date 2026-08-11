@@ -1755,6 +1755,12 @@ class JsonlEngineBridge:
                 request_id=request_id,
             )
             return
+        if event_type == ClientEventType.AGENTS_RESULT_ACKNOWLEDGE:
+            await self.acknowledge_agent_result(
+                payload,
+                request_id=request_id,
+            )
+            return
         if event_type == ClientEventType.WORKBENCH_REQUEST:
             await self.show_workbench(payload, request_id=request_id)
             return
@@ -4254,7 +4260,7 @@ class JsonlEngineBridge:
             return
         await self.emit(
             ServerEventType.AGENTS_SNAPSHOT,
-            snapshot.to_dict(),
+            self._public_agent_snapshot(snapshot),
             request_id=request_id,
         )
 
@@ -4337,6 +4343,64 @@ class JsonlEngineBridge:
         )
         await self._emit_agents_update()
 
+    async def acknowledge_agent_result(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Acknowledge one exact current-session durable result fence."""
+        session = getattr(self.engine, "_session", None)
+        session_id = str(getattr(session, "id", "") or "")
+        requested_session_id = str(payload.get("session_id") or "")
+        if not session_id or requested_session_id != session_id:
+            await self.emit_error(
+                "Agent 结果确认不属于当前会话。",
+                code="agents_session_mismatch",
+                request_id=request_id,
+            )
+            return
+        try:
+            result = (
+                await self.engine.subagent_manager.acknowledge_result_inbox(
+                    session_id=session_id,
+                    delivery_id=str(payload.get("delivery_id") or ""),
+                    expected_delivery_sha256=str(
+                        payload.get("delivery_sha256") or ""
+                    ),
+                )
+            )
+        except Exception as exc:
+            logger.warning(
+                "Agent result acknowledgement failed (%s)",
+                type(exc).__name__,
+            )
+            await self.emit_error(
+                "当前无法确认结果已读；持久结果和已读状态均未被改写。",
+                code="agents_result_ack_unavailable",
+                request_id=request_id,
+            )
+            return
+        await self.emit(
+            ServerEventType.AGENTS_RESULT_ACKNOWLEDGEMENT,
+            asdict(result),
+            request_id=request_id,
+        )
+        await self._emit_agents_update()
+
+    def _public_agent_snapshot(self, snapshot: Any) -> dict[str, Any]:
+        """Downgrade result acknowledgement fields for older clients."""
+        public = snapshot.to_dict()
+        if "agent_result_acknowledgement" in self._client_capabilities:
+            return public
+        public["schema_version"] = 6
+        public["summary"].pop("durable_unread_results", None)
+        for result in public["results"]:
+            result.pop("acknowledged", None)
+            result.pop("acknowledged_at", None)
+            result.pop("acknowledgement_receipt_sha256", None)
+        return public
+
     async def _emit_agents_update(self) -> None:
         if not self._agents_subscribed:
             return
@@ -4345,16 +4409,22 @@ class JsonlEngineBridge:
             previous = self._agents_snapshot
             if previous is None or previous.session_id != current.session_id:
                 self._agents_snapshot = current
-                await self.emit(ServerEventType.AGENTS_SNAPSHOT, current.to_dict())
+                await self.emit(
+                    ServerEventType.AGENTS_SNAPSHOT,
+                    self._public_agent_snapshot(current),
+                )
                 return
             changed_sections = self.engine.agent_control.changed_sections(previous, current)
             if not changed_sections and current.revision == previous.revision:
                 return
             self._agents_snapshot = current
             if not changed_sections or current.revision != previous.revision + 1:
-                await self.emit(ServerEventType.AGENTS_SNAPSHOT, current.to_dict())
+                await self.emit(
+                    ServerEventType.AGENTS_SNAPSHOT,
+                    self._public_agent_snapshot(current),
+                )
                 return
-            public = current.to_dict()
+            public = self._public_agent_snapshot(current)
             await self.emit(
                 ServerEventType.AGENTS_UPDATE,
                 {

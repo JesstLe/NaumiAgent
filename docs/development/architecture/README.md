@@ -38,8 +38,10 @@ active 上限、有界 FIFO 与等待取消。ARC-04.5d1 又将 response/error �
 从 Store 重新认证恢复；ARC-04.5d2a 又建立 terminal transaction 原子创建的 durable publication
 outbox、lease/epoch fencing、恢复目录与 HMAC receipt chain；ARC-04.5d2b 进一步建立 schema v5
 幂等 result inbox、生产 manager 在线消费和有界 startup recovery；ARC-04.5d2c 又通过 Agent Control
-schema v3 将当前 session 的认证、脱敏、有界结果同步到 New UI/TUI；HAR-10.7d 又通过 Agent Control
-schema v4 投影 claimed/running/unknown 与 pending/expired publication 的恢复目录；HAR-10.7e 已让双端
+schema v3 将当前 session 的认证、脱敏、有界结果同步到 New UI/TUI；ARC-04.5d2d 又增加当前 session
+精确 delivery 的 append-only HMAC 已读回执，并通过 Agent Tool、CLI、New UI 与 Textual TUI 共享；
+HAR-10.7d 又通过 Agent Control schema v4 投影 claimed/running/unknown 与 pending/expired publication
+的恢复目录；HAR-10.7e 已让双端
 以 exact fence 人工把当前 session 的 expired running Job 收口为 unknown，不重放模型；HAR-10.7f 又增加
 publication startup/periodic recovery、有界退避、失败唤醒与 shutdown drain；HAR-10.7g 又增加 durable
 retry budget、HMAC quarantine receipt 和双端隔离投影；ARC-04.5e1/HAR-10.7h1 又建立真实独立

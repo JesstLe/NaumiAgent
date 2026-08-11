@@ -2920,15 +2920,20 @@ class NaumiApp(App):
                 )
             return
         if command == "/agents":
+            if arg.lower().startswith("result ack "):
+                self._run_cli_slash_command(raw)
+                return
             target = parse_terminal_agent_deep_link(raw)
             if arg and target is None:
                 self.query_one(StatusBar).status_text = (
-                    "用法：/agents 或 /agents agent <name>"
+                    "用法：/agents、/agents agent <name> 或 "
+                    "/agents result ack <delivery-id> <sha256>"
                 )
                 self.query_one(ChatPanel).mount(
                     Markdown(
-                        "Agent Control 用法：`/agents` 或 "
-                        "`/agents agent <name>`。",
+                        "Agent Control 用法：`/agents`、"
+                        "`/agents agent <name>` 或 "
+                        "`/agents result ack <delivery-id> <sha256>`。",
                         classes="agent-msg",
                     )
                 )
