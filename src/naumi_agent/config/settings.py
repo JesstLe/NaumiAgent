@@ -523,6 +523,37 @@ class StableRemoteFinalizationResultReturnWorkerConfig(BaseSettings):
         return self
 
 
+class StablePromotionRuntimeAdmissionDeliveryWorkerConfig(BaseSettings):
+    """Bounded signed Runtime Admission delivery worker policy."""
+
+    enabled: bool = True
+    interval_seconds: float = Field(default=30.0, ge=0.1, le=86_400)
+    max_empty_backoff_seconds: float = Field(default=300.0, ge=0.1, le=604_800)
+    max_failure_backoff_seconds: float = Field(default=300.0, ge=0.1, le=604_800)
+    claim_lease_seconds: int = Field(default=60, ge=3, le=300)
+    scan_limit: int = Field(default=20, ge=1, le=1000)
+    receipt_timeout_seconds: float = Field(default=20.0, ge=0.1, le=299.9)
+    retry_base_seconds: float = Field(default=5.0, ge=0.1, le=3600)
+    retry_max_seconds: float = Field(default=300.0, ge=0.1, le=3600)
+    max_attempts: int = Field(default=8, ge=1, le=1000)
+    shutdown_drain_seconds: float = Field(default=25.0, ge=0.1, le=3600)
+    jitter_ratio: float = Field(default=0.1, ge=0, le=0.5)
+
+    @model_validator(mode="after")
+    def _validate_runtime_admission_delivery(
+        self,
+    ) -> StablePromotionRuntimeAdmissionDeliveryWorkerConfig:
+        if self.max_empty_backoff_seconds < self.interval_seconds:
+            raise ValueError("Runtime Admission 空轮退避不能小于 interval")
+        if self.max_failure_backoff_seconds < self.interval_seconds:
+            raise ValueError("Runtime Admission 失败退避不能小于 interval")
+        if self.receipt_timeout_seconds >= self.claim_lease_seconds:
+            raise ValueError("Runtime Admission Receipt timeout 必须小于 claim lease")
+        if self.retry_max_seconds < self.retry_base_seconds:
+            raise ValueError("Runtime Admission retry max 不能小于 retry base")
+        return self
+
+
 class StableRemoteFinalizationHTTPTransportConfig(BaseSettings):
     """Authenticated control-plane to installation HTTPS transport."""
 
@@ -700,6 +731,9 @@ class HarnessConfig(BaseSettings):
     stable_remote_finalization_result_return: (
         StableRemoteFinalizationResultReturnWorkerConfig
     ) = Field(default_factory=StableRemoteFinalizationResultReturnWorkerConfig)
+    stable_promotion_runtime_admission_delivery: (
+        StablePromotionRuntimeAdmissionDeliveryWorkerConfig
+    ) = Field(default_factory=StablePromotionRuntimeAdmissionDeliveryWorkerConfig)
     stable_remote_finalization_result_http_transport: (
         StableRemoteFinalizationResultHTTPTransportConfig
     ) = Field(default_factory=StableRemoteFinalizationResultHTTPTransportConfig)

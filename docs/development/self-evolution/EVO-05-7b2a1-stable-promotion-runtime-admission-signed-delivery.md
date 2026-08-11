@@ -103,7 +103,8 @@ Population Snapshot 失效、Contract/Finalization 撤权或 durable row 篡改�
 budget、dead-letter、shutdown drain 或跨进程 Worker supervision。`receive` 是真实 Control Plane 接收边界，但本切片没有把它
 挂到网络服务器。
 
-下一独立切片为 `EVO-05.7b2a2 Authenticated Runtime Admission Delivery Worker`：复用已经验证过的 Remote Finalization
-transport/worker 模式，为本 Submission 增加 authenticated HTTP transport、目标解析、owner/epoch/lease fencing、ACK、
-指数退避、dead-letter 与恢复。完成 7b2a2 后，才进入 `EVO-05.7b3` 的 Population 长期窗口聚合；任何单个 signed
+后续 [EVO-05.7b2a2a](EVO-05-7b2a2a-fenced-runtime-admission-delivery-worker.md) 已交付 transport Protocol、本地真实
+Control Plane adapter、owner/epoch/lease fencing、Receipt ACK、指数退避、dead-letter 与 Engine lifecycle。下一独立切片为
+`EVO-05.7b2a2b Authenticated Runtime Admission HTTP Transport`，补齐 mTLS HTTP、证书 pin、严格网络边界和配置自动装配。
+完成 7b2a2b 后，才进入 `EVO-05.7b3` 的 Population 长期窗口聚合；任何单个 signed
 Admission 或 Delivery Receipt 都不得被投影为 fleet sustained health 或 `promoted` Outcome。
