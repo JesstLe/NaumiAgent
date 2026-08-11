@@ -296,6 +296,9 @@ durable 单安装四态长期结论、动态 source/ledger/timeout 撤权、Tool
 denominator/member set，持久化 missing/insufficient/passing/breached/censored 五态、member/duration coverage、缺员列表、
 并发 writer fence 和 timeout/source 动态撤权。只有 exact Population current passing/breached 才分别拥有 health/alert authority；
 promoted Outcome 与 learning authority 仍等待 7b4。
+[EVO-05.7b4a](EVO-05-7b4a-stable-promotion-outcome-eligibility.md) 已继续把 current exact Population passing
+机械转换为 durable Outcome review eligibility，并绑定 Proposal/Candidate/原 approval lineage、writer fence 与动态撤权。
+它没有 `promote` 动作，固定 `promoted=false`；下一步必须先实现 7b4b 独立 post-observation Decision，再由 7b4c 写 ledger。
 [EVO-05.3f2c3b1](EVO-05-3f2c3b1-platform-dispatch-outbox.md) 已把实时准入的 required-platform Worker lane 转为 durable
 queued dispatch，并在 exact Worker incarnation 上预留容量。[EVO-05.3f2c3b2a](EVO-05-3f2c3b2a-authenticated-worker-claim.md)
 已增加 supervisor-attested Ed25519 Worker Identity、一次性 claim challenge 和可续期 lease hash chain。
@@ -314,5 +317,5 @@ managed runtime identity 与 startup-origin Harness ledger；6d3 已完成长期
 已进一步签发 rollback-recovery-observed Outcome revision 与 append-only supersede event，保留 immutable rollback fact；
 [HAR-09.6e2](../harness/HAR-09-6e2-long-term-outcome-projection-parity.md) 又通过 Projection v2 同源同步
 Workbench/New UI/Textual TUI，并保持 Contract 终态阻断。promoted Outcome、配置/数据 rollback 与 policy learning
-authority 仍未完成。成功 rollout 路径的下一步是 EVO-05.7b4 promoted/superseded ledger，而不是复用 rollback recovery
+authority 仍未完成。成功 rollout 路径的下一步是 EVO-05.7b4b 独立 Outcome Decision，而不是复用 rollback recovery
 Outcome、把 installation 本地 Cursor 冒充 Control Plane evidence，或把 7b3c2 Population Assessment 直接冒充 promoted Outcome。

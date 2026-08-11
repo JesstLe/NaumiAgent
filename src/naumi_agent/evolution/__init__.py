@@ -1202,6 +1202,17 @@ if TYPE_CHECKING:
         StablePromotionObservationRevisionHTTPServer,
         StablePromotionObservationRevisionHTTPServerPolicy,
     )
+    from naumi_agent.evolution.stable_promotion_outcome_eligibilities import (
+        EVOLUTION_STABLE_PROMOTION_OUTCOME_ELIGIBILITY_POLICY,
+        EvolutionStablePromotionOutcomeEligibility,
+        EvolutionStablePromotionOutcomeEligibilityError,
+        EvolutionStablePromotionOutcomeEligibilityService,
+        EvolutionStablePromotionOutcomeEligibilityStore,
+        EvolutionStablePromotionOutcomeEligibilityView,
+        EvolutionStablePromotionPopulationObservationInspectionPort,
+        build_stable_promotion_outcome_eligibility,
+        render_stable_promotion_outcome_eligibility,
+    )
     from naumi_agent.evolution.stable_promotion_population_observation_assessments import (
         EVOLUTION_STABLE_PROMOTION_POPULATION_OBSERVATION_ASSESSMENT_POLICY,
         EvolutionStablePromotionPopulationMemberObservationStatus,
@@ -1964,6 +1975,15 @@ __all__ = [
     "EvolutionStablePromotionPopulationObservationStatus",
     "build_stable_promotion_population_observation_assessment",
     "render_stable_promotion_population_observation_assessment",
+    "EVOLUTION_STABLE_PROMOTION_OUTCOME_ELIGIBILITY_POLICY",
+    "EvolutionStablePromotionOutcomeEligibility",
+    "EvolutionStablePromotionOutcomeEligibilityError",
+    "EvolutionStablePromotionOutcomeEligibilityService",
+    "EvolutionStablePromotionOutcomeEligibilityStore",
+    "EvolutionStablePromotionOutcomeEligibilityView",
+    "EvolutionStablePromotionPopulationObservationInspectionPort",
+    "build_stable_promotion_outcome_eligibility",
+    "render_stable_promotion_outcome_eligibility",
     "EVOLUTION_STABLE_PROMOTION_OBSERVATION_CHAIN_CURSOR_POLICY",
     "EvolutionStablePromotionObservationChainCursor",
     "EvolutionStablePromotionObservationChainCursorError",
@@ -3463,6 +3483,17 @@ def __getattr__(name: str) -> object:
         "build_stable_promotion_population_observation_assessment",
         "render_stable_promotion_population_observation_assessment",
     }
+    stable_promotion_outcome_eligibility_exports = {
+        "EVOLUTION_STABLE_PROMOTION_OUTCOME_ELIGIBILITY_POLICY",
+        "EvolutionStablePromotionOutcomeEligibility",
+        "EvolutionStablePromotionOutcomeEligibilityError",
+        "EvolutionStablePromotionOutcomeEligibilityService",
+        "EvolutionStablePromotionOutcomeEligibilityStore",
+        "EvolutionStablePromotionOutcomeEligibilityView",
+        "EvolutionStablePromotionPopulationObservationInspectionPort",
+        "build_stable_promotion_outcome_eligibility",
+        "render_stable_promotion_outcome_eligibility",
+    }
     stable_promotion_observation_chain_cursor_exports = {
         "EVOLUTION_STABLE_PROMOTION_OBSERVATION_CHAIN_CURSOR_POLICY",
         "EvolutionStablePromotionObservationChainCursor",
@@ -4351,6 +4382,8 @@ def __getattr__(name: str) -> object:
         module_name = "stable_promotion_installation_observation_assessments"
     elif name in stable_promotion_population_observation_assessment_exports:
         module_name = "stable_promotion_population_observation_assessments"
+    elif name in stable_promotion_outcome_eligibility_exports:
+        module_name = "stable_promotion_outcome_eligibilities"
     elif name in stable_promotion_observation_chain_cursor_exports:
         module_name = "stable_promotion_observation_chain_cursors"
     elif name in stable_promotion_observation_revision_delivery_exports:
