@@ -603,6 +603,44 @@ test("workbench Reviews tab renders Proposal preview and decision form at common
   }
 });
 
+test("workbench Reviews tab renders waiting Approval decision affordances", () => {
+  const view = {
+    ...workbenchOverviewFixture(),
+    selected_tab: "reviews",
+    selected_review_id: "approval-1",
+    selected_review_kind: "approval",
+    approvals: [{
+      id: "approval-1", session_id: "session-workbench", task_id: "task-1",
+      state: "waiting", title: "发布审查", detail: "确认验证证据", requester: "Agent",
+    }],
+    proposals: [],
+    review_detail: {
+      schema_version: 1, session_id: "session-workbench", review_id: "approval-1",
+      status: "ready",
+      evidence: {
+        approval: {
+          id: "approval-1", state: "waiting", task_id: "task-1",
+          title: "发布审查", detail: "确认验证证据", requester: "Agent",
+        },
+        worktree: { name: "ui-10-6e", status: "present" },
+        validation_runs: [], changed_files: [], diff_hunks: [],
+      },
+    },
+    approval_action: {
+      approval_id: "approval-1", action: "reject", phase: "note", input: "证据不足",
+    },
+  };
+
+  for (const width of [80, 120, 200]) {
+    const rendered = renderWorkbenchOverview(view, width, 24);
+    const plain = rendered.map(stripAnsi).join("\n");
+    assert(rendered.every((line) => visibleWidth(line) <= width));
+    assert(plain.includes("a 批准 · x 拒绝"));
+    assert(plain.includes("拒绝原因"));
+    assert(plain.includes("证据不足"));
+  }
+});
+
 test("workbench Proposal defer duration presets stay visible at common widths", () => {
   const view = {
     ...workbenchOverviewFixture(),

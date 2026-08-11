@@ -90,3 +90,6 @@ Bridge 必须拒绝跨会话读取；approval id 必须与请求 id 一致。Nod
 UI-10.6a 已在本只读基础之上把 open Proposal 合并进同一 Reviews 列表，并实现
 approve/reject/cancel。Approval 证据链仍保持只读，Proposal 动作走 Python 权限、既有 Service 与审计；
 详见 `UI-10-6a-proposal-actions.md`。本文件描述的 UI-10.4a 验收边界不被追溯改写。
+
+UI-10.6e 随后补齐 waiting Approval 的人工 approve/reject、原子 CAS 与同事务审计；详见
+`UI-10-6e-waiting-approval-actions.md`。这属于后续增量，不改变 UI-10.4a 当时的只读验收事实。

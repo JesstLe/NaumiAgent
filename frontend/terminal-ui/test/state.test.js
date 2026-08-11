@@ -4601,6 +4601,113 @@ test("workbench Reviews tab lazily requests selected evidence and ignores stale 
   assert.equal(state.workbench.review_detail.review_id, "approval-99");
 });
 
+test("workbench Approval decisions require reason and confirmation before authority refresh", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-workbench";
+  state.status.permission_mode = "moderate";
+  state.route = { name: "workbench", originAnchor: null };
+  state.workbench.selected_tab = "reviews";
+  state.workbench.approvals = [{
+    id: "approval-1", session_id: "session-workbench", state: "waiting",
+    title: "发布审查",
+  }];
+  state.workbench.selected_review_id = "approval-1";
+  state.workbench.selected_review_kind = "approval";
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+
+  handleWorkbenchOverviewKey(state, "x", send);
+  assert.equal(state.workbench.approval_action.phase, "note");
+  handleWorkbenchOverviewKey(state, "\r", send);
+  assert.match(state.workbench.action_error, /拒绝原因不能为空/);
+  handleWorkbenchOverviewKey(state, "验证证据不足", send);
+  handleWorkbenchOverviewKey(state, "\r", send);
+  assert.equal(state.workbench.approval_action.phase, "confirm");
+  handleWorkbenchOverviewKey(state, "y", send);
+  assert.deepEqual(sent, [{
+    type: "workbench/approval/action",
+    payload: {
+      session_id: "session-workbench",
+      approval_id: "approval-1",
+      action: "reject",
+      decision_note: "验证证据不足",
+      confirmed: true,
+    },
+  }]);
+
+  reduceServerEvent(state, {
+    type: "workbench/approval/action_result",
+    payload: {
+      schema_version: 1, session_id: "session-workbench", approval_id: "approval-1",
+      action: "reject", status: "completed", message: "Approval 已拒绝。",
+      approval: { id: "approval-1", state: "rejected" },
+      workbench_snapshot: {
+        schema_version: 1, stream_id: "stream-a", revision: 2, generated_at: "",
+        full: true, session_id: "session-workbench", counts: { reviews: 0 },
+        active_selection: {}, approvals: [], proposals: [], missions: [], tasks: [],
+        issues: [], failures: [], events: [],
+      },
+    },
+  });
+  assert.equal(state.workbench.approval_action, null);
+  assert.equal(state.workbench.action_notice, "Approval 已拒绝。");
+  assert.equal(state.workbench.counts.reviews, 0);
+});
+
+test("workbench bypass approves Approval without a second confirmation", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-workbench";
+  state.status.permission_mode = "bypass";
+  state.route = { name: "workbench", originAnchor: null };
+  state.workbench.selected_tab = "reviews";
+  state.workbench.approvals = [{ id: "approval-1", state: "waiting", title: "发布审查" }];
+  state.workbench.selected_review_id = "approval-1";
+  state.workbench.selected_review_kind = "approval";
+  const sent = [];
+
+  handleWorkbenchOverviewKey(state, "a", (type, payload) => sent.push({ type, payload }));
+
+  assert.equal(state.workbench.approval_action.phase, "loading");
+  assert.deepEqual(sent, [{
+    type: "workbench/approval/action",
+    payload: {
+      session_id: "session-workbench",
+      approval_id: "approval-1",
+      action: "approve",
+      decision_note: "",
+      confirmed: false,
+    },
+  }]);
+});
+
+test("workbench Approval conflict clears pending input and applies authority snapshot", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-workbench";
+  state.route = { name: "workbench", originAnchor: null };
+  state.workbench.approval_action = {
+    approval_id: "approval-1", action: "approve", phase: "loading",
+  };
+
+  reduceServerEvent(state, {
+    type: "workbench/approval/action_result",
+    payload: {
+      schema_version: 1, session_id: "session-workbench", approval_id: "approval-1",
+      action: "approve", status: "conflict", message: "Approval 已由其他决策收口。",
+      approval: null,
+      workbench_snapshot: {
+        schema_version: 1, stream_id: "stream-a", revision: 3, generated_at: "",
+        full: true, session_id: "session-workbench", counts: { reviews: 0 },
+        active_selection: {}, approvals: [], proposals: [], missions: [], tasks: [],
+        issues: [], failures: [], events: [],
+      },
+    },
+  });
+
+  assert.equal(state.workbench.approval_action, null);
+  assert.match(state.workbench.action_error, /其他决策收口/);
+  assert.equal(state.workbench.revision, 3);
+});
+
 test("workbench Proposal decisions collect reason, confirm, cancel, and refresh authority", () => {
   const state = createInitialState();
   state.currentSessionId = "session-workbench";

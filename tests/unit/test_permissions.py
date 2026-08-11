@@ -204,6 +204,25 @@ class TestPermissionChecker:
             assert unrestricted.allowed
             assert not unrestricted.requires_confirmation
 
+    def test_workbench_approval_resolution_confirms_except_in_bypass(self) -> None:
+        arguments = {"approval_id": "approval-1", "action": "approve"}
+        guarded = PermissionChecker(PermissionMode.MODERATE).check(
+            "workbench_resolve_approval",
+            arguments,
+        )
+        unrestricted = PermissionChecker(PermissionMode.BYPASS).check(
+            "workbench_resolve_approval",
+            arguments,
+        )
+        lockdown = PermissionChecker(PermissionMode.LOCKDOWN).check(
+            "workbench_resolve_approval",
+            arguments,
+        )
+
+        assert guarded.allowed and guarded.requires_confirmation
+        assert unrestricted.allowed and not unrestricted.requires_confirmation
+        assert not lockdown.allowed
+
     def test_experiment_contract_issuance_confirms_except_in_bypass(self) -> None:
         moderate = PermissionChecker(PermissionMode.MODERATE)
         bypass = PermissionChecker(PermissionMode.BYPASS)

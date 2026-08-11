@@ -56,7 +56,7 @@
 
 ## 明确未包含
 
-- waiting Approval 的 approve/reject 动作；
+- waiting Approval 的 approve/reject 动作（后由 UI-10.6e 独立交付）；
 - Proposal `merge` 目标选择器（后由 UI-10.6b2 独立交付）；
 - approved Proposal 到 EVO-02 Experiment Contract 或 Workbench Issue 的显式转换（前者后由 UI-10.6c 交付）；
 - HAR-09.6 before/after outcome tracking；
@@ -73,3 +73,5 @@ UI-10.6c/HAR-09.5c 已实现上述 approved Evolution Proposal → durable Exper
 Proposal defer 的原因、预设时间、authority clock 与审计边界见 `UI-10-6b1-proposal-defer.md`。
 Proposal merge 的 authority target 投影、最终重验、两端选择器与审计边界见
 `UI-10-6b2-proposal-merge.md`。
+waiting Approval 的人工权限、原子 CAS、同事务审计与两端交互见
+`UI-10-6e-waiting-approval-actions.md`。

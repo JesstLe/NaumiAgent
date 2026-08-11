@@ -20,6 +20,7 @@ from naumi_agent.evolution.experiments import (
     EvolutionExperimentContractStoreError,
     default_experiment_seed,
 )
+from naumi_agent.workbench.models import ApprovalState
 from naumi_agent.workbench.proposal_governance import (
     DEFER_PRESET_DAYS,
     ProposalAction,
@@ -29,6 +30,7 @@ from naumi_agent.workbench.proposal_governance import (
 from naumi_agent.workbench.stable_population_finalization import (
     WorkbenchStablePopulationFinalizationProjection,
 )
+from naumi_agent.workbench.store import ApprovalResolutionConflictError
 
 logger = logging.getLogger(__name__)
 
@@ -503,6 +505,12 @@ def format_workbench_reviews_markdown(
             lines.append(f"另有 {len(hunks) - 1} 个 diff 文件。")
     else:
         lines.extend(["", "Diff：当前没有可展示的已跟踪文件差异。"])
+    lines.extend(
+        [
+            "",
+            "`a` 批准 · `x` 拒绝 · `r` 刷新 · `Esc` 返回",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -859,6 +867,111 @@ class ProposalDecisionScreen(ModalScreen[dict[str, Any] | None]):
         )
 
 
+class ApprovalDecisionScreen(ModalScreen[dict[str, str] | None]):
+    """Collect one explicit Approval decision without retaining draft input."""
+
+    BINDINGS = [Binding("escape", "cancel", "取消", show=False)]
+    DEFAULT_CSS = """
+    ApprovalDecisionScreen {
+        align: center middle;
+    }
+    ApprovalDecisionScreen > Container {
+        width: 76;
+        max-width: 92%;
+        height: auto;
+        padding: 1 2;
+        border: thick $warning 80%;
+        background: $surface;
+    }
+    ApprovalDecisionScreen Label,
+    ApprovalDecisionScreen Input {
+        width: 1fr;
+        margin: 0 0 1 0;
+    }
+    ApprovalDecisionScreen .approval-decision-error {
+        color: $error;
+        margin: 0 0 1 0;
+    }
+    ApprovalDecisionScreen Horizontal {
+        width: auto;
+        height: auto;
+    }
+    ApprovalDecisionScreen Button {
+        margin: 0 1 0 0;
+    }
+    """
+
+    def __init__(
+        self,
+        *,
+        action: str,
+        title: str,
+        confirmation_required: bool,
+    ) -> None:
+        super().__init__()
+        if action not in {"approve", "reject"}:
+            raise ValueError("Approval action 仅支持 approve 或 reject")
+        self.approval_action = action
+        self.approval_title = title
+        self.confirmation_required = confirmation_required
+
+    def compose(self) -> ComposeResult:
+        label = "批准" if self.approval_action == "approve" else "拒绝"
+        with Container():
+            heading = (
+                f"确认{label} Approval？"
+                if self.confirmation_required
+                else f"{label} Approval"
+            )
+            yield Label(f"[bold]{heading}[/bold]")
+            yield Label(_plain(self.approval_title) or "未命名 Approval")
+            if self.approval_action == "reject":
+                yield Input(
+                    placeholder="填写拒绝原因（必填，最多 2000 字符）",
+                    max_length=2_000,
+                    id="approval-decision-note",
+                )
+            error = Static("", classes="approval-decision-error", id="approval-decision-error")
+            error.display = False
+            yield error
+            with Horizontal():
+                button_label = (
+                    f"确认{label}" if self.confirmation_required else f"提交{label}"
+                )
+                yield Button(button_label, variant="warning", id="approval-confirm")
+                yield Button("取消", variant="primary", id="approval-cancel")
+
+    def on_mount(self) -> None:
+        note = self.query("#approval-decision-note").first(Input)
+        (note or self.query_one("#approval-confirm", Button)).focus()
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    @on(Input.Submitted, "#approval-decision-note")
+    def on_note_submitted(self) -> None:
+        self._submit()
+
+    @on(Button.Pressed)
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "approval-cancel":
+            self.dismiss(None)
+        elif event.button.id == "approval-confirm":
+            self._submit()
+
+    def _submit(self) -> None:
+        note_input = self.query("#approval-decision-note").first(Input)
+        note = note_input.value.strip() if note_input is not None else ""
+        if self.approval_action == "reject" and not note:
+            error = self.query_one("#approval-decision-error", Static)
+            error.update("拒绝原因不能为空。")
+            error.display = True
+            if note_input is not None:
+                note_input.focus()
+            return
+        self.dismiss({"action": self.approval_action, "decision_note": note})
+
+
 class ProposalMergeScreen(ModalScreen[str | None]):
     """Select one backend-projected merge target without persisting UI state."""
 
@@ -970,8 +1083,8 @@ class WorkbenchOverviewScreen(Screen[None]):
         Binding("5", "timeline_tab", "Timeline", show=False),
         Binding("up", "select_previous", "上一项", show=False),
         Binding("down", "select_next", "下一项", show=False),
-        Binding("a", "approve_proposal", "批准 Proposal", show=False),
-        Binding("x", "reject_proposal", "拒绝 Proposal", show=False),
+        Binding("a", "approve_proposal", "批准审查项", show=False),
+        Binding("x", "reject_proposal", "拒绝审查项", show=False),
         Binding("d", "defer_proposal", "延后 Proposal", show=False),
         Binding("m", "merge_proposal", "合并 Proposal", show=False),
         Binding("c", "issue_experiment_contract", "签发实验契约", show=False),
@@ -1213,9 +1326,17 @@ class WorkbenchOverviewScreen(Screen[None]):
             self._render_snapshot()
 
     def action_approve_proposal(self) -> None:
+        selected = self._selected_review()
+        if selected is not None and selected.get("review_kind") == "approval":
+            self._begin_approval_action("approve")
+            return
         self._begin_proposal_action(ProposalAction.APPROVE)
 
     def action_reject_proposal(self) -> None:
+        selected = self._selected_review()
+        if selected is not None and selected.get("review_kind") == "approval":
+            self._begin_approval_action("reject")
+            return
         self._begin_proposal_action(ProposalAction.REJECT)
 
     def action_defer_proposal(self) -> None:
@@ -1434,6 +1555,164 @@ class WorkbenchOverviewScreen(Screen[None]):
             ),
             on_decision,
         )
+
+    def _begin_approval_action(self, action: str) -> None:
+        if self.proposal_action_pending:
+            return
+        selected = self._selected_review()
+        if not (
+            selected is not None
+            and selected.get("review_kind") == "approval"
+            and _normalized(selected.get("state")) == ApprovalState.WAITING.value
+        ):
+            return
+        approval_id = _normalized(selected.get("id"))
+        decision = self.engine._permission_checker.check(
+            "workbench_resolve_approval",
+            {"approval_id": approval_id, "action": action},
+        )
+        if not decision.allowed:
+            self.review_error = "当前权限模式不允许决策 Approval。"
+            self._render_snapshot()
+            return
+        if action == "approve" and not decision.requires_confirmation:
+            self._start_approval_action(
+                approval_id,
+                action,
+                decision_note="",
+                confirmed=False,
+            )
+            return
+
+        def on_decision(result: dict[str, str] | None) -> None:
+            if result is None:
+                return
+            self._start_approval_action(
+                approval_id,
+                result["action"],
+                decision_note=result.get("decision_note", ""),
+                confirmed=decision.requires_confirmation,
+            )
+
+        self.app.push_screen(
+            ApprovalDecisionScreen(
+                action=action,
+                title=_plain(selected.get("title") or selected.get("id")),
+                confirmation_required=decision.requires_confirmation,
+            ),
+            on_decision,
+        )
+
+    def _start_approval_action(
+        self,
+        approval_id: str,
+        action: str,
+        *,
+        decision_note: str,
+        confirmed: bool,
+    ) -> None:
+        if self.proposal_action_pending:
+            return
+        self.proposal_action_pending = True
+        self.submit_approval_action(
+            approval_id,
+            action,
+            decision_note=decision_note,
+            confirmed=confirmed,
+        )
+
+    @work(exclusive=True, group="workbench-approval-action", exit_on_error=False)
+    async def submit_approval_action(
+        self,
+        approval_id: str,
+        action: str,
+        *,
+        decision_note: str,
+        confirmed: bool,
+    ) -> None:
+        try:
+            decision = self.engine._permission_checker.check(
+                "workbench_resolve_approval",
+                {"approval_id": approval_id, "action": action},
+            )
+            if not decision.allowed:
+                raise WorkbenchSnapshotError(
+                    "当前权限模式不允许决策 Approval。"
+                )
+            if decision.requires_confirmation and not confirmed:
+                raise WorkbenchSnapshotError("该 Approval 决策需要明确确认。")
+            if self.snapshot is None:
+                raise WorkbenchSnapshotError("Workbench 权威快照不可用。")
+            session_id = _normalized(self.snapshot.get("session_id"))
+            if action == "approve":
+                state = ApprovalState.APPROVED
+            elif action == "reject":
+                state = ApprovalState.REJECTED
+            else:
+                raise WorkbenchSnapshotError("Approval action 格式无效。")
+            self.review_error = ""
+            self.review_notice = "正在提交 Approval 决策…"
+            self._render_snapshot()
+            approval = await self.engine.workbench_service.resolve_approval(
+                session_id=session_id,
+                approval_id=approval_id,
+                actor="Human",
+                state=state,
+                decision_note=decision_note,
+            )
+            if approval is None:
+                raise WorkbenchSnapshotError(
+                    "Approval 不存在或不属于当前会话。"
+                )
+            snapshot = _validate_snapshot(
+                await self.engine.workbench_service.dashboard_snapshot(session_id),
+                session_id=session_id,
+            )
+        except ApprovalResolutionConflictError as exc:
+            self.review_error = _plain(exc)
+            self.review_notice = ""
+            await self._refresh_after_approval_conflict()
+            return
+        except Exception as exc:
+            logger.warning(
+                "TUI Workbench Approval action failed (%s)",
+                type(exc).__name__,
+            )
+            self.review_error = (
+                _plain(exc)
+                if isinstance(exc, ValueError)
+                else "Approval 决策暂时失败。"
+            )
+            self.review_notice = ""
+            self._render_snapshot()
+            return
+        finally:
+            self.proposal_action_pending = False
+        self.snapshot = snapshot
+        self.review_notice = (
+            "Approval 已批准。" if action == "approve" else "Approval 已拒绝。"
+        )
+        self.selected_review_index = min(
+            self.selected_review_index,
+            max(0, len(_review_records(snapshot)) - 1),
+        )
+        self.review_detail = None
+        self._render_snapshot()
+        self.refresh_review_detail()
+
+    async def _refresh_after_approval_conflict(self) -> None:
+        if self.snapshot is None:
+            return
+        session_id = _normalized(self.snapshot.get("session_id"))
+        try:
+            self.snapshot = _validate_snapshot(
+                await self.engine.workbench_service.dashboard_snapshot(session_id),
+                session_id=session_id,
+            )
+        except (RuntimeError, ValueError):
+            pass
+        self.review_detail = None
+        self._render_snapshot()
 
     def _start_proposal_action(
         self,

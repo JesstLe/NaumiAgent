@@ -888,6 +888,9 @@ function normalizeServerPayload(type, payload) {
   if (type === "workbench/review") {
     return normalizeWorkbenchReview(payload);
   }
+  if (type === "workbench/approval/action_result") {
+    return normalizeWorkbenchApprovalActionResult(payload);
+  }
   if (type === "workbench/proposal/action_result") {
     return normalizeWorkbenchProposalActionResult(payload);
   }
@@ -2698,6 +2701,63 @@ function normalizeWorkbenchProposalActionResult(payload) {
     workbench_snapshot: payload.workbench_snapshot == null
       ? null
       : normalizeServerPayload("workbench/snapshot", payload.workbench_snapshot),
+  };
+}
+
+function normalizeWorkbenchApprovalActionResult(payload) {
+  if (Number(payload.schema_version) !== 1) {
+    throw new Error(`workbench/approval/action_result schema_version 不兼容: ${payload.schema_version}`);
+  }
+  const status = harnessChoice(
+    payload.status,
+    "workbench/approval/action_result status",
+    new Set(["needs_confirmation", "completed", "blocked", "conflict", "not_found", "error"]),
+  );
+  const approvalId = harnessText(
+    payload.approval_id,
+    "workbench/approval/action_result approval_id",
+  );
+  const action = harnessChoice(
+    payload.action,
+    "workbench/approval/action_result action",
+    new Set(["approve", "reject"]),
+  );
+  const approval = payload.approval == null
+    ? null
+    : normalizeWorkbenchApproval(payload.approval);
+  const snapshot = payload.workbench_snapshot == null
+    ? null
+    : normalizeServerPayload("workbench/snapshot", payload.workbench_snapshot);
+  if (
+    status === "completed"
+    && (
+      approval == null
+      || snapshot == null
+      || approval.id !== approvalId
+      || approval.session_id !== String(payload.session_id || "")
+      || approval.state !== (action === "approve" ? "approved" : "rejected")
+    )
+  ) {
+    throw new Error("workbench/approval/action_result 权威绑定无效");
+  }
+  if (status !== "completed" && approval != null) {
+    throw new Error("workbench/approval/action_result 非完成状态不得携带 Approval");
+  }
+  if (status === "conflict" && snapshot == null) {
+    throw new Error("workbench/approval/action_result 冲突必须携带权威快照");
+  }
+  if (!["completed", "conflict"].includes(status) && snapshot != null) {
+    throw new Error("workbench/approval/action_result 当前状态不得携带权威快照");
+  }
+  return {
+    schema_version: 1,
+    session_id: harnessText(payload.session_id, "workbench/approval/action_result session_id"),
+    approval_id: approvalId,
+    action,
+    status,
+    message: workbenchText(payload.message, "workbench/approval/action_result message", 2_000),
+    approval,
+    workbench_snapshot: snapshot,
   };
 }
 

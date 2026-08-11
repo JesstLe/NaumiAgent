@@ -133,6 +133,7 @@ function createEmptyWorkbenchState() {
     review_loading: false,
     review_error: "",
     review_detail: null,
+    approval_action: null,
     proposal_action: null,
     experiment_contract: null,
     action_notice: "",
@@ -674,6 +675,7 @@ function applyWorkbenchSnapshot(state, payload) {
     ? state.workbench.selected_tab
     : "overview";
   const previousReviewDetail = state.workbench.review_detail;
+  const previousApprovalAction = state.workbench.approval_action;
   const previousProposalAction = state.workbench.proposal_action;
   const previousExperimentContract = state.workbench.experiment_contract;
   const previousActionNotice = state.workbench.action_notice;
@@ -702,6 +704,7 @@ function applyWorkbenchSnapshot(state, payload) {
   ) {
     state.workbench.review_detail = previousReviewDetail;
   }
+  state.workbench.approval_action = previousApprovalAction;
   state.workbench.proposal_action = previousProposalAction;
   state.workbench.experiment_contract = previousExperimentContract;
   state.workbench.action_notice = previousActionNotice;
@@ -1778,6 +1781,10 @@ export function reduceServerEvent(state, record) {
         ? "该审查已不存在或不再可读，请刷新列表。"
         : "";
       state.workbench.review_detail = payload;
+      break;
+    }
+    case "workbench/approval/action_result": {
+      applyWorkbenchApprovalActionResult(state, payload);
       break;
     }
     case "workbench/proposal/action_result": {
@@ -3877,6 +3884,9 @@ function requestWorkbenchReview(state, send, { force = false } = {}) {
 export function handleWorkbenchOverviewKey(state, key, send) {
   if (state.route?.name !== "workbench") return false;
   const normalized = String(key || "").toLowerCase();
+  if (state.workbench.approval_action) {
+    return handleWorkbenchApprovalActionKey(state, key, send);
+  }
   if (state.workbench.proposal_action) {
     return handleWorkbenchProposalActionKey(state, key, send);
   }
@@ -3940,6 +3950,22 @@ export function handleWorkbenchOverviewKey(state, key, send) {
   }
   if (state.workbench.selected_tab === "reviews") {
     const selected = selectedWorkbenchReview(state.workbench);
+    if (
+      selected?.review_kind === "approval"
+      && selected.state === "waiting"
+      && normalized === "a"
+    ) {
+      beginWorkbenchApprovalAction(state, selected, "approve", send);
+      return true;
+    }
+    if (
+      selected?.review_kind === "approval"
+      && selected.state === "waiting"
+      && normalized === "x"
+    ) {
+      beginWorkbenchApprovalAction(state, selected, "reject", send);
+      return true;
+    }
     if (
       selected?.review_kind === "proposal"
       && selected.state === "open"
@@ -4165,6 +4191,126 @@ function selectedWorkbenchReview(workbench) {
     Math.max(0, Number(workbench.selected_review_index) || 0),
   );
   return reviews[index] || null;
+}
+
+function beginWorkbenchApprovalAction(state, approval, action, send) {
+  state.workbench.action_notice = "";
+  state.workbench.action_error = "";
+  state.workbench.approval_action = {
+    approval_id: String(approval.id || ""),
+    title: String(approval.title || approval.id || "Approval"),
+    action,
+    phase: action === "reject" ? "note" : "confirm",
+    decision_note: "",
+    input: "",
+    inputCursor: 0,
+    inputPreferredColumn: null,
+  };
+  if (action === "approve" && state.status?.permission_mode === "bypass") {
+    sendWorkbenchApprovalAction(state, send, false);
+  }
+}
+
+function handleWorkbenchApprovalActionKey(state, key, send) {
+  const action = state.workbench.approval_action;
+  if (!action) return false;
+  if (action.phase === "loading") return true;
+  if (action.phase === "confirm") {
+    const normalized = String(key || "").toLowerCase();
+    if (normalized === "y" || key === "\r" || key === "\n") {
+      sendWorkbenchApprovalAction(state, send, true);
+    } else if (normalized === "n" || key === INPUT_KEYS.escape) {
+      state.workbench.approval_action = null;
+      state.workbench.action_notice = "已取消操作，未写入任何变更。";
+    }
+    return true;
+  }
+  if (action.phase !== "note") return true;
+  if (key === INPUT_KEYS.escape) {
+    state.workbench.approval_action = null;
+    state.workbench.action_notice = "已取消操作，未写入任何变更。";
+    return true;
+  }
+  if (key === "\r" || key === "\n" || key === INPUT_KEYS.ctrlEnter) {
+    const note = String(action.input || "").trim();
+    if (!note) {
+      state.workbench.action_error = "拒绝原因不能为空。";
+      return true;
+    }
+    action.decision_note = note;
+    state.workbench.action_error = "";
+    if (state.status?.permission_mode === "bypass") {
+      sendWorkbenchApprovalAction(state, send, false);
+    } else {
+      action.phase = "confirm";
+    }
+    return true;
+  }
+  if (key === "\u007f" || key === "\b") return backspaceInput(action) || true;
+  if (key === INPUT_KEYS.delete) return deleteInputForward(action) || true;
+  if ([INPUT_KEYS.left, INPUT_KEYS.leftAlt].includes(key)) {
+    moveInputCursor(action, "left");
+    return true;
+  }
+  if ([INPUT_KEYS.right, INPUT_KEYS.rightAlt].includes(key)) {
+    moveInputCursor(action, "right");
+    return true;
+  }
+  if ([INPUT_KEYS.home, INPUT_KEYS.homeAlt, INPUT_KEYS.homeSs3, INPUT_KEYS.ctrlA].includes(key)) {
+    moveInputCursor(action, "home");
+    return true;
+  }
+  if ([INPUT_KEYS.end, INPUT_KEYS.endAlt, INPUT_KEYS.endSs3, INPUT_KEYS.ctrlE].includes(key)) {
+    moveInputCursor(action, "end");
+    return true;
+  }
+  if (key >= " " && key !== "\x7f" && !key.includes("\n") && !key.includes("\r")) {
+    insertInputText(action, key);
+    action.input = Array.from(action.input).slice(0, 2_000).join("");
+    action.inputCursor = Math.min(action.inputCursor, Array.from(action.input).length);
+  }
+  return true;
+}
+
+function sendWorkbenchApprovalAction(state, send, confirmed) {
+  const action = state.workbench.approval_action;
+  if (!action || action.phase === "loading") return;
+  action.phase = "loading";
+  state.workbench.action_error = "";
+  send("workbench/approval/action", {
+    session_id: String(state.currentSessionId || ""),
+    approval_id: action.approval_id,
+    action: action.action,
+    decision_note: action.decision_note,
+    confirmed: confirmed === true,
+  });
+}
+
+function applyWorkbenchApprovalActionResult(state, payload) {
+  if (!workbenchMatchesCurrentSession(state, payload)) return false;
+  const pending = state.workbench.approval_action;
+  if (
+    pending
+    && (
+      String(pending.approval_id || "") !== String(payload.approval_id || "")
+      || String(pending.action || "") !== String(payload.action || "")
+    )
+  ) return false;
+  if (payload.status === "needs_confirmation") {
+    if (pending) pending.phase = "confirm";
+    state.workbench.action_error = "";
+    return true;
+  }
+  state.workbench.approval_action = null;
+  if (payload.status === "completed") {
+    state.workbench.action_notice = String(payload.message || "Approval 决策已完成。");
+    state.workbench.action_error = "";
+  } else {
+    state.workbench.action_notice = "";
+    state.workbench.action_error = String(payload.message || "Approval 决策失败。");
+  }
+  if (payload.workbench_snapshot) applyWorkbenchSnapshot(state, payload.workbench_snapshot);
+  return true;
 }
 
 function beginWorkbenchProposalAction(state, proposal, action, send) {

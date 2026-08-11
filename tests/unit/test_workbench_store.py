@@ -17,7 +17,7 @@ from naumi_agent.workbench.models import (
     ProposalState,
     RiskLevel,
 )
-from naumi_agent.workbench.store import WorkbenchStore
+from naumi_agent.workbench.store import ApprovalResolutionConflictError, WorkbenchStore
 
 
 @pytest.fixture
@@ -518,6 +518,21 @@ async def test_add_and_resolve_approval_round_trip(store: WorkbenchStore) -> Non
     assert resolved.reviewer == "Human"
     assert resolved.decision_note == "同意，但需补充回归测试"
     assert resolved.updated_at >= approval.updated_at
+    events = await store.list_events("s", event_type="approval.resolved")
+    assert len(events) == 1
+    assert events[0].subject_id == approval.id
+    assert events[0].payload["state"] == "approved"
+
+    with pytest.raises(ApprovalResolutionConflictError) as conflict:
+        await store.resolve_approval(
+            session_id="s",
+            approval_id=approval.id,
+            state=ApprovalState.REJECTED,
+            reviewer="Other-Human",
+            decision_note="不同意",
+        )
+    assert conflict.value.current_state is ApprovalState.APPROVED
+    assert len(await store.list_events("s", event_type="approval.resolved")) == 1
 
 
 @pytest.mark.asyncio
@@ -549,6 +564,92 @@ async def test_resolve_approval_only_matches_same_session(store: WorkbenchStore)
     )
     assert unchanged is not None
     assert unchanged.state == ApprovalState.APPROVED
+
+
+@pytest.mark.asyncio
+async def test_resolve_approval_rejects_invalid_terminal_inputs(
+    store: WorkbenchStore,
+) -> None:
+    approval = await store.add_approval(
+        session_id="s",
+        mission_id="mission-1",
+        task_id="task-1",
+        title="输入校验",
+        detail="拒绝原因和审批人均必填",
+        requester="Agent-A",
+    )
+
+    with pytest.raises(ValueError, match="approved 或 rejected"):
+        await store.resolve_approval(
+            session_id="s",
+            approval_id=approval.id,
+            state=ApprovalState.WAITING,
+            reviewer="Human",
+            decision_note="",
+        )
+    with pytest.raises(ValueError, match="审批人不能为空"):
+        await store.resolve_approval(
+            session_id="s",
+            approval_id=approval.id,
+            state=ApprovalState.APPROVED,
+            reviewer="  ",
+            decision_note="",
+        )
+    with pytest.raises(ValueError, match="必须填写原因"):
+        await store.resolve_approval(
+            session_id="s",
+            approval_id=approval.id,
+            state=ApprovalState.REJECTED,
+            reviewer="Human",
+            decision_note="  ",
+        )
+    persisted = await store.get_approval("s", approval.id)
+    assert persisted is not None
+    assert persisted.state is ApprovalState.WAITING
+    assert await store.list_events("s", event_type="approval.resolved") == []
+
+
+@pytest.mark.asyncio
+async def test_resolve_approval_concurrency_commits_one_terminal_decision(
+    store: WorkbenchStore,
+) -> None:
+    approval = await store.add_approval(
+        session_id="s",
+        mission_id="mission-1",
+        task_id="task-1",
+        title="并发审批",
+        detail="只能有一个终态",
+        requester="Agent-A",
+    )
+
+    results = await asyncio.gather(
+        store.resolve_approval(
+            session_id="s",
+            approval_id=approval.id,
+            state=ApprovalState.APPROVED,
+            reviewer="Human-A",
+            decision_note="同意",
+        ),
+        store.resolve_approval(
+            session_id="s",
+            approval_id=approval.id,
+            state=ApprovalState.REJECTED,
+            reviewer="Human-B",
+            decision_note="拒绝",
+        ),
+        return_exceptions=True,
+    )
+
+    committed = [item for item in results if not isinstance(item, BaseException)]
+    conflicts = [
+        item for item in results if isinstance(item, ApprovalResolutionConflictError)
+    ]
+    assert len(committed) == 1
+    assert len(conflicts) == 1
+    persisted = await store.get_approval("s", approval.id)
+    assert persisted is not None
+    assert persisted.state in {ApprovalState.APPROVED, ApprovalState.REJECTED}
+    assert len(await store.list_events("s", event_type="approval.resolved")) == 1
 
 
 @pytest.mark.asyncio

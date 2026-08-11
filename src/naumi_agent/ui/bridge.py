@@ -139,11 +139,12 @@ from naumi_agent.user_interaction import (
     normalize_interaction_response,
     public_interaction_request_payload,
 )
-from naumi_agent.workbench.models import ParallelMode, RiskLevel
+from naumi_agent.workbench.models import ApprovalState, ParallelMode, RiskLevel
 from naumi_agent.workbench.proposal_governance import (
     ProposalAction,
     ProposalGovernanceConflictError,
 )
+from naumi_agent.workbench.store import ApprovalResolutionConflictError
 
 logger = logging.getLogger(__name__)
 
@@ -1733,6 +1734,9 @@ class JsonlEngineBridge:
             return
         if event_type == ClientEventType.WORKBENCH_REVIEW_REQUEST:
             await self.show_workbench_review(payload, request_id=request_id)
+            return
+        if event_type == ClientEventType.WORKBENCH_APPROVAL_ACTION:
+            await self.resolve_workbench_approval(payload, request_id=request_id)
             return
         if event_type == ClientEventType.WORKBENCH_PROPOSAL_ACTION:
             await self.govern_workbench_proposal(payload, request_id=request_id)
@@ -3376,6 +3380,135 @@ class JsonlEngineBridge:
                 "status": "ready",
                 "code": "",
                 "evidence": evidence,
+            },
+            request_id=request_id,
+        )
+
+    async def resolve_workbench_approval(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Apply one permission-governed waiting Approval decision."""
+        session = getattr(self.engine, "_session", None)
+        if session is None:
+            session = await self.engine.get_or_create_session()
+        session_id = str(getattr(session, "id", "") or "")
+        requested_session_id = str(payload.get("session_id") or "")
+        approval_id = str(payload.get("approval_id") or "")
+        action = str(payload.get("action") or "")
+        decision_note = str(payload.get("decision_note") or "")
+        confirmed = payload.get("confirmed") is True
+        if requested_session_id and requested_session_id != session_id:
+            await self.emit_error(
+                "Workbench 只能审批当前会话的 Approval。",
+                code="workbench_session_mismatch",
+                request_id=request_id,
+            )
+            return
+        service = getattr(self.engine, "workbench_service", None)
+        if service is None:
+            await self.emit_error(
+                "Workbench 服务暂不可用。",
+                code="workbench_unavailable",
+                request_id=request_id,
+            )
+            return
+        decision = self.engine._permission_checker.check(
+            "workbench_resolve_approval",
+            {"approval_id": approval_id, "action": action},
+        )
+        if not decision.allowed:
+            await self._emit_workbench_approval_result(
+                request_id=request_id,
+                session_id=session_id,
+                approval_id=approval_id,
+                action=action,
+                status="blocked",
+                message="当前权限模式不允许决策 Approval。",
+            )
+            return
+        if decision.requires_confirmation and not confirmed:
+            await self._emit_workbench_approval_result(
+                request_id=request_id,
+                session_id=session_id,
+                approval_id=approval_id,
+                action=action,
+                status="needs_confirmation",
+                message="请确认后再次提交该 Approval 决策。",
+            )
+            return
+        state = (
+            ApprovalState.APPROVED
+            if action == "approve"
+            else ApprovalState.REJECTED
+        )
+        approval: dict[str, Any] | None = None
+        snapshot: dict[str, Any] | None = None
+        try:
+            approval = await service.resolve_approval(
+                session_id=session_id,
+                approval_id=approval_id,
+                actor="Human",
+                state=state,
+                decision_note=decision_note,
+            )
+            if approval is None:
+                status = "not_found"
+                message = "Approval 不存在或不属于当前会话。"
+            else:
+                status = "completed"
+                message = "Approval 已批准。" if action == "approve" else "Approval 已拒绝。"
+                snapshot = await service.dashboard_snapshot(session_id)
+        except ApprovalResolutionConflictError as exc:
+            status = "conflict"
+            message = str(exc)
+            snapshot = await service.dashboard_snapshot(session_id)
+        except Exception as exc:
+            logger.warning("Workbench Approval action failed (%s)", type(exc).__name__)
+            status = "error"
+            message = str(exc) if isinstance(exc, ValueError) else "Approval 决策暂时失败。"
+        await self._emit_workbench_approval_result(
+            request_id=request_id,
+            session_id=session_id,
+            approval_id=approval_id,
+            action=action,
+            status=status,
+            message=message,
+            approval=approval,
+            snapshot=snapshot,
+        )
+        if snapshot is not None:
+            await self.emit(
+                ServerEventType.WORKBENCH_SNAPSHOT,
+                snapshot,
+                request_id=request_id,
+            )
+
+    async def _emit_workbench_approval_result(
+        self,
+        *,
+        request_id: str,
+        session_id: str,
+        approval_id: str,
+        action: str,
+        status: str,
+        message: str,
+        approval: dict[str, Any] | None = None,
+        snapshot: dict[str, Any] | None = None,
+    ) -> None:
+        await self.emit(
+            ServerEventType.WORKBENCH_APPROVAL_ACTION_RESULT,
+            {
+                "schema_version": 1,
+                "session_id": session_id,
+                "approval_id": approval_id,
+                "action": action,
+                "status": status,
+                "message": message,
+                "approval": approval,
+                "workbench_snapshot": snapshot,
             },
             request_id=request_id,
         )

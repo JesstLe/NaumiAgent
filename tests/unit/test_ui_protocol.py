@@ -597,6 +597,73 @@ def test_protocol_normalizes_workbench_review_requests() -> None:
     }
 
 
+def test_protocol_normalizes_workbench_approval_actions() -> None:
+    approved = normalize_client_record(
+        {
+            "type": ClientEventType.WORKBENCH_APPROVAL_ACTION,
+            "payload": {
+                "session_id": " session-1 ",
+                "approval_id": " approval-1 ",
+                "action": " APPROVE ",
+                "confirmed": False,
+            },
+        }
+    )
+    rejected = normalize_client_record(
+        {
+            "type": ClientEventType.WORKBENCH_APPROVAL_ACTION,
+            "payload": {
+                "session_id": "session-1",
+                "approval_id": "approval-1",
+                "action": "reject",
+                "decision_note": " 证据不足 ",
+                "confirmed": True,
+            },
+        }
+    )
+
+    assert approved["payload"] == {
+        "session_id": "session-1",
+        "approval_id": "approval-1",
+        "action": "approve",
+        "decision_note": "",
+        "confirmed": False,
+    }
+    assert rejected["payload"] == {
+        "session_id": "session-1",
+        "approval_id": "approval-1",
+        "action": "reject",
+        "decision_note": "证据不足",
+        "confirmed": True,
+    }
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"approval_id": "", "action": "approve"},
+        {"approval_id": "approval-1", "action": "defer"},
+        {"approval_id": "approval-1", "action": "reject", "decision_note": ""},
+        {"approval_id": "approval-1\nforged", "action": "approve"},
+        {"approval_id": "approval-1", "action": "approve", "confirmed": "yes"},
+        {"approval_id": "approval-1", "action": "approve", "private": True},
+        {
+            "approval_id": "approval-1",
+            "action": "reject",
+            "decision_note": "bad\rreason",
+        },
+    ],
+)
+def test_protocol_rejects_invalid_workbench_approval_actions(payload: dict) -> None:
+    with pytest.raises(ValueError):
+        normalize_client_record(
+            {
+                "type": ClientEventType.WORKBENCH_APPROVAL_ACTION,
+                "payload": payload,
+            }
+        )
+
+
 def test_protocol_normalizes_workbench_proposal_actions() -> None:
     record = normalize_client_record(
         {

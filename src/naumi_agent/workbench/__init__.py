@@ -24,7 +24,7 @@ from naumi_agent.workbench.models import (
 )
 from naumi_agent.workbench.policy import PolicyDecision, evaluate_intent_locks
 from naumi_agent.workbench.service import WorkbenchService
-from naumi_agent.workbench.store import WorkbenchStore
+from naumi_agent.workbench.store import ApprovalResolutionConflictError, WorkbenchStore
 from naumi_agent.workbench.validation import (
     ValidationCommand,
     ValidationResult,
@@ -34,6 +34,7 @@ from naumi_agent.workbench.validation import (
 __all__ = [
     "AgentProfile",
     "ApprovalState",
+    "ApprovalResolutionConflictError",
     "ContextHealth",
     "ContextHealthInput",
     "ContextHealthResult",

@@ -77,6 +77,15 @@ function renderPageState(snapshot) {
     return color(ANSI.yellow, `刷新警告 · ${compactText(snapshot.error, 300)} · r 重试 · Esc 返回`);
   }
   if (snapshot.loading) return color(ANSI.cyan, "状态 · 正在刷新 · r 重试 · Esc 返回");
+  if (snapshot.approval_action?.phase === "note") {
+    return color(ANSI.yellow, "拒绝 Approval · 输入原因后 Enter 继续 · Esc 取消");
+  }
+  if (snapshot.approval_action?.phase === "confirm") {
+    return color(ANSI.yellow, "确认 Approval 决策 · y/Enter 确认 · n/Esc 取消");
+  }
+  if (snapshot.approval_action?.phase === "loading") {
+    return color(ANSI.cyan, "正在原子写入 Approval 决策与审计…");
+  }
   if (snapshot.proposal_action?.phase === "note") {
     return color(
       ANSI.yellow,
@@ -326,6 +335,30 @@ function renderReviewDetail(snapshot, selected, width) {
     if (files.length > 8) lines.push(color(ANSI.dim, `另有 ${files.length - 8} 个文件`));
   } else {
     lines.push(color(ANSI.yellow, "文件 · 未检测到工作区变更"));
+  }
+  lines.push(
+    approval.state === "waiting"
+      ? color(ANSI.dim, "a 批准 · x 拒绝 · r 刷新 · Esc 返回")
+      : color(ANSI.dim, "该 Approval 已收口，只能查看权威证据。"),
+  );
+  if (snapshot.action_notice) lines.push(color(ANSI.green, compactText(snapshot.action_notice, 1_000)));
+  if (snapshot.action_error) lines.push(color(ANSI.red, compactText(snapshot.action_error, 1_000)));
+  const action = snapshot.approval_action;
+  if (action?.approval_id === approval.id) {
+    if (action.phase === "note") {
+      lines.push(
+        color(ANSI.yellow, "拒绝原因（必填）"),
+        `> ${compactText(action.input || "", 2_000)}${color(ANSI.cyan, "▌")}`,
+      );
+    } else if (action.phase === "confirm") {
+      lines.push(
+        color(ANSI.yellow, `确认${action.action === "approve" ? "批准" : "拒绝"}此 Approval？`),
+        action.decision_note ? color(ANSI.dim, `原因 · ${compactText(action.decision_note, 1_000)}`) : "",
+        color(ANSI.yellow, "y/Enter 确认 · n/Esc 取消"),
+      );
+    } else if (action.phase === "loading") {
+      lines.push(color(ANSI.cyan, "正在提交决策并等待权威快照…"));
+    }
   }
   return lines.flatMap((line) => wrapAnsiLine(line, Math.max(1, width)));
 }

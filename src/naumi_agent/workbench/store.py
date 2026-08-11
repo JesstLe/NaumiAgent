@@ -52,6 +52,19 @@ _SENSITIVE_PAYLOAD_KEYS = (
 )
 
 
+class ApprovalResolutionConflictError(RuntimeError):
+    """Raised when a terminal decision races with a non-waiting approval."""
+
+    code = "approval_resolution_conflict"
+
+    def __init__(self, *, approval_id: str, current_state: ApprovalState) -> None:
+        self.approval_id = approval_id
+        self.current_state = current_state
+        super().__init__(
+            f"Approval 已由其他决策收口为 {current_state.value}，请刷新后复核。"
+        )
+
+
 def _is_sensitive_payload_key(key: str) -> bool:
     """True when a payload key likely holds a secret."""
     lower = key.lower()
@@ -2022,30 +2035,99 @@ class WorkbenchStore:
         reviewer: str,
         decision_note: str,
     ) -> Approval | None:
+        if state not in {ApprovalState.APPROVED, ApprovalState.REJECTED}:
+            raise ValueError("审批结果只能是 approved 或 rejected")
+        reviewer = reviewer.strip()
+        decision_note = decision_note.strip()
+        if not reviewer:
+            raise ValueError("审批人不能为空")
         now = now_iso()
         async with aiosqlite.connect(self._db_path) as db:
             await self._ensure_tables(db)
-            await db.execute(
-                """UPDATE workbench_approvals
-                   SET state = ?, reviewer = ?, decision_note = ?, updated_at = ?
-                   WHERE id = ? AND session_id = ?""",
-                (
-                    state.value,
-                    reviewer.strip(),
-                    decision_note.strip(),
-                    now,
-                    approval_id,
-                    session_id,
-                ),
-            )
-            await db.commit()
+            await db.execute("BEGIN IMMEDIATE")
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(
                 "SELECT * FROM workbench_approvals WHERE id = ? AND session_id = ?",
                 (approval_id, session_id),
             )
             row = await cursor.fetchone()
-        return _row_to_approval(dict(row)) if row else None
+            if row is None:
+                await db.rollback()
+                return None
+            current = _row_to_approval(dict(row))
+            if current.state is not ApprovalState.WAITING:
+                await db.rollback()
+                raise ApprovalResolutionConflictError(
+                    approval_id=approval_id,
+                    current_state=current.state,
+                )
+            if state is ApprovalState.REJECTED and not decision_note:
+                await db.rollback()
+                raise ValueError("拒绝 Approval 时必须填写原因")
+            update = await db.execute(
+                """UPDATE workbench_approvals
+                   SET state = ?, reviewer = ?, decision_note = ?, updated_at = ?
+                   WHERE id = ? AND session_id = ? AND state = ?""",
+                (
+                    state.value,
+                    reviewer,
+                    decision_note,
+                    now,
+                    approval_id,
+                    session_id,
+                    ApprovalState.WAITING.value,
+                ),
+            )
+            if update.rowcount != 1:
+                await db.rollback()
+                raise ApprovalResolutionConflictError(
+                    approval_id=approval_id,
+                    current_state=ApprovalState.WAITING,
+                )
+            cursor = await db.execute(
+                "SELECT * FROM workbench_approvals WHERE id = ? AND session_id = ?",
+                (approval_id, session_id),
+            )
+            row = await cursor.fetchone()
+            if row is None:
+                await db.rollback()
+                raise RuntimeError("Approval 决策写入后无法读取权威记录")
+            approval = _row_to_approval(dict(row))
+            event = WorkbenchEvent(
+                session_id=session_id,
+                type="approval.resolved",
+                actor=approval.reviewer,
+                subject_id=approval.id,
+                payload=redact_event_payload(
+                    {
+                        "state": approval.state.value,
+                        "mission_id": approval.mission_id,
+                        "task_id": approval.task_id,
+                        "title": approval.title,
+                    }
+                ),
+                timestamp=now,
+            )
+            await db.execute(
+                """INSERT INTO workbench_audit_events
+                   (id, session_id, type, actor, subject_id, payload, timestamp,
+                    correlation_id, parent_event_id, severity)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    event.id,
+                    event.session_id,
+                    event.type,
+                    event.actor,
+                    event.subject_id,
+                    json.dumps(event.payload, ensure_ascii=False),
+                    event.timestamp,
+                    event.correlation_id,
+                    event.parent_event_id,
+                    event.severity.value,
+                ),
+            )
+            await db.commit()
+        return approval
 
     async def list_approvals(
         self,

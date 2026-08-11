@@ -30,6 +30,9 @@ UI-10.6b1 已让 New UI/Textual TUI 在同一 Workbench Reviews 页延后 open P
 时长限定 1/7/30 天并由 Python authority clock 生成精确 cooldown；normal 一次确认，bypass 参数齐全后
 直接执行且不出现二次确认。UI-10.6b2 又补齐 merge：后端投影同 Candidate 的较新 open revision，
 两端键盘选择，Service 最终重验并以 CAS 写入 source merged/target open 和审计；bypass 不增加二次确认。
+UI-10.6e 已补齐 waiting Approval 人工决策：New UI/TUI 共用 waiting-only CAS 与同事务审计，拒绝原因
+必填，普通模式一次确认，bypass 参数齐全后直接执行；并发或重复决定返回 conflict 和最新权威快照，
+Agent 不获得自批人工 gate 的 Tool。
 UI-13.1c 与 ARC-01.4c1-4c3 已让 New UI/TUI Doctor 都展示各自 terminal lifecycle 的实时 retention 状态；
 UI-13.1d/1e 又让两端从同一只读 Worker authority 看见 capacity 与 durable queue backlog；缺少
 Composition 注入时明确标记不可观测，而不是伪造调度健康。UI-17.1 已为两端发布 14 项严格 capability manifest；

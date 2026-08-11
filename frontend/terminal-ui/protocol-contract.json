@@ -3,6 +3,7 @@
   "transport": "jsonl",
   "compatibility": {
     "previous_registry_sha256": [
+      "7a71f05e943e5c78a497d6bad2015298f3f496c4ec53ecb25dffc20f683b69d6",
       "ea8c8c0d1f6b59485a0dead99e4bcd21b57105b842af03b1ad3a1bea53df6504",
       "4fc5c46ebf049471a125d4c98d64b82439d432a98c71553a2bbc966d05f658b0",
       "96a5cfac756bbe47f4e0224b0e77d626b25189ac6c3d9aaa72a54d8f879eb70f",
@@ -36,6 +37,7 @@
       "terminal_event_recovery",
       "typed_ui_messages",
       "workbench_snapshot",
+      "workbench_approval_actions",
       "workbench_proposal_actions"
     ],
     "required_capabilities": [
@@ -74,6 +76,10 @@
     "terminal_event_recovery": {
       "client_events": ["terminal_events/ack"],
       "server_events": ["terminal_events/recovery"]
+    },
+    "workbench_approval_actions": {
+      "client_events": ["workbench/approval/action"],
+      "server_events": ["workbench/approval/action_result"]
     }
   },
   "client_events": [
@@ -97,6 +103,7 @@
     "agents/recovery/resolve_unknown",
     "workbench/request",
     "workbench/review/request",
+    "workbench/approval/action",
     "workbench/proposal/action",
     "goal/lifecycle/update",
     "pursuit/recovery/resume",
@@ -182,6 +189,7 @@
     "workbench/snapshot",
     "workbench/event",
     "workbench/review",
+    "workbench/approval/action_result",
     "workbench/proposal/action_result",
     "goal/lifecycle/action_result",
     "pursuit/recovery/action_result",
@@ -214,6 +222,7 @@
       "agents/recovery/resolve_unknown": {"owner":"agents","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":[],"redaction":"none"},
       "workbench/request": {"owner":"workbench","stability":"stable","criticality":"informational","persistence":"never","sensitive_fields":[],"redaction":"none"},
       "workbench/review/request": {"owner":"workbench","stability":"experimental","criticality":"informational","persistence":"never","sensitive_fields":[],"redaction":"none"},
+      "workbench/approval/action": {"owner":"workbench","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":["payload.decision_note"],"redaction":"required"},
       "workbench/proposal/action": {"owner":"workbench","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":["payload.decision_note"],"redaction":"required"},
       "goal/lifecycle/update": {"owner":"runtime","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":[],"redaction":"none"},
       "pursuit/recovery/resume": {"owner":"runtime","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":[],"redaction":"none"},
@@ -298,6 +307,7 @@
       "debug/trace": {"owner":"diagnostics","stability":"stable","criticality":"informational","persistence":"never","sensitive_fields":["payload.events_path","payload.transcript_path"],"redaction":"required"},
       "workbench/snapshot": {"owner":"workbench","stability":"stable","criticality":"informational","persistence":"snapshot","sensitive_fields":["payload.tasks","payload.events"],"redaction":"required"},
       "workbench/review": {"owner":"workbench","stability":"experimental","criticality":"informational","persistence":"snapshot","sensitive_fields":["payload.evidence.diff_hunks","payload.evidence.agent_notes","payload.evidence.events"],"redaction":"required"},
+      "workbench/approval/action_result": {"owner":"workbench","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":["payload.message","payload.approval"],"redaction":"required"},
       "workbench/proposal/action_result": {"owner":"workbench","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":["payload.message","payload.proposal"],"redaction":"required"},
       "goal/lifecycle/action_result": {"owner":"runtime","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":["payload.message"],"redaction":"required"},
       "pursuit/recovery/action_result": {"owner":"runtime","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":["payload.message"],"redaction":"required"},
