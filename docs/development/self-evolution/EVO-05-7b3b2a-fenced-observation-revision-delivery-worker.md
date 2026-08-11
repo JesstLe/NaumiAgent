@@ -107,5 +107,6 @@ Dispatch/ACK 只证明 signed revisions 已经由当前 transport 收口。以�
 - Control Plane remote head 与 installation local ACK head 的主动 reconcile 尚未实现；
 - Windows/Linux 发布矩阵仍需在网络 transport 切片补证。
 
-下一独立切片是 `EVO-05.7b3c Population Long-term Observation Assessment`。它只能读取 7b3b2b 已认证并由 7b3b1 验签的远端
-revision ledger，按 7b1 Contract 计算 Population coverage 与长期窗口，不得使用 installation 本地 ACK head 越权聚合。
+[EVO-05.7b3c1](EVO-05-7b3c1-remote-installation-observation-assessment.md) 已只读取 7b3b2b 已认证并由 7b3b1 验签的远端
+revision ledger，按 7b1 Contract 形成单安装长期结论。下一独立切片 7b3c2 才计算 Population coverage，不得使用
+installation 本地 ACK head 或单安装 Assessment 越权聚合。

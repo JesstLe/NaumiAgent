@@ -100,7 +100,8 @@ Cursor JSON 上限 2 MiB，单 revision 上限 512 KiB；revision 只保存 HAR 
 installation 聚合。[EVO-05.7b3b1](EVO-05-7b3b1-signed-observation-revision-delivery.md) 已用 current Population Credential 把
 Cursor revisions 形成有界 signed batch，并由本地真实 Control Plane boundary 逐 revision 验签、顺序幂等接收；
 [EVO-05.7b3b2a](EVO-05-7b3b2a-fenced-observation-revision-delivery-worker.md) 已补齐自动 fenced Worker，
-[EVO-05.7b3b2b](EVO-05-7b3b2b-authenticated-observation-revision-http-transport.md) 已补齐 mTLS 网络交付。下一步 7b3c
-补齐 durable fenced worker、Receipt ACK 与 mTLS transport；完成跨安装投递后，7b3c 才能按 7b1 的 duration、Population denominator/member coverage、
+[EVO-05.7b3b2b](EVO-05-7b3b2b-authenticated-observation-revision-http-transport.md) 已补齐 mTLS 网络交付，
+[EVO-05.7b3c1](EVO-05-7b3c1-remote-installation-observation-assessment.md) 已按 7b1 duration 形成 durable 单安装结论；下一步
+7b3c2 才能按 Population denominator/member coverage、
 sample/gap/latest-age 规则形成
 Population long-term assessment。

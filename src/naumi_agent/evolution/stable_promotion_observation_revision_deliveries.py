@@ -866,6 +866,52 @@ class EvolutionStablePromotionObservationRevisionDeliveryService:
             remote_revision_delivery_authority=authority,
         )
 
+    async def authoritative_received_chain(
+        self,
+        admission_id: str,
+    ) -> tuple[
+        tuple[
+            EvolutionStablePromotionObservationRevisionSubmission,
+            EvolutionStablePromotionObservationRevisionDeliveryReceipt,
+        ],
+        ...,
+    ]:
+        """Return only a complete chain reverified with current authority."""
+        item_id = _admission_id(admission_id)
+        admission_submission, admission_receipt = await self._admission_sources(item_id)
+        credential = await self._current_credential(admission_submission)
+        chain = await self.store.received_chain(item_id)
+        head = await self.store.remote_head(item_id)
+        if not chain or not _received_chain_current(
+            chain=chain,
+            head=head,
+            expected=chain[-1],
+        ):
+            raise EvolutionStablePromotionObservationRevisionDeliveryError(
+                "stable_promotion_observation_revision_chain_stale",
+                "Control Plane observation revision chain 不完整或 head 已失效。",
+            )
+        for submission, receipt in chain:
+            if not (
+                _payload_matches_admission(
+                    submission.payload,
+                    admission_submission,
+                    admission_receipt,
+                )
+                and _receipt_matches_submission(receipt, submission)
+                and receipt.installation_credential_id == credential.credential_id
+                and receipt.installation_credential_sha256
+                == credential.credential_sha256
+                and receipt.installation_public_key_sha256
+                == credential.payload.installation_public_key_sha256
+            ):
+                raise EvolutionStablePromotionObservationRevisionDeliveryError(
+                    "stable_promotion_observation_revision_chain_untrusted",
+                    "Control Plane observation revision chain authority 不一致。",
+                )
+            self._verify_signature(submission, credential)
+        return chain
+
     async def _admission_sources(self, admission_id: str) -> tuple[
         EvolutionStablePromotionRuntimeAdmissionSubmission,
         EvolutionStablePromotionRuntimeAdmissionDeliveryReceipt,

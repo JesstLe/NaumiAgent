@@ -266,7 +266,9 @@
   已交付；owner/epoch/lease、next-batch chaining、retry/dead-letter、Receipt ACK 与 Engine lifecycle 已闭合。
 - [EVO-05.7b3b2b Authenticated Observation Revision HTTP Transport](EVO-05-7b3b2b-authenticated-observation-revision-http-transport.md)：
   已交付；mTLS、成员证书绑定、current/next pin、严格 HTTP bounds 与配置自动装配已闭合。
-- EVO-05.7 后续：7b3c Population long-term assessment、7b4 promoted/superseded ledger 与 policy learning。
+- [EVO-05.7b3c1 Remote Installation Observation Assessment](EVO-05-7b3c1-remote-installation-observation-assessment.md)：
+  已交付；从 Control Plane 完整已验签 ledger 形成 durable 单安装四态结论和动态撤权，不扩张 Population authority。
+- EVO-05.7 后续：7b3c2 Population aggregation、7b4 promoted/superseded ledger 与 policy learning。
 
 ## 验收标准
 

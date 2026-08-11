@@ -216,6 +216,10 @@ from naumi_agent.evolution.stable_population_completions import (
     EvolutionStablePopulationCompletionError,
     render_stable_population_completion,
 )
+from naumi_agent.evolution.stable_promotion_installation_observation_assessments import (
+    EvolutionStablePromotionInstallationObservationAssessmentError,
+    render_stable_promotion_installation_observation_assessment,
+)
 from naumi_agent.evolution.stable_promotion_observation_chain_cursors import (
     EvolutionStablePromotionObservationChainCursorError,
     render_stable_promotion_observation_chain_cursor,
@@ -4312,6 +4316,85 @@ class EvolutionStablePromotionObservationRevisionDeliveryTool(Tool):
             return f"稳定推广 Observation Revision Delivery 未完成（`{code}`）：{exc}"
 
 
+class EvolutionStablePromotionInstallationObservationAssessmentTool(Tool):
+    """Assess or inspect one durable Control-Plane installation verdict."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_stable_promotion_installation_observation_assessment"
+
+    @property
+    def description(self) -> str:
+        return (
+            "读取 Control Plane 已验签的完整 Observation Revision ledger，"
+            "持久化单个 installation 的长期健康、不足、故障或删失结论；"
+            "不聚合 Population，也不授予推广、学习或执行权限。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["assess", "inspect"]},
+                "admission_id": {
+                    "type": "string",
+                    "pattern": "^evstablepromadmit_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["action", "admission_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="稳定推广单安装长期观察评估",
+            search_hint=(
+                "evolution stable promotion installation observation assessment "
+                "自进化 稳定推广 单安装 长期观察 评估"
+            ),
+        )
+
+    async def execute(self, action: str, admission_id: str) -> str:
+        operation = str(action or "").strip().lower()
+        identifier = str(admission_id or "").strip()
+        service = (
+            self._engine.evolution_stable_promotion_installation_observation_assessment_service
+        )
+        try:
+            if operation == "assess":
+                view = await service.assess(admission_id=identifier)
+            elif operation == "inspect":
+                view = await service.inspect(admission_id=identifier)
+            else:
+                raise ValueError("action 必须是 assess 或 inspect。")
+        except (
+            AttributeError,
+            EvolutionStablePromotionInstallationObservationAssessmentError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(
+                exc,
+                "code",
+                "stable_promotion_installation_observation_assessment_failed",
+            )
+            return f"稳定推广单安装长期观察评估未完成（`{code}`）：{exc}"
+        return render_stable_promotion_installation_observation_assessment(view)
+
+
 class EvolutionStablePromotionRuntimeAdmissionDeliveryTool(Tool):
     """Prepare, export, receive, or inspect one signed runtime Admission."""
 
@@ -6033,6 +6116,7 @@ def create_evolution_review_tools(
         EvolutionStablePromotionRuntimeObservationAdmissionTool(engine),
         EvolutionStablePromotionObservationChainCursorTool(engine),
         EvolutionStablePromotionObservationRevisionDeliveryTool(engine),
+        EvolutionStablePromotionInstallationObservationAssessmentTool(engine),
         EvolutionStablePromotionRuntimeAdmissionDeliveryTool(engine),
         EvolutionStableRolloutAuthorizationTool(engine),
         EvolutionStableRolloutFinalizationTool(engine),
@@ -6101,6 +6185,7 @@ __all__ = [
     "EvolutionStableRemoteFinalizationTool",
     "EvolutionStableRemotePopulationFinalizationTool",
     "EvolutionStablePromotionObservationContractTool",
+    "EvolutionStablePromotionInstallationObservationAssessmentTool",
     "EvolutionStablePromotionRuntimeAdmissionDeliveryTool",
     "EvolutionStablePromotionObservationChainCursorTool",
     "EvolutionStablePromotionObservationRevisionDeliveryTool",
