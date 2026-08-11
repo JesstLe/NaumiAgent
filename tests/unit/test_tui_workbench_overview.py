@@ -14,6 +14,7 @@ from naumi_agent.runtime.composition import create_agent_engine
 from naumi_agent.tasks.store import TaskStore
 from naumi_agent.tui.app import NaumiApp
 from naumi_agent.tui.workbench_overview import (
+    ApprovalDecisionScreen,
     ExperimentContractIssueScreen,
     ProposalDecisionScreen,
     ProposalMergeScreen,
@@ -555,6 +556,102 @@ async def test_textual_workbench_reviews_loads_selected_service_evidence() -> No
 
 
 @pytest.mark.asyncio
+async def test_textual_workbench_rejects_approval_with_required_reason() -> None:
+    engine = create_agent_engine(AppConfig())
+    engine._session = SimpleNamespace(id="session-workbench-tui")
+    initial = _snapshot()
+    completed = {
+        **initial,
+        "revision": 4,
+        "approvals": [],
+        "counts": {**initial["counts"], "reviews": 0},
+    }
+    engine.workbench_service.dashboard_snapshot = AsyncMock(  # type: ignore[method-assign]
+        side_effect=[initial, completed]
+    )
+    engine.workbench_service.get_review_evidence = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            "approval": initial["approvals"][0],
+            "worktree": {"name": "ui-10-real", "status": "present"},
+            "validation_runs": [],
+            "changed_files": [],
+            "diff_hunks": [],
+        }
+    )
+    engine.workbench_service.resolve_approval = AsyncMock(  # type: ignore[method-assign]
+        return_value={"id": "approval-1", "state": "rejected"}
+    )
+    app = NaumiApp(engine)
+
+    async with app.run_test(size=(100, 32)) as pilot:
+        app._handle_slash_command("/workbench")
+        await pilot.pause(0.1)
+        await pilot.press("3", "x")
+        await pilot.pause(0.05)
+
+        assert isinstance(app.screen, ApprovalDecisionScreen)
+        note = app.screen.query_one("#approval-decision-note", Input)
+        await pilot.press("enter")
+        assert "不能为空" in str(
+            app.screen.query_one("#approval-decision-error", Static).render()
+        )
+        note.value = "缺少真实回归证据"
+        await pilot.press("enter")
+        await pilot.pause(0.15)
+
+        assert isinstance(app.screen, WorkbenchOverviewScreen)
+        call = engine.workbench_service.resolve_approval.await_args
+        assert call.kwargs["session_id"] == "session-workbench-tui"
+        assert call.kwargs["approval_id"] == "approval-1"
+        assert call.kwargs["actor"] == "Human"
+        assert call.kwargs["state"].value == "rejected"
+        assert call.kwargs["decision_note"] == "缺少真实回归证据"
+        rendered = app.screen.query_one("#workbench-content", Markdown)._markdown
+        assert "Approval 已拒绝" in rendered
+
+
+@pytest.mark.asyncio
+async def test_textual_workbench_bypass_approves_approval_without_modal() -> None:
+    engine = create_agent_engine(AppConfig())
+    engine.set_runtime_mode("bypass")
+    engine._session = SimpleNamespace(id="session-workbench-tui")
+    initial = _snapshot()
+    completed = {
+        **initial,
+        "revision": 4,
+        "approvals": [],
+        "counts": {**initial["counts"], "reviews": 0},
+    }
+    engine.workbench_service.dashboard_snapshot = AsyncMock(  # type: ignore[method-assign]
+        side_effect=[initial, completed]
+    )
+    engine.workbench_service.get_review_evidence = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            "approval": initial["approvals"][0],
+            "worktree": {"name": "ui-10-real", "status": "present"},
+            "validation_runs": [],
+            "changed_files": [],
+            "diff_hunks": [],
+        }
+    )
+    engine.workbench_service.resolve_approval = AsyncMock(  # type: ignore[method-assign]
+        return_value={"id": "approval-1", "state": "approved"}
+    )
+    app = NaumiApp(engine)
+
+    async with app.run_test(size=(100, 32)) as pilot:
+        app._handle_slash_command("/workbench")
+        await pilot.pause(0.1)
+        await pilot.press("3", "a")
+        await pilot.pause(0.15)
+
+        assert isinstance(app.screen, WorkbenchOverviewScreen)
+        call = engine.workbench_service.resolve_approval.await_args
+        assert call.kwargs["state"].value == "approved"
+        assert call.kwargs["decision_note"] == ""
+
+
+@pytest.mark.asyncio
 async def test_textual_workbench_rejects_proposal_with_required_reason() -> None:
     engine = create_agent_engine(AppConfig())
     engine._session = SimpleNamespace(id="session-workbench-tui")
@@ -1026,7 +1123,9 @@ def _snapshot() -> dict[str, object]:
         }],
         "approvals": [{
             "id": "approval-1",
+            "session_id": "session-workbench-tui",
             "task_id": "task-1",
+            "state": "waiting",
             "title": "等待用户确认",
         }],
         "proposals": [],

@@ -93,7 +93,7 @@ projection 重验，projection 与 error 同时存在时失败关闭。
 - 没有远端 active pointer 的 fresh probe，继续保留 x3j 的 unverified 边界；
 - 没有历史 Receipt 列表、成员级 drill-down 或 Timeline 事件；
 - 没有 config/data finalization 与 promotion 写动作；
-- UI-10.5 Timeline 和 UI-10.6 waiting Approval 动作仍是独立模块。
+- UI-10.5 Timeline 与 UI-10.6e waiting Approval 动作保持独立模块；后者现已交付。
 
 下一步应重新检查 UI/Harness/ARC/Evolution 文档依赖，再选择新的最小前置；不得借 UI-10.8 继续扩张
 x3 transport 或把只读 authority 伪装成发布控制面。

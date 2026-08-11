@@ -1234,6 +1234,18 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         risk_level=PermissionRiskLevel.HIGH,
         tool_family="workbench_governance",
     ),
+    "workbench_resolve_approval": PermissionRule(
+        tool_name="workbench_resolve_approval",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=True,
+        risk_level=PermissionRiskLevel.HIGH,
+        tool_family="workbench_governance",
+    ),
     "session_load": PermissionRule(
         tool_name="session_load",
         allowed_modes=[

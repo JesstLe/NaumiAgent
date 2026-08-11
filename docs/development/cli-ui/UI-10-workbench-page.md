@@ -214,7 +214,15 @@
   把源标记为 merged、保留目标 open 并写 `proposal.merged` 审计。
 - 详见 `UI-10-6b2-proposal-merge.md`。merge 不执行代码、不签发实验或 promotion 权限。
 
+### UI-10.6e 已实现：waiting Approval approve/reject
+
+- New UI 与 Textual TUI 在 Reviews 中以 `a/x` 决策 waiting Approval；拒绝原因必填。
+- 普通模式一次确认；bypass 参数齐全后直接提交，不增加高风险二次确认。
+- Store 只允许 `waiting → approved/rejected`，并把终态与 `approval.resolved` 审计写入同一事务。
+- 并发、重复或迟到决定返回 conflict 与最新 Snapshot，不覆盖先到终态。
+- Approval 是人工控制面，Agent 不获得自批 Tool；批准不执行代码、不签发实验或发布权限。
+- 完整契约与验收见 `UI-10-6e-waiting-approval-actions.md`。
+
 ### 尚未完成
 
 - UI-10.5b：Timeline revisioned 增量事件生产、断线 cursor 与 gap 恢复。
-- UI-10.6：waiting Approval 动作。

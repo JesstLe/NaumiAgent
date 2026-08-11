@@ -701,6 +701,7 @@ test("protocol contract drives client and server event validation", () => {
       "terminal_event_cursor",
       "terminal_event_recovery",
       "typed_ui_messages",
+      "workbench_approval_actions",
       "workbench_proposal_actions",
       "workbench_snapshot",
     ],
@@ -909,6 +910,7 @@ test("hello payload is generated from the embedded negotiation contract", () => 
       "terminal_event_cursor",
       "terminal_event_recovery",
       "typed_ui_messages",
+      "workbench_approval_actions",
       "workbench_proposal_actions",
       "workbench_snapshot",
     ],
@@ -4857,6 +4859,63 @@ test("normalizes strict workbench proposal action results", () => {
       },
     }), /experiment contract/);
   }
+});
+
+test("normalizes strict workbench approval action results", () => {
+  const snapshot = {
+    schema_version: 1,
+    stream_id: "approval-stream",
+    revision: 2,
+    generated_at: "2026-08-11T12:00:00+08:00",
+    full: true,
+    session_id: "s",
+    counts: { tasks: 0, worktrees: 0, reviews: 0, failures: 0 },
+    active_selection: {},
+    missions: [], tasks: [], issues: [], approvals: [], proposals: [], failures: [], events: [],
+  };
+  const payload = normalizeServerRecord({
+    type: "workbench/approval/action_result",
+    payload: {
+      schema_version: 1,
+      session_id: "s",
+      approval_id: "approval-1",
+      action: "reject",
+      status: "completed",
+      message: "Approval 已拒绝。",
+      approval: {
+        id: "approval-1", session_id: "s", mission_id: "m", task_id: "t",
+        state: "rejected", title: "发布审查", detail: "证据不足",
+        requester: "Agent", reviewer: "Human", decision_note: "验证不足",
+        created_at: "now", updated_at: "now", private_field: "drop",
+      },
+      workbench_snapshot: snapshot,
+    },
+  }).payload;
+
+  assert.equal(payload.status, "completed");
+  assert.equal(payload.approval.state, "rejected");
+  assert.equal(Object.hasOwn(payload.approval, "private_field"), false);
+  for (const invalid of [
+    { ...payload, status: "invented" },
+    { ...payload, approval: null },
+    { ...payload, approval: { ...payload.approval, id: "approval-other" } },
+    { ...payload, approval: { ...payload.approval, state: "approved" } },
+    { ...payload, workbench_snapshot: null },
+  ]) {
+    assert.throws(() => normalizeServerRecord({
+      type: "workbench/approval/action_result",
+      payload: invalid,
+    }));
+  }
+  assert.throws(() => normalizeServerRecord({
+    type: "workbench/approval/action_result",
+    payload: {
+      ...payload,
+      status: "conflict",
+      approval: null,
+      workbench_snapshot: null,
+    },
+  }), /冲突必须携带权威快照/);
 });
 
 test("normalizes workbench event payloads", () => {

@@ -143,10 +143,10 @@ from naumi_agent.user_interaction import (
     UserInteractionUnavailableError,
     normalize_interaction_request,
 )
-from naumi_agent.workbench.models import ProposalSourceKind
+from naumi_agent.workbench.models import ApprovalState, ProposalSourceKind
 from naumi_agent.workbench.proposal_governance import ProposalAction
 from naumi_agent.workbench.service import WorkbenchService
-from naumi_agent.workbench.store import WorkbenchStore
+from naumi_agent.workbench.store import ApprovalResolutionConflictError, WorkbenchStore
 
 pytestmark = pytest.mark.usefixtures("runtime_payload_key")
 
@@ -757,6 +757,48 @@ class _ProposalActionWorkbenchService:
         }
 
 
+class _ApprovalActionWorkbenchService:
+    def __init__(self, *, conflict: bool = False) -> None:
+        self.resolved: list[dict[str, Any]] = []
+        self.revision = 1
+        self.conflict = conflict
+
+    async def resolve_approval(self, **kwargs: Any) -> dict[str, Any] | None:
+        self.resolved.append(kwargs)
+        if self.conflict:
+            raise ApprovalResolutionConflictError(
+                approval_id=kwargs["approval_id"],
+                current_state=ApprovalState.APPROVED,
+            )
+        self.revision += 1
+        return {
+            "id": kwargs["approval_id"],
+            "session_id": kwargs["session_id"],
+            "state": kwargs["state"].value,
+            "reviewer": kwargs["actor"],
+            "decision_note": kwargs["decision_note"],
+        }
+
+    async def dashboard_snapshot(self, session_id: str) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "stream_id": "approval-stream",
+            "revision": self.revision,
+            "generated_at": "2026-08-11T12:00:00+08:00",
+            "full": True,
+            "session_id": session_id,
+            "counts": {"tasks": 0, "worktrees": 0, "reviews": 0, "failures": 0},
+            "active_selection": {},
+            "missions": [],
+            "tasks": [],
+            "issues": [],
+            "approvals": [],
+            "proposals": [],
+            "failures": [],
+            "events": [],
+        }
+
+
 class _TaskSubmitFakeEngine(_FakeEngine):
     def __init__(self, missions: list[dict[str, Any]] | None = None) -> None:
         super().__init__()
@@ -898,6 +940,11 @@ def _records(writer: io.StringIO) -> list[dict[str, Any]]:
         for line in writer.getvalue().splitlines()
         if line.strip()
     ]
+
+
+def _enable_approval_capability(bridge: JsonlEngineBridge) -> None:
+    bridge._protocol_negotiated = True
+    bridge._client_capabilities.add("workbench_approval_actions")
 
 
 def _attach_terminal_runtime_factory(
@@ -1166,6 +1213,7 @@ def test_protocol_contract_matches_python_enums() -> None:
             "terminal_event_recovery",
             "typed_ui_messages",
             "workbench_snapshot",
+            "workbench_approval_actions",
             "workbench_proposal_actions",
         ],
         "required_capabilities": ["typed_ui_messages"],
@@ -1212,6 +1260,10 @@ def test_protocol_contract_matches_python_enums() -> None:
         "terminal_event_recovery": {
             "client_events": ["terminal_events/ack"],
             "server_events": ["terminal_events/recovery"],
+        },
+        "workbench_approval_actions": {
+            "client_events": ["workbench/approval/action"],
+            "server_events": ["workbench/approval/action_result"],
         },
     }
 
@@ -4527,6 +4579,257 @@ async def test_bridge_workbench_review_reports_missing_without_error_details() -
         "review_id": "missing",
         "status": "unavailable",
         "code": "review_not_found",
+    }
+
+
+@pytest.mark.asyncio
+async def test_bridge_approval_action_requires_confirmation_then_resolves() -> None:
+    engine = _TaskSubmitFakeEngine()
+    engine._session = SimpleNamespace(id="session-task")
+    engine._permission_checker = PermissionChecker(
+        PermissionMode.MODERATE,
+        workspace_root=str(Path.cwd()),
+    )
+    service = _ApprovalActionWorkbenchService()
+    engine.workbench_service = service
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    _enable_approval_capability(bridge)
+    base = {
+        "session_id": "session-task",
+        "approval_id": "approval-1",
+        "action": "reject",
+        "decision_note": "验证证据不足",
+    }
+
+    await bridge.handle_client_record(
+        {
+            "id": "approval-preview",
+            "type": ClientEventType.WORKBENCH_APPROVAL_ACTION,
+            "payload": {**base, "confirmed": False},
+        }
+    )
+    assert service.resolved == []
+    records = _records(writer)
+    preview_records = [
+        item
+        for item in records
+        if item["type"] == "workbench/approval/action_result"
+    ]
+    assert preview_records, records
+    preview = preview_records[-1]
+    assert preview["payload"]["status"] == "needs_confirmation"
+
+    await bridge.handle_client_record(
+        {
+            "id": "approval-confirm",
+            "type": ClientEventType.WORKBENCH_APPROVAL_ACTION,
+            "payload": {**base, "confirmed": True},
+        }
+    )
+    completed = [
+        item
+        for item in _records(writer)
+        if item["type"] == "workbench/approval/action_result"
+    ][-1]
+    assert completed["payload"]["status"] == "completed"
+    assert completed["payload"]["approval"]["state"] == "rejected"
+    assert completed["payload"]["workbench_snapshot"]["revision"] == 2
+    assert service.resolved == [
+        {
+            "session_id": "session-task",
+            "approval_id": "approval-1",
+            "actor": "Human",
+            "state": ApprovalState.REJECTED,
+            "decision_note": "验证证据不足",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_bridge_bypass_resolves_approval_without_second_confirmation() -> None:
+    engine = _TaskSubmitFakeEngine()
+    engine._session = SimpleNamespace(id="session-task")
+    engine.permission_mode = PermissionMode.BYPASS
+    engine._permission_checker = PermissionChecker(
+        PermissionMode.BYPASS,
+        workspace_root=str(Path.cwd()),
+    )
+    service = _ApprovalActionWorkbenchService()
+    engine.workbench_service = service
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    _enable_approval_capability(bridge)
+
+    await bridge.handle_client_record(
+        {
+            "id": "approval-bypass",
+            "type": ClientEventType.WORKBENCH_APPROVAL_ACTION,
+            "payload": {
+                "session_id": "session-task",
+                "approval_id": "approval-1",
+                "action": "approve",
+                "decision_note": "",
+                "confirmed": False,
+            },
+        }
+    )
+
+    result = next(
+        item
+        for item in _records(writer)
+        if item["type"] == "workbench/approval/action_result"
+    )
+    assert result["payload"]["status"] == "completed"
+    assert len(service.resolved) == 1
+
+
+@pytest.mark.asyncio
+async def test_bridge_approval_conflict_returns_fresh_snapshot() -> None:
+    engine = _TaskSubmitFakeEngine()
+    engine._session = SimpleNamespace(id="session-task")
+    engine.permission_mode = PermissionMode.BYPASS
+    engine._permission_checker = PermissionChecker(
+        PermissionMode.BYPASS,
+        workspace_root=str(Path.cwd()),
+    )
+    engine.workbench_service = _ApprovalActionWorkbenchService(conflict=True)
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    _enable_approval_capability(bridge)
+
+    await bridge.handle_client_record(
+        {
+            "id": "approval-conflict",
+            "type": ClientEventType.WORKBENCH_APPROVAL_ACTION,
+            "payload": {
+                "session_id": "session-task",
+                "approval_id": "approval-1",
+                "action": "approve",
+                "confirmed": False,
+            },
+        }
+    )
+
+    result = next(
+        item
+        for item in _records(writer)
+        if item["type"] == "workbench/approval/action_result"
+    )
+    assert result["payload"]["status"] == "conflict"
+    assert result["payload"]["workbench_snapshot"]["revision"] == 1
+
+
+@pytest.mark.asyncio
+async def test_bridge_approval_action_rejects_cross_session_write() -> None:
+    engine = _TaskSubmitFakeEngine()
+    engine._session = SimpleNamespace(id="session-task")
+    service = _ApprovalActionWorkbenchService()
+    engine.workbench_service = service
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    _enable_approval_capability(bridge)
+
+    await bridge.handle_client_record(
+        {
+            "id": "approval-cross-session",
+            "type": ClientEventType.WORKBENCH_APPROVAL_ACTION,
+            "payload": {
+                "session_id": "another-session",
+                "approval_id": "approval-1",
+                "action": "approve",
+                "confirmed": True,
+            },
+        }
+    )
+
+    error = next(item for item in _records(writer) if item["type"] == "error")
+    assert error["payload"]["code"] == "workbench_session_mismatch"
+    assert service.resolved == []
+
+
+@pytest.mark.asyncio
+async def test_real_sqlite_bridge_approval_action_persists_state_and_atomic_audit(
+    tmp_path: Path,
+) -> None:
+    engine = create_agent_engine(
+        AppConfig(
+            memory=MemoryConfig(
+                session_db_path=str(tmp_path / "sessions.db"),
+                vector_db_path=str(tmp_path / "chroma"),
+            )
+        )
+    )
+    engine.set_runtime_mode("bypass")
+    session = await engine.get_or_create_session("Approval action real chain")
+    mission = await engine.workbench_service.create_mission(
+        session_id=session.id,
+        title="治理 Approval",
+        goal="验证 UI Bridge 到 SQLite 的原子决策链路",
+    )
+    issue = await engine.workbench_service.create_issue(
+        session_id=session.id,
+        mission_id=mission.id,
+        title="审查 Workbench 变更",
+        description="等待人工批准",
+    )
+    approval = await engine.workbench_store.add_approval(
+        session_id=session.id,
+        mission_id=mission.id,
+        task_id=str(issue["task_id"]),
+        title="批准 UI-10.6e",
+        detail="确认定向验证证据",
+        requester="Workbench-Agent",
+    )
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    _enable_approval_capability(bridge)
+
+    await bridge.handle_client_record(
+        {
+            "id": "approval-real-approve",
+            "type": ClientEventType.WORKBENCH_APPROVAL_ACTION,
+            "payload": {
+                "session_id": session.id,
+                "approval_id": approval.id,
+                "action": "approve",
+                "decision_note": "",
+                "confirmed": False,
+            },
+        }
+    )
+
+    records = _records(writer)
+    result = next(
+        item
+        for item in records
+        if item["type"] == "workbench/approval/action_result"
+    )
+    persisted = await engine.workbench_service.get_approval(session.id, approval.id)
+    events = await engine.workbench_service.list_events(session.id)
+    resolution_events = [
+        event
+        for event in events["events"]
+        if event["type"] == "approval.resolved"
+        and event["subject_id"] == approval.id
+    ]
+
+    assert result["payload"]["status"] == "completed"
+    assert result["payload"]["workbench_snapshot"]["counts"]["reviews"] == 0
+    assert persisted is not None
+    assert persisted["state"] == "approved"
+    assert persisted["reviewer"] == "Human"
+    assert len(resolution_events) == 1
+    assert resolution_events[0]["payload"] == {
+        "state": "approved",
+        "mission_id": mission.id,
+        "task_id": str(issue["task_id"]),
+        "title": "批准 UI-10.6e",
     }
 
 

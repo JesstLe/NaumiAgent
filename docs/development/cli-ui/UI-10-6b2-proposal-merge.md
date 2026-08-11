@@ -131,7 +131,7 @@ Workbench 的聚焦测试，不运行全量测试。
 
 ## 9. 非目标与后续
 
-- waiting Approval 的 approve/reject/defer/merge 动作；
+- waiting Approval 的 approve/reject 动作（后由 UI-10.6e 独立交付；Approval 不支持 defer/merge）；
 - 跨 Candidate、跨 session、向旧 revision 或关闭 Proposal 合并；
 - 批量 merge、自动选择目标或模型静默治理；
 - HAR-09.6 before/after outcome tracking；
@@ -139,4 +139,4 @@ Workbench 的聚焦测试，不运行全量测试。
 - 任何代码执行、实验、promotion、rollback 或 Git 写入。
 
 UI-10 与 HAR-09 仍为 `partial`。UI-10.6 的 Proposal approve/reject/defer/merge 与 Contract 显式转换
-已经具备，但 waiting Approval 动作和 HAR-09.6 Outcome authority 尚未完成。
+已经具备，waiting Approval 动作随后由 UI-10.6e 完成；其余 Outcome authority 以 HAR-09 模块册为准。

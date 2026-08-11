@@ -39,6 +39,7 @@ PROTOCOL_CAPABILITIES = (
     "terminal_event_recovery",
     "typed_ui_messages",
     "workbench_snapshot",
+    "workbench_approval_actions",
     "workbench_proposal_actions",
 )
 PROTOCOL_REQUIRED_CAPABILITIES = ("typed_ui_messages",)
@@ -76,6 +77,7 @@ class ClientEventType(StrEnum):
     AGENTS_RECOVERY_RESOLVE_UNKNOWN = "agents/recovery/resolve_unknown"
     WORKBENCH_REQUEST = "workbench/request"
     WORKBENCH_REVIEW_REQUEST = "workbench/review/request"
+    WORKBENCH_APPROVAL_ACTION = "workbench/approval/action"
     WORKBENCH_PROPOSAL_ACTION = "workbench/proposal/action"
     GOAL_LIFECYCLE_UPDATE = "goal/lifecycle/update"
     PURSUIT_RECOVERY_RESUME = "pursuit/recovery/resume"
@@ -176,6 +178,7 @@ class ServerEventType(StrEnum):
     WORKBENCH_SNAPSHOT = "workbench/snapshot"
     WORKBENCH_EVENT = "workbench/event"
     WORKBENCH_REVIEW = "workbench/review"
+    WORKBENCH_APPROVAL_ACTION_RESULT = "workbench/approval/action_result"
     WORKBENCH_PROPOSAL_ACTION_RESULT = "workbench/proposal/action_result"
     GOAL_LIFECYCLE_ACTION_RESULT = "goal/lifecycle/action_result"
     PURSUIT_RECOVERY_ACTION_RESULT = "pursuit/recovery/action_result"
@@ -605,6 +608,45 @@ def _normalize_client_payload(
         if len(review_id) > 500:
             raise ValueError("Workbench review_id 不能超过 500 个字符。")
         return {"session_id": session_id, "review_id": review_id}
+
+    if event_type == ClientEventType.WORKBENCH_APPROVAL_ACTION:
+        unknown = set(payload) - {
+            "session_id",
+            "approval_id",
+            "action",
+            "decision_note",
+            "confirmed",
+        }
+        if unknown:
+            raise ValueError("Approval action payload 包含未知字段。")
+        session_id = str(payload.get("session_id") or "").strip()
+        approval_id = str(payload.get("approval_id") or "").strip()
+        action = str(payload.get("action") or "").strip().lower()
+        decision_note = str(payload.get("decision_note") or "").strip()
+        confirmed = payload.get("confirmed", False)
+        if len(session_id) > 500:
+            raise ValueError("Workbench session_id 不能超过 500 个字符。")
+        if not approval_id or len(approval_id) > 128 or any(
+            char in approval_id for char in ("\x00", "\r", "\n")
+        ):
+            raise ValueError("Workbench approval_id 格式无效。")
+        if action not in {"approve", "reject"}:
+            raise ValueError("Approval UI action 仅支持 approve 或 reject。")
+        if len(decision_note) > 2_000 or any(
+            char in decision_note for char in ("\x00", "\r")
+        ):
+            raise ValueError("Approval decision_note 格式无效。")
+        if action == "reject" and not decision_note:
+            raise ValueError("拒绝 Approval 时必须填写原因。")
+        if not isinstance(confirmed, bool):
+            raise ValueError("Approval confirmed 必须是布尔值。")
+        return {
+            "session_id": session_id,
+            "approval_id": approval_id,
+            "action": action,
+            "decision_note": decision_note,
+            "confirmed": confirmed,
+        }
 
     if event_type == ClientEventType.WORKBENCH_PROPOSAL_ACTION:
         session_id = str(payload.get("session_id") or "").strip()

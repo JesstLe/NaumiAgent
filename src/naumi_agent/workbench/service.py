@@ -441,18 +441,6 @@ class WorkbenchService:
         if approval is None:
             return None
 
-        await self._workbench_store.append_event(
-            session_id=session_id,
-            type="approval.resolved",
-            actor=approval.reviewer,
-            subject_id=approval.id,
-            payload={
-                "state": approval.state.value,
-                "mission_id": approval.mission_id,
-                "task_id": approval.task_id,
-                "title": approval.title,
-            },
-        )
         task = await self._tasks_for_session(session_id).get_task(approval.task_id)
         return self._approval_to_dict(approval) | {"task": self._task_to_summary(task)}
 
