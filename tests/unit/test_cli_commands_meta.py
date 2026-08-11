@@ -197,6 +197,37 @@ async def test_shared_pursue_outbox_routes_retention_preview(
 
 
 @pytest.mark.asyncio
+async def test_shared_pursue_outbox_routes_retention_admission(
+    rendered_console: StringIO,
+) -> None:
+    engine = _EngineFacadeFake(content="准入计划已持久化，没有删除记录。")
+    engine.tool_registry = {
+        "pursuit_terminal_outbox_retention_admission": engine.tool,
+    }
+    digest = "a" * 64
+
+    await commands_meta.run_pursue(
+        engine,
+        f"outbox retention-admit ptorpv_{digest[:24]} {digest} "
+        "--retention-days 45 --limit 5 --scan-limit 10 "
+        "--assessed-at 2026-08-11T08:00:00+08:00",
+    )
+
+    tool_call, agent_name = engine.calls[0]
+    assert agent_name == "cli"
+    assert tool_call.name == "pursuit_terminal_outbox_retention_admission"
+    assert json.loads(tool_call.arguments) == {
+        "preview_id": f"ptorpv_{digest[:24]}",
+        "preview_sha256": digest,
+        "retention_days": 45,
+        "limit": 5,
+        "scan_limit": 10,
+        "assessed_at": "2026-08-11T08:00:00+08:00",
+    }
+    assert "准入计划已持久化" in rendered_console.getvalue()
+
+
+@pytest.mark.asyncio
 async def test_delete_session_command_reports_durable_retry_request(
     rendered_console: StringIO,
 ) -> None:

@@ -87,6 +87,20 @@ async def test_run_pursue_routes_goal_through_engine_tool_executor() -> None:
             },
         ),
         (
+            "outbox retention-admit ptorpv_" + "a" * 24 + " " + "a" * 64
+            + " --retention-days 45 --limit 5 --scan-limit 10 "
+            "--assessed-at 2026-08-11T08:00:00+08:00",
+            "pursuit_terminal_outbox_retention_admission",
+            {
+                "preview_id": "ptorpv_" + "a" * 24,
+                "preview_sha256": "a" * 64,
+                "retention_days": 45,
+                "limit": 5,
+                "scan_limit": 10,
+                "assessed_at": "2026-08-11T08:00:00+08:00",
+            },
+        ),
+        (
             "reconcile recovery-" + "a" * 64,
             "pursuit_reconcile",
             {"attempt_id": "recovery-" + "a" * 64},

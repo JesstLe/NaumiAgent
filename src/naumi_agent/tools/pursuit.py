@@ -24,6 +24,9 @@ from naumi_agent.orchestrator.pursuit_store import format_run, format_run_list
 from naumi_agent.orchestrator.pursuit_terminal_retention import (
     render_terminal_outbox_retention_preview,
 )
+from naumi_agent.orchestrator.pursuit_terminal_retention_admission import (
+    render_terminal_outbox_retention_admission,
+)
 from naumi_agent.tools.base import Tool, ToolMetadata
 
 if TYPE_CHECKING:
@@ -41,6 +44,9 @@ if TYPE_CHECKING:
     )
     from naumi_agent.orchestrator.pursuit_terminal_retention import (
         PursuitTerminalOutboxRetentionPreview,
+    )
+    from naumi_agent.orchestrator.pursuit_terminal_retention_admission import (
+        PursuitTerminalOutboxRetentionAdmission,
     )
     from naumi_agent.runtime.ports.model import ModelPort
 
@@ -99,6 +105,35 @@ def parse_terminal_outbox_retention_preview_args(
     if not parsed["limit"] <= parsed["scan_limit"] <= 100:
         raise ValueError("--scan-limit 必须在 limit..100 之间。")
     return parsed
+
+
+def parse_terminal_outbox_retention_admission_args(
+    tokens: list[str],
+) -> dict[str, Any]:
+    """Parse exact preview identity plus the reproducible preview policy."""
+    if len(tokens) < 2:
+        raise ValueError("retention-admit 缺少 preview ID 或摘要。")
+    preview_id, preview_sha256 = tokens[:2]
+    if not re.fullmatch(r"ptorpv_[0-9a-f]{24}", preview_id):
+        raise ValueError("retention-admit preview ID 格式无效。")
+    if not re.fullmatch(r"[0-9a-f]{64}", preview_sha256):
+        raise ValueError("retention-admit preview 摘要格式无效。")
+    if preview_id != f"ptorpv_{preview_sha256[:24]}":
+        raise ValueError("retention-admit preview ID 与摘要不一致。")
+    try:
+        parsed = parse_terminal_outbox_retention_preview_args(tokens[2:])
+    except ValueError as exc:
+        raise ValueError(str(exc).replace(
+            "retention-preview",
+            "retention-admit",
+        )) from None
+    if "assessed_at" not in parsed:
+        raise ValueError("retention-admit 必须提供原 preview 的 --assessed-at。")
+    return {
+        "preview_id": preview_id,
+        "preview_sha256": preview_sha256,
+        **parsed,
+    }
 
 
 def set_pursuit_dependencies(
@@ -863,6 +898,120 @@ class PursuitTerminalOutboxRetentionPreviewTool(Tool):
         return render_terminal_outbox_retention_preview(preview)
 
 
+class PursuitTerminalOutboxRetentionAdmissionTool(Tool):
+    """Admit an exact preview into a durable, non-executable recovery plan."""
+
+    def __init__(
+        self,
+        runner: Callable[
+            [str, str, int, int, int, str, str],
+            Awaitable[PursuitTerminalOutboxRetentionAdmission],
+        ],
+    ) -> None:
+        self._runner = runner
+
+    @property
+    def name(self) -> str:
+        return "pursuit_terminal_outbox_retention_admission"
+
+    @property
+    def description(self) -> str:
+        return (
+            "精确绑定并重新认证一个 Pursuit 终态 outbox retention preview，"
+            "持久化可恢复变更计划；不签发执行或物理删除权限。"
+        )
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            user_facing_name="准入 Pursuit 终态 Outbox 保留计划",
+            search_hint=(
+                "pursuit terminal outbox retention apply admission recovery plan"
+            ),
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "preview_id": {
+                    "type": "string",
+                    "pattern": r"^ptorpv_[0-9a-f]{24}$",
+                },
+                "preview_sha256": {
+                    "type": "string",
+                    "pattern": r"^[0-9a-f]{64}$",
+                },
+                "retention_days": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 3650,
+                },
+                "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+                "scan_limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100,
+                },
+                "assessed_at": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "description": "原 preview 的带时区固定评估时间。",
+                },
+            },
+            "required": [
+                "preview_id",
+                "preview_sha256",
+                "retention_days",
+                "limit",
+                "scan_limit",
+                "assessed_at",
+            ],
+            "additionalProperties": False,
+        }
+
+    async def execute(self, **kwargs: Any) -> str:
+        preview_id = kwargs.get("preview_id")
+        preview_sha256 = kwargs.get("preview_sha256")
+        retention_days = kwargs.get("retention_days")
+        limit = kwargs.get("limit")
+        scan_limit = kwargs.get("scan_limit")
+        assessed_at = kwargs.get("assessed_at")
+        parsed = parse_terminal_outbox_retention_admission_args([
+            str(preview_id or ""),
+            str(preview_sha256 or ""),
+            "--retention-days",
+            str(retention_days),
+            "--limit",
+            str(limit),
+            "--scan-limit",
+            str(scan_limit),
+            "--assessed-at",
+            str(assessed_at or ""),
+        ])
+        permission_receipt = current_permission_receipt()
+        source_request_id = (
+            permission_receipt.call_id
+            if permission_receipt is not None
+            else f"local-tool-{uuid.uuid4()}"
+        )
+        admission = await self._runner(
+            parsed["preview_id"],
+            parsed["preview_sha256"],
+            parsed["retention_days"],
+            parsed["limit"],
+            parsed["scan_limit"],
+            parsed["assessed_at"],
+            source_request_id,
+        )
+        return render_terminal_outbox_retention_admission(admission)
+
+
 def create_pursuit_tool(
     *,
     terminal_outbox_runner: (
@@ -890,6 +1039,13 @@ def create_pursuit_tool(
         ]
         | None
     ) = None,
+    terminal_outbox_retention_admission: (
+        Callable[
+            [str, str, int, int, int, str, str],
+            Awaitable[PursuitTerminalOutboxRetentionAdmission],
+        ]
+        | None
+    ) = None,
 ) -> list[Tool]:
     tools: list[Tool] = [
         PursueTool(),
@@ -914,5 +1070,9 @@ def create_pursuit_tool(
     if terminal_outbox_retention_preview is not None:
         tools.append(PursuitTerminalOutboxRetentionPreviewTool(
             terminal_outbox_retention_preview,
+        ))
+    if terminal_outbox_retention_admission is not None:
+        tools.append(PursuitTerminalOutboxRetentionAdmissionTool(
+            terminal_outbox_retention_admission,
         ))
     return tools

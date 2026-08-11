@@ -260,6 +260,7 @@ def render_terminal_outbox_retention_preview(
         "本结果是只读候选预演，不是删除授权；未删除、归档或修改任何记录。",
         "",
         f"- 预览回执：`{preview.preview_id}`",
+        f"- 预览摘要：`{preview.preview_sha256}`",
         f"- 评估时间：`{preview.assessed_at}`",
         f"- 截止时间：`{preview.cutoff_at}`（保留 {preview.policy.retention_days} 天）",
         f"- Effective-state：pending {preview.pending_count} · delivered "

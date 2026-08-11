@@ -6413,6 +6413,26 @@ async def _run_pursue_meta(engine: Any, subcommand: str, arg: str) -> None:
             )
             return
         tool_name = "pursuit_terminal_outbox_retention_preview"
+    elif outbox_parts and outbox_parts[0] in {
+        "retention-admit", "retention_admit",
+    }:
+        from naumi_agent.tools.pursuit import (
+            parse_terminal_outbox_retention_admission_args,
+        )
+
+        try:
+            retention_kwargs = parse_terminal_outbox_retention_admission_args(
+                outbox_parts[1:]
+            )
+        except ValueError as exc:
+            console.print(f"[yellow]{exc}[/yellow]")
+            console.print(
+                "[yellow]用法: /pursue outbox retention-admit "
+                "<ptorpv_...> <sha256> --assessed-at ISO "
+                "[--retention-days N] [--limit N] [--scan-limit N][/yellow]"
+            )
+            return
+        tool_name = "pursuit_terminal_outbox_retention_admission"
     tool = engine.tool_registry.get(tool_name)
     if not tool:
         console.print(f"[red]工具未注册: {tool_name}[/red]")
@@ -6443,7 +6463,8 @@ async def _run_pursue_meta(engine: Any, subcommand: str, arg: str) -> None:
             "[yellow]用法: /pursue outbox run-now | "
             "requeue <ptfail_...> | abandon <ptfail_...> <reason> | "
             "retention-preview [--retention-days N] [--limit N] "
-            "[--scan-limit N] [--assessed-at ISO][/yellow]"
+            "[--scan-limit N] [--assessed-at ISO] | retention-admit "
+            "<ptorpv_...> <sha256> --assessed-at ISO[/yellow]"
         )
         return
     if subcommand == "outbox":
