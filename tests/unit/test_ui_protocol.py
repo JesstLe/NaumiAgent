@@ -79,6 +79,26 @@ def test_protocol_exposes_typed_harness_receipt_event() -> None:
     assert ServerEventType.HARNESS_RECEIPT == "harness/receipt"
 
 
+def test_evolution_review_accepts_rollback_outcome_filter() -> None:
+    record = normalize_client_record({
+        "type": ClientEventType.EVOLUTION_REVIEW_REQUEST,
+        "payload": {
+            "action": "list",
+            "source_kind": "rollback_outcome",
+            "limit": 20,
+        },
+    })
+
+    assert record["payload"] == {
+        "action": "list",
+        "candidate_id": "",
+        "query": "",
+        "risk": "",
+        "source_kind": "rollback_outcome",
+        "limit": 20,
+    }
+
+
 def test_protocol_normalizes_bounded_doctor_probe_and_cancel() -> None:
     start = normalize_client_record({
         "type": ClientEventType.DOCTOR_PROBE,

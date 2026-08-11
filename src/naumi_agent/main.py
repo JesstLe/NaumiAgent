@@ -2920,6 +2920,7 @@ def _print_help() -> None:
             "stable-rollback-readiness|"
             "stable-rollout-authorization|"
             "stable-rollout-finalization|"
+            "discover-outcome|"
             "revalidation-rollback-execute|revalidation-rollback-outcome|"
             "outcome-before-after|outcome-verify-runtime|"
             "outcome-verify-behavior|outcome-behavior-coverage|"
@@ -3325,6 +3326,17 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     try:
         parts = shlex.split(arg)
         action = parts[0].lower() if parts else "list"
+        if action == "discover-outcome":
+            if len(parts) != 2:
+                raise ValueError("discover-outcome 需要一个 Rollback Outcome ID。")
+            await _run_tool_slash_command(
+                engine,
+                slash_command="/evolution",
+                tool_name="evolution_discover_outcome_opportunity",
+                parse_args=lambda _arg: {"outcome_id": parts[1]},
+                arg="",
+            )
+            return
         if action == "experiment-contract":
             if len(parts) != 2:
                 raise ValueError("experiment-contract 需要一个 Contract ID。")
@@ -4169,6 +4181,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "stable-rollback-readiness、"
                 "stable-rollout-authorization、"
                 "stable-rollout-finalization、"
+                "discover-outcome、"
                 "revalidation-rollback-execute、revalidation-rollback-outcome、"
                 "outcome-before-after、outcome-verify-runtime、"
                 "outcome-verify-behavior、outcome-behavior-coverage、"
@@ -4373,6 +4386,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "<stable-intent-id>；inspect <authorization-id>；"
             "/evolution stable-rollout-finalization execute <authorization-id>；"
             "inspect <authorization-id>；"
+            "/evolution discover-outcome <rollback-outcome-id>；"
             "/evolution revalidation-rollback-execute <rollback-request-id>；"
             "/evolution revalidation-rollback-outcome <rollback-request-id>；"
             "/evolution outcome-before-after <rollback-request-id>；"

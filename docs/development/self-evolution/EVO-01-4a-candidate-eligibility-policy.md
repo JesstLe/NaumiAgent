@@ -43,14 +43,15 @@ v1 明确保护安全/权限、凭据、迁移与更新相关 authority scope，
 到期或显著新证据时通过；活跃冷却、缺失可信截止时间或未知结论时 fail-closed。纯函数调用未绑定
 上下文时仍不伪造通过。`experiment_contract` 继续固定未通过，因此 `review_ready` 只表示可进入
 Review Queue，不等于允许修改代码。
-每个 Gate 另有 `hard_block`；只有 protected scope 与 verifier 缺失属于不可继续的硬阻断，证据
+每个 Gate 另有 `hard_block`；source authority 失效、protected scope 与 verifier 缺失属于不可继续的硬阻断，证据
 不足、冷却记录和 experiment contract 缺失仍可通过后续证据或治理步骤补齐。
 
 ## 接入与验收
 
 - `/evolution detail` 和 `evolution_candidates` Tool 通过现有 Review Service 展示同一 Assessment。
-- 每个判断包含 `candidate-eligibility-v2`、稳定 reason code、通过状态和中文解释；v2 可接收只读
-  Workbench 治理上下文，未绑定上下文时 fail-closed 且不伪造 cooldown 通过。
+- 每个判断包含当前 `candidate-eligibility-v3`、稳定 reason code、通过状态和中文解释；v2 引入只读
+  Workbench 治理上下文，v3 由 EVO-06.1a 增加 Outcome `source_authority` 动态硬门。未绑定治理上下文时
+  fail-closed 且不伪造 cooldown 通过；未绑定来源重验器时 Outcome-backed Candidate 同样 fail-closed。
 - 重复直接反馈、单次反馈、Agent-only、单条机械证据、受保护源码 scope 均有 focused tests。
 - Assessment 不读取时钟、不访问网络、不写 Store；治理时间由 Workbench 在外层评估后作为不可变
   Context 注入，因此相同 Candidate + Context 必须得到相同结果。

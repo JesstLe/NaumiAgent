@@ -73,7 +73,7 @@ export const DEFAULT_SLASH_COMMAND_CANDIDATES = [
   { command: "/workbench", description: "刷新 Workbench 权威快照" },
   { command: "/chat", description: "切换为普通对话输入" },
   { command: "/permissions", description: "显示待确认权限面板" },
-  { command: "/evolution", description: "审阅 Candidate，并显式加入 Workbench 队列" },
+  { command: "/evolution", description: "回注 Outcome、审阅 Candidate，并显式加入 Workbench 队列" },
   { command: "/agents", description: "打开 Agent 控制中心" },
   { command: "/doctor", description: "本地诊断、受控在线探测或脱敏诊断包" },
   { command: "/harness", description: "Harness Profile 状态、离线评测、运行解释、证据、知识、检查与信任" },
@@ -3644,7 +3644,7 @@ export function handleSubmitText(state, text, send) {
     return;
   }
   if (
-    /^\/evolution\s+(?:experiment-contract|evaluation-contract|evaluation-final|decision-input|mechanical-gate|independent-review|counterfactual|reward-hacking|decision-state|decision-resolve|reflection|reflection-revoke|promotion-input|promotion-package|approval-requirement|approval-request|approval-principal|approval-signature|approval-decision)(?:\s|$)/i.test(
+    /^\/evolution\s+(?:discover-outcome|experiment-contract|evaluation-contract|evaluation-final|decision-input|mechanical-gate|independent-review|counterfactual|reward-hacking|decision-state|decision-resolve|reflection|reflection-revoke|promotion-input|promotion-package|approval-requirement|approval-request|approval-principal|approval-signature|approval-decision)(?:\s|$)/i.test(
       commandText,
     )
   ) {
@@ -3656,7 +3656,7 @@ export function handleSubmitText(state, text, send) {
       pushSystemMessage(
         state,
         "Evolution",
-        "用法：/evolution list [...]；/evolution detail <candidate-id>；/evolution enqueue <candidate-id> --mission <id> --task <id> [--agent <name>]",
+        "用法：/evolution list [...]；/evolution detail <candidate-id>；/evolution discover-outcome <rollback-outcome-id>；/evolution enqueue <candidate-id> --mission <id> --task <id> [--agent <name>]",
         "warning",
       );
       return;
@@ -5417,7 +5417,7 @@ function parseEvolutionReviewCommand(text) {
     if (!value) return null;
     if (option === "--query") request.query = value;
     else if (option === "--risk" && ["low", "medium", "high", "critical"].includes(value)) request.risk = value;
-    else if (option === "--source" && ["harness_failure", "self_review_static", "user_feedback", "agent_interpreted_feedback"].includes(value)) request.source_kind = value;
+    else if (option === "--source" && ["harness_failure", "self_review_static", "user_feedback", "agent_interpreted_feedback", "rollback_outcome"].includes(value)) request.source_kind = value;
     else if (option === "--limit" && /^\d+$/.test(value) && Number(value) >= 1 && Number(value) <= 100) request.limit = Number(value);
     else return null;
   }

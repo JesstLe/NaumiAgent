@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 from naumi_agent.evolution.aggregation import CandidateAggregation, aggregate_candidate
+from naumi_agent.evolution.candidate import EvolutionCandidateDraft
 from naumi_agent.evolution.eligibility import (
     CandidateEligibilityAssessment,
     CandidateGovernanceContext,
@@ -30,6 +32,7 @@ _SOURCE_KINDS = frozenset({
     "self_review_static",
     "user_feedback",
     "agent_interpreted_feedback",
+    "rollback_outcome",
 })
 
 
@@ -41,6 +44,13 @@ class CandidateGovernanceReader(Protocol):
         str,
         tuple[WorkbenchProposal | None, ProposalCooldownDecision],
     ]: ...
+
+
+class CandidateSourceAuthorityReader(Protocol):
+    async def validate_candidate_sources(
+        self,
+        candidate: EvolutionCandidateDraft,
+    ) -> bool: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,13 +116,22 @@ class EvolutionReviewService:
         store: EvolutionCandidateStore,
         *,
         governance_reader: CandidateGovernanceReader | None = None,
+        source_authority_reader: CandidateSourceAuthorityReader | None = None,
     ) -> None:
         self._store = store
         self._governance_reader = governance_reader
+        self._source_authority_reader = source_authority_reader
 
     def bind_governance_reader(self, reader: CandidateGovernanceReader) -> None:
         """Bind the durable read path after runtime services are composed."""
         self._governance_reader = reader
+
+    def bind_source_authority_reader(
+        self,
+        reader: CandidateSourceAuthorityReader,
+    ) -> None:
+        """Bind dynamic Outcome revalidation after runtime composition."""
+        self._source_authority_reader = reader
 
     async def list_snapshot(
         self,
@@ -126,11 +145,16 @@ class EvolutionReviewService:
             : active.limit
         ]
         governance = await self._governance_contexts(selected)
+        source_authority = await self._source_authority_contexts(selected)
         items = tuple(
             _review_item(
                 candidate,
                 include_refs=False,
                 governance=governance.get(candidate.draft.candidate_id),
+                source_authority_valid=source_authority.get(
+                    candidate.draft.candidate_id,
+                    False,
+                ),
             )
             for candidate in selected
         )
@@ -146,12 +170,14 @@ class EvolutionReviewService:
             return EvolutionReviewSnapshot(mode="detail")
         events = await self._store.list_events(workspace_root, candidate_id)
         governance = await self._governance_contexts([stored])
+        source_authority = await self._source_authority_contexts([stored])
         return EvolutionReviewSnapshot(
             mode="detail",
             selected=_review_item(
                 stored,
                 include_refs=True,
                 governance=governance.get(candidate_id),
+                source_authority_valid=source_authority.get(candidate_id, False),
             ),
             events=events[-100:],
         )
@@ -185,6 +211,28 @@ class EvolutionReviewService:
                 policy_version=decision.policy_version,
             )
         return contexts
+
+    async def _source_authority_contexts(
+        self,
+        candidates: list[EvolutionStoredCandidate],
+    ) -> dict[str, bool]:
+        if not candidates:
+            return {}
+        reader = self._source_authority_reader
+        if reader is None:
+            return {
+                item.draft.candidate_id: "rollback_outcome" not in item.draft.source_kinds
+                for item in candidates
+            }
+
+        async def validate(item: EvolutionStoredCandidate) -> tuple[str, bool]:
+            try:
+                valid = await reader.validate_candidate_sources(item.draft)
+            except (OSError, RuntimeError, TypeError, ValueError):
+                valid = False
+            return item.draft.candidate_id, bool(valid)
+
+        return dict(await asyncio.gather(*(validate(item) for item in candidates)))
 
 
 def render_evolution_review(snapshot: EvolutionReviewSnapshot) -> str:
@@ -347,6 +395,7 @@ def _review_item(
     *,
     include_refs: bool,
     governance: CandidateGovernanceContext | None,
+    source_authority_valid: bool,
 ) -> EvolutionReviewItem:
     draft = stored.draft
     evidence = draft.evidence
@@ -383,11 +432,19 @@ def _review_item(
             if include_refs
             else ()
         ),
-        eligibility=assess_candidate_eligibility(draft, governance=governance),
+        eligibility=assess_candidate_eligibility(
+            draft,
+            governance=governance,
+            source_authority_valid=source_authority_valid,
+        ),
         governance=governance,
         aggregation=aggregate_candidate(draft) if include_refs else None,
         proposal=(
-            generate_proposal_preview(stored, governance=governance)
+            generate_proposal_preview(
+                stored,
+                governance=governance,
+                source_authority_valid=source_authority_valid,
+            )
             if include_refs
             else None
         ),

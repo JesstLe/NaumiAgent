@@ -242,6 +242,9 @@ restore/remove step 并写入只读 content-addressed storage。
 验证、崩溃对账，以及 normal 单次确认/bypass 直通的 Agent Tool 与共享 Slash 入口。
 [EVO-05.7a](EVO-05-7a-rollback-outcome-authority.md) 已把真实 rollback Receipt 反向绑定到原始 Experiment Contract
 与 Workbench Proposal，形成动态可撤权的 `rolled_back` Outcome；长期指标和 promoted/superseded 状态尚未完成。
+[EVO-06.1a](EVO-06-1a-outcome-backed-opportunity-discovery.md) 已把该真实 `rolled_back` Outcome 确定性回注
+现有 Candidate Store：同源并发幂等、同根失败聚合，Review/Workbench 入队前动态重验来源 authority；它不复制源码/补丁，
+也不授予实验、学习或推广权限。accepted/promoted Outcome 与后续 Capability Proposal/Shadow/Activation 仍未完成。
 [EVO-05.3f2c3b1](EVO-05-3f2c3b1-platform-dispatch-outbox.md) 已把实时准入的 required-platform Worker lane 转为 durable
 queued dispatch，并在 exact Worker incarnation 上预留容量。[EVO-05.3f2c3b2a](EVO-05-3f2c3b2a-authenticated-worker-claim.md)
 已增加 supervisor-attested Ed25519 Worker Identity、一次性 claim challenge 和可续期 lease hash chain。

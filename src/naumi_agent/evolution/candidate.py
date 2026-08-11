@@ -62,6 +62,7 @@ _FINDING_LABELS = MappingProxyType({
     "user_correction": "用户纠正信号",
     "user_reported_defect": "用户报告缺陷",
     "verification_failure": "机械验证失败",
+    "rollback_guardrail_breach": "发布后护栏回退",
 })
 
 

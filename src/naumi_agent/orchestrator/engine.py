@@ -192,6 +192,9 @@ from naumi_agent.evolution.mutation_receipts import (
     EvolutionMutationReceiptStore,
 )
 from naumi_agent.evolution.mutation_turns import EvolutionMutationTurnRunner
+from naumi_agent.evolution.opportunity_discovery import (
+    EvolutionOutcomeOpportunityService,
+)
 from naumi_agent.evolution.patch_journals import EvolutionPatchJournalStore
 from naumi_agent.evolution.patch_recovery import (
     EvolutionPatchRecoveryCoordinator,
@@ -2709,6 +2712,18 @@ class AgentEngine:
                 experiment_store=self.evolution_experiment_contract_store,
                 store=self.evolution_revalidation_rollback_outcome_store,
             )
+        )
+        self.evolution_outcome_opportunity_service = (
+            EvolutionOutcomeOpportunityService(
+                workspace_root=paths.workspace_root,
+                outcome_service=(
+                    self.evolution_revalidation_rollback_outcome_service
+                ),
+                candidate_store=self.evolution_candidate_store,
+            )
+        )
+        self.evolution_review_service.bind_source_authority_reader(
+            self.evolution_outcome_opportunity_service
         )
         self.evolution_post_rollback_runtime_verification_store = (
             EvolutionPostRollbackRuntimeVerificationStore(
