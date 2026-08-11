@@ -20,6 +20,7 @@ runtime metric 或其他动态来源时，第二次 `bind_source_authority_reade
 `EVOLUTION_DYNAMIC_EVIDENCE_SOURCE_KINDS` 是动态 Evidence 的唯一代码注册表。当前包含：
 
 - `eval_metric_regression`
+- `goal_need`
 - `rollback_outcome`
 - `promoted_outcome`
 
@@ -52,7 +53,8 @@ runtime metric 或其他动态来源时，第二次 `bind_source_authority_reade
 
 `AgentEngine` 在 Outcome Opportunity Service 构造完成后创建
 `evolution_candidate_source_authority_router`，将 rollback/promoted 映射到 Outcome Service，并将
-`eval_metric_regression` 映射到 H5c Opportunity Service，再把完整 router 一次性绑定到
+`eval_metric_regression` 映射到 H5c Opportunity Service，`goal_need` 映射到 Goal Need Opportunity
+Service，再把完整 router 一次性绑定到
 `EvolutionReviewService`。New UI、Textual TUI、Slash 和 Agent Tool
 仍通过 Review Service 消费同一个 `source_authority` Gate，没有界面专属判断。
 
@@ -73,5 +75,6 @@ runtime metric 或其他动态来源时，第二次 `bind_source_authority_reade
 
 ## 非目标与下一步
 
-EVO-01.1c / EVO-06.1c1 已在本前置之上形成 `eval_metric_regression` Evidence 并接入独立 reader。
-后续分别实现缺失能力/明确需求 Evidence、跨 Outcome 时间窗和 EVO-01.5 可解释 Prioritization。
+EVO-01.1c / EVO-06.1c1 已形成 `eval_metric_regression` Evidence；EVO-06.1c2 已形成 `goal_need`
+Evidence。两者均接入独立 reader。后续实现 durable 缺失能力 Evidence、跨类型时间窗和 EVO-01.5
+可解释 Prioritization。

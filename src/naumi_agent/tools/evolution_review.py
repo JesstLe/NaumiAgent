@@ -67,6 +67,10 @@ from naumi_agent.evolution.final_evaluation_receipts import (
     EvolutionFinalEvaluationReceiptError,
     render_final_evaluation_receipt,
 )
+from naumi_agent.evolution.goal_need_opportunities import (
+    EvolutionGoalNeedOpportunityError,
+    render_goal_need_opportunity,
+)
 from naumi_agent.evolution.independent_reviews import (
     EvolutionIndependentReviewError,
     render_independent_review,
@@ -558,6 +562,67 @@ class EvolutionEvalMetricOpportunityTool(Tool):
             code = getattr(exc, "code", "eval_metric_opportunity_failed")
             return f"H5c 定量回归机会发现未完成（`{code}`）：{exc}"
         return render_eval_metric_opportunity(result)
+
+
+class EvolutionGoalNeedOpportunityTool(Tool):
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_discover_goal_need_opportunity"
+
+    @property
+    def description(self) -> str:
+        return (
+            "把一个当前未完成的 durable Goal 投影为用户明确需求 Candidate。"
+            "只保存 Goal 身份和 objective 的摘要哈希，完成或取消后动态撤权；"
+            "不创建 Goal、不复制目标原文，也不授予实验或推广权限。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "goal_id": {
+                    "type": "string",
+                    "pattern": "^goal_[0-9a-f]{12}$",
+                },
+            },
+            "required": ["goal_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            user_facing_name="Goal 明确需求机会发现",
+            search_hint=(
+                "evolution goal explicit user need capability opportunity "
+                "自进化 目标 明确 用户 需求 能力 机会发现"
+            ),
+        )
+
+    async def execute(self, goal_id: str) -> str:
+        try:
+            result = await self._engine.evolution_goal_need_opportunity_service.discover(
+                goal_id=goal_id
+            )
+        except (
+            EvolutionGoalNeedOpportunityError,
+            EvolutionStoreError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "goal_need_opportunity_failed")
+            return f"Goal 明确需求机会发现未完成（`{code}`）：{exc}"
+        return render_goal_need_opportunity(result)
 
 
 class EvolutionExperimentContractAuthorityTool(Tool):
@@ -6549,6 +6614,7 @@ def create_evolution_review_tools(
         EvolutionStableRolloutFinalizationTool(engine),
         EvolutionOutcomeOpportunityTool(engine),
         EvolutionEvalMetricOpportunityTool(engine),
+        EvolutionGoalNeedOpportunityTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -6561,6 +6627,7 @@ __all__ = [
     "EvolutionApprovalSignatureTool",
     "EvolutionCandidatesTool",
     "EvolutionEvalMetricOpportunityTool",
+    "EvolutionGoalNeedOpportunityTool",
     "EvolutionOutcomeOpportunityTool",
     "EvolutionCounterfactualEvidenceTool",
     "EvolutionDecisionInputTool",

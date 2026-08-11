@@ -118,6 +118,7 @@ class ExperimentCheck(_StrictModel):
     direction: Literal["decrease", "increase"]
     target: float
     verifier: Literal[
+        "goal_completion",
         "harness_replay",
         "self_review_static",
         "feedback_recurrence",

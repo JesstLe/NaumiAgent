@@ -30,7 +30,13 @@ _ABSOLUTE_TEXT_PATH_RE = re.compile(
     r"(?:^|[\s`(])(?:/(?:Users|home|tmp|var)/\S+|[A-Za-z]:[\\/]\S+)",
 )
 
-CandidateKind = Literal["correctness", "maintainability", "reliability", "safety"]
+CandidateKind = Literal[
+    "capability",
+    "correctness",
+    "maintainability",
+    "reliability",
+    "safety",
+]
 CandidateRiskLevel = Literal["low", "medium", "high", "critical"]
 
 _MAINTAINABILITY_FINDINGS = frozenset(
@@ -68,6 +74,7 @@ _FINDING_LABELS = MappingProxyType({
     "eval_cost_regression": "评测成本回归",
     "eval_token_regression": "评测 Token 消耗回归",
     "eval_metric_regression": "评测定量指标回归",
+    "user_explicit_need": "用户明确能力需求",
 })
 
 
@@ -111,6 +118,7 @@ class CandidateExpectedMetric(_StrictModel):
     direction: Literal["decrease", "increase"]
     target: float
     verifier: Literal[
+        "goal_completion",
         "harness_replay",
         "self_review_static",
         "feedback_recurrence",
@@ -300,6 +308,8 @@ def _unique_evidence(evidence: Iterable[EvolutionEvidence]) -> tuple[EvolutionEv
 
 
 def _candidate_kind(finding_code: str) -> CandidateKind:
+    if finding_code == "user_explicit_need":
+        return "capability"
     if finding_code in _SAFETY_FINDINGS:
         return "safety"
     if finding_code in _RELIABILITY_FINDINGS:
@@ -361,6 +371,14 @@ def _expected_metrics(
                 direction=quantitative.direction,
                 target=quantitative.target,
                 verifier="harness_replay",
+            )
+        elif item.source_kind == "goal_need":
+            source_key = item.source_kind
+            metric = CandidateExpectedMetric(
+                name="goal.user_explicit_need.completion",
+                direction="increase",
+                target=1,
+                verifier="goal_completion",
             )
         else:
             source_key = item.source_kind

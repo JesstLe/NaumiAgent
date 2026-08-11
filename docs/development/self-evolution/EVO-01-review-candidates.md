@@ -54,6 +54,9 @@ Evolution Candidate，而不是直接触发 self_modify。
 - [EVO-01.1c / EVO-06.1c1](EVO-06-1c1-h5c-quantitative-regression-opportunity.md) H5c 定量回归
   Evidence adapter：已实现。重读两组 H5a cohort 并完整重建 H5c，只把 primary typed metric 的
   95% CI 确认回归写入 Evidence v2；Candidate 保留原 metric/direction/target 并在 Review 前动态重验。
+- [EVO-06.1c2](EVO-06-1c2-goal-backed-explicit-need-opportunity.md) Goal 明确需求 adapter：已实现。
+  只接受用户显式创建且未终结的 durable Goal，Candidate 不保存 objective/note/session 正文；完成、
+  取消或篡改会动态撤权，独立 acceptance runner 缺失时禁止自动实验。
 - HAR-09.1a Feedback adapter：已实现。直接用户反馈和 Agent 对 durable user turn 的解释使用
   不同 source kind，摘要不落库，非缺陷反馈不生成 Candidate；所有结果仍固定不可执行。
 - EVO-01.6a Candidate 只读审阅面：已实现。用户通过 `/evolution list/detail`、Agent 通过
@@ -67,6 +70,6 @@ Evolution Candidate，而不是直接触发 self_modify。
 - HAR-09.5a/5b1/5b2a 已实现 Proposal 显式入队、持久来源、治理状态机、有效冷却与 Eligibility
   只读接线；单条噪声不能越过 reject/defer，显著新证据规则有版本和审计，New UI/TUI 可见同一
   治理结论。Workbench 决策交互页仍未完成。
-- runtime 在线指标 adapter、缺失能力/明确需求 adapter、跨 Candidate 影响范围分析、
+- runtime 在线指标 adapter、durable 缺失能力 adapter、跨 Candidate 影响范围分析、
   完整 experiment Eligibility、Prioritization、排序解释和 approve/reject/defer 动作仍为 planned；不得把
   EVO-01 整体标记为完成。

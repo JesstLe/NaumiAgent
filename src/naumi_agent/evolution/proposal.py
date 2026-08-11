@@ -40,6 +40,7 @@ _SCOPE_PREFIX_KIND: dict[str, ProposalKind] = {
     "test": "test",
     "eval": "test",
     "verification": "test",
+    "capability": "tool",
 }
 _FINDING_KIND: dict[str, ProposalKind] = {
     "knowledge_gap": "knowledge",
@@ -56,6 +57,7 @@ _FINDING_KIND: dict[str, ProposalKind] = {
     "verification_failure": "test",
     "flaky_test": "test",
     "missing_test": "test",
+    "user_explicit_need": "tool",
 }
 _KIND_LABELS: dict[ProposalKind, str] = {
     "knowledge": "知识",
@@ -66,6 +68,7 @@ _KIND_LABELS: dict[ProposalKind, str] = {
     "code": "代码",
 }
 _VERIFIER_PROCEDURES = {
+    "goal_completion": "由独立 Goal 验收窗口确认用户完成状态；取消、静默或 Agent 自评不计为完成。",
     "harness_replay": "使用同一 Harness 输入安全回放，并比较失败分类与验收条件。",
     "self_review_static": "对同一 scope 重新运行 Self-Review 静态扫描并比较 finding 数量。",
     "feedback_recurrence": "在后续观察窗口比较同根用户反馈复发率，不把沉默视为自动通过。",
@@ -105,6 +108,7 @@ class ProposalValidationStep(_StrictModel):
     direction: Literal["decrease", "increase"]
     target: float
     verifier: Literal[
+        "goal_completion",
         "harness_replay",
         "self_review_static",
         "feedback_recurrence",

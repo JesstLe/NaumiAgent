@@ -150,6 +150,9 @@ from naumi_agent.evolution.final_evaluation_receipts import (
     EvolutionFinalEvaluationReceiptExecutor,
     EvolutionFinalEvaluationReceiptStore,
 )
+from naumi_agent.evolution.goal_need_opportunities import (
+    EvolutionGoalNeedOpportunityService,
+)
 from naumi_agent.evolution.independent_reviews import (
     EvolutionIndependentReviewBuilder,
     EvolutionIndependentReviewExecutor,
@@ -3467,11 +3470,19 @@ class AgentEngine:
                 candidate_store=self.evolution_candidate_store,
             )
         )
+        self.evolution_goal_need_opportunity_service = (
+            EvolutionGoalNeedOpportunityService(
+                workspace_root=paths.workspace_root,
+                goal_store=resources.goal_store,
+                candidate_store=self.evolution_candidate_store,
+            )
+        )
         self.evolution_candidate_source_authority_router = (
             EvolutionCandidateSourceAuthorityRouter({
                 "eval_metric_regression": (
                     self.evolution_eval_metric_opportunity_service
                 ),
+                "goal_need": self.evolution_goal_need_opportunity_service,
                 "promoted_outcome": self.evolution_outcome_opportunity_service,
                 "rollback_outcome": self.evolution_outcome_opportunity_service,
             })

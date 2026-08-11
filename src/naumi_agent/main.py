@@ -2991,6 +2991,7 @@ def _print_help() -> None:
             "stable-rollout-authorization|"
             "stable-rollout-finalization|"
             "discover-metric|"
+            "discover-goal|"
             "discover-outcome|"
             "revalidation-rollback-execute|revalidation-rollback-outcome|"
             "outcome-before-after|outcome-verify-runtime|"
@@ -3401,6 +3402,17 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     try:
         parts = shlex.split(arg)
         action = parts[0].lower() if parts else "list"
+        if action == "discover-goal":
+            if len(parts) != 2:
+                raise ValueError("discover-goal 需要一个 Goal ID。")
+            await _run_tool_slash_command(
+                engine,
+                slash_command="/evolution",
+                tool_name="evolution_discover_goal_need_opportunity",
+                parse_args=lambda _arg: {"goal_id": parts[1]},
+                arg="",
+            )
+            return
         if action == "discover-metric":
             if len(parts) != 2:
                 raise ValueError("discover-metric 需要一个 H5c Comparison ID。")
@@ -4816,6 +4828,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "stable-promotion-admission-delivery、"
                 "stable-rollout-authorization、"
                 "stable-rollout-finalization、"
+                "discover-goal、"
                 "discover-metric、"
                 "discover-outcome、"
                 "revalidation-rollback-execute、revalidation-rollback-outcome、"
@@ -5069,6 +5082,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution stable-promotion-admission-delivery prepare|export|inspect|"
             "queue|inspect-dispatch <runtime-admission-id>；"
             "receive <submission-base64>；run-worker；inspect-worker；"
+            "/evolution discover-goal <goal-id>；"
             "/evolution discover-metric <h5c-comparison-id>；"
             "/evolution discover-outcome <rollback|stable-promoted-outcome-id>；"
             "/evolution revalidation-rollback-execute <rollback-request-id>；"

@@ -14,7 +14,7 @@
 - **工具执行**：文件读写、代码执行、shell、Web、浏览器、记忆、任务、调度等工具走统一权限与预算控制。
 - **会话与记忆**：SQLite 会话历史、Chroma 长期记忆、上下文压缩、`/resume` 与 `/history` 恢复链路。
 - **运行态面板**：`/todo`、`/tasks`、`/runtime` 汇总 todo、subagent、后台任务、浏览器任务和 hook 状态。
-- **持续目标与自我演进**：`/goal` 跨轮次保持工作方向，`/goal pursue` 复用 `/pursue` 启动自主循环；`/self-review`、`/evolve`、`/forge` 支持源码审查、自我修改和工具锻造。
+- **持续目标与自我演进**：`/goal` 跨轮次保持工作方向，`/goal pursue` 复用 `/pursue` 启动自主循环；显式未终结 Goal 可经 `/evolution discover-goal <id>` 脱敏进入候选审阅，完成或取消后动态撤权；`/self-review`、`/evolve`、`/forge` 支持源码审查、自我修改和工具锻造。
 - **多界面**：Node Terminal UI、Textual fallback、REST API/WebSocket 和原生 Mac Workbench。
 - **跨平台终端**：适配 macOS Terminal/iTerm2、Kitty、WezTerm、常见 Linux
   终端与 Windows Terminal；启动时协商颜色、Unicode、高级键盘协议和动画能力，异常退出会恢复光标、raw mode 与备用屏幕。

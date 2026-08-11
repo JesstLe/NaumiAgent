@@ -26,12 +26,14 @@ _SAFE_URI_SCHEMES = frozenset({
     "artifact",
     "chat-run",
     "evolution-outcome",
+    "goal",
     "harness",
 })
 
 # Every kind in this registry requires a live authority reader before review.
 EVOLUTION_DYNAMIC_EVIDENCE_SOURCE_KINDS = frozenset({
     "eval_metric_regression",
+    "goal_need",
     "promoted_outcome",
     "rollback_outcome",
 })
@@ -105,6 +107,7 @@ class EvolutionEvidence(_StrictModel):
         "user_feedback",
         "agent_interpreted_feedback",
         "eval_metric_regression",
+        "goal_need",
         "rollback_outcome",
         "promoted_outcome",
     ] = "harness_failure"
