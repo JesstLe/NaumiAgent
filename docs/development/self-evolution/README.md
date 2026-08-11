@@ -254,7 +254,9 @@ pointer、slot 与 Boot Receipt，以 ARC-07.5c1 installation key 签署 fresh s
 readiness，不授予 remote execution、stable rollout、配置/数据或 promotion authority。
 [EVO-05.5f5x3c](EVO-05-5f5x3c-signed-remote-finalization-authorization.md) 已让独立 Rollout Control key 对 current x3b
 Probe 签发逐 member、短期、single-use、binary-only portable Finalization Authorization，并由 installer-owned Trust Policy
-验签；它仍不执行目标 Release Store writer，自动 transport、远端 CAS 与 installation-signed result 留给 x3d。
+验签。[EVO-05.5f5x3d](EVO-05-5f5x3d-remote-stable-member-finalization-executor.md) 已进一步形成 signed Execution Grant，
+让目标重验真实 Release Store、执行 expected-pointer CAS、签署 Result，并由 Control Plane 重验后记录 Receipt；自动 transport、
+超期恢复与 Population aggregation 仍未完成。
 [EVO-05.3f2c3b1](EVO-05-3f2c3b1-platform-dispatch-outbox.md) 已把实时准入的 required-platform Worker lane 转为 durable
 queued dispatch，并在 exact Worker incarnation 上预留容量。[EVO-05.3f2c3b2a](EVO-05-3f2c3b2a-authenticated-worker-claim.md)
 已增加 supervisor-attested Ed25519 Worker Identity、一次性 claim challenge 和可续期 lease hash chain。

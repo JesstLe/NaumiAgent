@@ -32,6 +32,7 @@ from naumi_agent.release.rollout_control_keys import (
 from naumi_agent.tools.evolution_review import (
     EvolutionRolloutControlKeyTool,
     EvolutionStableRemoteFinalizationAuthorizationTool,
+    EvolutionStableRemoteFinalizationTool,
 )
 
 T0 = datetime(2026, 8, 11, 10, 0, tzinfo=UTC)
@@ -377,6 +378,16 @@ async def test_engine_is_rollout_keyring_lazy_and_slash_uses_shared_tool(
                 "evolution_stable_remote_finalization_authorization"
             ),
             EvolutionStableRemoteFinalizationAuthorizationTool,
+        )
+        finalization_service = engine.evolution_stable_remote_finalization_service
+        assert finalization_service.authorization_service is remote_service
+        assert finalization_service.rollout_key_service is service
+        assert finalization_service.store is (
+            engine.evolution_stable_remote_finalization_store
+        )
+        assert isinstance(
+            engine.tool_registry.get("evolution_stable_remote_finalization"),
+            EvolutionStableRemoteFinalizationTool,
         )
 
         provisioned = await execute_slash_command(

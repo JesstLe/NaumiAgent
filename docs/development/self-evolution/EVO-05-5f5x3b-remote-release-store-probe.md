@@ -84,7 +84,7 @@ writer。[ARC-07.5c2](../architecture/ARC-07-5c2-rollout-control-signing-authori
 Ed25519 signing root 与 installer-owned Trust Policy，避免把 Channel/Build/Population/Installation key 错当 writer authority。
 [EVO-05.5f5x3c](EVO-05-5f5x3c-signed-remote-finalization-authorization.md) 已消费 x3b readiness 与独立
 rollout-control trust root，签发 member-scoped、短期、signed、single-use、binary-only portable Authorization，并继续受
-kill-switch fencing、expiry、Trust Policy 与重放保护约束。下一最小切片 x3d 必须在目标安装真实验证/消费 envelope、执行
+kill-switch fencing、expiry、Trust Policy 与重放保护约束。x3d 已在目标安装真实验证/消费 envelope、执行
 expected-pointer writer-fenced CAS 并返回 installation-signed result。只有每个 Population member 都产生 current readiness、
 受限 Authorization 和 Finalization Receipt，才可聚合 Population Stable Rollout Completion。配置/数据恢复继续等待
 ARC-07.6；三平台 OS keyring 的真实发布 runner 验收仍是 ARC-07.5c1 的外部发布门禁。

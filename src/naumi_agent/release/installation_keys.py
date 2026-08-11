@@ -31,6 +31,9 @@ RELEASE_INSTALLATION_KEY_POLICY = "release-installation-key-v1"
 RELEASE_INSTALLATION_SIGNATURE_DOMAIN = (
     "naumi.release.stable-remote-readiness-probe.v1"
 )
+RELEASE_INSTALLATION_FINALIZATION_SIGNATURE_DOMAIN = (
+    "naumi.release.stable-remote-finalization-result.v1"
+)
 _SERVICE_NAME = "NaumiAgent"
 _CHANNEL_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _MAX_METADATA_BYTES = 64 * 1024
@@ -110,7 +113,10 @@ class ReleaseInstallationSignature(_StrictModel):
     )
     signature_id: str = Field(pattern=r"^relinstallsig_[0-9a-f]{24}$")
     signature_artifact_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    domain: Literal["naumi.release.stable-remote-readiness-probe.v1"] = (
+    domain: Literal[
+        "naumi.release.stable-remote-readiness-probe.v1",
+        "naumi.release.stable-remote-finalization-result.v1",
+    ] = (
         RELEASE_INSTALLATION_SIGNATURE_DOMAIN
     )
     key_id: str = Field(pattern=r"^relinstallkey_[0-9a-f]{24}$")
@@ -158,7 +164,7 @@ class ReleaseInstallationKeyError(RuntimeError):
 
 
 class ReleaseInstallationKeyService:
-    """Provision once, inspect publicly, and sign only a fixed protocol domain."""
+    """Provision once, inspect publicly, and sign only enumerated protocol domains."""
 
     def __init__(
         self,
@@ -274,12 +280,37 @@ class ReleaseInstallationKeyService:
         credential: ReleaseManagedInstallationCredential,
         payload: bytes,
     ) -> ReleaseInstallationSignature:
+        return self._sign(
+            domain=RELEASE_INSTALLATION_SIGNATURE_DOMAIN,
+            credential=credential,
+            payload=payload,
+        )
+
+    def sign_remote_finalization_result(
+        self,
+        *,
+        credential: ReleaseManagedInstallationCredential,
+        payload: bytes,
+    ) -> ReleaseInstallationSignature:
+        return self._sign(
+            domain=RELEASE_INSTALLATION_FINALIZATION_SIGNATURE_DOMAIN,
+            credential=credential,
+            payload=payload,
+        )
+
+    def _sign(
+        self,
+        *,
+        domain: str,
+        credential: ReleaseManagedInstallationCredential,
+        payload: bytes,
+    ) -> ReleaseInstallationSignature:
         if not isinstance(credential, ReleaseManagedInstallationCredential):
             raise TypeError("credential 必须是 managed installation credential。")
         if not isinstance(payload, bytes) or not 1 <= len(payload) <= (
             _MAX_SIGNED_PAYLOAD_BYTES
         ):
-            raise ValueError("remote readiness probe payload 必须为 1..65536 bytes。")
+            raise ValueError("installation signature payload 必须为 1..65536 bytes。")
         handle = self.inspect()
         if not (
             credential.payload.channel == handle.channel
@@ -295,6 +326,7 @@ class ReleaseInstallationKeyService:
         private = self._load_private_key(handle)
         signed_at = _aware(self.clock()).isoformat()
         signature = private.sign(installation_signature_message(
+            domain=domain,
             key_id=handle.key_id,
             key_sha256=handle.key_sha256,
             credential_id=credential.credential_id,
@@ -307,7 +339,7 @@ class ReleaseInstallationKeyService:
         core = {
             "schema_version": 1,
             "policy_version": RELEASE_INSTALLATION_KEY_POLICY,
-            "domain": RELEASE_INSTALLATION_SIGNATURE_DOMAIN,
+            "domain": domain,
             "key_id": handle.key_id,
             "key_sha256": handle.key_sha256,
             "credential_id": credential.credential_id,
@@ -391,6 +423,7 @@ class ReleaseInstallationKeyService:
 
 def installation_signature_message(
     *,
+    domain: str = RELEASE_INSTALLATION_SIGNATURE_DOMAIN,
     key_id: str,
     key_sha256: str,
     credential_id: str,
@@ -403,9 +436,9 @@ def installation_signature_message(
     if not isinstance(payload, bytes) or not 1 <= len(payload) <= (
         _MAX_SIGNED_PAYLOAD_BYTES
     ):
-        raise ValueError("remote readiness probe payload 必须为 1..65536 bytes。")
+        raise ValueError("installation signature payload 必须为 1..65536 bytes。")
     return _canonical_bytes({
-        "domain": RELEASE_INSTALLATION_SIGNATURE_DOMAIN,
+        "domain": _signature_domain(domain),
         "key_id": key_id,
         "key_sha256": key_sha256,
         "credential_id": credential_id,
@@ -423,9 +456,11 @@ def verify_release_installation_signature(
     credential: ReleaseManagedInstallationCredential,
     payload: bytes,
     artifact: ReleaseInstallationSignature,
+    expected_domain: str = RELEASE_INSTALLATION_SIGNATURE_DOMAIN,
 ) -> None:
     if not (
-        artifact.credential_id == credential.credential_id
+        artifact.domain == _signature_domain(expected_domain)
+        and artifact.credential_id == credential.credential_id
         and artifact.credential_sha256 == credential.credential_sha256
         and artifact.installation_member_id == credential.payload.member_id
         and artifact.public_key_sha256
@@ -451,6 +486,7 @@ def verify_release_installation_signature(
         Ed25519PublicKey.from_public_bytes(public).verify(
             signature,
             installation_signature_message(
+                domain=artifact.domain,
                 key_id=artifact.key_id,
                 key_sha256=artifact.key_sha256,
                 credential_id=artifact.credential_id,
@@ -466,6 +502,15 @@ def verify_release_installation_signature(
             "release_installation_signature_untrusted",
             "安装签名无法由 Population Credential 验证。",
         ) from exc
+
+
+def _signature_domain(value: str) -> str:
+    if value not in {
+        RELEASE_INSTALLATION_SIGNATURE_DOMAIN,
+        RELEASE_INSTALLATION_FINALIZATION_SIGNATURE_DOMAIN,
+    }:
+        raise ValueError("installation signature domain 无效。")
+    return value
 
 
 def render_release_installation_key(handle: ReleaseInstallationKeyHandle) -> str:
@@ -647,6 +692,7 @@ def _digest(payload: object) -> str:
 
 
 __all__ = [
+    "RELEASE_INSTALLATION_FINALIZATION_SIGNATURE_DOMAIN",
     "RELEASE_INSTALLATION_KEY_POLICY",
     "RELEASE_INSTALLATION_SIGNATURE_DOMAIN",
     "InstallationCredentialBackend",

@@ -101,6 +101,7 @@ Authorization Store 与 Probe、Population 和 rollout-control evidence 共用 a
 - Control Plane consumption 与目标 Release Store writer 无法共享事务，需要 crash-recoverable journal；
 - 尚无 installation-signed Finalization Result ingest，也没有 Population aggregation。
 
-下一最小切片是 **EVO-05.5f5x3d Remote Stable Member Finalization Executor**：目标侧验证 portable envelope，完成远端
-single-use 协调，在真实 `release-slots.db` 内执行 expected-pointer fenced CAS，并用 installation key 签署结果；Control Plane
-只在重新验证 current sources 与结果签名后记录 Finalization Receipt。
+[EVO-05.5f5x3d Remote Stable Member Finalization Executor](EVO-05-5f5x3d-remote-stable-member-finalization-executor.md)
+已完成上述目标：signed Execution Grant 绑定 durable consumption，目标侧重验并执行真实 expected-pointer CAS，以 installation
+key 签署结果，Control Plane 重验 current sources 后记录 Receipt。下一步转向 x3e 自动 delivery/recovery，而不是直接聚合
+Population completion。

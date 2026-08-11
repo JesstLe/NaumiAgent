@@ -85,6 +85,6 @@ member-scoped writer capability；远端 executor 仍必须在 writer 前重验�
 - key rotation/retirement、multi-signer quorum、HSM/TPM/KMS non-exportable backend 和三平台真实发布 runner 尚未完成；
 - Trust Policy 由 installer/管理员独立分发，本切片不提供“生成即信任”捷径；
 - 自动 daemon transport、mTLS/network identity、delivery retry 与离线队列尚未完成；
-- `EVO-05.5f5x3c Signed Remote Finalization Authorization` 已交付 portable signed capability；下一切片 x3d 必须实现目标侧
-  Trust Policy/Release Store 重验、远端 single-use 协调、expected-pointer CAS 和 installation-signed result，不能把 envelope
-  签发直接声称为远端 finalization 已执行。
+- `EVO-05.5f5x3c Signed Remote Finalization Authorization` 已交付 portable signed capability；
+  `EVO-05.5f5x3d Remote Stable Member Finalization Executor` 已实现独立 domain 的 signed Execution Grant、目标侧 Trust
+  Policy/Release Store 重验、expected-pointer CAS 与 installation-signed result。自动 transport 和超期恢复仍需 x3e 完成。

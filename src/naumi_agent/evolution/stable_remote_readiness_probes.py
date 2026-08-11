@@ -711,6 +711,21 @@ class EvolutionStableRemoteReadinessProbeService:
             binary_rollback_readiness_authority=authority,
         )
 
+    async def current_credential_for_probe(
+        self,
+        *,
+        receipt_id: str,
+    ) -> ReleaseManagedInstallationCredential:
+        """Resolve the exact current credential behind one durable Probe receipt."""
+        receipt = await self.store.get_receipt(receipt_id)
+        if receipt is None:
+            raise EvolutionStableRemoteReadinessProbeError(
+                "stable_remote_probe_receipt_missing",
+                "Remote Readiness Probe receipt 不存在。",
+            )
+        claim = await self._current_claim(receipt.challenge.claim_receipt_id)
+        return await self._current_credential(receipt.challenge, claim)
+
     async def _current_claim(self, claim_receipt_id: str):
         try:
             claim = await self.claim_service.inspect(receipt_id=claim_receipt_id)
