@@ -203,6 +203,10 @@
   已交付；对 current Population member 签发短期 challenge，验证 installation Credential-bound Ed25519 pointer/slot
   assertion 并持久化 authenticated claim；尚未远端重读 Release Store，不授予 readiness、execution、rollout 或
   promotion authority；
+- [EVO-05.5f5x3b Remote Release Store Fresh Probe](EVO-05-5f5x3b-remote-release-store-probe.md)：
+  已交付；目标安装重新读取并重验 active/candidate/previous/rollback Release Store material，以 installation key 签署
+  fresh source digest，Control Plane 动态授予短期 binary readiness；自动 daemon transport、远端 Authorization、
+  Finalization、Population aggregation 与配置/数据 authority 仍未完成；
 - [EVO-05.6a Automatic Pause and Rollback Request](EVO-05-6a-automatic-pause-rollback-request.md)：已交付；
   exact breach 会触发或复用 kill switch，并冻结只读 exact Rollback Request，不虚报执行完成。
 - [EVO-05.6b1 Immutable Rollback Source](EVO-05-6b1-immutable-rollback-source.md)：已交付；从 exact Git

@@ -506,6 +506,10 @@ from naumi_agent.evolution.stable_remote_readiness_claims import (
     EvolutionStableRemoteReadinessClaimService,
     EvolutionStableRemoteReadinessClaimStore,
 )
+from naumi_agent.evolution.stable_remote_readiness_probes import (
+    EvolutionStableRemoteReadinessProbeService,
+    EvolutionStableRemoteReadinessProbeStore,
+)
 from naumi_agent.evolution.stable_rollback_readiness import (
     EvolutionStableDeploymentInspectionPort,
     EvolutionStableRollbackReadinessService,
@@ -2631,6 +2635,19 @@ class AgentEngine:
                 ),
                 population_store=self.evolution_release_population_snapshot_store,
                 store=self.evolution_stable_remote_readiness_claim_store,
+            )
+        )
+        self.evolution_stable_remote_readiness_probe_store = (
+            EvolutionStableRemoteReadinessProbeStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_stable_remote_readiness_probe_service = (
+            EvolutionStableRemoteReadinessProbeService(
+                claim_service=(
+                    self.evolution_stable_remote_readiness_claim_service
+                ),
+                store=self.evolution_stable_remote_readiness_probe_store,
             )
         )
         self.evolution_stable_rollout_authorization_store = (

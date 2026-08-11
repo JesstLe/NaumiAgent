@@ -1081,6 +1081,25 @@ class TestPermissionChecker:
         assert bypass.allowed and not bypass.requires_confirmation
         assert not lockdown.allowed
 
+    def test_stable_remote_probe_is_direct_and_bypass_has_no_confirmation(
+        self,
+    ) -> None:
+        moderate = PermissionChecker(PermissionMode.MODERATE).check(
+            "evolution_stable_remote_readiness_probe",
+            {},
+        )
+        bypass = PermissionChecker(PermissionMode.BYPASS).check(
+            "evolution_stable_remote_readiness_probe",
+            {},
+        )
+        lockdown = PermissionChecker(PermissionMode.LOCKDOWN).check(
+            "evolution_stable_remote_readiness_probe",
+            {},
+        )
+        assert moderate.allowed and not moderate.requires_confirmation
+        assert bypass.allowed and not bypass.requires_confirmation
+        assert not lockdown.allowed
+
     def test_installation_key_is_explicit_but_never_prompts_in_bypass(self) -> None:
         moderate = PermissionChecker(PermissionMode.MODERATE).check(
             "evolution_installation_key",

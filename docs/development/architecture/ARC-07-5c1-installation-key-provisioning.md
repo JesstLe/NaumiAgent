@@ -77,6 +77,6 @@ Locker。后端缺失或锁定时显式失败，不降级为明文文件。第�
 - 自动 Registry enrollment/renewal/revocation API 尚未实现，当前需把 handle public key 交给外部 Registry；
 - rotation、retirement、backup/recovery 与企业 HSM/TPM non-exportable key 尚未实现；
 - 三平台真实 OS credential backend 的发布 runner 验收仍需各平台 CI，单元测试使用无落盘的 backend adapter，不能冒充平台认证；
-- 下一切片 EVO-05.5f5x3b 应在远端安装上调用受限 Release Store probe，再使用本模块固定 domain 签名其 fresh source
-  digest；Control Plane 验证后才可把 x3a 的 `source_runtime_revalidated=false` 升级为独立、短期的 binary rollback
-  readiness authority。
+- [EVO-05.5f5x3b](../self-evolution/EVO-05-5f5x3b-remote-release-store-probe.md) 已在目标安装调用只读
+  Release Store probe，使用本模块固定 domain 签署 fresh source digest；Control Plane 验证后形成独立、短期的 binary
+  rollback readiness authority。自动 daemon transport、远端 Authorization/Finalization 和三平台发布 runner 仍未完成。
