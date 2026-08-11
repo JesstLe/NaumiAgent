@@ -244,7 +244,11 @@
 - [EVO-05.7a Rollback Outcome Authority](EVO-05-7a-rollback-outcome-authority.md)：已交付；把真实 rollback
   Receipt 反向绑定到原始 Experiment Contract 与 Workbench Proposal，形成 `rolled_back` historical Outcome；长期指标、
   `promoted/superseded` 与 policy learning authority 仍保持关闭。
-- EVO-05.7 后续：promoted/superseded ledger、HAR-08 before/after 与长期指标。
+- [EVO-05.7b1 Stable Promotion Observation Contract](EVO-05-7b1-stable-promotion-observation-contract.md)：已交付；
+  从 current Population Finalization 逐级绑定 Completion、fresh Approval、Rollout Plan、Promotion Input 与
+  Experiment/Workbench Proposal，并把观察起点固定在 finalization 之后；尚不读取 heartbeat、不计算长期指标，
+  不签发 `promoted` Outcome。
+- EVO-05.7 后续：7b2 runtime admission、7b3 long-term assessment、7b4 promoted/superseded ledger 与 policy learning。
 
 ## 验收标准
 
@@ -265,5 +269,8 @@ Authority、版本化 Fresh Promotion Input、新 Approval Requirement/Response�
 真实 local-canary executor、可信 monitor baseline、runtime observation、显式本机 opt-in Intent、authority-bound pointer
 activation/crash reconcile、percentage assignment/runtime/window/outcome aggregation、stable entry authorization、逐安装 stable
 Deployment Intent/Boot Preparation/Activation/Runtime Exposure/Observation Window/Durable Assessment/Release-bound Outcome、逐成员 binary-only finalization 与 automatic pause/rollback request；无数据迁移的 version-slot rollback 已能
-authority-bound 执行和崩溃对账，真实 rollback 也已形成 Proposal-bound `rolled_back` Outcome；但尚未实现 Population-level stable rollout aggregation、配置/数据 rollback、promoted/superseded Outcome 或长期指标回注。任何界面不得把 stable entry、Deployment Intent 或单 member finalization 宣称为完整 stable rollout，
+authority-bound 执行和崩溃对账，真实 rollback 也已形成 Proposal-bound `rolled_back` Outcome；Population-level binary
+finalization aggregation 与成功路径观察契约已经完成，但尚未实现配置/数据 rollback、finalization 后 runtime admission、
+长期指标回注或 promoted/superseded Outcome。任何界面不得把 stable entry、Deployment Intent、单 member finalization
+或观察契约宣称为 promoted Outcome，
 也不得把 rollback source 冻结宣称为已回滚。

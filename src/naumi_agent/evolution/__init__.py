@@ -1129,6 +1129,15 @@ if TYPE_CHECKING:
         EvolutionStablePopulationCompletionView,
         render_stable_population_completion,
     )
+    from naumi_agent.evolution.stable_promotion_observation_contracts import (
+        EVOLUTION_STABLE_PROMOTION_OBSERVATION_CONTRACT_POLICY,
+        EvolutionStablePromotionObservationContract,
+        EvolutionStablePromotionObservationContractError,
+        EvolutionStablePromotionObservationContractService,
+        EvolutionStablePromotionObservationContractStore,
+        EvolutionStablePromotionObservationContractView,
+        render_stable_promotion_observation_contract,
+    )
     from naumi_agent.evolution.stable_read_graph import (
         EvolutionLazyStableReadGraphInspector,
         EvolutionStableReadGraphInspector,
@@ -1798,6 +1807,13 @@ __all__ = [
     "EvolutionStableRemotePopulationFinalizationService",
     "EvolutionStableRemotePopulationFinalizationStore",
     "EvolutionStableRemotePopulationFinalizationView",
+    "EVOLUTION_STABLE_PROMOTION_OBSERVATION_CONTRACT_POLICY",
+    "EvolutionStablePromotionObservationContract",
+    "EvolutionStablePromotionObservationContractError",
+    "EvolutionStablePromotionObservationContractService",
+    "EvolutionStablePromotionObservationContractStore",
+    "EvolutionStablePromotionObservationContractView",
+    "render_stable_promotion_observation_contract",
     "render_stable_remote_population_finalization",
     "EVOLUTION_STABLE_REMOTE_FINALIZATION_DELIVERY_POLICY",
     "EvolutionStableRemoteFinalizationDeliveryAck",
@@ -3175,6 +3191,15 @@ def __getattr__(name: str) -> object:
         "EvolutionStableRemotePopulationFinalizationView",
         "render_stable_remote_population_finalization",
     }
+    stable_promotion_observation_contract_exports = {
+        "EVOLUTION_STABLE_PROMOTION_OBSERVATION_CONTRACT_POLICY",
+        "EvolutionStablePromotionObservationContract",
+        "EvolutionStablePromotionObservationContractError",
+        "EvolutionStablePromotionObservationContractService",
+        "EvolutionStablePromotionObservationContractStore",
+        "EvolutionStablePromotionObservationContractView",
+        "render_stable_promotion_observation_contract",
+    }
     stable_remote_finalization_delivery_exports = {
         "EVOLUTION_STABLE_REMOTE_FINALIZATION_DELIVERY_POLICY",
         "EvolutionStableRemoteFinalizationDeliveryAck",
@@ -3953,6 +3978,8 @@ def __getattr__(name: str) -> object:
         module_name = "stable_remote_finalizations"
     elif name in stable_remote_population_finalization_exports:
         module_name = "stable_remote_population_finalizations"
+    elif name in stable_promotion_observation_contract_exports:
+        module_name = "stable_promotion_observation_contracts"
     elif name in stable_remote_finalization_delivery_exports:
         module_name = "stable_remote_finalization_deliveries"
     elif name in stable_remote_finalization_delivery_worker_exports:
