@@ -687,6 +687,7 @@ test("protocol contract drives client and server event validation", () => {
     maximum_version: 1,
     capabilities: [
       "agent_recovery_actions",
+      "agent_result_acknowledgement",
       "doctor_export",
       "doctor_live_probe",
       "doctor_trace_index",
@@ -725,6 +726,8 @@ test("protocol contract drives client and server event validation", () => {
   assert(PROTOCOL_CONTRACT.client_events.includes("inspector/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("agents/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("agents/stop"));
+  assert(PROTOCOL_CONTRACT.client_events.includes("agents/result/acknowledge"));
+  assert(PROTOCOL_CONTRACT.server_events.includes("agents/result/acknowledgement"));
   assert(PROTOCOL_CONTRACT.server_events.includes("ui/message"));
   assert(PROTOCOL_CONTRACT.server_events.includes("runtime/status"));
   assert(PROTOCOL_CONTRACT.server_events.includes("run/cancelled"));
@@ -2801,8 +2804,10 @@ test("normalizes strict agent control snapshots updates and actions", () => {
   assert.equal(normalized.summary.durable_active_jobs, 1);
   assert.equal(normalized.summary.durable_waiting_jobs, 2);
   assert.equal(normalized.summary.durable_results_visible, 1);
+  assert.equal(normalized.summary.durable_unread_results, 1);
   assert.equal(normalized.results[0].task_id, "result-task");
   assert.equal(normalized.results[0].delivery_sha256, "c".repeat(64));
+  assert.equal(normalized.results[0].acknowledged, false);
   assert.equal(normalized.recovery_catalog.items[0].recovery_state, "recovery_required");
   assert.equal(normalized.recovery_catalog.items[1].recovery_state, "publication_quarantined");
   assert.equal(normalized.recovery_catalog.items[0].session_scope, "current");
@@ -2811,7 +2816,7 @@ test("normalizes strict agent control snapshots updates and actions", () => {
   const update = normalizeServerRecord({
     type: "agents/update",
     payload: {
-      schema_version: 6,
+      schema_version: 7,
       session_id: "session-1",
       revision: 4,
       generated_at: "2026-07-13T00:00:01+00:00",
@@ -2850,6 +2855,24 @@ test("normalizes strict agent control snapshots updates and actions", () => {
   assert.equal(recoveryAction.job_state, "unknown");
   assert.equal(recoveryAction.receipt_sha256, "f".repeat(64));
   assert.equal(Object.hasOwn(recoveryAction, "owner_id"), false);
+
+  const acknowledgement = normalizeServerRecord({
+    type: "agents/result/acknowledgement",
+    payload: {
+      delivery_id: "delivery-1",
+      accepted: true,
+      applied: true,
+      code: "result_acknowledged",
+      message: "已确认。",
+      acknowledgement_id: "agent-result-ack-1",
+      acknowledged_at: "2026-07-13T00:00:03+00:00",
+      receipt_sha256: "9".repeat(64),
+      session_routing_hmac: "must-not-survive",
+    },
+  }).payload;
+  assert.equal(acknowledgement.applied, true);
+  assert.equal(acknowledgement.receipt_sha256, "9".repeat(64));
+  assert.equal(Object.hasOwn(acknowledgement, "session_routing_hmac"), false);
 });
 
 test("rejects malformed agent control payloads and unknown sections", () => {
@@ -3028,7 +3051,7 @@ test("rejects malformed agent control payloads and unknown sections", () => {
 
 function agentControlSnapshotFixture(revision) {
   return {
-    schema_version: 6,
+    schema_version: 7,
     session_id: "session-1",
     revision,
     generated_at: "2026-07-13T00:00:00+00:00",
@@ -3046,6 +3069,7 @@ function agentControlSnapshotFixture(revision) {
       durable_reclaimable_jobs: 0,
       durable_recovery_required_jobs: 0,
       durable_results_visible: 1,
+      durable_unread_results: 1,
       durable_publications_pending: 0,
       durable_publications_claimed: 0,
       durable_publications_expired: 0,
@@ -3083,6 +3107,9 @@ function agentControlSnapshotFixture(revision) {
       total_cost_usd: 0.001,
       turns: 1,
       reason_code: "agent_completed",
+      acknowledged: false,
+      acknowledged_at: "",
+      acknowledgement_receipt_sha256: "",
     }],
     recovery_catalog: {
       assessed_at: "2026-07-13T00:00:02+00:00",

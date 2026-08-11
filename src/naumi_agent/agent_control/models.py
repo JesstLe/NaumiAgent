@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
 from typing import Any
 
-AGENT_CONTROL_SCHEMA_VERSION = 6
+AGENT_CONTROL_SCHEMA_VERSION = 7
 AGENT_CONTROL_SECTIONS = (
     "summary",
     "agents",
@@ -165,6 +165,7 @@ class AgentControlSummary:
     durable_reclaimable_jobs: int = 0
     durable_recovery_required_jobs: int = 0
     durable_results_visible: int = 0
+    durable_unread_results: int = 0
     durable_publications_pending: int = 0
     durable_publications_claimed: int = 0
     durable_publications_expired: int = 0
@@ -180,7 +181,8 @@ class AgentControlSummary:
             "durable_max_active_jobs", "durable_waiting_jobs",
             "durable_max_waiters", "durable_reclaimable_jobs",
             "durable_recovery_required_jobs",
-            "durable_results_visible", "durable_publications_pending",
+            "durable_results_visible", "durable_unread_results",
+            "durable_publications_pending",
             "durable_publications_claimed", "durable_publications_expired",
             "durable_publications_quarantined",
         }, "summary")
@@ -227,6 +229,10 @@ class AgentControlSummary:
             durable_results_visible=_integer(
                 data.get("durable_results_visible", 0),
                 "summary.durable_results_visible",
+            ),
+            durable_unread_results=_integer(
+                data.get("durable_unread_results", 0),
+                "summary.durable_unread_results",
             ),
             durable_publications_pending=_integer(
                 data.get("durable_publications_pending", 0),
@@ -446,6 +452,9 @@ class AgentResultDescriptor:
     total_cost_usd: float = 0.0
     turns: int = 0
     reason_code: str = ""
+    acknowledged: bool = False
+    acknowledged_at: str = ""
+    acknowledgement_receipt_sha256: str = ""
 
     @classmethod
     def from_dict(cls, value: Any) -> AgentResultDescriptor:
@@ -456,7 +465,26 @@ class AgentResultDescriptor:
             "task_excerpt", "response_excerpt", "error_excerpt",
             "content_truncated", "response_bytes", "total_tokens",
             "total_cost_usd", "turns", "reason_code",
+            "acknowledged", "acknowledged_at",
+            "acknowledgement_receipt_sha256",
         }, "result")
+        acknowledged = _boolean(
+            data.get("acknowledged", False),
+            "result.acknowledged",
+        )
+        acknowledged_at = _timestamp(
+            data.get("acknowledged_at"),
+            "result.acknowledged_at",
+            optional=True,
+        )
+        acknowledgement_receipt_sha256 = _sha256(
+            data.get("acknowledgement_receipt_sha256"),
+            "result.acknowledgement_receipt_sha256",
+        )
+        if acknowledged != bool(acknowledged_at):
+            raise ValueError("result acknowledged time is inconsistent")
+        if acknowledged != bool(acknowledgement_receipt_sha256):
+            raise ValueError("result acknowledgement receipt is inconsistent")
         return cls(
             delivery_id=_text(
                 data.get("delivery_id"), "result.delivery_id", required=True
@@ -500,6 +528,11 @@ class AgentResultDescriptor:
             ),
             turns=_integer(data.get("turns", 0), "result.turns"),
             reason_code=_text(data.get("reason_code"), "result.reason_code"),
+            acknowledged=acknowledged,
+            acknowledged_at=acknowledged_at,
+            acknowledgement_receipt_sha256=(
+                acknowledgement_receipt_sha256
+            ),
         )
 
 

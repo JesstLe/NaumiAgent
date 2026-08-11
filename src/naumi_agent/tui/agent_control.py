@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
+from uuid import uuid4
 
 from textual import on, work
 from textual.app import ComposeResult
@@ -22,6 +24,7 @@ from textual.widgets import (
 )
 
 from naumi_agent.agent_control import AgentControlSnapshot
+from naumi_agent.tools.base import ToolCall
 
 AGENT_CONTROL_TABS = ("agents", "executions", "results", "recovery", "team")
 _TAB_LABELS = {
@@ -55,7 +58,8 @@ def format_agent_control_markdown(
             f"revision {snapshot.revision} · Agent {summary.total_agents} · "
             f"运行 {summary.active_agents} · 需注意 {summary.attention_agents} · "
             f"可停止 {summary.stoppable_executions} · 消息 {summary.pending_messages} · "
-            f"结果 {summary.durable_results_visible}"
+            f"结果 {summary.durable_results_visible} · "
+            f"未读 {summary.durable_unread_results}"
         ),
         *(
             [_durable_publication_line(summary)]
@@ -165,6 +169,7 @@ class AgentControlScreen(Screen[None]):
         Binding("r", "refresh", "刷新"),
         Binding("x", "request_stop", "停止"),
         Binding("u", "resolve_recovery_unknown", "恢复裁决"),
+        Binding("v", "acknowledge_result", "标记已读"),
         Binding("y", "confirm_stop", "确认停止", show=False),
         Binding("n", "cancel_stop", "取消停止", show=False),
     ]
@@ -233,6 +238,7 @@ class AgentControlScreen(Screen[None]):
         self.stop_confirmation_task_id = ""
         self.action_pending_task_id = ""
         self.recovery_action_pending_id = ""
+        self.result_ack_pending_id = ""
         self.action_notice = ""
         self._entry_ids: list[str] = []
 
@@ -294,6 +300,16 @@ class AgentControlScreen(Screen[None]):
             error.update(f"刷新失败，已保留上一次快照：{type(exc).__name__} — {exc}")
             return
         self.snapshot = snapshot
+        if self.result_ack_pending_id:
+            result = next(
+                (
+                    item for item in snapshot.results
+                    if item.delivery_id == self.result_ack_pending_id
+                ),
+                None,
+            )
+            if result is not None and result.acknowledged:
+                self.result_ack_pending_id = ""
         if self.recovery_action_pending_id:
             recovery = next(
                 (
@@ -355,6 +371,7 @@ class AgentControlScreen(Screen[None]):
             return [
                 (
                     item.delivery_id,
+                    f"{'已读' if item.acknowledged else '未读'} · "
                     f"{item.task_id} · {item.status} · {item.agent_name}"
                     + (" · 已脱敏/截断" if item.content_truncated else ""),
                 )
@@ -469,6 +486,29 @@ class AgentControlScreen(Screen[None]):
             item.receipt_sha256,
         )
 
+    def action_acknowledge_result(self) -> None:
+        if (
+            self.selected_tab != "results"
+            or self.snapshot is None
+            or self.result_ack_pending_id
+        ):
+            return
+        item = next(
+            (
+                value for value in self.snapshot.results
+                if value.delivery_id == self.selected_id
+            ),
+            None,
+        )
+        if item is None or item.acknowledged:
+            return
+        self.action_notice = ""
+        self.result_ack_pending_id = item.delivery_id
+        self.query_one("#agent-error", Static).update(
+            "正在签发结果已读回执…"
+        )
+        self._acknowledge_result(item.delivery_id, item.delivery_sha256)
+
     def action_close(self) -> None:
         if self.stop_confirmation_task_id:
             self.action_cancel_stop()
@@ -521,6 +561,39 @@ class AgentControlScreen(Screen[None]):
             return
         self.recovery_action_pending_id = ""
         self.action_notice = result.message
+        self.query_one("#agent-error", Static).update(self.action_notice)
+        self.refresh_snapshot()
+
+    @work(exclusive=True, group="agent-control-result-ack", exit_on_error=False)
+    async def _acknowledge_result(
+        self,
+        delivery_id: str,
+        delivery_sha256: str,
+    ) -> None:
+        try:
+            result = await self.engine.execute_tool(
+                ToolCall(
+                    id=f"tui-agent-result-ack-{uuid4()}",
+                    name="agent_result_acknowledge",
+                    arguments=json.dumps(
+                        {
+                            "delivery_id": delivery_id,
+                            "delivery_sha256": delivery_sha256,
+                        },
+                        ensure_ascii=False,
+                    ),
+                ),
+                agent_name="tui",
+            )
+        except Exception:
+            self.result_ack_pending_id = ""
+            self.action_notice = (
+                "结果已读确认失败，请刷新后重试；持久结果未被改写。"
+            )
+            self.query_one("#agent-error", Static).update(self.action_notice)
+            return
+        self.result_ack_pending_id = ""
+        self.action_notice = result.content
         self.query_one("#agent-error", Static).update(self.action_notice)
         self.refresh_snapshot()
 
@@ -637,6 +710,12 @@ def _format_result(snapshot: AgentControlSnapshot, selected_id: str) -> list[str
         ),
         f"- 结果摘要：`{_code(_short_digest(item.result_sha256))}`",
         f"- 投递摘要：`{_code(_short_digest(item.delivery_sha256))}`",
+        (
+            f"- ✅ 已读：{_plain(item.acknowledged_at)} · 回执 "
+            f"`{_code(_short_digest(item.acknowledgement_receipt_sha256))}`"
+            if item.acknowledged
+            else "- 🟡 未读：按 `v` 签发不可变已读回执。"
+        ),
         *(
             ["- ⚠️ 展示内容已经脱敏或截断；原始结果仍保留在加密持久层。"]
             if item.content_truncated

@@ -20,7 +20,7 @@ from naumi_agent.orchestrator.subagent_manager import (
     StopExecutionResult,
 )
 from naumi_agent.safety.permissions import PermissionMode
-from naumi_agent.tools.base import ToolCall
+from naumi_agent.tools.base import ToolCall, ToolResult
 from naumi_agent.tui.agent_control import (
     AgentControlScreen,
     format_agent_control_markdown,
@@ -66,6 +66,8 @@ def test_agent_control_formatter_covers_all_authoritative_tabs() -> None:
     assert "共享 Agent capacity" in executions
     assert "1/4" in executions
     assert "持久结果" in results
+    assert "未读 1" in results
+    assert "按 `v`" in results
     assert "结果正文" in results
     assert "已经脱敏或截断" in results
     assert "running Job 需要恢复裁决" in recovery
@@ -271,6 +273,66 @@ async def test_textual_agent_control_resolves_exact_recovery_without_second_conf
 
 
 @pytest.mark.asyncio
+async def test_textual_agent_control_acknowledges_result_through_shared_tool() -> None:
+    engine = AgentEngine(AppConfig())
+    unread = _snapshot()
+    acknowledged = AgentControlSnapshot.from_dict({
+        **unread.to_dict(),
+        "revision": 2,
+        "summary": {
+            **unread.to_dict()["summary"],
+            "durable_unread_results": 0,
+        },
+        "results": [{
+            **unread.to_dict()["results"][0],
+            "acknowledged": True,
+            "acknowledged_at": "2026-07-13T00:00:03+00:00",
+            "acknowledgement_receipt_sha256": "9" * 64,
+        }],
+    })
+    engine.agent_control.snapshot = AsyncMock(  # type: ignore[method-assign]
+        side_effect=[unread, acknowledged]
+    )
+    engine.execute_tool = AsyncMock(  # type: ignore[method-assign]
+        return_value=ToolResult(
+            call_id="tui-agent-result-ack",
+            status="success",
+            content="已确认 Agent 持久结果；加密结果未删除。",
+        )
+    )
+    app = NaumiApp(engine)
+
+    async with app.run_test(size=(110, 34)) as pilot:
+        await pilot.press("ctrl+g")
+        await pilot.pause(0.1)
+        screen = app.screen
+        assert isinstance(screen, AgentControlScreen)
+        await pilot.press("]", "]")
+        await pilot.pause(0.05)
+        assert screen.selected_tab == "results"
+        await pilot.press("v")
+        await pilot.pause(0.15)
+
+        call = engine.execute_tool.await_args
+        assert call.kwargs == {"agent_name": "tui"}
+        assert call.args[0].name == "agent_result_acknowledge"
+        assert call.args[0].arguments == (
+            '{"delivery_id": "delivery-1", "delivery_sha256": "'
+            + "c" * 64
+            + '"}'
+        )
+        rendered = screen.query_one(
+            "#agent-content-results",
+            Markdown,
+        )._markdown
+        assert "✅ 已读" in rendered
+        assert "999999999999" in rendered
+        assert "加密结果未删除" in str(
+            screen.query_one("#agent-error", Static).render()
+        )
+
+
+@pytest.mark.asyncio
 async def test_textual_agent_control_retains_snapshot_on_refresh_error() -> None:
     engine = AgentEngine(AppConfig())
     engine.agent_control.snapshot = AsyncMock(  # type: ignore[method-assign]
@@ -368,7 +430,7 @@ async def test_textual_bypass_confirmation_enables_full_permission_mode() -> Non
 
 def _snapshot() -> AgentControlSnapshot:
     return AgentControlSnapshot.from_dict({
-        "schema_version": 6,
+        "schema_version": 7,
         "session_id": "session-tui-agents",
         "revision": 1,
         "generated_at": "2026-07-13T00:00:00+00:00",
@@ -386,6 +448,7 @@ def _snapshot() -> AgentControlSnapshot:
             "durable_reclaimable_jobs": 0,
             "durable_recovery_required_jobs": 0,
             "durable_results_visible": 1,
+            "durable_unread_results": 1,
             "durable_publications_pending": 0,
             "durable_publications_claimed": 0,
             "durable_publications_expired": 0,
@@ -423,6 +486,9 @@ def _snapshot() -> AgentControlSnapshot:
             "total_cost_usd": 0.001,
             "turns": 1,
             "reason_code": "agent_completed",
+            "acknowledged": False,
+            "acknowledged_at": "",
+            "acknowledgement_receipt_sha256": "",
         }],
         "recovery_catalog": {
             "assessed_at": "2026-07-13T00:00:02+00:00",

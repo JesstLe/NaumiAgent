@@ -1344,7 +1344,7 @@ async def test_schema_v1_migrates_capacity_policy_without_losing_jobs(
             WHERE type = 'table' AND name = 'agent_job_capacity_policy'
             """
         ).fetchone()
-    assert version == AGENT_JOB_SCHEMA_VERSION == 6
+    assert version == AGENT_JOB_SCHEMA_VERSION == 7
     assert table == ("agent_job_capacity_policy",)
 
 
@@ -1375,7 +1375,7 @@ async def test_schema_v2_adds_terminal_payload_without_losing_jobs(
             row[1]
             for row in db.execute("PRAGMA table_info(agent_jobs)").fetchall()
         }
-    assert version == AGENT_JOB_SCHEMA_VERSION == 6
+    assert version == AGENT_JOB_SCHEMA_VERSION == 7
     assert "terminal_payload_envelope_json" in columns
 
 
@@ -1951,6 +1951,147 @@ async def test_publication_delivery_is_atomic_restart_safe_and_routable(
 
 
 @pytest.mark.asyncio
+async def test_result_acknowledgement_is_session_bound_idempotent_and_authenticated(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 7, 24, 12, 0, tzinfo=UTC))
+    path = tmp_path / "agent-jobs.db"
+    key = bytes(range(32))
+    store = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    admitted, _result = await _complete_job(
+        store,
+        clock,
+        task_id="result-acknowledgement",
+        response="确认后仍保留的加密结果",
+    )
+    publication = await store.get_job_publication(admitted.job_id)
+    assert publication is not None
+    claimed = await store.claim_publication(
+        publication.publication_id,
+        owner_id="publisher-ack",
+        lease_seconds=30,
+    )
+    delivered = await store.deliver_publication_to_inbox(
+        publication.publication_id,
+        owner_id="publisher-ack",
+        claim_epoch=claimed.publication.claim_epoch,
+    )
+    records = await store.list_result_inbox_records("session-1")
+    assert len(records) == 1
+    assert records[0].delivery == delivered.delivery
+    assert records[0].acknowledgement is None
+
+    with pytest.raises(AgentJobLifecycleConflictError, match="当前会话"):
+        await store.acknowledge_result_inbox_delivery(
+            "other-session",
+            delivered.delivery.delivery_id,
+            expected_delivery_sha256=delivered.delivery.delivery_sha256,
+        )
+    with pytest.raises(AgentJobLifecycleConflictError, match="fence"):
+        await store.acknowledge_result_inbox_delivery(
+            "session-1",
+            delivered.delivery.delivery_id,
+            expected_delivery_sha256="0" * 64,
+        )
+
+    clock.advance(seconds=1)
+    first, second = await asyncio.gather(
+        *(
+            store.acknowledge_result_inbox_delivery(
+                "session-1",
+                delivered.delivery.delivery_id,
+                expected_delivery_sha256=delivered.delivery.delivery_sha256,
+            )
+            for _ in range(2)
+        )
+    )
+    assert sorted((first.applied, second.applied)) == [False, True]
+    assert first.acknowledgement == second.acknowledgement
+    acknowledgement = first.acknowledgement
+    assert acknowledgement.delivery_id == delivered.delivery.delivery_id
+    assert acknowledgement.acknowledgement_id.startswith("agent-result-ack-")
+    assert acknowledgement.receipt.receipt_sha256
+    assert acknowledgement.receipt.authentication_sha256
+
+    reopened = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    persisted = await reopened.list_result_inbox_records("session-1")
+    assert persisted[0].acknowledgement == acknowledgement
+    recovered = await reopened.recover_delivered_result(
+        delivered.delivery.delivery_id,
+        expected_delivery_sha256=delivered.delivery.delivery_sha256,
+    )
+    assert recovered.terminal_payload.response == "确认后仍保留的加密结果"
+    raw = path.read_bytes()
+    assert b"session-1" not in raw
+    assert "确认后仍保留的加密结果".encode() not in raw
+
+    with sqlite3.connect(path) as db:
+        with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+            db.execute(
+                "DELETE FROM agent_job_result_acknowledgements "
+                "WHERE acknowledgement_id = ?",
+                (acknowledgement.acknowledgement_id,),
+            )
+
+
+@pytest.mark.asyncio
+async def test_result_acknowledgement_tampering_fails_closed(tmp_path) -> None:
+    clock = _Clock(datetime(2026, 7, 24, 12, 0, tzinfo=UTC))
+    path = tmp_path / "agent-jobs.db"
+    key = bytes(range(32))
+    store = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    admitted, _result = await _complete_job(
+        store,
+        clock,
+        task_id="result-ack-tamper",
+    )
+    publication = await store.get_job_publication(admitted.job_id)
+    assert publication is not None
+    claimed = await store.claim_publication(
+        publication.publication_id,
+        owner_id="publisher-tamper",
+        lease_seconds=30,
+    )
+    delivered = await store.deliver_publication_to_inbox(
+        publication.publication_id,
+        owner_id="publisher-tamper",
+        claim_epoch=claimed.publication.claim_epoch,
+    )
+    await store.acknowledge_result_inbox_delivery(
+        "session-1",
+        delivered.delivery.delivery_id,
+        expected_delivery_sha256=delivered.delivery.delivery_sha256,
+    )
+    with sqlite3.connect(path) as db:
+        row = db.execute(
+            "SELECT receipt_json FROM agent_job_result_acknowledgements"
+        ).fetchone()
+        assert row is not None
+        payload = json.loads(str(row[0]))
+        payload["acknowledged_at"] = "2026-07-24T13:00:00+00:00"
+        db.execute(
+            "DROP TRIGGER agent_job_result_acknowledgements_no_update"
+        )
+        db.execute(
+            "UPDATE agent_job_result_acknowledgements SET receipt_json = ?",
+            (json.dumps(payload, sort_keys=True, separators=(",", ":")),),
+        )
+        db.execute(
+            """
+            CREATE TRIGGER agent_job_result_acknowledgements_no_update
+            BEFORE UPDATE ON agent_job_result_acknowledgements
+            BEGIN
+                SELECT RAISE(ABORT, 'agent result acknowledgement is append-only');
+            END
+            """
+        )
+
+    reopened = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    with pytest.raises(AgentJobError, match="acknowledgement"):
+        await reopened.list_result_inbox_records("session-1")
+
+
+@pytest.mark.asyncio
 async def test_publication_delivery_rolls_back_inbox_when_publish_fails(
     tmp_path,
 ) -> None:
@@ -2125,7 +2266,7 @@ async def test_schema_v3_adds_publication_outbox_and_replay_backfills(
                 """
             ).fetchall()
         }
-    assert version == AGENT_JOB_SCHEMA_VERSION == 6
+    assert version == AGENT_JOB_SCHEMA_VERSION == 7
     assert {
         "agent_job_publications",
         "agent_job_publication_events",
@@ -2201,7 +2342,7 @@ async def test_schema_v4_adds_result_inbox_without_losing_publication(
               AND name = 'agent_job_publication_deliveries'
             """
         ).fetchone()
-    assert version == AGENT_JOB_SCHEMA_VERSION == 6
+    assert version == AGENT_JOB_SCHEMA_VERSION == 7
     assert table == ("agent_job_publication_deliveries",)
 
 
@@ -2299,8 +2440,114 @@ async def test_schema_v5_adds_quarantine_authority_without_losing_publication(
               AND name = 'agent_job_publication_quarantines'
             """
         ).fetchone()
-    assert version == AGENT_JOB_SCHEMA_VERSION == 6
+    assert version == AGENT_JOB_SCHEMA_VERSION == 7
     assert table == ("agent_job_publication_quarantines",)
+
+
+@pytest.mark.asyncio
+async def test_schema_v6_adds_result_acknowledgement_authority_without_losing_delivery(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 8, 6, 12, 0, tzinfo=UTC))
+    path = tmp_path / "agent-jobs.db"
+    key = bytes(range(32))
+    store = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    admitted, _result = await _complete_job(
+        store,
+        clock,
+        task_id="result-ack-schema-migration",
+    )
+    publication = await store.get_job_publication(admitted.job_id)
+    assert publication is not None
+    claimed = await store.claim_publication(
+        publication.publication_id,
+        owner_id="publisher-migration",
+        lease_seconds=30,
+    )
+    delivered = await store.deliver_publication_to_inbox(
+        publication.publication_id,
+        owner_id="publisher-migration",
+        claim_epoch=claimed.publication.claim_epoch,
+    )
+    with sqlite3.connect(path) as db:
+        db.execute("DROP TABLE agent_job_result_acknowledgements")
+        db.execute("PRAGMA user_version = 6")
+
+    reopened = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    records = await reopened.list_result_inbox_records("session-1")
+    assert len(records) == 1
+    assert records[0].delivery == delivered.delivery
+    assert records[0].acknowledgement is None
+    with sqlite3.connect(path) as db:
+        version = db.execute("PRAGMA user_version").fetchone()[0]
+        table = db.execute(
+            """
+            SELECT name FROM sqlite_master
+            WHERE type = 'table'
+              AND name = 'agent_job_result_acknowledgements'
+            """
+        ).fetchone()
+    assert version == AGENT_JOB_SCHEMA_VERSION == 7
+    assert table == ("agent_job_result_acknowledgements",)
+
+
+@pytest.mark.asyncio
+async def test_schema_v7_rejects_missing_result_acknowledgement_authority(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 8, 6, 12, 0, tzinfo=UTC))
+    path = tmp_path / "agent-jobs.db"
+    key = bytes(range(32))
+    store = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    request, payload = _facts(clock, task_id="result-ack-schema-integrity")
+    admitted = await store.admit(request=request, payload=payload)
+    with sqlite3.connect(path) as db:
+        db.execute("DROP TABLE agent_job_result_acknowledgements")
+
+    reopened = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    with pytest.raises(AgentJobError, match="acknowledgement 表缺失"):
+        await reopened.get(admitted.job_id)
+
+
+@pytest.mark.asyncio
+async def test_schema_v7_rejects_weakened_result_acknowledgement_constraints(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 8, 6, 12, 0, tzinfo=UTC))
+    path = tmp_path / "agent-jobs.db"
+    key = bytes(range(32))
+    store = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    request, payload = _facts(clock, task_id="result-ack-schema-constraints")
+    admitted = await store.admit(request=request, payload=payload)
+    with sqlite3.connect(path) as db:
+        db.execute("DROP TABLE agent_job_result_acknowledgements")
+        db.execute(
+            """
+            CREATE TABLE agent_job_result_acknowledgements (
+                acknowledgement_id TEXT PRIMARY KEY,
+                delivery_id TEXT NOT NULL,
+                publication_id TEXT NOT NULL,
+                job_id TEXT NOT NULL,
+                session_routing_hmac TEXT NOT NULL,
+                delivery_sha256 TEXT NOT NULL,
+                acknowledged_at TEXT NOT NULL,
+                receipt_sha256 TEXT NOT NULL,
+                receipt_json TEXT NOT NULL
+            )
+            """
+        )
+        db.execute(
+            """
+            CREATE INDEX agent_job_result_acknowledgements_inbox
+            ON agent_job_result_acknowledgements (
+                session_routing_hmac, acknowledged_at, acknowledgement_id
+            )
+            """
+        )
+
+    reopened = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    with pytest.raises(AgentJobError, match="唯一约束无效"):
+        await reopened.get(admitted.job_id)
 
 
 @pytest.mark.asyncio

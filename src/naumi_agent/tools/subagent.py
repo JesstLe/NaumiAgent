@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from typing import Any
 
 from naumi_agent.agents.team_protocol import (
@@ -27,9 +28,17 @@ MAX_SUBAGENT_TASK_CHARS = 10_000
 MAX_SUBAGENT_CONTEXT_CHARS = 20_000
 MAX_SUBAGENT_FIELD_CHARS = 120
 AGENT_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
+AGENT_RESULT_DELIVERY_RE = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+)
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
-def create_subagent_tools(manager: Any) -> list[Tool]:
+def create_subagent_tools(
+    manager: Any,
+    *,
+    session_id_getter: Callable[[], str] | None = None,
+) -> list[Tool]:
     return [
         DelegateTaskTool(manager),
         SpawnAgentTool(manager),
@@ -39,7 +48,99 @@ def create_subagent_tools(manager: Any) -> list[Tool]:
         TeamStatusTool(manager),
         BlackboardReadTool(manager),
         BlackboardWriteTool(manager),
+        AgentResultAcknowledgeTool(
+            manager,
+            session_id_getter=session_id_getter,
+        ),
     ]
+
+
+class AgentResultAcknowledgeTool(Tool):
+    """Persist an authenticated acknowledgement for one delivered result."""
+
+    def __init__(
+        self,
+        manager: Any,
+        *,
+        session_id_getter: Callable[[], str] | None = None,
+    ) -> None:
+        self._manager = manager
+        self._session_id_getter = session_id_getter or (lambda: "")
+
+    @property
+    def name(self) -> str:
+        return "agent_result_acknowledge"
+
+    @property
+    def description(self) -> str:
+        return (
+            "将当前会话中一条已认证的持久 Agent 结果标记为已读。"
+            "操作并发幂等，不删除或修改加密结果内容。"
+        )
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            user_facing_name="确认 Agent 结果已读",
+            search_hint="agent durable result inbox acknowledge read receipt",
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "delivery_id": {
+                    "type": "string",
+                    "description": "Agent Control 返回的投递 ID",
+                    "maxLength": 128,
+                },
+                "delivery_sha256": {
+                    "type": "string",
+                    "description": "Agent Control 返回的投递 SHA-256 fence",
+                    "pattern": "^[0-9a-f]{64}$",
+                },
+            },
+            "required": ["delivery_id", "delivery_sha256"],
+            "additionalProperties": False,
+        }
+
+    async def execute(
+        self,
+        *,
+        delivery_id: str,
+        delivery_sha256: str,
+        **kwargs: Any,
+    ) -> str:
+        try:
+            normalized_delivery = _normalize_result_delivery_id(delivery_id)
+            normalized_digest = _normalize_result_delivery_sha256(
+                delivery_sha256
+            )
+            session_id = str(self._session_id_getter() or "").strip()
+            if not session_id:
+                raise ValueError("当前没有可用会话。")
+        except ValueError as exc:
+            return f"结果已读确认已拒绝：{exc}"
+
+        result = await self._manager.acknowledge_result_inbox(
+            session_id=session_id,
+            delivery_id=normalized_delivery,
+            expected_delivery_sha256=normalized_digest,
+        )
+        if not result.accepted:
+            return f"结果已读确认失败 [{result.code}]：{result.message}"
+        state = "已确认" if result.applied else "此前已确认"
+        return (
+            f"{state} Agent 持久结果 `{result.delivery_id}`；"
+            "加密结果未删除。\n"
+            f"确认回执：`{result.acknowledgement_id}`\n"
+            f"回执摘要：`{result.receipt_sha256}`"
+        )
 
 
 class DelegateTaskTool(Tool):
@@ -807,6 +908,26 @@ def _normalize_subagent_text(
         raise ValueError(f"{field_name} 不能为空。")
     if len(normalized) > max_chars:
         raise ValueError(f"{field_name} 过长，当前上限为 {max_chars} 个字符。")
+    return normalized
+
+
+def _normalize_result_delivery_id(value: Any) -> str:
+    if not isinstance(value, str):
+        raise ValueError("delivery_id 必须是字符串。")
+    normalized = value.strip()
+    if not AGENT_RESULT_DELIVERY_RE.fullmatch(normalized):
+        raise ValueError(
+            "delivery_id 必须是 1 到 128 位安全标识符。"
+        )
+    return normalized
+
+
+def _normalize_result_delivery_sha256(value: Any) -> str:
+    if not isinstance(value, str):
+        raise ValueError("delivery_sha256 必须是字符串。")
+    normalized = value.strip().lower()
+    if not SHA256_RE.fullmatch(normalized):
+        raise ValueError("delivery_sha256 必须是 64 位 SHA-256。")
     return normalized
 
 

@@ -951,6 +951,9 @@ function normalizeServerPayload(type, payload) {
   if (type === "agents/recovery/action_result") {
     return normalizeAgentRecoveryActionResult(payload);
   }
+  if (type === "agents/result/acknowledgement") {
+    return normalizeAgentResultAcknowledgement(payload);
+  }
   if (type === "ui/message") {
     const messageType = String(payload.type ?? "");
     if (!messageType) {
@@ -8185,11 +8188,11 @@ function normalizeAgentControlUpdate(payload) {
 }
 
 function normalizeAgentControlHeader(payload) {
-  if (payload.schema_version !== 6) {
+  if (![6, 7].includes(payload.schema_version)) {
     throw new Error(`Agent Control schema_version 不兼容: ${payload.schema_version}`);
   }
   return {
-    schema_version: 6,
+    schema_version: 7,
     session_id: agentText(payload.session_id),
     revision: strictAgentNonnegativeInteger(payload.revision, "Agent Control revision"),
     generated_at: agentText(payload.generated_at),
@@ -8235,6 +8238,10 @@ function normalizeAgentSummary(value) {
     durable_results_visible: strictAgentNonnegativeInteger(
       summary.durable_results_visible ?? 0,
       "summary.durable_results_visible",
+    ),
+    durable_unread_results: strictAgentNonnegativeInteger(
+      summary.durable_unread_results ?? 0,
+      "summary.durable_unread_results",
     ),
     durable_publications_pending: strictAgentNonnegativeInteger(
       summary.durable_publications_pending ?? 0,
@@ -8325,6 +8332,24 @@ function normalizeExecutionDescriptor(item) {
 }
 
 function normalizeAgentResultDescriptor(item) {
+  const acknowledged = strictBoolean(
+    item.acknowledged ?? false,
+    "result.acknowledged",
+  );
+  const acknowledgedAt = optionalAgentTimestamp(
+    item.acknowledged_at,
+    "result.acknowledged_at",
+  );
+  const acknowledgementReceiptSha256 = optionalSha256(
+    item.acknowledgement_receipt_sha256,
+    "result.acknowledgement_receipt_sha256",
+  );
+  if (acknowledged !== Boolean(acknowledgedAt)) {
+    throw new Error("Agent result acknowledged_at 与已读状态不一致");
+  }
+  if (acknowledged !== Boolean(acknowledgementReceiptSha256)) {
+    throw new Error("Agent result acknowledgement receipt 与已读状态不一致");
+  }
   return {
     delivery_id: requiredAgentText(item.delivery_id, "result.delivery_id"),
     publication_id: requiredAgentText(
@@ -8362,6 +8387,9 @@ function normalizeAgentResultDescriptor(item) {
     ),
     turns: strictAgentNonnegativeInteger(item.turns ?? 0, "result.turns"),
     reason_code: agentText(item.reason_code),
+    acknowledged,
+    acknowledged_at: acknowledgedAt,
+    acknowledgement_receipt_sha256: acknowledgementReceiptSha256,
   };
 }
 
@@ -8588,6 +8616,51 @@ function normalizeAgentRecoveryActionResult(payload) {
       payload.claim_epoch,
       "agents/recovery/action_result claim_epoch",
     ),
+    receipt_sha256: receiptSha256,
+  };
+}
+
+function normalizeAgentResultAcknowledgement(payload) {
+  const accepted = strictBoolean(
+    payload.accepted,
+    "agents/result/acknowledgement accepted",
+  );
+  const applied = strictBoolean(
+    payload.applied,
+    "agents/result/acknowledgement applied",
+  );
+  if (applied && !accepted) {
+    throw new Error("Agent result acknowledgement applied 不能在 rejected 时为 true");
+  }
+  const acknowledgementId = agentText(payload.acknowledgement_id);
+  const acknowledgedAt = optionalAgentTimestamp(
+    payload.acknowledged_at,
+    "agents/result/acknowledgement acknowledged_at",
+  );
+  const receiptSha256 = optionalSha256(
+    payload.receipt_sha256,
+    "agents/result/acknowledgement receipt_sha256",
+  );
+  if (accepted && (!acknowledgementId || !acknowledgedAt || !receiptSha256)) {
+    throw new Error("Agent result acknowledgement accepted 缺少认证回执");
+  }
+  if (!accepted && (acknowledgementId || acknowledgedAt || receiptSha256)) {
+    throw new Error("Agent result acknowledgement rejected 不得携带持久回执");
+  }
+  return {
+    delivery_id: requiredAgentText(
+      payload.delivery_id,
+      "agents/result/acknowledgement delivery_id",
+    ),
+    accepted,
+    applied,
+    code: requiredAgentText(
+      payload.code,
+      "agents/result/acknowledgement code",
+    ),
+    message: agentText(payload.message),
+    acknowledgement_id: acknowledgementId,
+    acknowledged_at: acknowledgedAt,
     receipt_sha256: receiptSha256,
   };
 }

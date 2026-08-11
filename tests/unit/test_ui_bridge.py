@@ -95,6 +95,7 @@ from naumi_agent.orchestrator.pursuit_terminal_outbox_worker import (
 )
 from naumi_agent.orchestrator.subagent_manager import (
     AgentRecoveryActionResult,
+    AgentResultAcknowledgementActionResult,
     SubTask,
 )
 from naumi_agent.runs.models import CompletionReceipt
@@ -1207,6 +1208,7 @@ def test_protocol_contract_matches_python_enums() -> None:
         "maximum_version": 1,
         "capabilities": [
             "agent_recovery_actions",
+            "agent_result_acknowledgement",
             "evolution_evaluation_lane",
             "goal_lifecycle_actions",
             "doctor_export",
@@ -1232,6 +1234,10 @@ def test_protocol_contract_matches_python_enums() -> None:
         "agent_recovery_actions": {
             "client_events": ["agents/recovery/resolve_unknown"],
             "server_events": ["agents/recovery/action_result"],
+        },
+        "agent_result_acknowledgement": {
+            "client_events": ["agents/result/acknowledge"],
+            "server_events": ["agents/result/acknowledgement"],
         },
         "doctor_export": {
             "client_events": ["doctor/export"],
@@ -2920,6 +2926,19 @@ def test_protocol_normalizes_known_client_event_payloads() -> None:
         "receipt_sha256": "b" * 64,
         "claim_epoch": 3,
     }
+    acknowledgement_record = normalize_client_record({
+        "type": "agents/result/acknowledge",
+        "payload": {
+            "delivery_id": " delivery-1 ",
+            "session_id": " session-1 ",
+            "delivery_sha256": "c" * 64,
+        },
+    })
+    assert acknowledgement_record["payload"] == {
+        "delivery_id": "delivery-1",
+        "session_id": "session-1",
+        "delivery_sha256": "c" * 64,
+    }
 
     with pytest.raises(ValueError, match="协议 version 不兼容"):
         normalize_client_record({
@@ -2970,6 +2989,17 @@ def test_protocol_normalizes_known_client_event_payloads() -> None:
                 "request_sha256": "a" * 64,
                 "receipt_sha256": "b" * 64,
                 "claim_epoch": 0,
+            },
+        })
+
+    with pytest.raises(ValueError, match="未知字段"):
+        normalize_client_record({
+            "type": "agents/result/acknowledge",
+            "payload": {
+                "delivery_id": "delivery-1",
+                "session_id": "session-1",
+                "delivery_sha256": "c" * 64,
+                "ignored": True,
             },
         })
 
@@ -3046,6 +3076,64 @@ async def test_bridge_agent_snapshot_updates_and_session_isolation(
         assert not any(
             record["type"].startswith("agents/")
             for record in _records(writer)[close_index:]
+        )
+    finally:
+        await bridge.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_bridge_downgrades_agent_ack_fields_for_legacy_client(
+    tmp_path: Path,
+) -> None:
+    engine = AgentEngine(AppConfig(
+        workspace_root=str(tmp_path),
+        memory=MemoryConfig(
+            session_db_path=str(tmp_path / "sessions.db"),
+            vector_db_path=str(tmp_path / "vectors"),
+            long_term_enabled=False,
+        ),
+    ))
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    try:
+        await engine.get_or_create_session(title="Legacy Agent Control")
+        await bridge.handle_client_record({
+            "id": "hello-legacy-agents",
+            "type": "hello",
+            "payload": {
+                "client": "legacy-terminal-ui",
+                "minimum_version": 1,
+                "maximum_version": 1,
+                "capabilities": ["typed_ui_messages"],
+            },
+        })
+        await bridge.handle_client_record({
+            "id": "agents-legacy-open",
+            "type": "agents/request",
+            "payload": {"open": True, "known_revision": 0},
+        })
+
+        snapshot = next(
+            record for record in reversed(_records(writer))
+            if record["type"] == "agents/snapshot"
+        )
+        assert snapshot["payload"]["schema_version"] == 6
+        assert "durable_unread_results" not in snapshot["payload"]["summary"]
+
+        await bridge.handle_client_record({
+            "id": "legacy-result-ack",
+            "type": "agents/result/acknowledge",
+            "payload": {
+                "session_id": snapshot["payload"]["session_id"],
+                "delivery_id": "delivery-1",
+                "delivery_sha256": "c" * 64,
+            },
+        })
+        rejected = _records(writer)[-1]
+        assert rejected["type"] == "error"
+        assert rejected["payload"]["code"] == (
+            "protocol_capability_not_negotiated"
         )
     finally:
         await bridge.shutdown()
@@ -3344,6 +3432,108 @@ async def test_bridge_agent_recovery_action_is_exact_and_session_scoped(
         assert rejected["type"] == "error"
         assert rejected["payload"]["code"] == "agents_session_mismatch"
         assert manager.resolve_recovery_unknown.await_count == 1
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_bridge_agent_result_acknowledgement_is_exact_and_session_scoped(
+    tmp_path: Path,
+) -> None:
+    engine = AgentEngine(AppConfig(
+        workspace_root=str(tmp_path),
+        memory=MemoryConfig(
+            session_db_path=str(tmp_path / "sessions.db"),
+            vector_db_path=str(tmp_path / "vectors"),
+            long_term_enabled=False,
+        ),
+    ))
+    try:
+        session = await engine.get_or_create_session(title="Agent Result Ack")
+        manager = engine.subagent_manager
+        manager.acknowledge_result_inbox = AsyncMock(  # type: ignore[method-assign]
+            return_value=AgentResultAcknowledgementActionResult(
+                delivery_id="delivery-1",
+                accepted=True,
+                applied=True,
+                code="result_acknowledged",
+                message="已确认。",
+                acknowledgement_id="agent-result-ack-1",
+                acknowledged_at="2026-07-13T00:00:03+00:00",
+                receipt_sha256="9" * 64,
+            )
+        )
+        writer = io.StringIO()
+        bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+        bridge.bind_writer(writer)
+        await bridge.handle_client_record({
+            "id": "hello-agent-result-ack",
+            "type": "hello",
+            "payload": {
+                "client": "naumi-terminal-ui",
+                "minimum_version": 1,
+                "maximum_version": 1,
+                "capabilities": [
+                    "agent_result_acknowledgement",
+                    "typed_ui_messages",
+                ],
+            },
+        })
+        await bridge.handle_client_record({
+            "id": "agent-result-ack-1",
+            "type": "agents/result/acknowledge",
+            "payload": {
+                "session_id": session.id,
+                "delivery_id": "delivery-1",
+                "delivery_sha256": "c" * 64,
+            },
+        })
+
+        manager.acknowledge_result_inbox.assert_awaited_once_with(
+            session_id=session.id,
+            delivery_id="delivery-1",
+            expected_delivery_sha256="c" * 64,
+        )
+        result = _records(writer)[-1]
+        assert result["type"] == "agents/result/acknowledgement"
+        assert result["request_id"] == "agent-result-ack-1"
+        assert result["payload"]["acknowledgement_id"] == (
+            "agent-result-ack-1"
+        )
+        assert result["payload"]["receipt_sha256"] == "9" * 64
+
+        await bridge.handle_client_record({
+            "id": "agent-result-ack-other",
+            "type": "agents/result/acknowledge",
+            "payload": {
+                "session_id": "other-session",
+                "delivery_id": "delivery-1",
+                "delivery_sha256": "c" * 64,
+            },
+        })
+        rejected = _records(writer)[-1]
+        assert rejected["type"] == "error"
+        assert rejected["payload"]["code"] == "agents_session_mismatch"
+        assert manager.acknowledge_result_inbox.await_count == 1
+
+        manager.acknowledge_result_inbox.side_effect = RuntimeError(
+            "sensitive /tmp/private-agent-jobs.db"
+        )
+        await bridge.handle_client_record({
+            "id": "agent-result-ack-failed",
+            "type": "agents/result/acknowledge",
+            "payload": {
+                "session_id": session.id,
+                "delivery_id": "delivery-1",
+                "delivery_sha256": "c" * 64,
+            },
+        })
+        unavailable = _records(writer)[-1]
+        assert unavailable["type"] == "error"
+        assert unavailable["payload"]["code"] == (
+            "agents_result_ack_unavailable"
+        )
+        assert "private-agent-jobs" not in unavailable["payload"]["message"]
     finally:
         await engine.shutdown()
 

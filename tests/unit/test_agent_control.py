@@ -346,6 +346,7 @@ async def test_service_projects_authenticated_session_result_with_bounded_public
     engine = _engine(tmp_path)
     try:
         await engine.get_or_create_session(title="result inbox")
+        assert engine.tool_registry.get("agent_result_acknowledge") is not None
         manager = _use_embedded_manager(engine)
         agent = manager.get_agent("coder")
         assert agent is not None
@@ -371,6 +372,7 @@ async def test_service_projects_authenticated_session_result_with_bounded_public
         snapshot = await engine.agent_control.snapshot()
 
         assert snapshot.summary.durable_results_visible == 1
+        assert snapshot.summary.durable_unread_results == 1
         assert snapshot.summary.durable_publications_pending == 0
         assert snapshot.summary.durable_publications_claimed == 0
         assert snapshot.summary.durable_publications_expired == 0
@@ -388,11 +390,33 @@ async def test_service_projects_authenticated_session_result_with_bounded_public
         assert result.turns == 4
         assert len(result.result_sha256) == 64
         assert len(result.delivery_sha256) == 64
+        assert result.acknowledged is False
+        assert result.acknowledged_at == ""
+        assert result.acknowledgement_receipt_sha256 == ""
+
+        acknowledgement = await manager.acknowledge_result_inbox(
+            session_id=engine._session.id,
+            delivery_id=result.delivery_id,
+            expected_delivery_sha256=result.delivery_sha256,
+        )
+        assert acknowledgement.accepted is True
+        assert acknowledgement.applied is True
+
+        acknowledged = await engine.agent_control.snapshot()
+        assert acknowledged.summary.durable_results_visible == 1
+        assert acknowledged.summary.durable_unread_results == 0
+        assert acknowledged.results[0].acknowledged is True
+        assert acknowledged.results[0].acknowledged_at
+        assert len(
+            acknowledged.results[0].acknowledgement_receipt_sha256
+        ) == 64
+        assert acknowledged.results[0].response_excerpt == result.response_excerpt
 
         engine._session = await engine.session_store.create_session(title="other")
         isolated = await engine.agent_control.snapshot()
         assert isolated.results == ()
         assert isolated.summary.durable_results_visible == 0
+        assert isolated.summary.durable_unread_results == 0
     finally:
         await engine.shutdown()
 

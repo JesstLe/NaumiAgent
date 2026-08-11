@@ -568,6 +568,7 @@ export function createInitialState() {
       stopConfirmationTaskId: "",
       actionPendingTaskId: "",
       recoveryActionPendingId: "",
+      resultAckPendingId: "",
       actionMessage: "",
     },
     permission: null,
@@ -1277,6 +1278,11 @@ export function reduceServerEvent(state, record) {
       state.agents.actionMessage = String(payload.message || "");
       state.agents.recoveryActionPendingId = "";
       break;
+    case "agents/result/acknowledgement":
+      if (String(payload.delivery_id || "") !== state.agents.resultAckPendingId) break;
+      state.agents.actionMessage = String(payload.message || "");
+      state.agents.resultAckPendingId = "";
+      break;
     case "run/started":
       resetRunCancellation(state);
       startRunActivity(state, record, payload);
@@ -1706,6 +1712,7 @@ export function reduceServerEvent(state, record) {
         state.agents.stopConfirmationTaskId = "";
         state.agents.actionPendingTaskId = "";
         state.agents.recoveryActionPendingId = "";
+        state.agents.resultAckPendingId = "";
         state.agents.actionMessage = state.agents.error;
         break;
       }
@@ -1963,6 +1970,7 @@ function resetAgentControlSnapshot(agents) {
   agents.stopConfirmationTaskId = "";
   agents.actionPendingTaskId = "";
   agents.recoveryActionPendingId = "";
+  agents.resultAckPendingId = "";
   agents.actionMessage = "";
 }
 
@@ -1984,6 +1992,7 @@ export function toggleAgentControlCenter(state, send, forceOpen = null) {
   state.agents.error = "";
   state.agents.stopConfirmationTaskId = "";
   state.agents.recoveryActionPendingId = "";
+  state.agents.resultAckPendingId = "";
   if (open) {
     state.route = {
       name: "agents",
@@ -2109,6 +2118,33 @@ export function handleAgentControlKey(state, key, send) {
     }
     return true;
   }
+  if (normalized === "v" && agents.selectedTab === "results") {
+    const deliveryId = selectedAgentControlId(agents);
+    const result = (agents.snapshot?.results || []).find(
+      (item) => item.delivery_id === deliveryId,
+    );
+    if (result && !result.acknowledged && !agents.resultAckPendingId) {
+      const capability = negotiatedEventCapabilityStatus(
+        state,
+        "client",
+        "agents/result/acknowledge",
+      );
+      if (capability.status !== "available") {
+        agents.actionMessage = capability.status === "pending"
+          ? "协议协商尚未完成，未发送结果确认。"
+          : "当前 Bridge 不支持结果已读确认，请升级完整安装后重试。";
+        return true;
+      }
+      agents.resultAckPendingId = deliveryId;
+      agents.actionMessage = "正在签发结果已读回执…";
+      send("agents/result/acknowledge", {
+        session_id: String(state.currentSessionId || ""),
+        delivery_id: deliveryId,
+        delivery_sha256: result.delivery_sha256,
+      });
+    }
+    return true;
+  }
   return true;
 }
 
@@ -2173,6 +2209,16 @@ function agentControlItemIds(agents) {
 }
 
 function settleAgentActionFromSnapshot(agents) {
+  const deliveryId = agents.resultAckPendingId;
+  if (deliveryId) {
+    const result = (agents.snapshot?.results || []).find(
+      (item) => item.delivery_id === deliveryId,
+    );
+    if (result?.acknowledged === true) {
+      agents.resultAckPendingId = "";
+      agents.actionMessage = "结果已标记为已读，加密内容仍完整保留。";
+    }
+  }
   const recoveryJobId = agents.recoveryActionPendingId;
   if (recoveryJobId) {
     const recovery = (agents.snapshot?.recovery_catalog?.items || []).find(
@@ -3531,11 +3577,40 @@ export function handleSubmitText(state, text, send) {
     }
     return;
   }
+  const agentResultAck = commandText.match(
+    /^\/agents\s+result\s+ack\s+([A-Za-z0-9][A-Za-z0-9._:-]{0,127})\s+([0-9a-fA-F]{64})$/u,
+  );
+  if (agentResultAck) {
+    const capability = negotiatedEventCapabilityStatus(
+      state,
+      "client",
+      "agents/result/acknowledge",
+    );
+    if (capability.status !== "available") {
+      pushSystemMessage(
+        state,
+        "Agent Control",
+        capability.status === "pending"
+          ? "协议协商尚未完成，未发送结果确认。"
+          : "当前 Bridge 不支持结果已读确认。",
+        "warning",
+      );
+      return;
+    }
+    state.agents.resultAckPendingId = agentResultAck[1];
+    state.agents.actionMessage = "正在签发结果已读回执…";
+    send("agents/result/acknowledge", {
+      session_id: String(state.currentSessionId || ""),
+      delivery_id: agentResultAck[1],
+      delivery_sha256: agentResultAck[2].toLowerCase(),
+    });
+    return;
+  }
   if (commandText.toLocaleLowerCase("und").startsWith("/agents ")) {
     pushSystemMessage(
       state,
       "Agent Control",
-      "用法：/agents 或 /agents agent <name>",
+      "用法：/agents、/agents agent <name> 或 /agents result ack <delivery-id> <sha256>",
       "warning",
     );
     return;

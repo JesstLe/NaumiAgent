@@ -24,6 +24,7 @@ PROTOCOL_MINIMUM_VERSION = 1
 PROTOCOL_MAXIMUM_VERSION = 1
 PROTOCOL_CAPABILITIES = (
     "agent_recovery_actions",
+    "agent_result_acknowledgement",
     "doctor_export",
     "doctor_live_probe",
     "doctor_trace_index",
@@ -76,6 +77,7 @@ class ClientEventType(StrEnum):
     AGENTS_REQUEST = "agents/request"
     AGENTS_STOP = "agents/stop"
     AGENTS_RECOVERY_RESOLVE_UNKNOWN = "agents/recovery/resolve_unknown"
+    AGENTS_RESULT_ACKNOWLEDGE = "agents/result/acknowledge"
     WORKBENCH_REQUEST = "workbench/request"
     WORKBENCH_REVIEW_REQUEST = "workbench/review/request"
     WORKBENCH_APPROVAL_ACTION = "workbench/approval/action"
@@ -155,6 +157,7 @@ class ServerEventType(StrEnum):
     AGENTS_UPDATE = "agents/update"
     AGENTS_ACTION = "agents/action"
     AGENTS_RECOVERY_ACTION_RESULT = "agents/recovery/action_result"
+    AGENTS_RESULT_ACKNOWLEDGEMENT = "agents/result/acknowledgement"
     RUN_QUEUED = "run/queued"
     RUN_QUEUE_PROMOTED = "run/queue_promoted"
     RUN_QUEUE_CANCELLED = "run/queue_cancelled"
@@ -819,6 +822,32 @@ def _normalize_client_payload(
             "task_id": task_id,
             "session_id": session_id,
             "reason": reason or "用户请求停止子 Agent。",
+        }
+
+    if event_type == ClientEventType.AGENTS_RESULT_ACKNOWLEDGE:
+        unknown = set(payload) - {
+            "session_id",
+            "delivery_id",
+            "delivery_sha256",
+        }
+        if unknown:
+            raise ValueError("Agent 结果确认包含未知字段。")
+        session_id = str(payload.get("session_id") or "").strip()
+        delivery_id = str(payload.get("delivery_id") or "").strip()
+        delivery_sha256 = str(payload.get("delivery_sha256") or "").strip()
+        if not session_id or len(session_id) > 500:
+            raise ValueError("Agent 结果确认 session_id 格式无效。")
+        if not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}",
+            delivery_id,
+        ):
+            raise ValueError("Agent 结果确认 delivery_id 格式无效。")
+        if not re.fullmatch(r"[0-9a-f]{64}", delivery_sha256):
+            raise ValueError("Agent 结果确认 delivery_sha256 格式无效。")
+        return {
+            "session_id": session_id,
+            "delivery_id": delivery_id,
+            "delivery_sha256": delivery_sha256,
         }
 
     if event_type == ClientEventType.AGENTS_RECOVERY_RESOLVE_UNKNOWN:

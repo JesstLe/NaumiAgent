@@ -16,6 +16,7 @@ from naumi_agent.tools.subagent import (
     MAX_SUBAGENT_TASK_CHARS,
     MAX_TEAM_CONTENT_CHARS,
     MAX_TEAM_STATUS_LIMIT,
+    AgentResultAcknowledgeTool,
     BlackboardReadTool,
     BlackboardWriteTool,
     DelegateTaskTool,
@@ -154,6 +155,87 @@ class TestDelegateTaskTool:
         assert "已拒绝" in result
         assert expected in result
         assert manager.delegated == []
+
+
+class TestAgentResultAcknowledgeTool:
+    def test_metadata_marks_acknowledgement_as_idempotent_state_change(
+        self,
+    ) -> None:
+        metadata = AgentResultAcknowledgeTool(
+            FakeSubagentManager(),
+            session_id_getter=lambda: "session-1",
+        ).metadata
+        assert metadata.read_only is False
+        assert metadata.destructive is False
+        assert metadata.concurrency_safe is True
+        assert metadata.requires_confirmation is False
+
+    @pytest.mark.asyncio
+    async def test_acknowledges_exact_current_session_delivery(self) -> None:
+        calls: list[dict[str, str]] = []
+        manager = FakeSubagentManager()
+
+        async def acknowledge_result_inbox(**kwargs: str) -> SimpleNamespace:
+            calls.append(kwargs)
+            return SimpleNamespace(
+                delivery_id=kwargs["delivery_id"],
+                accepted=True,
+                applied=True,
+                code="result_acknowledged",
+                message="ok",
+                acknowledgement_id="agent-result-ack-1",
+                receipt_sha256="b" * 64,
+            )
+
+        manager.acknowledge_result_inbox = acknowledge_result_inbox  # type: ignore[attr-defined]
+        tool = AgentResultAcknowledgeTool(
+            manager,
+            session_id_getter=lambda: "session-1",
+        )
+
+        result = await tool.execute(
+            delivery_id=" delivery-1 ",
+            delivery_sha256="A" * 64,
+        )
+
+        assert calls == [{
+            "session_id": "session-1",
+            "delivery_id": "delivery-1",
+            "expected_delivery_sha256": "a" * 64,
+        }]
+        assert "已确认 Agent 持久结果" in result
+        assert "加密结果未删除" in result
+        assert "agent-result-ack-1" in result
+
+    @pytest.mark.parametrize(
+        ("session_id", "delivery_id", "digest", "expected"),
+        [
+            ("", "delivery-1", "a" * 64, "当前没有可用会话"),
+            ("session-1", "../bad", "a" * 64, "安全标识符"),
+            ("session-1", "delivery-1", "bad", "64 位 SHA-256"),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_rejects_invalid_acknowledgement_fence(
+        self,
+        session_id: str,
+        delivery_id: str,
+        digest: str,
+        expected: str,
+    ) -> None:
+        manager = FakeSubagentManager()
+        tool = AgentResultAcknowledgeTool(
+            manager,
+            session_id_getter=lambda: session_id,
+        )
+
+        result = await tool.execute(
+            delivery_id=delivery_id,
+            delivery_sha256=digest,
+        )
+
+        assert "已拒绝" in result
+        assert expected in result
 
 
 class TestSpawnAgentTool:

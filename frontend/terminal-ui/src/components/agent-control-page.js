@@ -56,6 +56,9 @@ function renderSummary(view, snapshot) {
     `可停止 ${number(summary.stoppable_executions)}`,
     `消息 ${number(summary.pending_messages)}`,
     `结果 ${number(summary.durable_results_visible)}`,
+    number(summary.durable_unread_results) > 0
+      ? color(ANSI.yellow, `未读 ${number(summary.durable_unread_results)}`)
+      : color(ANSI.green, "未读 0"),
     snapshot?.generated_at ? `更新 ${compactText(snapshot.generated_at, 40)}` : "",
   ].filter(Boolean).join(" · ");
 }
@@ -149,6 +152,9 @@ function renderPageState(view) {
   if (view?.recoveryActionPendingId) {
     return color(ANSI.yellow, view.actionMessage || "正在提交精确恢复裁决…");
   }
+  if (view?.resultAckPendingId) {
+    return color(ANSI.yellow, view.actionMessage || "正在签发结果已读回执…");
+  }
   if (view?.stale) {
     return color(ANSI.yellow, `状态 · 已过期${view.error ? ` · ${compactText(view.error, 300)}` : ""}`);
   }
@@ -162,6 +168,9 @@ function renderPageState(view) {
   }
   if (view?.selectedTab === "recovery") {
     return color(ANSI.dim, "恢复目录 · ↑/↓ 选择 · Enter 详情 · u 精确裁决 · r 刷新 · Esc 返回");
+  }
+  if (view?.selectedTab === "results") {
+    return color(ANSI.dim, "结果 · ↑/↓ 选择 · Enter 详情 · v 标记已读 · r 刷新 · Esc 返回");
   }
   return color(ANSI.dim, "Tab 切换 · ↑/↓ 选择 · Enter 详情 · r 刷新 · x 停止 · Esc 返回");
 }
@@ -195,7 +204,10 @@ function renderList(view, snapshot, width, maxLines = 100) {
     return visibleListItems(view, items, maxLines).map((item) => {
       const marker = item.delivery_id === selected ? color(ANSI.cyan, "›") : " ";
       const truncated = item.content_truncated ? color(ANSI.yellow, " · 已脱敏/截断") : "";
-      return `${marker} ${executionStatus(item.status)} ${compactText(item.task_id, 120)} · ${compactText(item.agent_name, 80)}${truncated}`;
+      const readState = item.acknowledged
+        ? color(ANSI.green, "已读")
+        : color(ANSI.yellow, "未读");
+      return `${marker} ${readState} ${executionStatus(item.status)} ${compactText(item.task_id, 120)} · ${compactText(item.agent_name, 80)}${truncated}`;
     }).flatMap((line) => wrapAnsiLine(line, Math.max(1, width))).slice(0, maxLines);
   }
   if (view?.selectedTab === "recovery") {
@@ -294,6 +306,12 @@ function renderDetail(view, snapshot, width) {
       `响应大小 · ${number(item.response_bytes)} bytes`,
       `结果摘要 · ${shortDigest(item.result_sha256)}`,
       `投递摘要 · ${shortDigest(item.delivery_sha256)}`,
+      item.acknowledged
+        ? color(ANSI.green, `已读 · ${item.acknowledged_at}`)
+        : color(ANSI.yellow, "未读 · 按 v 签发不可变已读回执"),
+      item.acknowledged
+        ? `已读回执 · ${shortDigest(item.acknowledgement_receipt_sha256)}`
+        : "",
       item.content_truncated
         ? color(ANSI.yellow, "展示内容已经脱敏或截断；原始结果仍保留在加密持久层。")
         : "",

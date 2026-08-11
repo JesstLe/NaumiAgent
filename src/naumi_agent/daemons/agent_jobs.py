@@ -38,7 +38,7 @@ from naumi_agent.safety.payload_envelope import (
     seal_runtime_payload,
 )
 
-AGENT_JOB_SCHEMA_VERSION = 6
+AGENT_JOB_SCHEMA_VERSION = 7
 _PAYLOAD_MAGIC = b"NAUMI_AGENT_JOB_PAYLOAD_V1\x00"
 _TERMINAL_PAYLOAD_MAGIC = b"NAUMI_AGENT_JOB_TERMINAL_PAYLOAD_V1\x00"
 _TERMINAL_PAYLOAD_AAD = b"NAUMI_AGENT_JOB_TERMINAL_AAD_V1\x00"
@@ -419,6 +419,77 @@ class AgentJobPublicationDeliveryTransition:
     publication: StoredAgentJobPublication
     delivery: StoredAgentJobPublicationDelivery
     applied: bool
+
+
+@dataclass(frozen=True, slots=True)
+class AgentJobResultAcknowledgementReceipt:
+    """Authenticated immutable acknowledgement of one exact inbox delivery."""
+
+    schema_version: int
+    acknowledgement_id: str
+    delivery_id: str
+    publication_id: str
+    job_id: str
+    session_routing_hmac: str
+    delivery_sha256: str
+    acknowledged_at: str
+    receipt_sha256: str
+    authentication_sha256: str
+
+    def __post_init__(self) -> None:
+        if self.schema_version != 1:
+            raise ValueError(
+                "AgentJob result acknowledgement schema_version 必须为 1。"
+            )
+        _require_identifier(
+            self.acknowledgement_id,
+            field="acknowledgement_id",
+        )
+        _require_identifier(self.delivery_id, field="delivery_id")
+        _require_identifier(self.publication_id, field="publication_id")
+        _require_identifier(self.job_id, field="job_id")
+        _require_sha256(
+            self.session_routing_hmac,
+            field="session_routing_hmac",
+        )
+        _require_sha256(self.delivery_sha256, field="delivery_sha256")
+        _aware_time(self.acknowledged_at, field="acknowledged_at")
+        _require_sha256(self.receipt_sha256, field="receipt_sha256")
+        _require_sha256(
+            self.authentication_sha256,
+            field="authentication_sha256",
+        )
+        if not hmac.compare_digest(
+            self.receipt_sha256,
+            _digest(_result_acknowledgement_receipt_payload(self)),
+        ):
+            raise ValueError(
+                "AgentJob result acknowledgement receipt 摘要校验失败。"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class StoredAgentJobResultAcknowledgement:
+    acknowledgement_id: str
+    delivery_id: str
+    publication_id: str
+    job_id: str
+    session_routing_hmac: str
+    delivery_sha256: str
+    acknowledged_at: str
+    receipt: AgentJobResultAcknowledgementReceipt
+
+
+@dataclass(frozen=True, slots=True)
+class AgentJobResultAcknowledgementTransition:
+    acknowledgement: StoredAgentJobResultAcknowledgement
+    applied: bool
+
+
+@dataclass(frozen=True, slots=True)
+class AgentJobResultInboxRecord:
+    delivery: StoredAgentJobPublicationDelivery
+    acknowledgement: StoredAgentJobResultAcknowledgement | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1745,6 +1816,21 @@ class AgentJobStore:
         limit: int = 100,
         newest_first: bool = False,
     ) -> tuple[StoredAgentJobPublicationDelivery, ...]:
+        records = await self.list_result_inbox_records(
+            session_id,
+            limit=limit,
+            newest_first=newest_first,
+        )
+        return tuple(record.delivery for record in records)
+
+    async def list_result_inbox_records(
+        self,
+        session_id: str,
+        *,
+        limit: int = 100,
+        newest_first: bool = False,
+    ) -> tuple[AgentJobResultInboxRecord, ...]:
+        """Read authenticated deliveries with their immutable read state."""
         _require_text(
             session_id,
             field="session_id",
@@ -1767,19 +1853,23 @@ class AgentJobStore:
                 await db.execute("BEGIN")
                 query = (
                     """
-                    SELECT delivery_id
-                    FROM agent_job_publication_deliveries
-                    WHERE session_routing_hmac = ? AND sink = ?
-                    ORDER BY delivered_at DESC, delivery_id DESC
+                    SELECT d.delivery_id, a.acknowledgement_id
+                    FROM agent_job_publication_deliveries AS d
+                    LEFT JOIN agent_job_result_acknowledgements AS a
+                      ON a.delivery_id = d.delivery_id
+                    WHERE d.session_routing_hmac = ? AND d.sink = ?
+                    ORDER BY d.delivered_at DESC, d.delivery_id DESC
                     LIMIT ?
                     """
                     if newest_first
                     else
                     """
-                    SELECT delivery_id
-                    FROM agent_job_publication_deliveries
-                    WHERE session_routing_hmac = ? AND sink = ?
-                    ORDER BY delivered_at, delivery_id
+                    SELECT d.delivery_id, a.acknowledgement_id
+                    FROM agent_job_publication_deliveries AS d
+                    LEFT JOIN agent_job_result_acknowledgements AS a
+                      ON a.delivery_id = d.delivery_id
+                    WHERE d.session_routing_hmac = ? AND d.sink = ?
+                    ORDER BY d.delivered_at, d.delivery_id
                     LIMIT ?
                     """
                 )
@@ -1791,7 +1881,7 @@ class AgentJobStore:
                         limit,
                     ),
                 )
-                deliveries: list[StoredAgentJobPublicationDelivery] = []
+                records: list[AgentJobResultInboxRecord] = []
                 for row in await cursor.fetchall():
                     delivery = await _require_publication_delivery(
                         db,
@@ -1803,14 +1893,127 @@ class AgentJobStore:
                         delivery,
                         key=key,
                     )
-                    deliveries.append(delivery)
+                    raw_acknowledgement_id = row["acknowledgement_id"]
+                    acknowledgement = (
+                        await _require_result_acknowledgement(
+                            db,
+                            str(raw_acknowledgement_id),
+                            key=key,
+                        )
+                        if raw_acknowledgement_id is not None
+                        else None
+                    )
+                    if acknowledgement is not None:
+                        _validate_result_acknowledgement_binding(
+                            delivery,
+                            acknowledgement,
+                            expected_session_routing_hmac=routing_hmac,
+                        )
+                    records.append(AgentJobResultInboxRecord(
+                        delivery=delivery,
+                        acknowledgement=acknowledgement,
+                    ))
                 await db.commit()
-                return tuple(deliveries)
+                return tuple(records)
         except AgentJobError:
             raise
         except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
             raise AgentJobError(
                 "无法读取 AgentJob result inbox。"
+            ) from exc
+
+    async def acknowledge_result_inbox_delivery(
+        self,
+        session_id: str,
+        delivery_id: str,
+        *,
+        expected_delivery_sha256: str,
+    ) -> AgentJobResultAcknowledgementTransition:
+        """Acknowledge one current-session delivery without deleting content."""
+        _require_text(
+            session_id,
+            field="session_id",
+            maximum=_MAX_SESSION_ID_BYTES,
+            allow_empty=False,
+        )
+        _require_identifier(delivery_id, field="delivery_id")
+        _require_sha256(
+            expected_delivery_sha256,
+            field="expected_delivery_sha256",
+        )
+        if not _regular_file_exists(self._db_path):
+            raise AgentJobLifecycleConflictError(
+                "AgentJob publication delivery 不存在。"
+            )
+        key = self._runtime_key()
+        await self._ensure_schema()
+        routing_hmac = _session_routing_hmac(
+            session_id,
+            key=key.key_bytes,
+        )
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                delivery = await _require_publication_delivery(
+                    db,
+                    delivery_id,
+                    key=key,
+                )
+                await _validate_delivery_binding(db, delivery, key=key)
+                if not hmac.compare_digest(
+                    delivery.delivery_sha256,
+                    expected_delivery_sha256,
+                ):
+                    raise AgentJobLifecycleConflictError(
+                        "AgentJob result acknowledgement delivery fence 已变化。"
+                    )
+                if not hmac.compare_digest(
+                    delivery.session_routing_hmac,
+                    routing_hmac,
+                ):
+                    raise AgentJobLifecycleConflictError(
+                        "AgentJob result acknowledgement 不属于当前会话。"
+                    )
+                acknowledgement_id = _result_acknowledgement_id(
+                    delivery.delivery_id,
+                    delivery_sha256=delivery.delivery_sha256,
+                )
+                existing = await _find_result_acknowledgement(
+                    db,
+                    delivery_id=delivery.delivery_id,
+                    key=key,
+                )
+                if existing is not None:
+                    _validate_result_acknowledgement_binding(
+                        delivery,
+                        existing,
+                        expected_session_routing_hmac=routing_hmac,
+                    )
+                    if existing.acknowledgement_id != acknowledgement_id:
+                        raise AgentJobLifecycleConflictError(
+                            "AgentJob result acknowledgement identity 不一致。"
+                        )
+                    await db.commit()
+                    return AgentJobResultAcknowledgementTransition(
+                        acknowledgement=existing,
+                        applied=False,
+                    )
+                acknowledgement = _issue_result_acknowledgement(
+                    delivery,
+                    acknowledged_at=self._now().isoformat(),
+                    key=key,
+                )
+                await _insert_result_acknowledgement(db, acknowledgement)
+                await db.commit()
+                return AgentJobResultAcknowledgementTransition(
+                    acknowledgement=acknowledgement,
+                    applied=True,
+                )
+        except AgentJobError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise AgentJobError(
+                "无法确认 AgentJob result inbox 已读状态。"
             ) from exc
 
     async def recover_delivered_result(
@@ -3032,6 +3235,8 @@ class AgentJobStore:
                             await db.execute(statement)
                         for statement in _SCHEMA_V6:
                             await db.execute(statement)
+                        for statement in _SCHEMA_V7:
+                            await db.execute(statement)
                         await db.execute(
                             f"PRAGMA user_version = {AGENT_JOB_SCHEMA_VERSION}"
                         )
@@ -3042,6 +3247,7 @@ class AgentJobStore:
                         await _apply_schema_v4(db, allow_create=True)
                         await _apply_schema_v5(db, allow_create=True)
                         await _apply_schema_v6(db, allow_create=True)
+                        await _apply_schema_v7(db, allow_create=True)
                         await db.execute(
                             f"PRAGMA user_version = {AGENT_JOB_SCHEMA_VERSION}"
                         )
@@ -3050,6 +3256,7 @@ class AgentJobStore:
                         await _apply_schema_v4(db, allow_create=True)
                         await _apply_schema_v5(db, allow_create=True)
                         await _apply_schema_v6(db, allow_create=True)
+                        await _apply_schema_v7(db, allow_create=True)
                         await db.execute(
                             f"PRAGMA user_version = {AGENT_JOB_SCHEMA_VERSION}"
                         )
@@ -3057,6 +3264,7 @@ class AgentJobStore:
                         await _apply_schema_v4(db, allow_create=True)
                         await _apply_schema_v5(db, allow_create=True)
                         await _apply_schema_v6(db, allow_create=True)
+                        await _apply_schema_v7(db, allow_create=True)
                         await db.execute(
                             f"PRAGMA user_version = {AGENT_JOB_SCHEMA_VERSION}"
                         )
@@ -3064,6 +3272,7 @@ class AgentJobStore:
                         await _apply_schema_v4(db, allow_create=False)
                         await _apply_schema_v5(db, allow_create=True)
                         await _apply_schema_v6(db, allow_create=True)
+                        await _apply_schema_v7(db, allow_create=True)
                         await db.execute(
                             f"PRAGMA user_version = {AGENT_JOB_SCHEMA_VERSION}"
                         )
@@ -3071,6 +3280,15 @@ class AgentJobStore:
                         await _apply_schema_v4(db, allow_create=False)
                         await _apply_schema_v5(db, allow_create=False)
                         await _apply_schema_v6(db, allow_create=True)
+                        await _apply_schema_v7(db, allow_create=True)
+                        await db.execute(
+                            f"PRAGMA user_version = {AGENT_JOB_SCHEMA_VERSION}"
+                        )
+                    elif version == 6:
+                        await _apply_schema_v4(db, allow_create=False)
+                        await _apply_schema_v5(db, allow_create=False)
+                        await _apply_schema_v6(db, allow_create=False)
+                        await _apply_schema_v7(db, allow_create=True)
                         await db.execute(
                             f"PRAGMA user_version = {AGENT_JOB_SCHEMA_VERSION}"
                         )
@@ -3083,6 +3301,7 @@ class AgentJobStore:
                         await _apply_schema_v4(db, allow_create=False)
                         await _apply_schema_v5(db, allow_create=False)
                         await _apply_schema_v6(db, allow_create=False)
+                        await _apply_schema_v7(db, allow_create=False)
                     await db.commit()
                 if not existed and os.name != "nt":
                     self._db_path.chmod(0o600)
@@ -3643,6 +3862,224 @@ def _validate_publication_delivery_replay(
     ):
         raise AgentJobLifecycleConflictError(
             "AgentJob publication delivery 幂等事实不一致。"
+        )
+
+
+def _issue_result_acknowledgement(
+    delivery: StoredAgentJobPublicationDelivery,
+    *,
+    acknowledged_at: str,
+    key: RuntimePayloadKey,
+) -> StoredAgentJobResultAcknowledgement:
+    if not isinstance(delivery, StoredAgentJobPublicationDelivery):
+        raise TypeError("delivery 必须是 StoredAgentJobPublicationDelivery。")
+    _aware_time(acknowledged_at, field="acknowledged_at")
+    acknowledgement_id = _result_acknowledgement_id(
+        delivery.delivery_id,
+        delivery_sha256=delivery.delivery_sha256,
+    )
+    payload = {
+        "schema_version": 1,
+        "acknowledgement_id": acknowledgement_id,
+        "delivery_id": delivery.delivery_id,
+        "publication_id": delivery.publication_id,
+        "job_id": delivery.job_id,
+        "session_routing_hmac": delivery.session_routing_hmac,
+        "delivery_sha256": delivery.delivery_sha256,
+        "acknowledged_at": acknowledged_at,
+    }
+    receipt_sha256 = _digest(payload)
+    receipt = AgentJobResultAcknowledgementReceipt(
+        **payload,
+        receipt_sha256=receipt_sha256,
+        authentication_sha256=_result_acknowledgement_authentication(
+            payload,
+            receipt_sha256=receipt_sha256,
+            key=key.key_bytes,
+        ),
+    )
+    return StoredAgentJobResultAcknowledgement(
+        acknowledgement_id=acknowledgement_id,
+        delivery_id=delivery.delivery_id,
+        publication_id=delivery.publication_id,
+        job_id=delivery.job_id,
+        session_routing_hmac=delivery.session_routing_hmac,
+        delivery_sha256=delivery.delivery_sha256,
+        acknowledged_at=acknowledged_at,
+        receipt=receipt,
+    )
+
+
+async def _insert_result_acknowledgement(
+    db: aiosqlite.Connection,
+    acknowledgement: StoredAgentJobResultAcknowledgement,
+) -> None:
+    await db.execute(
+        """
+        INSERT INTO agent_job_result_acknowledgements (
+            acknowledgement_id, delivery_id, publication_id, job_id,
+            session_routing_hmac, delivery_sha256, acknowledged_at,
+            receipt_sha256, receipt_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            acknowledgement.acknowledgement_id,
+            acknowledgement.delivery_id,
+            acknowledgement.publication_id,
+            acknowledgement.job_id,
+            acknowledgement.session_routing_hmac,
+            acknowledgement.delivery_sha256,
+            acknowledgement.acknowledged_at,
+            acknowledgement.receipt.receipt_sha256,
+            _serialize_result_acknowledgement_receipt(
+                acknowledgement.receipt
+            ),
+        ),
+    )
+
+
+async def _find_result_acknowledgement(
+    db: aiosqlite.Connection,
+    *,
+    delivery_id: str,
+    key: RuntimePayloadKey,
+) -> StoredAgentJobResultAcknowledgement | None:
+    cursor = await db.execute(
+        """
+        SELECT * FROM agent_job_result_acknowledgements
+        WHERE delivery_id = ?
+        """,
+        (delivery_id,),
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        return None
+    return _stored_result_acknowledgement_from_row(row, key=key)
+
+
+async def _require_result_acknowledgement(
+    db: aiosqlite.Connection,
+    acknowledgement_id: str,
+    *,
+    key: RuntimePayloadKey,
+) -> StoredAgentJobResultAcknowledgement:
+    cursor = await db.execute(
+        """
+        SELECT * FROM agent_job_result_acknowledgements
+        WHERE acknowledgement_id = ?
+        """,
+        (acknowledgement_id,),
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        raise AgentJobError("AgentJob result acknowledgement 缺失。")
+    return _stored_result_acknowledgement_from_row(row, key=key)
+
+
+def _stored_result_acknowledgement_from_row(
+    row: aiosqlite.Row,
+    *,
+    key: RuntimePayloadKey,
+) -> StoredAgentJobResultAcknowledgement:
+    try:
+        receipt = _deserialize_result_acknowledgement_receipt(
+            str(row["receipt_json"])
+        )
+        _verify_result_acknowledgement_authentication(
+            receipt,
+            key=key.key_bytes,
+        )
+        acknowledgement = StoredAgentJobResultAcknowledgement(
+            acknowledgement_id=str(row["acknowledgement_id"]),
+            delivery_id=str(row["delivery_id"]),
+            publication_id=str(row["publication_id"]),
+            job_id=str(row["job_id"]),
+            session_routing_hmac=str(row["session_routing_hmac"]),
+            delivery_sha256=str(row["delivery_sha256"]),
+            acknowledged_at=str(row["acknowledged_at"]),
+            receipt=receipt,
+        )
+        comparisons = (
+            (
+                acknowledgement.acknowledgement_id,
+                receipt.acknowledgement_id,
+                "identity",
+            ),
+            (acknowledgement.delivery_id, receipt.delivery_id, "delivery"),
+            (
+                acknowledgement.publication_id,
+                receipt.publication_id,
+                "publication",
+            ),
+            (acknowledgement.job_id, receipt.job_id, "job"),
+            (
+                acknowledgement.session_routing_hmac,
+                receipt.session_routing_hmac,
+                "session routing",
+            ),
+            (
+                acknowledgement.delivery_sha256,
+                receipt.delivery_sha256,
+                "delivery digest",
+            ),
+            (
+                acknowledgement.acknowledged_at,
+                receipt.acknowledged_at,
+                "acknowledged time",
+            ),
+            (
+                str(row["receipt_sha256"]),
+                receipt.receipt_sha256,
+                "receipt",
+            ),
+        )
+        for stored_value, receipt_value, field_name in comparisons:
+            if stored_value != receipt_value:
+                raise AgentJobError(
+                    f"AgentJob result acknowledgement {field_name} 不一致。"
+                )
+        expected_id = _result_acknowledgement_id(
+            acknowledgement.delivery_id,
+            delivery_sha256=acknowledgement.delivery_sha256,
+        )
+        if acknowledgement.acknowledgement_id != expected_id:
+            raise AgentJobError(
+                "AgentJob result acknowledgement identity 不一致。"
+            )
+        return acknowledgement
+    except AgentJobError:
+        raise
+    except (KeyError, TypeError, ValueError) as exc:
+        raise AgentJobError(
+            "AgentJob result acknowledgement 持久记录无效。"
+        ) from exc
+
+
+def _validate_result_acknowledgement_binding(
+    delivery: StoredAgentJobPublicationDelivery,
+    acknowledgement: StoredAgentJobResultAcknowledgement,
+    *,
+    expected_session_routing_hmac: str,
+) -> None:
+    if (
+        acknowledgement.delivery_id != delivery.delivery_id
+        or acknowledgement.publication_id != delivery.publication_id
+        or acknowledgement.job_id != delivery.job_id
+        or not hmac.compare_digest(
+            acknowledgement.delivery_sha256,
+            delivery.delivery_sha256,
+        )
+        or not hmac.compare_digest(
+            acknowledgement.session_routing_hmac,
+            delivery.session_routing_hmac,
+        )
+        or not hmac.compare_digest(
+            acknowledgement.session_routing_hmac,
+            expected_session_routing_hmac,
+        )
+    ):
+        raise AgentJobError(
+            "AgentJob result acknowledgement 与 delivery authority 不一致。"
         )
 
 
@@ -5285,6 +5722,61 @@ def _publication_delivery_authentication(
     ).hexdigest()
 
 
+def _result_acknowledgement_receipt_payload(
+    receipt: AgentJobResultAcknowledgementReceipt,
+) -> dict[str, Any]:
+    return {
+        "schema_version": receipt.schema_version,
+        "acknowledgement_id": receipt.acknowledgement_id,
+        "delivery_id": receipt.delivery_id,
+        "publication_id": receipt.publication_id,
+        "job_id": receipt.job_id,
+        "session_routing_hmac": receipt.session_routing_hmac,
+        "delivery_sha256": receipt.delivery_sha256,
+        "acknowledged_at": receipt.acknowledged_at,
+    }
+
+
+def _verify_result_acknowledgement_authentication(
+    receipt: AgentJobResultAcknowledgementReceipt,
+    *,
+    key: bytes,
+) -> None:
+    expected = _result_acknowledgement_authentication(
+        _result_acknowledgement_receipt_payload(receipt),
+        receipt_sha256=receipt.receipt_sha256,
+        key=key,
+    )
+    if not hmac.compare_digest(
+        receipt.authentication_sha256,
+        expected,
+    ):
+        raise AgentJobError(
+            "AgentJob result acknowledgement authentication 无效。"
+        )
+
+
+def _result_acknowledgement_authentication(
+    payload: Mapping[str, Any],
+    *,
+    receipt_sha256: str,
+    key: bytes,
+) -> str:
+    derived = hmac.new(
+        key,
+        b"naumi-agent-result-acknowledgement-authentication-v1",
+        hashlib.sha256,
+    ).digest()
+    return hmac.new(
+        derived,
+        _canonical_json({
+            **payload,
+            "receipt_sha256": receipt_sha256,
+        }).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
 def _publication_receipt_payload(
     receipt: AgentJobPublicationReceipt,
 ) -> dict[str, Any]:
@@ -5491,6 +5983,12 @@ def _serialize_publication_delivery_receipt(
     return _canonical_json(asdict(receipt))
 
 
+def _serialize_result_acknowledgement_receipt(
+    receipt: AgentJobResultAcknowledgementReceipt,
+) -> str:
+    return _canonical_json(asdict(receipt))
+
+
 def _serialize_publication_quarantine_receipt(
     receipt: AgentJobPublicationQuarantineReceipt,
 ) -> str:
@@ -5521,6 +6019,18 @@ def _deserialize_publication_delivery_receipt(
         )
     payload["sink"] = AgentJobDeliverySink(payload["sink"])
     return AgentJobPublicationDeliveryReceipt(**payload)
+
+
+def _deserialize_result_acknowledgement_receipt(
+    value: str,
+) -> AgentJobResultAcknowledgementReceipt:
+    payload = _load_json_object(value)
+    expected = set(AgentJobResultAcknowledgementReceipt.__dataclass_fields__)
+    if set(payload) != expected:
+        raise ValueError(
+            "AgentJob result acknowledgement receipt 字段集合无效。"
+        )
+    return AgentJobResultAcknowledgementReceipt(**payload)
 
 
 def _deserialize_publication_quarantine_receipt(
@@ -5585,6 +6095,19 @@ def _publication_delivery_id(
         f"{publication_id}:{sink.value}".encode("ascii")
     ).hexdigest()
     return f"agent-delivery-{identity}"
+
+
+def _result_acknowledgement_id(
+    delivery_id: str,
+    *,
+    delivery_sha256: str,
+) -> str:
+    _require_identifier(delivery_id, field="delivery_id")
+    _require_sha256(delivery_sha256, field="delivery_sha256")
+    identity = hashlib.sha256(
+        f"{delivery_id}:{delivery_sha256}".encode("ascii")
+    ).hexdigest()
+    return f"agent-result-ack-{identity}"
 
 
 def _session_routing_hmac(
@@ -6008,6 +6531,132 @@ async def _apply_schema_v6(
         )
 
 
+async def _apply_schema_v7(
+    db: aiosqlite.Connection,
+    *,
+    allow_create: bool,
+) -> None:
+    table = "agent_job_result_acknowledgements"
+    expected_columns = {
+        "acknowledgement_id": ("TEXT", 0, 1),
+        "delivery_id": ("TEXT", 1, 0),
+        "publication_id": ("TEXT", 1, 0),
+        "job_id": ("TEXT", 1, 0),
+        "session_routing_hmac": ("TEXT", 1, 0),
+        "delivery_sha256": ("TEXT", 1, 0),
+        "acknowledged_at": ("TEXT", 1, 0),
+        "receipt_sha256": ("TEXT", 1, 0),
+        "receipt_json": ("TEXT", 1, 0),
+    }
+    tables = set(await _user_tables(db))
+    if table not in tables:
+        if not allow_create:
+            raise AgentJobError(
+                "AgentJob schema v7 result acknowledgement 表缺失。"
+            )
+        for statement in _SCHEMA_V7:
+            await db.execute(statement)
+        return
+    cursor = await db.execute(f"PRAGMA table_info({table})")
+    actual_columns = {
+        str(row[1]): (str(row[2]).upper(), int(row[3]), int(row[5]))
+        for row in await cursor.fetchall()
+    }
+    if actual_columns != expected_columns:
+        raise AgentJobError(
+            "AgentJob schema v7 result acknowledgement 列定义无效。"
+        )
+    cursor = await db.execute(
+        """
+        SELECT name FROM sqlite_master
+        WHERE type = 'index'
+          AND name = 'agent_job_result_acknowledgements_inbox'
+          AND tbl_name = 'agent_job_result_acknowledgements'
+        """
+    )
+    if await cursor.fetchone() is None:
+        raise AgentJobError(
+            "AgentJob schema v7 result acknowledgement 索引缺失。"
+        )
+    cursor = await db.execute(
+        "PRAGMA index_info(agent_job_result_acknowledgements_inbox)"
+    )
+    if tuple(str(row[2]) for row in await cursor.fetchall()) != (
+        "session_routing_hmac",
+        "acknowledged_at",
+        "acknowledgement_id",
+    ):
+        raise AgentJobError(
+            "AgentJob schema v7 result acknowledgement 索引列无效。"
+        )
+    cursor = await db.execute(f"PRAGMA index_list({table})")
+    unique_indexes: set[tuple[str, ...]] = set()
+    for row in await cursor.fetchall():
+        if int(row[2]) != 1:
+            continue
+        index_cursor = await db.execute(
+            "SELECT name FROM pragma_index_info(?) ORDER BY seqno",
+            (str(row[1]),),
+        )
+        unique_indexes.add(
+            tuple(str(item[0]) for item in await index_cursor.fetchall())
+        )
+    if unique_indexes != {
+        ("acknowledgement_id",),
+        ("delivery_id",),
+        ("publication_id",),
+        ("job_id",),
+        ("delivery_sha256",),
+        ("receipt_sha256",),
+    }:
+        raise AgentJobError(
+            "AgentJob schema v7 result acknowledgement 唯一约束无效。"
+        )
+    cursor = await db.execute(f"PRAGMA foreign_key_list({table})")
+    foreign_keys = {
+        (
+            str(row[2]),
+            str(row[3]),
+            str(row[4]),
+            str(row[6]).upper(),
+        )
+        for row in await cursor.fetchall()
+    }
+    if foreign_keys != {
+        (
+            "agent_job_publication_deliveries",
+            "delivery_id",
+            "delivery_id",
+            "RESTRICT",
+        ),
+        (
+            "agent_job_publications",
+            "publication_id",
+            "publication_id",
+            "RESTRICT",
+        ),
+        ("agent_jobs", "job_id", "job_id", "RESTRICT"),
+    }:
+        raise AgentJobError(
+            "AgentJob schema v7 result acknowledgement 外键约束无效。"
+        )
+    cursor = await db.execute(
+        """
+        SELECT name FROM sqlite_master
+        WHERE type = 'trigger'
+          AND tbl_name = 'agent_job_result_acknowledgements'
+        ORDER BY name
+        """
+    )
+    if tuple(str(row[0]) for row in await cursor.fetchall()) != (
+        "agent_job_result_acknowledgements_no_delete",
+        "agent_job_result_acknowledgements_no_update",
+    ):
+        raise AgentJobError(
+            "AgentJob schema v7 result acknowledgement append-only trigger 无效。"
+        )
+
+
 _STATE_VALUES = ", ".join(f"'{state.value}'" for state in AgentJobState)
 _PUBLICATION_STATE_VALUES = ", ".join(
     f"'{state.value}'" for state in AgentJobPublicationState
@@ -6164,6 +6813,47 @@ _SCHEMA_V6 = (
     """,
 )
 
+_SCHEMA_V7 = (
+    """
+    CREATE TABLE agent_job_result_acknowledgements (
+        acknowledgement_id TEXT PRIMARY KEY,
+        delivery_id TEXT NOT NULL UNIQUE
+            REFERENCES agent_job_publication_deliveries(delivery_id)
+            ON DELETE RESTRICT,
+        publication_id TEXT NOT NULL UNIQUE
+            REFERENCES agent_job_publications(publication_id)
+            ON DELETE RESTRICT,
+        job_id TEXT NOT NULL UNIQUE
+            REFERENCES agent_jobs(job_id) ON DELETE RESTRICT,
+        session_routing_hmac TEXT NOT NULL,
+        delivery_sha256 TEXT NOT NULL UNIQUE,
+        acknowledged_at TEXT NOT NULL,
+        receipt_sha256 TEXT NOT NULL UNIQUE,
+        receipt_json TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE INDEX agent_job_result_acknowledgements_inbox
+    ON agent_job_result_acknowledgements (
+        session_routing_hmac, acknowledged_at, acknowledgement_id
+    )
+    """,
+    """
+    CREATE TRIGGER agent_job_result_acknowledgements_no_update
+    BEFORE UPDATE ON agent_job_result_acknowledgements
+    BEGIN
+        SELECT RAISE(ABORT, 'agent result acknowledgement is append-only');
+    END
+    """,
+    """
+    CREATE TRIGGER agent_job_result_acknowledgements_no_delete
+    BEFORE DELETE ON agent_job_result_acknowledgements
+    BEGIN
+        SELECT RAISE(ABORT, 'agent result acknowledgement is append-only');
+    END
+    """,
+)
+
 
 __all__ = [
     "AGENT_JOB_SCHEMA_VERSION",
@@ -6187,6 +6877,9 @@ __all__ = [
     "AgentJobPublicationReceipt",
     "AgentJobPublicationState",
     "AgentJobPublicationTransition",
+    "AgentJobResultAcknowledgementReceipt",
+    "AgentJobResultAcknowledgementTransition",
+    "AgentJobResultInboxRecord",
     "AgentJobState",
     "AgentJobStore",
     "AgentJobRecoveryCatalog",
@@ -6196,5 +6889,6 @@ __all__ = [
     "StoredAgentJobPublication",
     "StoredAgentJobPublicationDelivery",
     "StoredAgentJobPublicationQuarantine",
+    "StoredAgentJobResultAcknowledgement",
     "TERMINAL_AGENT_JOB_STATES",
 ]
