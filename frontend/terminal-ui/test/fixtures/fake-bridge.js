@@ -121,6 +121,14 @@ attachJsonlLineReader(process.stdin, (line) => {
   }
 
   if (record.type === "workbench/request") {
+    if (payload.open === false) {
+      emit("ack", {
+        event: "workbench/request",
+        open: false,
+        subscribed: false,
+      }, record.id);
+      return;
+    }
     const mission = {
       id: "mission-workbench-1",
       title: "终端 Workbench 真实概览",
@@ -851,6 +859,9 @@ function workbenchSnapshot(mission, task, issue) {
     generated_at: "2026-07-17T14:20:00+08:00",
     full: true,
     session_id: sessionId,
+    timeline_stream_id: "fixture-timeline-stream",
+    timeline_earliest_cursor: 1,
+    timeline_cursor: 1,
     counts: { missions: 1, tasks: 1, worktrees: 1, reviews: 1, failures: 1 },
     active_selection: {
       mission_id: mission.id,
@@ -865,7 +876,17 @@ function workbenchSnapshot(mission, task, issue) {
     validation_runs: [{ task_id: task.id, command: ["node", "--test"], status: "failed", exit_code: 1, started_at: "2026-07-17T14:00:00+08:00", completed_at: "2026-07-17T14:00:01+08:00" }],
     failures: [{ id: "failure-fixture-1", task_id: task.id, kind: "test_failed", title: "终端快照失败", status: "open" }],
     approvals: [{ id: "approval-fixture-1", task_id: task.id, state: "waiting", title: "等待终端 UI 审查" }],
-    events: [{ id: "event-41", type: "issue.created" }],
+    events: [{
+      id: "event-41",
+      session_id: sessionId,
+      type: "issue.created",
+      actor: "Fixture-Agent",
+      subject_id: task.id,
+      payload: {},
+      timestamp: "2026-07-17T14:20:00+08:00",
+      severity: "info",
+      cursor: 1,
+    }],
   };
 }
 

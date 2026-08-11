@@ -824,7 +824,7 @@ class WorkbenchService:
             await self._enrich_agent_profile(profile, session_id)
             for profile in raw_agent_profiles
         ]
-        events = await self._workbench_store.list_events(session_id, limit=50)
+        timeline = await self._workbench_store.timeline_snapshot(session_id, limit=50)
         failures = await self._workbench_store.list_failures(session_id)
         raw_validation_runs = await self._workbench_store.list_validation_runs(
             session_id, limit=50
@@ -928,7 +928,12 @@ class WorkbenchService:
             "bids": [self._bid_to_dict(bid) for bid in bids],
             "proposals": proposal_snapshots,
             "failures": failures,
-            "events": [self._event_to_dict(event, tasks_by_id) for event in events],
+            "timeline_stream_id": timeline.stream_id,
+            "timeline_earliest_cursor": timeline.earliest_cursor,
+            "timeline_cursor": timeline.latest_cursor,
+            "events": [
+                self._event_to_dict(event, tasks_by_id) for event in timeline.events
+            ],
             "validation_runs": validation_runs,
             "context_snapshots": context_snapshots,
             "approvals": [self._approval_to_dict(approval) for approval in approvals],

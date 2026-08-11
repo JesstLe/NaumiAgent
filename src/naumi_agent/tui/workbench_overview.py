@@ -1132,6 +1132,8 @@ class WorkbenchOverviewScreen(Screen[None]):
         self.review_error = ""
         self.review_notice = ""
         self.proposal_action_pending = False
+        self._timeline_timer: Any | None = None
+        self._timeline_refresh_error = False
 
     def compose(self) -> ComposeResult:
         yield Static("", id="workbench-title")
@@ -1141,6 +1143,12 @@ class WorkbenchOverviewScreen(Screen[None]):
 
     def on_mount(self) -> None:
         self.refresh_snapshot()
+        self._timeline_timer = self.set_interval(0.5, self.refresh_timeline)
+
+    def on_unmount(self) -> None:
+        if self._timeline_timer is not None:
+            self._timeline_timer.stop()
+            self._timeline_timer = None
 
     @work(exclusive=True, group="workbench-overview", exit_on_error=False)
     async def refresh_snapshot(self) -> None:
@@ -1177,6 +1185,7 @@ class WorkbenchOverviewScreen(Screen[None]):
             return
         previous_event_id = self.selected_event_id
         self.snapshot = snapshot
+        self._timeline_refresh_error = False
         self.selected_worktree_index = min(
             self.selected_worktree_index,
             max(0, len(_records(snapshot.get("worktrees"))) - 1),
@@ -1198,6 +1207,97 @@ class WorkbenchOverviewScreen(Screen[None]):
         self._render_snapshot()
         if self.selected_tab == "reviews":
             self.refresh_review_detail()
+
+    @work(exclusive=True, group="workbench-timeline", exit_on_error=False)
+    async def refresh_timeline(self) -> None:
+        """Apply contiguous persisted events; fall back to a full snapshot on gaps."""
+        if self.snapshot is None:
+            return
+        service = getattr(self.engine, "workbench_service", None)
+        replay_builder = getattr(service, "timeline_replay_window", None)
+        if not callable(replay_builder):
+            return
+        session_id = _normalized(self.snapshot.get("session_id"))
+        stream_id = _normalized(self.snapshot.get("timeline_stream_id"))
+        cursor = _timeline_cursor(self.snapshot.get("timeline_cursor", 0), "cursor")
+        try:
+            recovery = await replay_builder(
+                session_id,
+                after_cursor=cursor,
+                expected_stream_id=stream_id,
+                limit=100,
+            )
+            if not isinstance(recovery, Mapping):
+                raise WorkbenchSnapshotError("Timeline replay 必须是对象")
+            if _integer(recovery.get("schema_version")) != 1:
+                raise WorkbenchSnapshotError("Timeline replay schema 无效")
+            if _normalized(recovery.get("session_id")) != session_id:
+                raise WorkbenchSnapshotError("Timeline replay 会话不匹配")
+            authority_stream = _strict_timeline_text(
+                recovery.get("stream_id") or "",
+                128,
+                allow_empty=True,
+            )
+            if recovery.get("gap") is True:
+                self.query_one("#workbench-error", Static).update(
+                    "Timeline 游标出现缺口，正在恢复权威完整快照。"
+                )
+                self.refresh_snapshot()
+                return
+            raw_events = recovery.get("events")
+            events = _validate_timeline_events(raw_events, session_id=session_id)
+            current_cursor = cursor
+            current_stream = stream_id
+            current = _records(self.snapshot.get("events"))
+            changed = False
+            for event in events:
+                event_cursor = _timeline_cursor(event.get("cursor"), "event cursor")
+                if authority_stream == current_stream and event_cursor <= current_cursor:
+                    continue
+                first = not current_stream and current_cursor == 0 and event_cursor == 1
+                continuous = (
+                    authority_stream == current_stream
+                    and event_cursor == current_cursor + 1
+                )
+                if not first and not continuous:
+                    self.query_one("#workbench-error", Static).update(
+                        "Timeline 增量不连续，正在恢复权威完整快照。"
+                    )
+                    self.refresh_snapshot()
+                    return
+                event_id = _normalized(event.get("id"))
+                current = [
+                    event,
+                    *(item for item in current if _normalized(item.get("id")) != event_id),
+                ][:100]
+                current_stream = authority_stream
+                current_cursor = event_cursor
+                changed = True
+            if changed:
+                snapshot = dict(self.snapshot)
+                snapshot["events"] = current
+                snapshot["timeline_stream_id"] = current_stream
+                snapshot["timeline_cursor"] = current_cursor
+                self.snapshot = snapshot
+                previous_id = self.selected_event_id
+                self.selected_event_index = next(
+                    (
+                        index
+                        for index, event in enumerate(current)
+                        if _normalized(event.get("id")) == previous_id
+                    ),
+                    min(self.selected_event_index, max(0, len(current) - 1)),
+                )
+                self._set_selected_event_index(self.selected_event_index)
+                self._render_snapshot()
+            self._timeline_refresh_error = False
+        except Exception as exc:
+            logger.warning("TUI Workbench Timeline refresh failed (%s)", type(exc).__name__)
+            if not self._timeline_refresh_error:
+                self._timeline_refresh_error = True
+                self.query_one("#workbench-error", Static).update(
+                    "Timeline 增量刷新失败，已保留上一次权威快照。"
+                )
 
     def action_refresh(self) -> None:
         self.refresh_snapshot()
@@ -1915,6 +2015,21 @@ def _validate_snapshot(
     if session_id is not None and _normalized(value.get("session_id")) != session_id:
         raise WorkbenchSnapshotError("Workbench snapshot 会话不匹配")
     normalized = dict(value)
+    timeline_stream_id = _strict_timeline_text(
+        value.get("timeline_stream_id") or "",
+        128,
+        allow_empty=True,
+    )
+    timeline_cursor = _timeline_cursor(value.get("timeline_cursor", 0), "cursor")
+    timeline_earliest_cursor = _timeline_cursor(
+        value.get("timeline_earliest_cursor", 0),
+        "earliest cursor",
+    )
+    if timeline_cursor > 0 and not timeline_stream_id:
+        raise WorkbenchSnapshotError("Workbench Timeline cursor 缺少 stream identity")
+    normalized["timeline_stream_id"] = timeline_stream_id
+    normalized["timeline_cursor"] = timeline_cursor
+    normalized["timeline_earliest_cursor"] = timeline_earliest_cursor
     error = _normalized(value.get("stable_population_finalization_error"))
     if error not in {"", "stable_population_finalization_unavailable"}:
         raise WorkbenchSnapshotError("Stable Population finalization error contract 无效")
@@ -1984,12 +2099,21 @@ def _validate_timeline_events(
                     raw.get("parent_event_id") or "", 128, allow_empty=True
                 ),
                 "severity": severity,
+                "cursor": _timeline_cursor(raw.get("cursor", 0), "event cursor"),
                 "payload": safe_payload,
             }
         if event["session_id"] != session_id:
             raise WorkbenchSnapshotError("Workbench Timeline event 会话不匹配")
         events.append(event)
     return events
+
+
+def _timeline_cursor(value: Any, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise WorkbenchSnapshotError(f"Workbench Timeline {name} 必须是非负整数")
+    if value > 9_007_199_254_740_991:
+        raise WorkbenchSnapshotError(f"Workbench Timeline {name} 超出安全范围")
+    return value
 
 
 def _strict_timeline_text(

@@ -5,8 +5,8 @@
 把 `WorkbenchStore.workbench_audit_events` 中已经持久化、已经脱敏的会话事实投影到 New UI 与
 Textual TUI。Timeline 不解析聊天文案，不监听终端 stdout 猜测事件，也不建立第二套日志 Store。
 
-本切片只交付只读快照消费。revisioned 增量事件 producer、断线 cursor 和 push stream 属于
-UI-10.5b/HAR-10 后续切片，不在此处伪装完成。
+本切片只交付只读快照消费；后续 UI-10.5b 已补齐独立 Timeline cursor、增量生产、断线 replay 与
+gap Snapshot 恢复。两者仍保持分层，快照 revision 不会被 Timeline cursor 代替。
 
 ## 权威链路
 
@@ -66,9 +66,8 @@ payload 只把 string/number/bool/null 投影为公开值；
 
 ## 后续边界
 
-- UI-10.5b1 已建立独立持久 Timeline stream/cursor、旧库迁移、并发分配、Service replay window 与机械
-  gap 判定；详见 `UI-10-5b-timeline-cursor-authority.md`。Bridge producer、连续 patch、断线 replay 与
-  gap full-snapshot 恢复仍属于 UI-10.5b2。
+- UI-10.5b1/b2 已建立独立持久 Timeline stream/cursor、旧库迁移、并发分配、Bridge 连续事件、断线
+  replay 与 gap full-snapshot 恢复；详见 `UI-10-5b-timeline-cursor-authority.md`。
 - HAR-10：多实例 push notification、持久 cursor 与跨 Store 原子 terminal commit。
 - 事件 payload 的领域专用详情卡仍需按事件类型逐项建立 typed projection；本切片不把通用 payload
   摘要冒充领域完整证据。

@@ -655,16 +655,28 @@ export function normalizeServerRecord(record) {
     if (durableCount !== durableFields.length) {
       throw new Error("Bridge event_id、stream_id 与 cursor 必须同时提供");
     }
-    if (!new Set(["completion/receipt", "harness/receipt"]).has(type)) {
+    if (!new Set(["completion/receipt", "harness/receipt", "workbench/event"]).has(type)) {
       throw new Error(`Bridge 事件不允许携带持久游标: ${type}`);
     }
     const eventId = String(record.event_id);
     const streamId = String(record.stream_id);
-    if (!/^tev_[0-9a-f]{24}$/.test(eventId)) {
-      throw new Error("Bridge event_id 格式无效");
-    }
-    if (!/^tes_[0-9a-f]{24}$/.test(streamId)) {
-      throw new Error("Bridge stream_id 格式无效");
+    if (type === "workbench/event") {
+      if (eventId !== normalized.payload.id) {
+        throw new Error("Workbench event_id 与 payload 不一致");
+      }
+      if (streamId !== normalized.payload.stream_id) {
+        throw new Error("Workbench stream_id 与 payload 不一致");
+      }
+      if (record.cursor !== normalized.payload.cursor) {
+        throw new Error("Workbench cursor 与 payload 不一致");
+      }
+    } else {
+      if (!/^tev_[0-9a-f]{24}$/.test(eventId)) {
+        throw new Error("Bridge event_id 格式无效");
+      }
+      if (!/^tes_[0-9a-f]{24}$/.test(streamId)) {
+        throw new Error("Bridge stream_id 格式无效");
+      }
     }
     if (!isValidServerSequence(record.cursor)) {
       throw new Error("Bridge cursor 必须是正安全整数");
@@ -787,6 +799,9 @@ export function createServerSequenceGuard() {
 function normalizeServerPayload(type, payload) {
   if (type === "ack" && payload.event === "hello") {
     return { ...payload, negotiation: normalizeHelloNegotiation(payload.negotiation) };
+  }
+  if (type === "ack" && payload.event === "workbench/request") {
+    return normalizeWorkbenchRequestAck(payload);
   }
   if (type === "ready" || type === "runtime/status") {
     return normalizeRuntimeStatus(payload, type);
@@ -1043,6 +1058,24 @@ function normalizeServerPayload(type, payload) {
     if (stablePopulationFinalization && stablePopulationFinalizationError) {
       throw new Error("workbench/snapshot Stable Population availability 投影冲突");
     }
+    const timelineStreamId = payload.timeline_stream_id == null
+      ? ""
+      : strictOptionalWorkbenchText(
+        payload.timeline_stream_id,
+        "workbench/snapshot timeline_stream_id",
+        128,
+      );
+    const timelineCursor = nonnegativeSafeInteger(
+      payload.timeline_cursor ?? 0,
+      "workbench/snapshot timeline_cursor",
+    );
+    const timelineEarliestCursor = nonnegativeSafeInteger(
+      payload.timeline_earliest_cursor ?? 0,
+      "workbench/snapshot timeline_earliest_cursor",
+    );
+    if (timelineCursor > 0 && !timelineStreamId) {
+      throw new Error("workbench/snapshot Timeline cursor 缺少 stream identity");
+    }
     return {
       ...payload,
       schema_version: Number(payload.schema_version) || 1,
@@ -1050,6 +1083,13 @@ function normalizeServerPayload(type, payload) {
       revision: Math.max(0, Number(payload.revision) || 0),
       generated_at: String(payload.generated_at ?? ""),
       full: payload.full !== false,
+      timeline_stream_id: timelineStreamId,
+      timeline_cursor: timelineCursor,
+      timeline_earliest_cursor: timelineEarliestCursor,
+      timeline_recovery: normalizeWorkbenchTimelineRecovery(
+        payload.timeline_recovery,
+        { snapshot: true },
+      ),
       session_id: String(payload.session_id ?? ""),
       counts: {
         missions: Math.max(0, Number(counts.missions) || 0),
@@ -1095,14 +1135,17 @@ function normalizeServerPayload(type, payload) {
   }
   if (type === "workbench/event") {
     const event = normalizeWorkbenchTimelineEvent(payload);
+    const streamId = strictWorkbenchPopulationText(
+      payload.stream_id,
+      "workbench/event stream_id",
+      128,
+    );
+    if (event.cursor < 1) {
+      throw new Error("workbench/event cursor 必须是正安全整数");
+    }
     return {
       ...event,
-      stream_id: strictWorkbenchPopulationText(
-        payload.stream_id,
-        "workbench/event stream_id",
-        128,
-      ),
-      revision: Math.max(0, Number(payload.revision) || 0),
+      stream_id: streamId,
     };
   }
   return { ...payload };
@@ -1427,20 +1470,93 @@ function normalizeWorkbenchTimelineEvent(value) {
     ),
     correlation_id: item.correlation_id == null
       ? ""
-      : strictWorkbenchPopulationText(
+      : strictOptionalWorkbenchText(
         item.correlation_id,
         "workbench timeline event.correlation_id",
         128,
       ),
     parent_event_id: item.parent_event_id == null
       ? ""
-      : strictWorkbenchPopulationText(
+      : strictOptionalWorkbenchText(
         item.parent_event_id,
         "workbench timeline event.parent_event_id",
         128,
       ),
     severity,
+    cursor: nonnegativeSafeInteger(
+      item.cursor ?? 0,
+      "workbench timeline event.cursor",
+    ),
     payload: normalizeWorkbenchTimelinePayload(item.payload),
+  };
+}
+
+function strictOptionalWorkbenchText(value, source, maximum) {
+  if (value === "") return "";
+  return strictWorkbenchPopulationText(value, source, maximum);
+}
+
+function normalizeWorkbenchTimelineRecovery(value, { snapshot = false } = {}) {
+  if (value == null) return { mode: "" };
+  const item = normalizeObject(value);
+  const allowedModes = snapshot
+    ? new Set(["full_snapshot", "gap_snapshot"])
+    : new Set(["cursor_replay"]);
+  const mode = String(item.mode ?? "");
+  if (!mode && Object.keys(item).every((key) => key === "mode")) return { mode: "" };
+  if (!allowedModes.has(mode)) throw new Error("Workbench Timeline recovery mode 无效");
+  const normalized = {
+    mode,
+    stream_id: strictOptionalWorkbenchText(
+      item.stream_id ?? "",
+      "Workbench Timeline recovery stream_id",
+      128,
+    ),
+    requested_cursor: nonnegativeSafeInteger(
+      item.requested_cursor ?? 0,
+      "Workbench Timeline recovery requested_cursor",
+    ),
+    earliest_cursor: nonnegativeSafeInteger(
+      item.earliest_cursor ?? 0,
+      "Workbench Timeline recovery earliest_cursor",
+    ),
+    latest_cursor: nonnegativeSafeInteger(
+      item.latest_cursor ?? 0,
+      "Workbench Timeline recovery latest_cursor",
+    ),
+    replayed_count: nonnegativeSafeInteger(
+      item.replayed_count ?? 0,
+      "Workbench Timeline recovery replayed_count",
+    ),
+    gap_reason: String(item.gap_reason ?? ""),
+  };
+  if (mode === "gap_snapshot" && !new Set([
+    "stream_changed",
+    "stream_identity_required",
+    "cursor_ahead",
+    "cursor_before_retention",
+    "stream_unavailable",
+    "unknown",
+  ]).has(normalized.gap_reason)) {
+    throw new Error("Workbench Timeline recovery gap_reason 无效");
+  }
+  return normalized;
+}
+
+function normalizeWorkbenchRequestAck(payload) {
+  const recovery = normalizeWorkbenchTimelineRecovery(
+    payload.timeline_recovery,
+    { snapshot: false },
+  );
+  return {
+    event: "workbench/request",
+    open: payload.open !== false,
+    subscribed: payload.subscribed === true,
+    revision: nonnegativeSafeInteger(
+      payload.revision ?? 0,
+      "Workbench request ack revision",
+    ),
+    timeline_recovery: recovery,
   };
 }
 

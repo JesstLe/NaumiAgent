@@ -100,6 +100,13 @@
 - `5`/`l` 打开 Timeline，方向键/Home/End/PgUp/PgDn 导航；刷新按稳定 event id 保留选择。
 - 完整契约、验收证据和后续增量边界见 `UI-10-5a-authoritative-timeline-snapshot.md`。
 
+### UI-10.5b 已实现：Timeline 增量恢复
+
+- SQLite 为每个 session 持久化独立 Timeline stream/cursor；快照元数据与最近事件从同一读事务取得。
+- Bridge 支持显式订阅、取消、连续增量、断线有界 replay 与 gap 完整快照；生命周期绑定当前 session。
+- New UI 与 Textual TUI 都验证会话、stream 和连续 cursor；重复事件幂等，跳号或换流失败关闭并恢复。
+- Timeline cursor 不推进 Dashboard revision；完整契约与验收见 `UI-10-5b-timeline-cursor-authority.md`。
+
 ### UI-10.3 已实现：权威 Worktrees tab
 
 - `WorkbenchService` 直接从 Engine 注入的 `WorktreeManager` 读取 Git 权威状态，并与当前 Task、active
@@ -223,8 +230,7 @@
 - Approval 是人工控制面，Agent 不获得自批 Tool；批准不执行代码、不签发实验或发布权限。
 - 完整契约与验收见 `UI-10-6e-waiting-approval-actions.md`。
 
-### 尚未完成
+### 当前边界
 
-- UI-10.5b2：Timeline Bridge 增量事件生产、断线 cursor replay、New UI/TUI 连续消费与 gap 完整快照恢复。
-  UI-10.5b1 的持久 stream/cursor authority、旧库迁移、并发分配和有界 gap replay 已完成，详见
-  `UI-10-5b-timeline-cursor-authority.md`。
+- UI-10 功能切片已完成；跨 Runtime 实例通知、Timeline 长期历史翻页与外部审计 archive 不属于本模块，
+  分别由 HAR-10、ARC-06 和后续审计模块承接。

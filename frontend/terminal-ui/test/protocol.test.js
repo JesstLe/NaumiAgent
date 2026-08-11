@@ -4922,6 +4922,9 @@ test("normalizes workbench event payloads", () => {
   const record = normalizeServerRecord({
     type: "workbench/event",
     version: 1,
+    event_id: "evt-1",
+    stream_id: "stream-a",
+    cursor: 4,
     payload: {
       id: "evt-1",
       type: "issue.claimed",
@@ -4932,7 +4935,7 @@ test("normalizes workbench event payloads", () => {
       payload: { lease_id: "lease-1" },
       timestamp: "2026-06-27T10:00:00",
       stream_id: "stream-a",
-      revision: 4,
+      cursor: 4,
     },
   });
 
@@ -4940,11 +4943,42 @@ test("normalizes workbench event payloads", () => {
   assert.equal(record.payload.type, "issue.claimed");
   assert.equal(record.payload.actor, "Backend-Agent");
   assert.equal(record.payload.stream_id, "stream-a");
-  assert.equal(record.payload.revision, 4);
+  assert.equal(record.payload.cursor, 4);
   assert.equal(record.payload.subject_id, "1");
   assert.equal(record.payload.session_id, "session-1");
   assert.equal(record.payload.payload.lease_id, "lease-1");
   assert.equal(record.payload.timestamp, "2026-06-27T10:00:00");
+
+  assert.throws(() => normalizeServerRecord({
+    ...record,
+    event_id: "other-event",
+  }), /event_id 与 payload 不一致/);
+  assert.throws(() => normalizeServerRecord({
+    ...record,
+    cursor: 5,
+  }), /cursor 与 payload 不一致/);
+});
+
+test("normalizes Workbench Timeline replay acknowledgement", () => {
+  const record = normalizeServerRecord({
+    type: "ack",
+    payload: {
+      event: "workbench/request",
+      open: true,
+      subscribed: true,
+      revision: 7,
+      timeline_recovery: {
+        mode: "cursor_replay",
+        stream_id: "timeline-a",
+        requested_cursor: 2,
+        latest_cursor: 3,
+        replayed_count: 1,
+      },
+    },
+  });
+
+  assert.equal(record.payload.timeline_recovery.mode, "cursor_replay");
+  assert.equal(record.payload.timeline_recovery.replayed_count, 1);
 });
 
 test("workbench timeline snapshot is strict bounded and summarizes nested payloads", () => {
@@ -4964,6 +4998,7 @@ test("workbench timeline snapshot is strict bounded and summarizes nested payloa
     correlation_id: "run-1",
     parent_event_id: null,
     severity: "error",
+    cursor: 1,
   };
   const normalized = normalizeServerRecord({
     type: "workbench/snapshot",
@@ -4987,6 +5022,10 @@ test("workbench timeline snapshot is strict bounded and summarizes nested payloa
     note: "line 1 line 2",
   });
   assert.equal(normalized.payload.events[0].severity, "error");
+  assert.throws(() => normalizeServerRecord({
+    type: "workbench/snapshot",
+    payload: { ...normalized.payload, timeline_cursor: 2, timeline_stream_id: "" },
+  }), /缺少 stream identity/);
   assert.throws(() => normalizeServerRecord({
     type: "workbench/snapshot",
     payload: { ...normalized.payload, events: Array.from({ length: 101 }, () => event) },

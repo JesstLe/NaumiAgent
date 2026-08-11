@@ -516,6 +516,100 @@ async def test_textual_workbench_timeline_tab_navigates_persisted_events() -> No
 
 
 @pytest.mark.asyncio
+async def test_textual_workbench_timeline_applies_increment_and_recovers_gap() -> None:
+    base = _snapshot()
+    event_2 = {
+        "id": "event-2",
+        "session_id": "session-workbench-tui",
+        "type": "issue.updated",
+        "actor": "Agent",
+        "subject_id": "task-2",
+        "payload": {},
+        "timestamp": "2026-08-11T12:00:02+00:00",
+        "severity": "info",
+        "cursor": 2,
+    }
+    initial = {
+        **base,
+        "timeline_stream_id": "timeline-a",
+        "timeline_earliest_cursor": 1,
+        "timeline_cursor": 2,
+        "events": [event_2],
+    }
+    event_3 = {
+        **event_2,
+        "id": "event-3",
+        "subject_id": "task-3",
+        "timestamp": "2026-08-11T12:00:03+00:00",
+        "cursor": 3,
+    }
+    event_5 = {
+        **event_2,
+        "id": "event-5",
+        "subject_id": "task-5",
+        "timestamp": "2026-08-11T12:00:05+00:00",
+        "cursor": 5,
+    }
+    recovered = {
+        **initial,
+        "revision": 4,
+        "timeline_earliest_cursor": 4,
+        "timeline_cursor": 5,
+        "events": [event_5],
+    }
+    engine = create_agent_engine(AppConfig())
+    engine._session = SimpleNamespace(id="session-workbench-tui")
+    engine.workbench_service.dashboard_snapshot = AsyncMock(  # type: ignore[method-assign]
+        side_effect=[initial, recovered]
+    )
+    engine.workbench_service.timeline_replay_window = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            "schema_version": 1,
+            "session_id": "session-workbench-tui",
+            "stream_id": "timeline-a",
+            "requested_cursor": 2,
+            "earliest_cursor": 1,
+            "latest_cursor": 3,
+            "gap": False,
+            "gap_reason": "",
+            "events": [event_3],
+        }
+    )
+    app = NaumiApp(engine)
+
+    async with app.run_test(size=(90, 30)) as pilot:
+        app._handle_slash_command("/workbench")
+        await pilot.pause(0.1)
+        screen = app.screen
+        assert isinstance(screen, WorkbenchOverviewScreen)
+        assert screen._timeline_timer is not None
+        screen._timeline_timer.stop()
+
+        screen.refresh_timeline()
+        await pilot.pause(0.1)
+        assert screen.snapshot is not None
+        assert screen.snapshot["timeline_cursor"] == 3
+        assert screen.snapshot["events"][0]["id"] == "event-3"
+
+        engine.workbench_service.timeline_replay_window.return_value = {
+            "schema_version": 1,
+            "session_id": "session-workbench-tui",
+            "stream_id": "timeline-b",
+            "requested_cursor": 3,
+            "earliest_cursor": 4,
+            "latest_cursor": 5,
+            "gap": True,
+            "gap_reason": "stream_changed",
+            "events": [],
+        }
+        screen.refresh_timeline()
+        await pilot.pause(0.2)
+        assert screen.snapshot["timeline_cursor"] == 5
+        assert screen.snapshot["events"][0]["id"] == "event-5"
+        assert engine.workbench_service.dashboard_snapshot.await_count == 2
+
+
+@pytest.mark.asyncio
 async def test_textual_workbench_reviews_loads_selected_service_evidence() -> None:
     engine = create_agent_engine(AppConfig())
     engine._session = SimpleNamespace(id="session-workbench-tui")

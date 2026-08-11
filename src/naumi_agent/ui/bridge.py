@@ -158,6 +158,8 @@ _TERMINAL_MISSION_STATUSES = frozenset({
 _MAX_QUEUED_CONVERSATIONS = 20
 _MAX_RECOVERED_INTERACTION_CARDS = 50
 _SANDBOX_RETRY_RECOVERY_TIMEOUT_SECONDS = 2.0
+_WORKBENCH_TIMELINE_POLL_SECONDS = 0.5
+_WORKBENCH_TIMELINE_REPLAY_LIMIT = 100
 _HARNESS_DETAIL_UNAVAILABLE = (
     "Harness 详情暂不可用。请确认当前工作区状态库可读，然后运行 `/harness doctor`。"
 )
@@ -655,6 +657,12 @@ class JsonlEngineBridge:
         self._inspector_snapshot: RuntimeInspectorSnapshot | None = None
         self._agents_subscribed = False
         self._agents_snapshot: AgentControlSnapshot | None = None
+        self._workbench_subscribed = False
+        self._workbench_session_id = ""
+        self._workbench_timeline_stream_id = ""
+        self._workbench_timeline_cursor = 0
+        self._workbench_refresh_task: asyncio.Task[None] | None = None
+        self._workbench_refresh_error_emitted = False
         self._doctor_health_snapshot: DoctorHealthSnapshot | None = None
         self._doctor_export_plan: DoctorExportPlan | None = None
         self._doctor_probe_task: asyncio.Task[None] | None = None
@@ -705,6 +713,9 @@ class JsonlEngineBridge:
         *,
         request_id: str | None = None,
         journal: bool = True,
+        event_id: str | None = None,
+        stream_id: str | None = None,
+        cursor: int | None = None,
     ) -> None:
         """Emit one JSONL record to the frontend."""
         if self._writer is None:
@@ -712,12 +723,27 @@ class JsonlEngineBridge:
         async with self._writer_lock:
             event_type = str(event)
             policy = self._protocol_event_registry.policy("server", event_type)
-            durable_fields: dict[str, str | int] = {}
+            explicit_durable_fields = (event_id, stream_id, cursor)
+            if any(value is not None for value in explicit_durable_fields) and not all(
+                value is not None for value in explicit_durable_fields
+            ):
+                raise ValueError("event_id、stream_id 与 cursor 必须同时提供。")
+            durable_fields: dict[str, str | int] = (
+                {
+                    "event_id": str(event_id),
+                    "stream_id": str(stream_id),
+                    "cursor": int(cursor),
+                }
+                if event_id is not None and stream_id is not None and cursor is not None
+                else {}
+            )
             if (
                 journal
                 and self._terminal_event_store is not None
                 and event_type in REPLAY_SAFE_TERMINAL_EVENTS
             ):
+                if durable_fields:
+                    raise ValueError("持久终端事件不能注入外部 durable identity。")
                 session_id = str(
                     getattr(getattr(self.engine, "_session", None), "id", "") or ""
                 ).strip()
@@ -3260,7 +3286,19 @@ class JsonlEngineBridge:
         *,
         request_id: str,
     ) -> None:
-        """Return one read-only, authoritative Workbench snapshot."""
+        """Open, recover, refresh, or close the Workbench Timeline subscription."""
+        if not bool(payload.get("open", True)):
+            await self._stop_workbench_subscription()
+            await self.emit(
+                ServerEventType.ACK,
+                {
+                    "event": str(ClientEventType.WORKBENCH_REQUEST),
+                    "open": False,
+                    "subscribed": False,
+                },
+                request_id=request_id,
+            )
+            return
         session = getattr(self.engine, "_session", None)
         if session is None:
             session = await self.engine.get_or_create_session()
@@ -3281,16 +3319,17 @@ class JsonlEngineBridge:
                 request_id=request_id,
             )
             return
+        subscribe = bool(payload.get("subscribe", False))
+        known_timeline_stream_id = str(
+            payload.get("known_timeline_stream_id") or ""
+        )
+        known_timeline_cursor = int(payload.get("known_timeline_cursor") or 0)
         try:
             snapshot = await service.dashboard_snapshot(session_id)
-            if (
-                str(snapshot.get("session_id") or "") != session_id
-                or int(snapshot.get("schema_version") or 0) != 1
-                or int(snapshot.get("revision") or 0) < 1
-                or not str(snapshot.get("stream_id") or "")
-                or snapshot.get("full") is not True
-            ):
-                raise ValueError("invalid Workbench snapshot contract")
+            timeline_stream_id, timeline_cursor = self._validate_workbench_snapshot(
+                snapshot,
+                session_id=session_id,
+            )
         except Exception as exc:
             error_type = type(exc).__name__
             logger.warning("Workbench snapshot failed (%s)", error_type)
@@ -3305,10 +3344,348 @@ class JsonlEngineBridge:
                 request_id=request_id,
             )
             return
+        same_dashboard = (
+            bool(payload.get("known_stream_id"))
+            and str(payload.get("known_stream_id")) == str(snapshot.get("stream_id"))
+            and int(payload.get("known_revision") or 0)
+            == int(snapshot.get("revision") or 0)
+        )
+        recovery: dict[str, Any] | None = None
+        if known_timeline_stream_id or known_timeline_cursor > 0:
+            replay_builder = getattr(service, "timeline_replay_window", None)
+            if not callable(replay_builder):
+                await self.emit_error(
+                    "Workbench Timeline 恢复暂不可用，已拒绝猜测缺失事件。",
+                    code="workbench_timeline_recovery_unavailable",
+                    request_id=request_id,
+                )
+                return
+            try:
+                recovery = await replay_builder(
+                    session_id,
+                    after_cursor=known_timeline_cursor,
+                    expected_stream_id=known_timeline_stream_id,
+                    limit=_WORKBENCH_TIMELINE_REPLAY_LIMIT,
+                )
+                self._validate_workbench_recovery(
+                    recovery,
+                    session_id=session_id,
+                    requested_cursor=known_timeline_cursor,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Workbench Timeline recovery failed (%s)",
+                    type(exc).__name__,
+                )
+                await self.emit_error(
+                    "Workbench Timeline 恢复窗口无法核验，已改用完整快照。",
+                    code="workbench_timeline_recovery_failed",
+                    request_id=request_id,
+                )
+                return
+
+        if recovery is not None and not recovery.get("gap") and same_dashboard:
+            for event in list(recovery.get("events") or []):
+                await self._emit_workbench_timeline_event(
+                    event,
+                    stream_id=str(recovery.get("stream_id") or ""),
+                    request_id=request_id,
+                )
+            replayed_events = list(recovery.get("events") or [])
+            replay_cursor = (
+                int(replayed_events[-1].get("cursor") or 0)
+                if replayed_events
+                else known_timeline_cursor
+            )
+            await self.emit(
+                ServerEventType.ACK,
+                {
+                    "event": str(ClientEventType.WORKBENCH_REQUEST),
+                    "open": True,
+                    "subscribed": subscribe,
+                    "revision": int(snapshot.get("revision") or 0),
+                    "timeline_recovery": {
+                        "mode": "cursor_replay",
+                        "stream_id": str(recovery.get("stream_id") or ""),
+                        "requested_cursor": known_timeline_cursor,
+                        "latest_cursor": int(recovery.get("latest_cursor") or 0),
+                        "replayed_count": len(replayed_events),
+                    },
+                },
+                request_id=request_id,
+            )
+            self._set_workbench_subscription_state(
+                subscribed=subscribe,
+                session_id=session_id,
+                stream_id=str(recovery.get("stream_id") or ""),
+                cursor=replay_cursor,
+            )
+        else:
+            if recovery is not None and recovery.get("gap"):
+                snapshot["timeline_recovery"] = {
+                    "mode": "gap_snapshot",
+                    "gap_reason": str(recovery.get("gap_reason") or "unknown"),
+                    "requested_cursor": known_timeline_cursor,
+                    "earliest_cursor": int(recovery.get("earliest_cursor") or 0),
+                    "latest_cursor": int(recovery.get("latest_cursor") or 0),
+                }
+            else:
+                snapshot["timeline_recovery"] = {"mode": "full_snapshot"}
+            await self.emit(
+                ServerEventType.WORKBENCH_SNAPSHOT,
+                snapshot,
+                request_id=request_id,
+            )
+            self._set_workbench_subscription_state(
+                subscribed=subscribe,
+                session_id=session_id,
+                stream_id=timeline_stream_id,
+                cursor=timeline_cursor,
+            )
+        if subscribe:
+            self._ensure_workbench_refresh_task()
+
+    def _set_workbench_subscription_state(
+        self,
+        *,
+        subscribed: bool,
+        session_id: str,
+        stream_id: str,
+        cursor: int,
+    ) -> None:
+        self._workbench_subscribed = subscribed
+        self._workbench_session_id = session_id if subscribed else ""
+        self._workbench_timeline_stream_id = stream_id if subscribed else ""
+        self._workbench_timeline_cursor = cursor if subscribed else 0
+        self._workbench_refresh_error_emitted = False
+
+    @staticmethod
+    def _validate_workbench_snapshot(
+        snapshot: dict[str, Any],
+        *,
+        session_id: str,
+    ) -> tuple[str, int]:
+        if (
+            not isinstance(snapshot, dict)
+            or str(snapshot.get("session_id") or "") != session_id
+            or int(snapshot.get("schema_version") or 0) != 1
+            or int(snapshot.get("revision") or 0) < 1
+            or not str(snapshot.get("stream_id") or "")
+            or snapshot.get("full") is not True
+        ):
+            raise ValueError("invalid Workbench snapshot contract")
+        timeline_stream_id = str(snapshot.get("timeline_stream_id") or "")
+        timeline_cursor = snapshot.get("timeline_cursor", 0)
+        earliest_cursor = snapshot.get("timeline_earliest_cursor", 0)
+        if (
+            isinstance(timeline_cursor, bool)
+            or not isinstance(timeline_cursor, int)
+            or timeline_cursor < 0
+            or timeline_cursor > 9_007_199_254_740_991
+            or isinstance(earliest_cursor, bool)
+            or not isinstance(earliest_cursor, int)
+            or earliest_cursor < 0
+            or earliest_cursor > 9_007_199_254_740_991
+            or (timeline_cursor > 0 and not timeline_stream_id)
+            or len(timeline_stream_id) > 128
+            or any(ord(char) < 32 or ord(char) == 127 for char in timeline_stream_id)
+        ):
+            raise ValueError("invalid Workbench Timeline snapshot contract")
+        return timeline_stream_id, timeline_cursor
+
+    @staticmethod
+    def _validate_workbench_recovery(
+        recovery: object,
+        *,
+        session_id: str,
+        requested_cursor: int,
+    ) -> None:
+        if not isinstance(recovery, dict):
+            raise ValueError("invalid Workbench Timeline recovery contract")
+        stream_id = recovery.get("stream_id")
+        events = recovery.get("events")
+        cursor_fields = (
+            recovery.get("requested_cursor"),
+            recovery.get("earliest_cursor"),
+            recovery.get("latest_cursor"),
+        )
+        if (
+            recovery.get("schema_version") != 1
+            or recovery.get("session_id") != session_id
+            or recovery.get("requested_cursor") != requested_cursor
+            or not isinstance(stream_id, str)
+            or len(stream_id) > 128
+            or any(ord(char) < 32 or ord(char) == 127 for char in stream_id)
+            or any(
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value < 0
+                or value > 9_007_199_254_740_991
+                for value in cursor_fields
+            )
+            or not isinstance(events, list)
+            or len(events) > _WORKBENCH_TIMELINE_REPLAY_LIMIT
+            or not isinstance(recovery.get("gap"), bool)
+        ):
+            raise ValueError("invalid Workbench Timeline recovery contract")
+        gap_reason = recovery.get("gap_reason")
+        allowed_gap_reasons = {
+            "stream_changed",
+            "stream_identity_required",
+            "cursor_ahead",
+            "cursor_before_retention",
+            "stream_unavailable",
+        }
+        if recovery["gap"]:
+            if events:
+                raise ValueError("Workbench Timeline gap 不得携带增量事件")
+            if gap_reason not in allowed_gap_reasons:
+                raise ValueError("Workbench Timeline gap_reason 无效")
+            return
+        if gap_reason != "":
+            raise ValueError("Workbench Timeline 连续窗口不得携带 gap_reason")
+        if recovery["latest_cursor"] < requested_cursor:
+            raise ValueError("Workbench Timeline latest_cursor 落后于请求游标")
+        expected_cursor = requested_cursor + 1
+        for event in events:
+            if (
+                not isinstance(event, dict)
+                or not str(event.get("id") or "")
+                or event.get("session_id") != session_id
+                or event.get("cursor") != expected_cursor
+            ):
+                raise ValueError("Workbench Timeline 增量事件不连续")
+            expected_cursor += 1
+        if events and events[-1]["cursor"] > recovery["latest_cursor"]:
+            raise ValueError("Workbench Timeline 增量事件超出最新游标")
+
+    def _ensure_workbench_refresh_task(self) -> None:
+        if self._workbench_refresh_task is not None and not self._workbench_refresh_task.done():
+            return
+        self._workbench_refresh_task = asyncio.create_task(
+            self._workbench_refresh_loop(),
+            name="workbench-timeline-refresh",
+        )
+
+    async def _stop_workbench_subscription(self) -> None:
+        self._workbench_subscribed = False
+        self._workbench_session_id = ""
+        self._workbench_timeline_stream_id = ""
+        self._workbench_timeline_cursor = 0
+        task = self._workbench_refresh_task
+        self._workbench_refresh_task = None
+        if task is not None and task is not asyncio.current_task() and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def _workbench_refresh_loop(self) -> None:
+        try:
+            while self._workbench_subscribed and not self._closed:
+                await asyncio.sleep(_WORKBENCH_TIMELINE_POLL_SECONDS)
+                await self._refresh_workbench_timeline()
+        except asyncio.CancelledError:
+            raise
+        finally:
+            if self._workbench_refresh_task is asyncio.current_task():
+                self._workbench_refresh_task = None
+
+    async def _refresh_workbench_timeline(self) -> None:
+        if not self._workbench_subscribed or not self._workbench_session_id:
+            return
+        service = getattr(self.engine, "workbench_service", None)
+        replay_builder = getattr(service, "timeline_replay_window", None)
+        if not callable(replay_builder):
+            return
+        try:
+            recovery = await replay_builder(
+                self._workbench_session_id,
+                after_cursor=self._workbench_timeline_cursor,
+                expected_stream_id=self._workbench_timeline_stream_id,
+                limit=_WORKBENCH_TIMELINE_REPLAY_LIMIT,
+            )
+            self._validate_workbench_recovery(
+                recovery,
+                session_id=self._workbench_session_id,
+                requested_cursor=self._workbench_timeline_cursor,
+            )
+            if recovery.get("gap"):
+                snapshot = await service.dashboard_snapshot(self._workbench_session_id)
+                self._validate_workbench_snapshot(
+                    snapshot,
+                    session_id=self._workbench_session_id,
+                )
+                snapshot["timeline_recovery"] = {
+                    "mode": "gap_snapshot",
+                    "gap_reason": str(recovery.get("gap_reason") or "unknown"),
+                    "requested_cursor": self._workbench_timeline_cursor,
+                    "earliest_cursor": int(recovery.get("earliest_cursor") or 0),
+                    "latest_cursor": int(recovery.get("latest_cursor") or 0),
+                }
+                await self.emit(ServerEventType.WORKBENCH_SNAPSHOT, snapshot)
+                self._workbench_timeline_stream_id = str(
+                    snapshot.get("timeline_stream_id") or ""
+                )
+                self._workbench_timeline_cursor = int(
+                    snapshot.get("timeline_cursor") or 0
+                )
+                return
+            for event in list(recovery.get("events") or []):
+                await self._emit_workbench_timeline_event(
+                    event,
+                    stream_id=str(recovery.get("stream_id") or ""),
+                )
+                self._workbench_timeline_stream_id = str(
+                    recovery.get("stream_id") or ""
+                )
+                self._workbench_timeline_cursor = int(event.get("cursor") or 0)
+            self._workbench_refresh_error_emitted = False
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "Workbench Timeline background refresh failed (%s)",
+                type(exc).__name__,
+            )
+            if not self._workbench_refresh_error_emitted:
+                self._workbench_refresh_error_emitted = True
+                await self.emit_error(
+                    "Workbench Timeline 增量刷新失败；已保留当前快照。",
+                    code="workbench_timeline_refresh_failed",
+                )
+
+    async def _emit_workbench_timeline_event(
+        self,
+        event: dict[str, Any],
+        *,
+        stream_id: str,
+        request_id: str | None = None,
+    ) -> None:
+        event_id = str(event.get("id") or "")
+        event_cursor = event.get("cursor")
+        session_id = str(event.get("session_id") or "")
+        active_session_id = str(
+            getattr(getattr(self.engine, "_session", None), "id", "") or ""
+        )
+        expected_session_id = self._workbench_session_id or active_session_id
+        if (
+            not event_id
+            or not stream_id
+            or isinstance(event_cursor, bool)
+            or not isinstance(event_cursor, int)
+            or event_cursor < 1
+            or not expected_session_id
+            or session_id != expected_session_id
+        ):
+            raise ValueError("invalid Workbench Timeline event contract")
+        payload = {**event, "stream_id": stream_id, "cursor": event_cursor}
         await self.emit(
-            ServerEventType.WORKBENCH_SNAPSHOT,
-            snapshot,
+            ServerEventType.WORKBENCH_EVENT,
+            payload,
             request_id=request_id,
+            journal=False,
+            event_id=event_id,
+            stream_id=stream_id,
+            cursor=event_cursor,
         )
 
     async def show_workbench_review(
@@ -4124,6 +4501,7 @@ class JsonlEngineBridge:
             )
             return
 
+        await self._stop_workbench_subscription()
         self._inspector_subscribed = False
         self._inspector_snapshot = None
 
@@ -6714,6 +7092,7 @@ class JsonlEngineBridge:
         if self._closed:
             return
         self._closed = True
+        await self._stop_workbench_subscription()
         terminal_runtime = self._terminal_runtime_lifecycle
         if terminal_runtime is not None:
             try:
