@@ -48,6 +48,9 @@ Evolution Candidate，而不是直接触发 self_modify。
   verifier 和 protected scope 由版本化纯函数给出稳定 reason codes；只判断是否可进入人工审阅，
   冷却期和 experiment contract 未完成前永不授予实验资格。详见
   `EVO-01-4a-candidate-eligibility-policy.md`。
+- [EVO-01.4b](EVO-01-4b-composite-source-authority-router.md) Composite Source Authority
+  Router：已实现。动态 Evidence 类型必须在 composition root 完整注册；多 reader 并发重验、异常和
+  非 bool 结果失败关闭，Review reader 不再允许被后绑定者静默覆盖。
 - HAR-09.1a Feedback adapter：已实现。直接用户反馈和 Agent 对 durable user turn 的解释使用
   不同 source kind，摘要不落库，非缺陷反馈不生成 Candidate；所有结果仍固定不可执行。
 - EVO-01.6a Candidate 只读审阅面：已实现。用户通过 `/evolution list/detail`、Agent 通过

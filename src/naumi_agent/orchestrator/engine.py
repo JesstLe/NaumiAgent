@@ -491,6 +491,9 @@ from naumi_agent.evolution.self_review_green_cohort import (
 from naumi_agent.evolution.self_review_red_baseline import (
     EvolutionSelfReviewRedBaselineExecutor,
 )
+from naumi_agent.evolution.source_authority import (
+    EvolutionCandidateSourceAuthorityRouter,
+)
 from naumi_agent.evolution.stable_population_candidate_previews import (
     EvolutionStablePopulationCandidatePreviewService,
 )
@@ -3454,8 +3457,14 @@ class AgentEngine:
                 candidate_store=self.evolution_candidate_store,
             )
         )
+        self.evolution_candidate_source_authority_router = (
+            EvolutionCandidateSourceAuthorityRouter({
+                "promoted_outcome": self.evolution_outcome_opportunity_service,
+                "rollback_outcome": self.evolution_outcome_opportunity_service,
+            })
+        )
         self.evolution_review_service.bind_source_authority_reader(
-            self.evolution_outcome_opportunity_service
+            self.evolution_candidate_source_authority_router
         )
         self.evolution_post_rollback_runtime_verification_store = (
             EvolutionPostRollbackRuntimeVerificationStore(

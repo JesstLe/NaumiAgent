@@ -21,6 +21,9 @@ from naumi_agent.evolution.revalidation_rollback_outcomes import (
     EvolutionRevalidationRollbackOutcomeError,
 )
 from naumi_agent.evolution.review import EvolutionReviewFilter, EvolutionReviewService
+from naumi_agent.evolution.source_authority import (
+    EvolutionCandidateSourceAuthorityRouter,
+)
 from naumi_agent.evolution.stable_promotion_outcomes import (
     EvolutionStablePromotionOutcome,
     EvolutionStablePromotionOutcomeError,
@@ -85,6 +88,15 @@ class _GovernanceReader:
             )
             for candidate_id, _revision, _count, _risk in sources
         }
+
+
+def _authority_router(
+    service: EvolutionOutcomeOpportunityService,
+) -> EvolutionCandidateSourceAuthorityRouter:
+    return EvolutionCandidateSourceAuthorityRouter({
+        "promoted_outcome": service,
+        "rollback_outcome": service,
+    })
 
 
 def _digest(value: object) -> str:
@@ -286,7 +298,7 @@ async def test_discovery_clusters_same_guardrail_root_and_revalidates_review(
     review = EvolutionReviewService(
         store,
         governance_reader=_GovernanceReader(),
-        source_authority_reader=service,
+        source_authority_reader=_authority_router(service),
     )
     current = await review.detail_snapshot(tmp_path, one.candidate_id)
     assert current.selected is not None
@@ -352,7 +364,7 @@ async def test_promoted_outcome_starts_new_candidate_and_revalidates_authority(
     review = EvolutionReviewService(
         store,
         governance_reader=_GovernanceReader(),
-        source_authority_reader=service,
+        source_authority_reader=_authority_router(service),
     )
     filtered = await review.list_snapshot(
         tmp_path,
@@ -405,6 +417,9 @@ async def test_engine_binds_both_outcome_authorities(tmp_path: Path) -> None:
         assert service.stable_outcome_service is (
             engine.evolution_stable_promotion_outcome_service
         )
+        router = engine.evolution_candidate_source_authority_router
+        assert router.source_kinds == ("promoted_outcome", "rollback_outcome")
+        assert engine.evolution_review_service._source_authority_reader is router
     finally:
         await engine.shutdown()
 

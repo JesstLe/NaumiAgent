@@ -104,3 +104,5 @@ Finding 与 root 都不同于上一轮 Candidate，因此新的成功 Outcome �
   Meta-governance。
 
 Promoted Outcome 回注只关闭“成功结果无法进入下一轮发现”的断点，不代表自进化闭环已经全部完成。
+EVO-01.4b 已先补齐多动态来源 authority router，避免 06.1c 的 Eval reader 覆盖本模块的 promoted
+Outcome reader；详见 [组合来源权威路由](EVO-01-4b-composite-source-authority-router.md)。

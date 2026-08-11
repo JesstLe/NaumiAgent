@@ -28,6 +28,12 @@ _SAFE_URI_SCHEMES = frozenset({
     "harness",
 })
 
+# Every kind in this registry requires a live authority reader before review.
+EVOLUTION_DYNAMIC_EVIDENCE_SOURCE_KINDS = frozenset({
+    "promoted_outcome",
+    "rollback_outcome",
+})
+
 
 class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -388,6 +394,7 @@ def _digest(value: object) -> str:
 
 
 __all__ = [
+    "EVOLUTION_DYNAMIC_EVIDENCE_SOURCE_KINDS",
     "EvolutionEvidence",
     "EvolutionEvidenceRef",
     "adapt_harness_failure_evidence",
