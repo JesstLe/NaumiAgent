@@ -36,6 +36,7 @@ _SOURCE_KINDS = frozenset({
     "user_feedback",
     "agent_interpreted_feedback",
     "eval_metric_regression",
+    "goal_need",
     "rollback_outcome",
     "promoted_outcome",
 })

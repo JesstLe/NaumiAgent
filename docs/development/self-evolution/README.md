@@ -253,8 +253,11 @@ Proposal、Shadow/Activation 与 learning authority 仍未完成。
 绑定不能被后续 reader 静默覆盖。
 [EVO-06.1c1](EVO-06-1c1-h5c-quantitative-regression-opportunity.md) 已把该前置用于真实 H5c typed
 quantitative regression：完整重建 H5a/H5c authority，只接收 primary metric 的 95% CI 确认回归，形成
-保留 name/direction/target 的 Evidence v2 Candidate，并在 Review 前动态重验。缺失能力、明确需求、
-跨类型时间窗和可解释 Prioritization 仍待后续独立切片。
+保留 name/direction/target 的 Evidence v2 Candidate，并在 Review 前动态重验。
+[EVO-06.1c2](EVO-06-1c2-goal-backed-explicit-need-opportunity.md) 已把用户显式创建且未终结的 durable
+Goal 脱敏投影为 `goal_need` capability Candidate，Goal 完成、取消或被篡改时动态撤权；没有独立
+`goal_completion` runner 时明确阻止自动实验。durable 缺失能力、跨类型时间窗和可解释 Prioritization
+仍待后续独立切片。
 
 [EVO-05.5f5x3a](EVO-05-5f5x3a-authenticated-remote-readiness-claim.md) 已为跨安装 Stable Finalization
 补齐 Population Credential-bound challenge、Ed25519 assertion 与 durable authenticated claim；它不把远端签名声明冒充

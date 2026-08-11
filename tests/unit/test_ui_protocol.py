@@ -81,7 +81,12 @@ def test_protocol_exposes_typed_harness_receipt_event() -> None:
 
 @pytest.mark.parametrize(
     "source_kind",
-    ["rollback_outcome", "promoted_outcome", "eval_metric_regression"],
+    [
+        "rollback_outcome",
+        "promoted_outcome",
+        "eval_metric_regression",
+        "goal_need",
+    ],
 )
 def test_evolution_review_accepts_outcome_filters(source_kind: str) -> None:
     record = normalize_client_record({

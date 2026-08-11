@@ -41,6 +41,7 @@ class _StrictModel(BaseModel):
 
 class MetricRunnerResolution(_StrictModel):
     verifier: Literal[
+        "goal_completion",
         "harness_replay",
         "self_review_static",
         "feedback_recurrence",
@@ -52,6 +53,7 @@ class MetricRunnerResolution(_StrictModel):
     )
     timeout_seconds_per_sample: int | None = Field(default=None, ge=1, le=3_600)
     fixture_kind: Literal[
+        "goal_status_authority",
         "validation_paths",
         "harness_replay_baseline",
         "feedback_observation_window",
@@ -212,6 +214,13 @@ class EvolutionMetricRunnerRegistry:
                 status="blocked",
                 fixture_kind="feedback_observation_window",
                 blocking_code="feedback_window_runner_unavailable",
+            )
+        if metric.verifier == "goal_completion":
+            return MetricRunnerResolution(
+                verifier=metric.verifier,
+                status="blocked",
+                fixture_kind="goal_status_authority",
+                blocking_code="goal_completion_runner_unavailable",
             )
         raise EvolutionMetricBindingError(
             "metric_verifier_unsupported",

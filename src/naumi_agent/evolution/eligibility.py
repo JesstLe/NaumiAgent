@@ -10,12 +10,14 @@ from naumi_agent.evolution.candidate import EvolutionCandidateDraft
 EligibilityDecision = Literal["blocked", "needs_evidence", "review_ready"]
 
 _MECHANICAL_SOURCES = frozenset({
+    "eval_metric_regression",
     "harness_failure",
     "rollback_outcome",
     "promoted_outcome",
     "self_review_static",
 })
 _FEEDBACK_SOURCES = frozenset({"user_feedback", "agent_interpreted_feedback"})
+_EXPLICIT_NEED_SOURCES = frozenset({"goal_need"})
 _PROTECTED_PREFIXES = (
     "src/naumi_agent/safety/",
     "src/naumi_agent/config/credentials",
@@ -84,9 +86,11 @@ def assess_candidate_eligibility(
     direct_feedback = "user_feedback" in candidate.source_kinds
     feedback_only = set(candidate.source_kinds).issubset(_FEEDBACK_SOURCES)
     repeated_feedback = feedback_only and direct_feedback and candidate.occurrence_count >= 2
-    evidence_ready = mechanical or repeated_feedback
+    explicit_need = bool(set(candidate.source_kinds) & _EXPLICIT_NEED_SOURCES)
+    evidence_ready = mechanical or repeated_feedback or explicit_need
     verifier_ready = bool(candidate.expected_metrics) and all(
         metric.verifier in {
+            "goal_completion",
             "harness_replay",
             "self_review_static",
             "feedback_recurrence",
@@ -107,7 +111,7 @@ def assess_candidate_eligibility(
             detail=(
                 "所有需要动态重验的来源 authority 当前有效。"
                 if source_authority_valid
-                else "Outcome 来源 authority 已失效或无法重验，禁止生成 Proposal。"
+                else "动态来源 authority 已失效或无法重验，禁止生成 Proposal。"
             ),
         ),
         EligibilityCheck(
@@ -127,6 +131,7 @@ def assess_candidate_eligibility(
             detail=_evidence_detail(
                 mechanical=mechanical,
                 direct_feedback=direct_feedback,
+                explicit_need=explicit_need,
                 occurrence_count=candidate.occurrence_count,
             ),
         ),
@@ -178,10 +183,13 @@ def _evidence_detail(
     *,
     mechanical: bool,
     direct_feedback: bool,
+    explicit_need: bool,
     occurrence_count: int,
 ) -> str:
     if mechanical:
-        return "包含 Harness、静态扫描或可信 Outcome 机械证据。"
+        return "包含 Harness、Eval、静态扫描或可信 Outcome 机械证据。"
+    if explicit_need:
+        return "包含用户明确创建且当前未终结的 durable Goal 需求。"
     if direct_feedback and occurrence_count >= 2:
         return "直接用户反馈已至少出现 2 次，可进入人工审阅。"
     if direct_feedback:

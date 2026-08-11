@@ -95,6 +95,7 @@ def _authority_router(
 ) -> EvolutionCandidateSourceAuthorityRouter:
     return EvolutionCandidateSourceAuthorityRouter({
         "eval_metric_regression": service,
+        "goal_need": service,
         "promoted_outcome": service,
         "rollback_outcome": service,
     })
@@ -421,9 +422,13 @@ async def test_engine_binds_both_outcome_authorities(tmp_path: Path) -> None:
         metric_service = engine.evolution_eval_metric_opportunity_service
         assert metric_service.harness_store is engine._harness_store
         assert metric_service.candidate_store is engine.evolution_candidate_store
+        goal_service = engine.evolution_goal_need_opportunity_service
+        assert goal_service.goal_store is engine.goal_store
+        assert goal_service.candidate_store is engine.evolution_candidate_store
         router = engine.evolution_candidate_source_authority_router
         assert router.source_kinds == (
             "eval_metric_regression",
+            "goal_need",
             "promoted_outcome",
             "rollback_outcome",
         )

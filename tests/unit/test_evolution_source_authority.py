@@ -94,9 +94,15 @@ def _static_candidate():
     ),))
 
 
-def _router(rollback: object, promoted: object, metric: object | None = None):
+def _router(
+    rollback: object,
+    promoted: object,
+    metric: object | None = None,
+    goal: object | None = None,
+):
     return EvolutionCandidateSourceAuthorityRouter({
         "eval_metric_regression": metric or _Reader(),  # type: ignore[dict-item]
+        "goal_need": goal or _Reader(),  # type: ignore[dict-item]
         "rollback_outcome": rollback,  # type: ignore[dict-item]
         "promoted_outcome": promoted,  # type: ignore[dict-item]
     })
@@ -112,6 +118,7 @@ async def test_router_calls_each_distinct_reader_once_and_runs_them_concurrently
     assert shared.calls == 1
     assert router.source_kinds == (
         "eval_metric_regression",
+        "goal_need",
         "promoted_outcome",
         "rollback_outcome",
     )
@@ -186,6 +193,7 @@ def test_router_rejects_missing_unknown_or_invalid_readers() -> None:
     with pytest.raises(ValueError, match="未知"):
         EvolutionCandidateSourceAuthorityRouter({
             "eval_metric_regression": reader,
+            "goal_need": reader,
             "rollback_outcome": reader,
             "promoted_outcome": reader,
             "future_claim": reader,
