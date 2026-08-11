@@ -491,6 +491,38 @@ class StableRemoteFinalizationDeliveryWorkerConfig(BaseSettings):
         return self
 
 
+class StableRemoteFinalizationResultReturnWorkerConfig(BaseSettings):
+    """Target execution and durable Result return worker policy."""
+
+    enabled: bool = True
+    interval_seconds: float = Field(default=30.0, ge=0.1, le=86_400)
+    max_empty_backoff_seconds: float = Field(default=300.0, ge=0.1, le=604_800)
+    max_failure_backoff_seconds: float = Field(default=300.0, ge=0.1, le=604_800)
+    journal_scan_limit: int = Field(default=20, ge=1, le=1000)
+    return_scan_limit: int = Field(default=20, ge=1, le=1000)
+    claim_lease_seconds: int = Field(default=60, ge=3, le=300)
+    result_timeout_seconds: float = Field(default=20.0, ge=0.1, le=299.9)
+    retry_base_seconds: float = Field(default=5.0, ge=0.1, le=3600)
+    retry_max_seconds: float = Field(default=300.0, ge=0.1, le=3600)
+    max_attempts: int = Field(default=8, ge=1, le=1000)
+    shutdown_drain_seconds: float = Field(default=25.0, ge=0.1, le=3600)
+    jitter_ratio: float = Field(default=0.1, ge=0, le=0.5)
+
+    @model_validator(mode="after")
+    def _validate_result_return(
+        self,
+    ) -> StableRemoteFinalizationResultReturnWorkerConfig:
+        if self.max_empty_backoff_seconds < self.interval_seconds:
+            raise ValueError("Result Return 空轮退避不能小于 interval")
+        if self.max_failure_backoff_seconds < self.interval_seconds:
+            raise ValueError("Result Return 失败退避不能小于 interval")
+        if self.result_timeout_seconds >= self.claim_lease_seconds:
+            raise ValueError("Result Return timeout 必须小于 claim lease")
+        if self.retry_max_seconds < self.retry_base_seconds:
+            raise ValueError("Result Return retry max 不能小于 retry base")
+        return self
+
+
 class StableRemoteFinalizationHTTPTransportConfig(BaseSettings):
     """Authenticated control-plane to installation HTTPS transport."""
 
@@ -556,6 +588,9 @@ class HarnessConfig(BaseSettings):
     stable_remote_finalization_http_transport: (
         StableRemoteFinalizationHTTPTransportConfig
     ) = Field(default_factory=StableRemoteFinalizationHTTPTransportConfig)
+    stable_remote_finalization_result_return: (
+        StableRemoteFinalizationResultReturnWorkerConfig
+    ) = Field(default_factory=StableRemoteFinalizationResultReturnWorkerConfig)
 
     @model_validator(mode="after")
     def _validate_stable_remote_transport_timeouts(self) -> HarnessConfig:

@@ -12,6 +12,9 @@ from naumi_agent.evolution.stable_population_candidate_previews import (
 from naumi_agent.evolution.stable_remote_finalization_delivery_worker import (
     EvolutionStableRemoteFinalizationInstallationTransport,
 )
+from naumi_agent.evolution.stable_remote_finalization_result_return_worker import (
+    EvolutionStableRemoteFinalizationResultTransport,
+)
 from naumi_agent.runtime.agent_heartbeat import AgentExecutionHeartbeatFactory
 from naumi_agent.runtime.browser_heartbeat import BrowserExecutionHeartbeatFactory
 from naumi_agent.runtime.terminal_runtime import TerminalRuntimeLifecycleFactory
@@ -31,6 +34,9 @@ class RuntimeServices:
     ) = None
     stable_remote_finalization_transport: (
         EvolutionStableRemoteFinalizationInstallationTransport | None
+    ) = None
+    stable_remote_finalization_result_transport: (
+        EvolutionStableRemoteFinalizationResultTransport | None
     ) = None
 
     def __post_init__(self) -> None:
@@ -87,6 +93,16 @@ class RuntimeServices:
             raise TypeError(
                 "stable_remote_finalization_transport 必须实现认证安装传输契约。"
             )
+        if (
+            self.stable_remote_finalization_result_transport is not None
+            and not isinstance(
+                self.stable_remote_finalization_result_transport,
+                EvolutionStableRemoteFinalizationResultTransport,
+            )
+        ):
+            raise TypeError(
+                "stable_remote_finalization_result_transport 必须实现认证结果回传契约。"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +119,9 @@ class RuntimeServiceOverrides:
     ) = None
     stable_remote_finalization_transport: (
         EvolutionStableRemoteFinalizationInstallationTransport | None
+    ) = None
+    stable_remote_finalization_result_transport: (
+        EvolutionStableRemoteFinalizationResultTransport | None
     ) = None
 
 

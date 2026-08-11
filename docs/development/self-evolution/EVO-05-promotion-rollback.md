@@ -220,7 +220,10 @@
   接入 Runtime composition 与双通道；
 - [EVO-05.5f5x3g Authenticated Remote Installation HTTP Transport](EVO-05-5f5x3g-authenticated-remote-installation-http-transport.md)：
   已交付；独立 mTLS endpoint、同连接服务端证书 pin、客户端证书授权、current/next 轮换、限长/timeout 和配置自动装配已通过真实
-  TLS loopback；Result 主动回传、安装端 daemon 和 Population aggregation 仍未完成；
+  TLS loopback；
+- [EVO-05.5f5x3h Remote Finalization Result Return Worker](EVO-05-5f5x3h-remote-finalization-result-return-worker.md)：
+  已交付；ACK 后 writer/补签与 Result 回传进入同一 durable 双阶段 outbox，以 owner/epoch/lease fencing、anti-join 同步、retry
+  budget、dead-letter、shutdown drain 和 exact Receipt 绑定自动收口；Result 网络传输、安装端 daemon 和 Population aggregation 仍未完成；
 - [EVO-05.6a Automatic Pause and Rollback Request](EVO-05-6a-automatic-pause-rollback-request.md)：已交付；
   exact breach 会触发或复用 kill switch，并冻结只读 exact Rollback Request，不虚报执行完成。
 - [EVO-05.6b1 Immutable Rollback Source](EVO-05-6b1-immutable-rollback-source.md)：已交付；从 exact Git

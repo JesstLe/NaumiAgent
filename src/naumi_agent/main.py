@@ -4006,6 +4006,8 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             elif len(parts) == 2 and parts[1] in {
                 "run-delivery-worker",
                 "inspect-delivery-worker",
+                "run-result-return-worker",
+                "inspect-result-return-worker",
             }:
                 arguments = {"action": parts[1]}
             else:
@@ -4633,7 +4635,9 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "receive-delivery-local|execute-delivery-local|recover-delivery-local "
             "<delivery-package-base64>；ack-delivery <delivery-id> <ack-base64>；"
             "ingest-delivery|ingest-delivery-late <delivery-id> <submission-base64>；"
-            "inspect-delivery <delivery-id>；"
+            "inspect-delivery <delivery-id>；run-delivery-worker；"
+            "inspect-delivery-worker；run-result-return-worker；"
+            "inspect-result-return-worker；"
             "/evolution discover-outcome <rollback-outcome-id>；"
             "/evolution revalidation-rollback-execute <rollback-request-id>；"
             "/evolution revalidation-rollback-outcome <rollback-request-id>；"

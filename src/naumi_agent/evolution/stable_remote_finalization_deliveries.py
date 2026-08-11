@@ -35,7 +35,7 @@ from naumi_agent.release.population_registry import ReleaseManagedInstallationCr
 from naumi_agent.release.rollout_control_keys import (
     ReleaseRolloutControlTrustPolicyDocument,
 )
-from naumi_agent.release.slots import ReleaseSlotStore
+from naumi_agent.release.slots import ReleaseSlotStore, ReleaseStableMemberFinalization
 
 EVOLUTION_STABLE_REMOTE_FINALIZATION_DELIVERY_POLICY = (
     "evolution-stable-remote-finalization-delivery-v1"
@@ -187,6 +187,55 @@ class EvolutionStableRemoteFinalizationDeliveryView(_StrictModel):
     latest_event: EvolutionStableRemoteFinalizationDeliveryEvent
     ack: EvolutionStableRemoteFinalizationDeliveryAck | None = None
     receipt: EvolutionStableRemoteFinalizationReceipt | None = None
+
+
+class EvolutionStableRemoteFinalizationTargetJournalEntry(_StrictModel):
+    """Strict public projection of one installation-local journal row."""
+
+    package: EvolutionStableRemoteFinalizationDeliveryPackage
+    state: Literal["received", "writer_committed", "result_signed"]
+    ack: EvolutionStableRemoteFinalizationDeliveryAck
+    writer: ReleaseStableMemberFinalization | None = None
+    submission: EvolutionStableRemoteFinalizationSubmission | None = None
+
+    @model_validator(mode="after")
+    def _state_binding(self) -> Self:
+        if not (
+            self.ack.payload.delivery_id == self.package.delivery_id
+            and self.ack.payload.delivery_sha256 == self.package.delivery_sha256
+            and self.ack.payload.grant_id
+            == self.package.execution_package.grant.grant_id
+            and self.ack.payload.grant_sha256
+            == self.package.execution_package.grant.grant_sha256
+            and self.ack.payload.installation_member_id
+            == self.package.installation_member_id
+        ):
+            raise ValueError("Target Journal ACK 与 package 不一致。")
+        if self.state == "received" and (
+            self.writer is not None or self.submission is not None
+        ):
+            raise ValueError("received Target Journal 不得携带 writer/result。")
+        if self.state == "writer_committed" and (
+            self.writer is None or self.submission is not None
+        ):
+            raise ValueError("writer_committed Target Journal artifact 不完整。")
+        if self.state == "result_signed" and (
+            self.writer is None or self.submission is None
+        ):
+            raise ValueError("result_signed Target Journal artifact 不完整。")
+        if self.writer is not None and self.writer.authority.authority_id != (
+            self.package.execution_package.grant.authorization_id
+        ):
+            raise ValueError("Target Journal writer 与 package authority 不一致。")
+        if self.submission is not None and not (
+            self.submission.result.release_finalization == self.writer
+            and self.submission.result.grant_id
+            == self.package.execution_package.grant.grant_id
+            and self.submission.result.installation_member_id
+            == self.package.installation_member_id
+        ):
+            raise ValueError("Target Journal submission 与 package/writer 不一致。")
+        return self
 
 
 class EvolutionStableRemoteFinalizationDeliveryError(RuntimeError):
@@ -678,6 +727,93 @@ class EvolutionStableRemoteFinalizationTargetJournal:
         )
         return submission
 
+    def get(
+        self, delivery_id: str
+    ) -> EvolutionStableRemoteFinalizationTargetJournalEntry | None:
+        """Read one row while verifying every stored artifact digest and binding."""
+        if not self.db_path.is_file():
+            return None
+        with sqlite3.connect(self.db_path) as db:
+            _ensure_target_schema(db)
+            row = db.execute(
+                "SELECT package_json, state, ack_json, ack_sha256, writer_json, "
+                "writer_sha256, result_json, result_sha256 FROM "
+                "stable_finalization_delivery_journal WHERE delivery_id = ?",
+                (_delivery_id(delivery_id),),
+            ).fetchone()
+        return None if row is None else self._restore_entry(row)
+
+    def list_entries(
+        self,
+        *,
+        states: tuple[Literal["received", "writer_committed", "result_signed"], ...],
+        limit: int = 20,
+    ) -> tuple[EvolutionStableRemoteFinalizationTargetJournalEntry, ...]:
+        """Return a bounded deterministic prefix for recovery workers."""
+        if not states or any(
+            item not in {"received", "writer_committed", "result_signed"}
+            for item in states
+        ):
+            raise ValueError("Target Journal states 无效。")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
+            raise ValueError("Target Journal limit 必须为 1..1000。")
+        if not self.db_path.is_file():
+            return ()
+        placeholders = ",".join("?" for _ in states)
+        with sqlite3.connect(self.db_path) as db:
+            _ensure_target_schema(db)
+            rows = db.execute(
+                "SELECT package_json, state, ack_json, ack_sha256, writer_json, "
+                "writer_sha256, result_json, result_sha256 FROM "
+                "stable_finalization_delivery_journal WHERE state IN ("
+                f"{placeholders}) ORDER BY delivery_id LIMIT ?",  # noqa: S608
+                (*states, limit),
+            ).fetchall()
+        return tuple(self._restore_entry(row) for row in rows)
+
+    @staticmethod
+    def _restore_entry(row) -> EvolutionStableRemoteFinalizationTargetJournalEntry:
+        (
+            package_json, state, ack_json, ack_sha, writer_json, writer_sha,
+            result_json, result_sha,
+        ) = row
+        for label, artifact, digest in (
+            ("ACK", ack_json, ack_sha),
+            ("writer", writer_json, writer_sha),
+            ("result", result_json, result_sha),
+        ):
+            if (artifact is None) != (digest is None) or (
+                artifact is not None
+                and hashlib.sha256(str(artifact).encode()).hexdigest() != digest
+            ):
+                raise EvolutionStableRemoteFinalizationDeliveryError(
+                    "stable_remote_delivery_journal_corrupt",
+                    f"Target Journal {label} digest 无效。",
+                )
+        try:
+            return EvolutionStableRemoteFinalizationTargetJournalEntry(
+                package=EvolutionStableRemoteFinalizationDeliveryPackage.model_validate_json(
+                    package_json
+                ),
+                state=state,
+                ack=EvolutionStableRemoteFinalizationDeliveryAck.model_validate_json(
+                    ack_json
+                ),
+                writer=None if writer_json is None else (
+                    ReleaseStableMemberFinalization.model_validate_json(writer_json)
+                ),
+                submission=None if result_json is None else (
+                    EvolutionStableRemoteFinalizationSubmission.model_validate_json(
+                        result_json
+                    )
+                ),
+            )
+        except (TypeError, ValueError) as exc:
+            raise EvolutionStableRemoteFinalizationDeliveryError(
+                "stable_remote_delivery_journal_corrupt",
+                "Target Journal artifact 结构或绑定无效。",
+            ) from exc
+
     def _state(self, delivery_id: str) -> str | None:
         if not self.db_path.is_file():
             return None
@@ -690,27 +826,16 @@ class EvolutionStableRemoteFinalizationTargetJournal:
         return None if row is None else str(row[0])
 
     def _artifact(self, package, *, kind: Literal["ack", "result"]) -> str | None:
-        if not self.db_path.is_file():
+        entry = self.get(package.delivery_id)
+        if entry is None:
             return None
-        column = "ack_json" if kind == "ack" else "result_json"
-        with sqlite3.connect(self.db_path) as db:
-            _ensure_target_schema(db)
-            row = db.execute(
-                f"SELECT package_json, {column} FROM "  # noqa: S608 - fixed enum column
-                "stable_finalization_delivery_journal WHERE delivery_id = ?",
-                (_delivery_id(package.delivery_id),),
-            ).fetchone()
-        if row is None:
-            return None
-        stored = EvolutionStableRemoteFinalizationDeliveryPackage.model_validate_json(
-            row[0]
-        )
-        if stored != package:
+        if entry.package != package:
             raise EvolutionStableRemoteFinalizationDeliveryError(
                 "stable_remote_delivery_journal_conflict",
                 "Target Journal 已绑定不同 package。",
             )
-        return None if row[1] is None else str(row[1])
+        artifact = entry.ack if kind == "ack" else entry.submission
+        return None if artifact is None else artifact.model_dump_json()
 
     def _record(self, *, package, state: str, artifact: str) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1161,6 +1286,7 @@ __all__ = [
     "EvolutionStableRemoteFinalizationDeliveryStore",
     "EvolutionStableRemoteFinalizationDeliveryView",
     "EvolutionStableRemoteFinalizationTargetJournal",
+    "EvolutionStableRemoteFinalizationTargetJournalEntry",
     "decode_stable_remote_finalization_delivery_ack",
     "decode_stable_remote_finalization_delivery_package",
     "encode_stable_remote_finalization_delivery_ack",

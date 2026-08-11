@@ -261,8 +261,10 @@ Probe 签发逐 member、短期、single-use、binary-only portable Finalization
 [EVO-05.5f5x3f](EVO-05-5f5x3f-remote-finalization-delivery-worker.md) 已增加认证安装传输 Protocol、真实本机 adapter、周期
 Worker、ACK timeout、retry budget、dead-letter 与 shutdown drain。
 [EVO-05.5f5x3g](EVO-05-5f5x3g-authenticated-remote-installation-http-transport.md) 已增加独立 mTLS endpoint、同连接服务端 pin、
-客户端证书授权、current/next 轮换、严格 HTTP 边界和配置自动装配；Result 主动回传、安装端 daemon 和 Population aggregation
-仍未完成。
+客户端证书授权、current/next 轮换、严格 HTTP 边界和配置自动装配。
+[EVO-05.5f5x3h](EVO-05-5f5x3h-remote-finalization-result-return-worker.md) 已增加 ACK 后 writer/补签与 Result 回传的 durable
+双阶段 outbox、owner/epoch/lease fencing、anti-join 同步、retry/dead-letter、shutdown drain、Runtime 注入和 exact Receipt 绑定；
+Result 网络传输、安装端 daemon 和 Population aggregation 仍未完成。
 [EVO-05.3f2c3b1](EVO-05-3f2c3b1-platform-dispatch-outbox.md) 已把实时准入的 required-platform Worker lane 转为 durable
 queued dispatch，并在 exact Worker incarnation 上预留容量。[EVO-05.3f2c3b2a](EVO-05-3f2c3b2a-authenticated-worker-claim.md)
 已增加 supervisor-attested Ed25519 Worker Identity、一次性 claim challenge 和可续期 lease hash chain。
