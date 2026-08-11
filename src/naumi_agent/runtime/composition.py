@@ -486,6 +486,9 @@ def build_runtime_services(
         stable_promotion_runtime_admission_transport=(
             stable_runtime_admission_transport
         ),
+        stable_promotion_observation_revision_transport=(
+            resolved.stable_promotion_observation_revision_transport
+        ),
         stable_remote_finalization_result_transport=(
             stable_remote_result_transport
         ),

@@ -510,6 +510,13 @@ from naumi_agent.evolution.stable_promotion_observation_revision_deliveries impo
     EvolutionStablePromotionObservationRevisionDeliveryService,
     EvolutionStablePromotionObservationRevisionDeliveryStore,
 )
+from naumi_agent.evolution.stable_promotion_observation_revision_delivery_worker import (
+    EvolutionStablePromotionObservationRevisionDeliveryWorker,
+    EvolutionStablePromotionObservationRevisionDispatchStore,
+    EvolutionStablePromotionObservationRevisionPassResult,
+    EvolutionStablePromotionObservationRevisionWorkerPolicy,
+    EvolutionStablePromotionObservationRevisionWorkerSnapshot,
+)
 from naumi_agent.evolution.stable_promotion_runtime_admission_deliveries import (
     EvolutionStablePromotionRuntimeAdmissionDeliveryService,
     EvolutionStablePromotionRuntimeAdmissionDeliveryStore,
@@ -2916,6 +2923,56 @@ class AgentEngine:
                 ),
             )
         )
+        self.evolution_stable_promotion_observation_revision_dispatch_store = (
+            EvolutionStablePromotionObservationRevisionDispatchStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_stable_promotion_observation_revision_delivery_worker: (
+            EvolutionStablePromotionObservationRevisionDeliveryWorker | None
+        ) = None
+        if services.stable_promotion_observation_revision_transport is not None:
+            revision_worker_config = (
+                config.harness.stable_promotion_observation_revision_delivery
+            )
+            self.evolution_stable_promotion_observation_revision_delivery_worker = (
+                EvolutionStablePromotionObservationRevisionDeliveryWorker(
+                    sender=(
+                        self.evolution_stable_promotion_observation_revision_delivery_service
+                    ),
+                    store=(
+                        self.evolution_stable_promotion_observation_revision_dispatch_store
+                    ),
+                    transport=(
+                        services.stable_promotion_observation_revision_transport
+                    ),
+                    policy=EvolutionStablePromotionObservationRevisionWorkerPolicy(
+                        interval_seconds=revision_worker_config.interval_seconds,
+                        max_empty_backoff_seconds=(
+                            revision_worker_config.max_empty_backoff_seconds
+                        ),
+                        max_failure_backoff_seconds=(
+                            revision_worker_config.max_failure_backoff_seconds
+                        ),
+                        claim_lease_seconds=(
+                            revision_worker_config.claim_lease_seconds
+                        ),
+                        scan_limit=revision_worker_config.scan_limit,
+                        receipt_timeout_seconds=(
+                            revision_worker_config.receipt_timeout_seconds
+                        ),
+                        retry_base_seconds=(
+                            revision_worker_config.retry_base_seconds
+                        ),
+                        retry_max_seconds=revision_worker_config.retry_max_seconds,
+                        max_attempts=revision_worker_config.max_attempts,
+                        shutdown_drain_seconds=(
+                            revision_worker_config.shutdown_drain_seconds
+                        ),
+                        jitter_ratio=revision_worker_config.jitter_ratio,
+                    ),
+                )
+            )
         self.evolution_stable_promotion_runtime_admission_delivery_worker: (
             EvolutionStablePromotionRuntimeAdmissionDeliveryWorker | None
         ) = None
@@ -4381,6 +4438,14 @@ class AgentEngine:
             "pursuit_terminal_outbox_worker",
             self._pursuit_terminal_outbox_worker.stop,
         )
+        revision_worker = (
+            self.evolution_stable_promotion_observation_revision_delivery_worker
+        )
+        if revision_worker is not None:
+            await self._shutdown_component(
+                "stable_promotion_observation_revision_delivery_worker",
+                revision_worker.stop,
+            )
         runtime_admission_worker = (
             self.evolution_stable_promotion_runtime_admission_delivery_worker
         )
@@ -4967,6 +5032,15 @@ class AgentEngine:
         ):
             await runtime_admission_worker.run_once()
             runtime_admission_worker.start()
+        revision_worker = (
+            self.evolution_stable_promotion_observation_revision_delivery_worker
+        )
+        if (
+            revision_worker is not None
+            and self._config.harness.stable_promotion_observation_revision_delivery.enabled
+        ):
+            await revision_worker.run_once()
+            revision_worker.start()
         delivery_worker = self.evolution_stable_remote_finalization_delivery_worker
         if (
             delivery_worker is not None
@@ -5011,6 +5085,36 @@ class AgentEngine:
         self,
     ) -> EvolutionStablePromotionRuntimeAdmissionWorkerSnapshot:
         worker = self.evolution_stable_promotion_runtime_admission_delivery_worker
+        if worker is None:
+            raise RuntimeError(
+                "尚未绑定 authenticated Control Plane transport，无法读取 Worker。"
+            )
+        return worker.snapshot()
+
+    async def enqueue_stable_promotion_observation_revision_delivery(
+        self, admission_id: str
+    ):
+        worker = self.evolution_stable_promotion_observation_revision_delivery_worker
+        if worker is None:
+            raise RuntimeError(
+                "尚未绑定 authenticated Control Plane transport，无法自动投递。"
+            )
+        return await worker.enqueue_next(admission_id)
+
+    async def run_stable_promotion_observation_revision_delivery_once(
+        self,
+    ) -> EvolutionStablePromotionObservationRevisionPassResult:
+        worker = self.evolution_stable_promotion_observation_revision_delivery_worker
+        if worker is None:
+            raise RuntimeError(
+                "尚未绑定 authenticated Control Plane transport，无法运行 Worker。"
+            )
+        return await worker.run_once()
+
+    def stable_promotion_observation_revision_delivery_worker_snapshot(
+        self,
+    ) -> EvolutionStablePromotionObservationRevisionWorkerSnapshot:
+        worker = self.evolution_stable_promotion_observation_revision_delivery_worker
         if worker is None:
             raise RuntimeError(
                 "尚未绑定 authenticated Control Plane transport，无法读取 Worker。"
