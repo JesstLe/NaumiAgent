@@ -77,6 +77,7 @@ from naumi_agent.tools.evolution_review import (
     EvolutionRolloutControlKeyTool,
     EvolutionStablePopulationCandidatePreviewTool,
     EvolutionStablePopulationCompletionTool,
+    EvolutionStablePromotionObservationChainCursorTool,
     EvolutionStablePromotionObservationContractTool,
     EvolutionStablePromotionRuntimeAdmissionDeliveryTool,
     EvolutionStablePromotionRuntimeObservationAdmissionTool,
@@ -295,6 +296,7 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
         "evolution_stable_remote_population_finalization",
         "evolution_stable_promotion_observation_contract",
         "evolution_stable_promotion_runtime_observation_admission",
+        "evolution_stable_promotion_observation_chain_cursor",
         "evolution_stable_promotion_runtime_admission_delivery",
         "evolution_stable_rollout_authorization",
         "evolution_stable_rollout_finalization",
@@ -379,12 +381,15 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
         tools[63], EvolutionStablePromotionRuntimeObservationAdmissionTool
     )
     assert isinstance(
-        tools[64], EvolutionStablePromotionRuntimeAdmissionDeliveryTool
+        tools[64], EvolutionStablePromotionObservationChainCursorTool
     )
-    assert isinstance(tools[65], EvolutionStableRolloutAuthorizationTool)
-    assert isinstance(tools[66], EvolutionStableRolloutFinalizationTool)
-    assert isinstance(tools[67], EvolutionOutcomeOpportunityTool)
-    assert isinstance(tools[68], EvolutionProposalQueueTool)
+    assert isinstance(
+        tools[65], EvolutionStablePromotionRuntimeAdmissionDeliveryTool
+    )
+    assert isinstance(tools[66], EvolutionStableRolloutAuthorizationTool)
+    assert isinstance(tools[67], EvolutionStableRolloutFinalizationTool)
+    assert isinstance(tools[68], EvolutionOutcomeOpportunityTool)
+    assert isinstance(tools[69], EvolutionProposalQueueTool)
 
 
 class _FakeEngine:

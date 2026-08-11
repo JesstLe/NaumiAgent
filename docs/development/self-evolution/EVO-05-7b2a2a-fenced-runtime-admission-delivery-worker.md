@@ -114,15 +114,14 @@ New UI、CLI 和 Textual TUI 继续共享 Slash Router、Tool Registry 与 Engin
 
 ## 自我审视与下一步
 
-本切片关闭了 durable automatic dispatch 的状态机缺口，但仍不能声称跨主机交付：
+本切片关闭了 durable automatic dispatch 的状态机缺口；后续 7b2a2b 已关闭 HTTPS/mTLS 网络边界。当前仍有这些缺口：
 
-- 没有 production HTTPS client/server、mTLS、hostname/SAN 和 same-connection leaf pin；
-- 没有 Control Plane endpoint 的 request body/header identity、大小、timeout、并发与速率限制；
 - dead-letter 暂无人工签名 requeue/abandon 和 retention；
-- production composition 目前只能使用显式注入 transport；
+- Control Plane server 尚未进入独立 daemon/discovery 与证书热重载；
 - macOS 本机真实 fixture 不能替代 Linux/Windows 网络矩阵。
 
 [EVO-05.7b2a2b](EVO-05-7b2a2b-authenticated-runtime-admission-http-transport.md) 已复用 bounded TLS HTTP common，交付
 installation→Control Plane 固定 endpoint/media type、双向证书校验与 current/next pin、canonical Submission/Receipt Base64、严格
-HTTP parser、并发/限流、真实 TLS loopback和 config 自动装配。下一步进入 `EVO-05.7b3a` Population observation chain cursor，
-不得从单个网络 Receipt 直接跳到 promoted Outcome。
+HTTP parser、并发/限流、真实 TLS loopback和 config 自动装配。
+[EVO-05.7b3a](EVO-05-7b3a-stable-promotion-observation-chain-cursor.md) 又完成 installation 本地 durable chain cursor；
+下一步是 7b3b signed revision delivery，不得从单个网络 Receipt 或本地 Cursor 直接跳到 promoted Outcome。

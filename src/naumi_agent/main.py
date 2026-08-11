@@ -2980,6 +2980,7 @@ def _print_help() -> None:
             "stable-remote-population-finalization|"
             "stable-promotion-observation-contract|"
             "stable-promotion-admit-runtime|"
+            "stable-promotion-observation-chain|"
             "stable-promotion-admission-delivery|"
             "stable-rollout-authorization|"
             "stable-rollout-finalization|"
@@ -4148,6 +4149,23 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 arg="",
             )
             return
+        if action == "stable-promotion-observation-chain":
+            if len(parts) != 3 or parts[1] not in {"advance", "inspect"}:
+                raise ValueError(
+                    "stable-promotion-observation-chain 需要 advance|inspect "
+                    "和 Runtime Admission ID。"
+                )
+            await _run_tool_slash_command(
+                engine,
+                slash_command="/evolution",
+                tool_name="evolution_stable_promotion_observation_chain_cursor",
+                parse_args=lambda _arg: {
+                    "action": parts[1],
+                    "admission_id": parts[2],
+                },
+                arg="",
+            )
+            return
         if action == "stable-promotion-admission-delivery":
             if len(parts) == 3 and parts[1] in {
                 "prepare",
@@ -4580,6 +4598,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "stable-remote-population-finalization、"
                 "stable-promotion-observation-contract、"
                 "stable-promotion-admit-runtime、"
+                "stable-promotion-observation-chain、"
                 "stable-promotion-admission-delivery、"
                 "stable-rollout-authorization、"
                 "stable-rollout-finalization、"
@@ -4816,6 +4835,8 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution stable-promotion-admit-runtime "
             "<population-finalization-receipt-id> <stable-intent-id> "
             "<runtime-subject-id>；"
+            "/evolution stable-promotion-observation-chain advance|inspect "
+            "<runtime-admission-id>；"
             "/evolution stable-promotion-admission-delivery prepare|export|inspect|"
             "queue|inspect-dispatch <runtime-admission-id>；"
             "receive <submission-base64>；run-worker；inspect-worker；"

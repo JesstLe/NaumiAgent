@@ -125,7 +125,6 @@ Control Plane server 使用 `StablePromotionRuntimeAdmissionHTTPServerPolicy` �
 - dead-letter 的人工签名 requeue/abandon 和 retention 尚未实现；
 - 当前真实 loopback 只证明本机平台，Linux/Windows 仍需要发布 CI matrix 证据。
 
-7b2a2 的 signed transport 和 durable Worker 至此闭合。下一最小切片转为 `EVO-05.7b3a Stable Promotion Observation Chain
-Cursor`：按 7b1 冻结的 minimum installations、window duration、heartbeat timeout 与 coverage 规则，为每个 received Admission 建立
-可恢复分页 cursor；它仍不直接签发 promoted Outcome。只有 7b3 后续完整 Population aggregation 达标，才能进入 7b4
-promoted/superseded ledger。
+[EVO-05.7b3a](EVO-05-7b3a-stable-promotion-observation-chain-cursor.md) 已为每个 acknowledged Admission 从 installation
+本地 HAR ledger 建立逐 sample content-addressed、可恢复的 durable cursor。下一步 7b3b 必须把 revision 签名传到 Control Plane；
+只有 7b3c 完整 Population aggregation 达标，才能进入 7b4 promoted/superseded ledger。

@@ -216,6 +216,10 @@ from naumi_agent.evolution.stable_population_completions import (
     EvolutionStablePopulationCompletionError,
     render_stable_population_completion,
 )
+from naumi_agent.evolution.stable_promotion_observation_chain_cursors import (
+    EvolutionStablePromotionObservationChainCursorError,
+    render_stable_promotion_observation_chain_cursor,
+)
 from naumi_agent.evolution.stable_promotion_observation_contracts import (
     EvolutionStablePromotionObservationContractError,
     render_stable_promotion_observation_contract,
@@ -4026,6 +4030,87 @@ class EvolutionStablePromotionRuntimeObservationAdmissionTool(Tool):
         return render_stable_promotion_runtime_observation_admission(view)
 
 
+class EvolutionStablePromotionObservationChainCursorTool(Tool):
+    """Advance or inspect a durable installation-side observation cursor."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_stable_promotion_observation_chain_cursor"
+
+    @property
+    def description(self) -> str:
+        return (
+            "为已获得 Control Plane Receipt ACK 的 Runtime Admission，从 installation "
+            "本地 HAR observation ledger 推进可恢复 cursor；不计算长期健康或推广结论。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["advance", "inspect"],
+                },
+                "admission_id": {
+                    "type": "string",
+                    "pattern": "^evstablepromadmit_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["action", "admission_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="稳定推广 Observation Chain Cursor",
+            search_hint=(
+                "evolution stable promotion observation chain cursor heartbeat "
+                "自进化 稳定推广 观察链 游标 心跳"
+            ),
+        )
+
+    async def execute(self, action: str, admission_id: str) -> str:
+        operation = str(action or "").strip().lower()
+        item_id = str(admission_id or "").strip()
+        service = (
+            self._engine.evolution_stable_promotion_observation_chain_cursor_service
+        )
+        try:
+            if operation == "advance":
+                view = await service.advance(admission_id=item_id)
+            elif operation == "inspect":
+                view = await service.inspect(admission_id=item_id)
+            else:
+                raise ValueError("action 必须是 advance 或 inspect。")
+        except (
+            AttributeError,
+            EvolutionStablePromotionObservationChainCursorError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(
+                exc,
+                "code",
+                "stable_promotion_observation_cursor_failed",
+            )
+            return f"稳定推广 Observation Chain Cursor 未完成（`{code}`）：{exc}"
+        return render_stable_promotion_observation_chain_cursor(view)
+
+
 class EvolutionStablePromotionRuntimeAdmissionDeliveryTool(Tool):
     """Prepare, export, receive, or inspect one signed runtime Admission."""
 
@@ -5745,6 +5830,7 @@ def create_evolution_review_tools(
         EvolutionStableRemotePopulationFinalizationTool(engine),
         EvolutionStablePromotionObservationContractTool(engine),
         EvolutionStablePromotionRuntimeObservationAdmissionTool(engine),
+        EvolutionStablePromotionObservationChainCursorTool(engine),
         EvolutionStablePromotionRuntimeAdmissionDeliveryTool(engine),
         EvolutionStableRolloutAuthorizationTool(engine),
         EvolutionStableRolloutFinalizationTool(engine),
@@ -5814,6 +5900,7 @@ __all__ = [
     "EvolutionStableRemotePopulationFinalizationTool",
     "EvolutionStablePromotionObservationContractTool",
     "EvolutionStablePromotionRuntimeAdmissionDeliveryTool",
+    "EvolutionStablePromotionObservationChainCursorTool",
     "EvolutionStablePromotionRuntimeObservationAdmissionTool",
     "EvolutionStableRolloutAuthorizationTool",
     "EvolutionStableRolloutFinalizationTool",

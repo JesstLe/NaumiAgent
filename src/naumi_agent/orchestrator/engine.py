@@ -498,6 +498,10 @@ from naumi_agent.evolution.stable_population_completions import (
     EvolutionStablePopulationCompletionService,
     EvolutionStablePopulationCompletionStore,
 )
+from naumi_agent.evolution.stable_promotion_observation_chain_cursors import (
+    EvolutionStablePromotionObservationChainCursorService,
+    EvolutionStablePromotionObservationChainCursorStore,
+)
 from naumi_agent.evolution.stable_promotion_observation_contracts import (
     EvolutionStablePromotionObservationContractService,
     EvolutionStablePromotionObservationContractStore,
@@ -2855,6 +2859,34 @@ class AgentEngine:
         self.evolution_stable_promotion_runtime_admission_dispatch_store = (
             EvolutionStablePromotionRuntimeAdmissionDispatchStore(
                 config.memory.session_db_path
+            )
+        )
+        self.evolution_stable_promotion_observation_chain_cursor_store = (
+            EvolutionStablePromotionObservationChainCursorStore(
+                config.memory.session_db_path,
+                admission_service=(
+                    self.evolution_stable_promotion_runtime_observation_admission_service
+                ),
+                dispatch_store=(
+                    self.evolution_stable_promotion_runtime_admission_dispatch_store
+                ),
+            )
+        )
+        self.evolution_stable_promotion_observation_chain_cursor_service = (
+            EvolutionStablePromotionObservationChainCursorService(
+                admission_service=(
+                    self.evolution_stable_promotion_runtime_observation_admission_service
+                ),
+                delivery_service=(
+                    self.evolution_stable_promotion_runtime_admission_delivery_service
+                ),
+                dispatch_store=(
+                    self.evolution_stable_promotion_runtime_admission_dispatch_store
+                ),
+                harness_store=self._harness_store,
+                store=(
+                    self.evolution_stable_promotion_observation_chain_cursor_store
+                ),
             )
         )
         self.evolution_stable_promotion_runtime_admission_delivery_worker: (
