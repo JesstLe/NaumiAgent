@@ -502,6 +502,10 @@ from naumi_agent.evolution.stable_read_graph import (
     EvolutionLazyStableReadGraphInspector,
     build_evolution_stable_read_graph_inspector,
 )
+from naumi_agent.evolution.stable_remote_readiness_claims import (
+    EvolutionStableRemoteReadinessClaimService,
+    EvolutionStableRemoteReadinessClaimStore,
+)
 from naumi_agent.evolution.stable_rollback_readiness import (
     EvolutionStableDeploymentInspectionPort,
     EvolutionStableRollbackReadinessService,
@@ -2608,6 +2612,21 @@ class AgentEngine:
                     self.evolution_stable_deployment_inspector
                 ),
                 release_slot_store=self.evolution_release_slot_store,
+            )
+        )
+        self.evolution_stable_remote_readiness_claim_store = (
+            EvolutionStableRemoteReadinessClaimStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_stable_remote_readiness_claim_service = (
+            EvolutionStableRemoteReadinessClaimService(
+                workspace_root=paths.workspace_root,
+                completion_service=(
+                    self.evolution_stable_population_completion_service
+                ),
+                population_store=self.evolution_release_population_snapshot_store,
+                store=self.evolution_stable_remote_readiness_claim_store,
             )
         )
         self.evolution_stable_rollout_authorization_store = (

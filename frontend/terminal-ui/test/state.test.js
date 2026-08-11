@@ -2780,6 +2780,22 @@ test("outcome discovery uses slash execution then filters its typed projection",
   });
 });
 
+test("stable remote readiness uses the shared slash execution path", () => {
+  const state = createInitialState();
+  const sent = [];
+  handleSubmitText(
+    state,
+    "/evolution stable-remote-readiness challenge evstablepopcomplete_aaaaaaaaaaaaaaaaaaaaaaaa relpopmember_bbbbbbbbbbbbbbbbbbbbbbbb",
+    (type, payload) => sent.push({ type, payload }),
+  );
+  assert.deepEqual(sent, [{
+    type: "submit",
+    payload: {
+      text: "/evolution stable-remote-readiness challenge evstablepopcomplete_aaaaaaaaaaaaaaaaaaaaaaaa relpopmember_bbbbbbbbbbbbbbbbbbbbbbbb",
+    },
+  }]);
+});
+
 test("evaluation lane command opens typed receipt route and stays out of chat", () => {
   const state = createInitialState();
   state.protocolNegotiated = true;
