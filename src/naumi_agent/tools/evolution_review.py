@@ -227,6 +227,12 @@ from naumi_agent.evolution.stable_promotion_runtime_admission_deliveries import 
     render_stable_promotion_runtime_admission_delivery,
     render_stable_promotion_runtime_admission_submission,
 )
+from naumi_agent.evolution.stable_promotion_runtime_admission_delivery_worker import (
+    EvolutionStablePromotionRuntimeAdmissionDispatchError,
+    render_stable_promotion_runtime_admission_dispatch,
+    render_stable_promotion_runtime_admission_worker,
+    render_stable_promotion_runtime_admission_worker_pass,
+)
 from naumi_agent.evolution.stable_promotion_runtime_observation_admissions import (
     EvolutionStablePromotionRuntimeObservationAdmissionError,
     render_stable_promotion_runtime_observation_admission,
@@ -4045,7 +4051,16 @@ class EvolutionStablePromotionRuntimeAdmissionDeliveryTool(Tool):
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["prepare", "export", "receive", "inspect"],
+                    "enum": [
+                        "prepare",
+                        "export",
+                        "receive",
+                        "inspect",
+                        "queue",
+                        "inspect-dispatch",
+                        "run-worker",
+                        "inspect-worker",
+                    ],
                 },
                 "admission_id": {
                     "type": ["string", "null"],
@@ -4086,6 +4101,35 @@ class EvolutionStablePromotionRuntimeAdmissionDeliveryTool(Tool):
             None,
         )
         try:
+            if operation == "queue":
+                view = await (
+                    self._engine.enqueue_stable_promotion_runtime_admission_delivery(
+                        str(admission_id or "").strip()
+                    )
+                )
+                return render_stable_promotion_runtime_admission_dispatch(view)
+            if operation == "inspect-dispatch":
+                view = await (
+                    self._engine.evolution_stable_promotion_runtime_admission_dispatch_store.get(
+                        str(admission_id or "").strip()
+                    )
+                )
+                if view is None:
+                    raise EvolutionStablePromotionRuntimeAdmissionDispatchError(
+                        "stable_promotion_admission_dispatch_missing",
+                        "指定 Runtime Admission 尚未进入自动投递队列。",
+                    )
+                return render_stable_promotion_runtime_admission_dispatch(view)
+            if operation == "run-worker":
+                result = await (
+                    self._engine.run_stable_promotion_runtime_admission_delivery_once()
+                )
+                return render_stable_promotion_runtime_admission_worker_pass(result)
+            if operation == "inspect-worker":
+                snapshot = (
+                    self._engine.stable_promotion_runtime_admission_delivery_worker_snapshot()
+                )
+                return render_stable_promotion_runtime_admission_worker(snapshot)
             if operation in {"prepare", "export"}:
                 submission = await service.prepare(
                     admission_id=str(admission_id or "").strip()
@@ -4124,11 +4168,13 @@ class EvolutionStablePromotionRuntimeAdmissionDeliveryTool(Tool):
                 return render_stable_promotion_runtime_admission_delivery(view)
             raise EvolutionStablePromotionRuntimeAdmissionDeliveryError(
                 "stable_promotion_admission_delivery_action_invalid",
-                "仅支持 prepare、export、receive 或 inspect。",
+                "仅支持 prepare、export、receive、inspect、queue、"
+                "inspect-dispatch、run-worker 或 inspect-worker。",
             )
         except (
             AttributeError,
             EvolutionStablePromotionRuntimeAdmissionDeliveryError,
+            EvolutionStablePromotionRuntimeAdmissionDispatchError,
             OSError,
             RuntimeError,
             TypeError,

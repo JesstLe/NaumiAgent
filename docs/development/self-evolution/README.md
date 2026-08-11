@@ -277,7 +277,9 @@ Completion、fresh Approval、Rollout Plan、Promotion Input 与 Experiment/Work
 Remote Finalization、Stable Intent/Deployment 与 Finalization 后新启动的 managed runtime origin 逐字段绑定，形成可动态撤权
 的 observation input。[EVO-05.7b2a1](EVO-05-7b2a1-stable-promotion-runtime-admission-signed-delivery.md) 已让 installation
 使用 current Population Credential 对完整 Admission 签名，并由 Control Plane 重验 exact Contract/Finalization/Credential 后
-幂等记录 Receipt；authenticated network transport/worker 与 Population 长期聚合仍未完成。
+幂等记录 Receipt。[EVO-05.7b2a2a](EVO-05-7b2a2a-fenced-runtime-admission-delivery-worker.md) 已增加 durable
+owner/epoch/lease Worker、Receipt ACK、重试/dead-letter、真实本地 Control Plane adapter 与 Engine/Tool/Slash lifecycle；
+mTLS HTTP transport 与 Population 长期聚合仍未完成。
 [EVO-05.3f2c3b1](EVO-05-3f2c3b1-platform-dispatch-outbox.md) 已把实时准入的 required-platform Worker lane 转为 durable
 queued dispatch，并在 exact Worker incarnation 上预留容量。[EVO-05.3f2c3b2a](EVO-05-3f2c3b2a-authenticated-worker-claim.md)
 已增加 supervisor-attested Ed25519 Worker Identity、一次性 claim challenge 和可续期 lease hash chain。
@@ -296,5 +298,5 @@ managed runtime identity 与 startup-origin Harness ledger；6d3 已完成长期
 已进一步签发 rollback-recovery-observed Outcome revision 与 append-only supersede event，保留 immutable rollback fact；
 [HAR-09.6e2](../harness/HAR-09-6e2-long-term-outcome-projection-parity.md) 又通过 Projection v2 同源同步
 Workbench/New UI/Textual TUI，并保持 Contract 终态阻断。promoted Outcome、配置/数据 rollback 与 policy learning
-authority 仍未完成。成功 rollout 路径的下一步是 EVO-05.7b2a2 authenticated runtime admission delivery worker，而不是复用 rollback recovery
+authority 仍未完成。成功 rollout 路径的下一步是 EVO-05.7b2a2b authenticated runtime admission HTTP transport，而不是复用 rollback recovery
 Outcome 或把单 member Admission 冒充 Population 长期健康。

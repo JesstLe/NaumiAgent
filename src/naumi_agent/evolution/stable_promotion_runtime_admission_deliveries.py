@@ -856,6 +856,14 @@ def render_stable_promotion_runtime_admission_delivery(view) -> str:
     )
 
 
+def stable_promotion_runtime_admission_receipt_matches_submission(
+    receipt: EvolutionStablePromotionRuntimeAdmissionDeliveryReceipt,
+    submission: EvolutionStablePromotionRuntimeAdmissionSubmission,
+) -> bool:
+    """Public exact-binding check used by authenticated transport workers."""
+    return _receipt_matches_submission(_receipt(receipt), _submission(submission))
+
+
 def _build_receipt(submission, credential, *, received_at):
     admission = submission.payload.admission
     core = {
@@ -1115,4 +1123,5 @@ __all__ = [
     "encode_stable_promotion_runtime_admission_submission",
     "render_stable_promotion_runtime_admission_delivery",
     "render_stable_promotion_runtime_admission_submission",
+    "stable_promotion_runtime_admission_receipt_matches_submission",
 ]

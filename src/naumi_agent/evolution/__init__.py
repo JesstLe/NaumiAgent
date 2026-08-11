@@ -1151,6 +1151,24 @@ if TYPE_CHECKING:
         encode_stable_promotion_runtime_admission_submission,
         render_stable_promotion_runtime_admission_delivery,
         render_stable_promotion_runtime_admission_submission,
+        stable_promotion_runtime_admission_receipt_matches_submission,
+    )
+    from naumi_agent.evolution.stable_promotion_runtime_admission_delivery_worker import (
+        EvolutionStablePromotionRuntimeAdmissionControlPlaneTransport,
+        EvolutionStablePromotionRuntimeAdmissionDeliveryWorker,
+        EvolutionStablePromotionRuntimeAdmissionDispatchError,
+        EvolutionStablePromotionRuntimeAdmissionDispatchEvent,
+        EvolutionStablePromotionRuntimeAdmissionDispatchStore,
+        EvolutionStablePromotionRuntimeAdmissionDispatchView,
+        EvolutionStablePromotionRuntimeAdmissionPassResult,
+        EvolutionStablePromotionRuntimeAdmissionTransportError,
+        EvolutionStablePromotionRuntimeAdmissionWorkerPolicy,
+        EvolutionStablePromotionRuntimeAdmissionWorkerSnapshot,
+        EvolutionStablePromotionRuntimeAdmissionWorkerState,
+        LocalStablePromotionRuntimeAdmissionControlPlaneTransport,
+        render_stable_promotion_runtime_admission_dispatch,
+        render_stable_promotion_runtime_admission_worker,
+        render_stable_promotion_runtime_admission_worker_pass,
     )
     from naumi_agent.evolution.stable_promotion_runtime_observation_admissions import (
         EVOLUTION_STABLE_PROMOTION_RUNTIME_OBSERVATION_ADMISSION_POLICY,
@@ -1856,6 +1874,22 @@ __all__ = [
     "encode_stable_promotion_runtime_admission_submission",
     "render_stable_promotion_runtime_admission_delivery",
     "render_stable_promotion_runtime_admission_submission",
+    "stable_promotion_runtime_admission_receipt_matches_submission",
+    "EvolutionStablePromotionRuntimeAdmissionControlPlaneTransport",
+    "EvolutionStablePromotionRuntimeAdmissionDeliveryWorker",
+    "EvolutionStablePromotionRuntimeAdmissionDispatchError",
+    "EvolutionStablePromotionRuntimeAdmissionDispatchEvent",
+    "EvolutionStablePromotionRuntimeAdmissionDispatchStore",
+    "EvolutionStablePromotionRuntimeAdmissionDispatchView",
+    "EvolutionStablePromotionRuntimeAdmissionPassResult",
+    "EvolutionStablePromotionRuntimeAdmissionTransportError",
+    "EvolutionStablePromotionRuntimeAdmissionWorkerPolicy",
+    "EvolutionStablePromotionRuntimeAdmissionWorkerSnapshot",
+    "EvolutionStablePromotionRuntimeAdmissionWorkerState",
+    "LocalStablePromotionRuntimeAdmissionControlPlaneTransport",
+    "render_stable_promotion_runtime_admission_dispatch",
+    "render_stable_promotion_runtime_admission_worker",
+    "render_stable_promotion_runtime_admission_worker_pass",
     "render_stable_remote_population_finalization",
     "EVOLUTION_STABLE_REMOTE_FINALIZATION_DELIVERY_POLICY",
     "EvolutionStableRemoteFinalizationDeliveryAck",
@@ -3264,6 +3298,24 @@ def __getattr__(name: str) -> object:
         "encode_stable_promotion_runtime_admission_submission",
         "render_stable_promotion_runtime_admission_delivery",
         "render_stable_promotion_runtime_admission_submission",
+        "stable_promotion_runtime_admission_receipt_matches_submission",
+    }
+    stable_promotion_runtime_admission_worker_exports = {
+        "EvolutionStablePromotionRuntimeAdmissionControlPlaneTransport",
+        "EvolutionStablePromotionRuntimeAdmissionDeliveryWorker",
+        "EvolutionStablePromotionRuntimeAdmissionDispatchError",
+        "EvolutionStablePromotionRuntimeAdmissionDispatchEvent",
+        "EvolutionStablePromotionRuntimeAdmissionDispatchStore",
+        "EvolutionStablePromotionRuntimeAdmissionDispatchView",
+        "EvolutionStablePromotionRuntimeAdmissionPassResult",
+        "EvolutionStablePromotionRuntimeAdmissionTransportError",
+        "EvolutionStablePromotionRuntimeAdmissionWorkerPolicy",
+        "EvolutionStablePromotionRuntimeAdmissionWorkerSnapshot",
+        "EvolutionStablePromotionRuntimeAdmissionWorkerState",
+        "LocalStablePromotionRuntimeAdmissionControlPlaneTransport",
+        "render_stable_promotion_runtime_admission_dispatch",
+        "render_stable_promotion_runtime_admission_worker",
+        "render_stable_promotion_runtime_admission_worker_pass",
     }
     stable_remote_finalization_delivery_exports = {
         "EVOLUTION_STABLE_REMOTE_FINALIZATION_DELIVERY_POLICY",
@@ -4049,6 +4101,8 @@ def __getattr__(name: str) -> object:
         module_name = "stable_promotion_runtime_observation_admissions"
     elif name in stable_promotion_runtime_admission_delivery_exports:
         module_name = "stable_promotion_runtime_admission_deliveries"
+    elif name in stable_promotion_runtime_admission_worker_exports:
+        module_name = "stable_promotion_runtime_admission_delivery_worker"
     elif name in stable_remote_finalization_delivery_exports:
         module_name = "stable_remote_finalization_deliveries"
     elif name in stable_remote_finalization_delivery_worker_exports:

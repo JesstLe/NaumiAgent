@@ -506,6 +506,13 @@ from naumi_agent.evolution.stable_promotion_runtime_admission_deliveries import 
     EvolutionStablePromotionRuntimeAdmissionDeliveryService,
     EvolutionStablePromotionRuntimeAdmissionDeliveryStore,
 )
+from naumi_agent.evolution.stable_promotion_runtime_admission_delivery_worker import (
+    EvolutionStablePromotionRuntimeAdmissionDeliveryWorker,
+    EvolutionStablePromotionRuntimeAdmissionDispatchStore,
+    EvolutionStablePromotionRuntimeAdmissionPassResult,
+    EvolutionStablePromotionRuntimeAdmissionWorkerPolicy,
+    EvolutionStablePromotionRuntimeAdmissionWorkerSnapshot,
+)
 from naumi_agent.evolution.stable_promotion_runtime_observation_admissions import (
     EvolutionStablePromotionRuntimeObservationAdmissionService,
     EvolutionStablePromotionRuntimeObservationAdmissionStore,
@@ -2845,6 +2852,54 @@ class AgentEngine:
                 ),
             )
         )
+        self.evolution_stable_promotion_runtime_admission_dispatch_store = (
+            EvolutionStablePromotionRuntimeAdmissionDispatchStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_stable_promotion_runtime_admission_delivery_worker: (
+            EvolutionStablePromotionRuntimeAdmissionDeliveryWorker | None
+        ) = None
+        if services.stable_promotion_runtime_admission_transport is not None:
+            runtime_admission_worker = (
+                config.harness.stable_promotion_runtime_admission_delivery
+            )
+            self.evolution_stable_promotion_runtime_admission_delivery_worker = (
+                EvolutionStablePromotionRuntimeAdmissionDeliveryWorker(
+                    sender=(
+                        self.evolution_stable_promotion_runtime_admission_delivery_service
+                    ),
+                    store=(
+                        self.evolution_stable_promotion_runtime_admission_dispatch_store
+                    ),
+                    transport=services.stable_promotion_runtime_admission_transport,
+                    policy=EvolutionStablePromotionRuntimeAdmissionWorkerPolicy(
+                        interval_seconds=runtime_admission_worker.interval_seconds,
+                        max_empty_backoff_seconds=(
+                            runtime_admission_worker.max_empty_backoff_seconds
+                        ),
+                        max_failure_backoff_seconds=(
+                            runtime_admission_worker.max_failure_backoff_seconds
+                        ),
+                        claim_lease_seconds=(
+                            runtime_admission_worker.claim_lease_seconds
+                        ),
+                        scan_limit=runtime_admission_worker.scan_limit,
+                        receipt_timeout_seconds=(
+                            runtime_admission_worker.receipt_timeout_seconds
+                        ),
+                        retry_base_seconds=(
+                            runtime_admission_worker.retry_base_seconds
+                        ),
+                        retry_max_seconds=runtime_admission_worker.retry_max_seconds,
+                        max_attempts=runtime_admission_worker.max_attempts,
+                        shutdown_drain_seconds=(
+                            runtime_admission_worker.shutdown_drain_seconds
+                        ),
+                        jitter_ratio=runtime_admission_worker.jitter_ratio,
+                    ),
+                )
+            )
         self.evolution_stable_remote_finalization_delivery_store = (
             EvolutionStableRemoteFinalizationDeliveryStore(
                 config.memory.session_db_path
@@ -4267,6 +4322,14 @@ class AgentEngine:
             "pursuit_terminal_outbox_worker",
             self._pursuit_terminal_outbox_worker.stop,
         )
+        runtime_admission_worker = (
+            self.evolution_stable_promotion_runtime_admission_delivery_worker
+        )
+        if runtime_admission_worker is not None:
+            await self._shutdown_component(
+                "stable_promotion_runtime_admission_delivery_worker",
+                runtime_admission_worker.stop,
+            )
         if self.evolution_stable_remote_finalization_delivery_worker is not None:
             await self._shutdown_component(
                 "stable_remote_finalization_delivery_worker",
@@ -4836,6 +4899,15 @@ class AgentEngine:
         if self._config.harness.pursuit_terminal_outbox.enabled:
             await self._pursuit_terminal_outbox_worker.run_once()
             self._pursuit_terminal_outbox_worker.start()
+        runtime_admission_worker = (
+            self.evolution_stable_promotion_runtime_admission_delivery_worker
+        )
+        if (
+            runtime_admission_worker is not None
+            and self._config.harness.stable_promotion_runtime_admission_delivery.enabled
+        ):
+            await runtime_admission_worker.run_once()
+            runtime_admission_worker.start()
         delivery_worker = self.evolution_stable_remote_finalization_delivery_worker
         if (
             delivery_worker is not None
@@ -4855,6 +4927,36 @@ class AgentEngine:
                 result_worker.start()
         self.start_session_retention_worker()
         return recovered
+
+    async def enqueue_stable_promotion_runtime_admission_delivery(
+        self, admission_id: str
+    ):
+        worker = self.evolution_stable_promotion_runtime_admission_delivery_worker
+        if worker is None:
+            raise RuntimeError(
+                "尚未绑定 authenticated Control Plane transport，无法自动投递。"
+            )
+        return await worker.enqueue(admission_id)
+
+    async def run_stable_promotion_runtime_admission_delivery_once(
+        self,
+    ) -> EvolutionStablePromotionRuntimeAdmissionPassResult:
+        worker = self.evolution_stable_promotion_runtime_admission_delivery_worker
+        if worker is None:
+            raise RuntimeError(
+                "尚未绑定 authenticated Control Plane transport，无法自动投递。"
+            )
+        return await worker.run_once()
+
+    def stable_promotion_runtime_admission_delivery_worker_snapshot(
+        self,
+    ) -> EvolutionStablePromotionRuntimeAdmissionWorkerSnapshot:
+        worker = self.evolution_stable_promotion_runtime_admission_delivery_worker
+        if worker is None:
+            raise RuntimeError(
+                "尚未绑定 authenticated Control Plane transport，无法读取 Worker。"
+            )
+        return worker.snapshot()
 
     async def run_stable_remote_finalization_delivery_once(
         self,

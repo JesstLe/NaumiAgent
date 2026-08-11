@@ -4149,10 +4149,25 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             )
             return
         if action == "stable-promotion-admission-delivery":
-            if len(parts) == 3 and parts[1] in {"prepare", "export", "inspect"}:
+            if len(parts) == 3 and parts[1] in {
+                "prepare",
+                "export",
+                "inspect",
+                "queue",
+                "inspect-dispatch",
+            }:
                 arguments = {
                     "action": parts[1],
                     "admission_id": parts[2],
+                    "submission_base64": None,
+                }
+            elif len(parts) == 2 and parts[1] in {
+                "run-worker",
+                "inspect-worker",
+            }:
+                arguments = {
+                    "action": parts[1],
+                    "admission_id": None,
                     "submission_base64": None,
                 }
             elif len(parts) == 3 and parts[1] == "receive":
@@ -4163,8 +4178,9 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 }
             else:
                 raise ValueError(
-                    "stable-promotion-admission-delivery 需要 prepare|export|inspect "
-                    "<Admission ID>，或 receive <Submission Base64>。"
+                    "stable-promotion-admission-delivery 需要 prepare|export|inspect|"
+                    "queue|inspect-dispatch <Admission ID>，receive <Submission Base64>，"
+                    "或 run-worker|inspect-worker。"
                 )
             await _run_tool_slash_command(
                 engine,
@@ -4800,8 +4816,9 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution stable-promotion-admit-runtime "
             "<population-finalization-receipt-id> <stable-intent-id> "
             "<runtime-subject-id>；"
-            "/evolution stable-promotion-admission-delivery prepare|export|inspect "
-            "<runtime-admission-id>；receive <submission-base64>；"
+            "/evolution stable-promotion-admission-delivery prepare|export|inspect|"
+            "queue|inspect-dispatch <runtime-admission-id>；"
+            "receive <submission-base64>；run-worker；inspect-worker；"
             "/evolution discover-outcome <rollback-outcome-id>；"
             "/evolution revalidation-rollback-execute <rollback-request-id>；"
             "/evolution revalidation-rollback-outcome <rollback-request-id>；"
