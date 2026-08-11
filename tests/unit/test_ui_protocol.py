@@ -681,6 +681,27 @@ def test_protocol_normalizes_pursuit_recovery_resume() -> None:
             })
 
 
+def test_protocol_normalizes_reversible_goal_lifecycle_action() -> None:
+    record = normalize_client_record({
+        "type": ClientEventType.GOAL_LIFECYCLE_UPDATE,
+        "payload": {"goal_id": " goal-1 ", "action": " PAUSE "},
+    })
+
+    assert record["payload"] == {"goal_id": "goal-1", "action": "pause"}
+
+    for payload in (
+        {"goal_id": "", "action": "pause"},
+        {"goal_id": "goal 1", "action": "pause"},
+        {"goal_id": "goal-1", "action": "complete"},
+        {"goal_id": "goal-1", "action": "resume", "note": "绕过协议"},
+    ):
+        with pytest.raises(ValueError, match="Goal 生命周期"):
+            normalize_client_record({
+                "type": ClientEventType.GOAL_LIFECYCLE_UPDATE,
+                "payload": payload,
+            })
+
+
 def test_protocol_normalizes_terminal_outbox_run_now_to_empty_payload() -> None:
     record = normalize_client_record({
         "type": ClientEventType.PURSUIT_TERMINAL_OUTBOX_RUN_NOW,

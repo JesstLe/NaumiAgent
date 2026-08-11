@@ -635,6 +635,7 @@ class JsonlEngineBridge:
         self._harness_eval_batch_tasks: dict[str, asyncio.Task[None]] = {}
         self._harness_eval_retry_tasks: dict[str, asyncio.Task[None]] = {}
         self._harness_eval_promotion_tasks: dict[str, asyncio.Task[None]] = {}
+        self._goal_lifecycle_tasks: dict[str, asyncio.Task[None]] = {}
         self._pursuit_recovery_tasks: dict[str, asyncio.Task[None]] = {}
         self._pursuit_terminal_outbox_tasks: dict[str, asyncio.Task[None]] = {}
         self._workspace_file_search_task: asyncio.Task[None] | None = None
@@ -1735,6 +1736,9 @@ class JsonlEngineBridge:
             return
         if event_type == ClientEventType.WORKBENCH_PROPOSAL_ACTION:
             await self.govern_workbench_proposal(payload, request_id=request_id)
+            return
+        if event_type == ClientEventType.GOAL_LIFECYCLE_UPDATE:
+            await self.start_goal_lifecycle_update(payload, request_id=request_id)
             return
         if event_type == ClientEventType.PURSUIT_RECOVERY_RESUME:
             await self.start_pursuit_recovery(payload, request_id=request_id)
@@ -4497,6 +4501,217 @@ class JsonlEngineBridge:
             )
         await self.emit(ServerEventType.STATUS, self.status_payload())
 
+    async def start_goal_lifecycle_update(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Run one reversible Goal transition through the shared ToolExecution path."""
+        from naumi_agent.orchestrator.goal_store import GoalStatus
+
+        goal_id = str(payload.get("goal_id") or "")
+        action = str(payload.get("action") or "")
+        if action not in {"pause", "resume"}:
+            await self.emit_error(
+                "Goal 操作无效，请刷新页面后重试。",
+                code="bad_request",
+                request_id=request_id,
+            )
+            return
+        target = GoalStatus.PAUSED if action == "pause" else GoalStatus.ACTIVE
+        required_source = GoalStatus.ACTIVE if action == "pause" else GoalStatus.PAUSED
+        if request_id in self._goal_lifecycle_tasks:
+            await self._emit_goal_lifecycle_action_result(
+                goal_id=goal_id,
+                action=action,
+                request_id=request_id,
+                status="blocked",
+                code="duplicate_request",
+                message="该 Goal 操作正在处理中，请等待当前结果。",
+            )
+            return
+        if len(self._goal_lifecycle_tasks) >= 4:
+            await self._emit_goal_lifecycle_action_result(
+                goal_id=goal_id,
+                action=action,
+                request_id=request_id,
+                status="blocked",
+                code="action_capacity_reached",
+                message="当前 Goal 控制通道已满，请稍后重试。",
+            )
+            return
+        goal_store = getattr(self.engine, "goal_store", None)
+        try:
+            goal = goal_store.get(goal_id) if goal_store is not None else None
+        except Exception:
+            await self._emit_goal_lifecycle_action_result(
+                goal_id=goal_id,
+                action=action,
+                request_id=request_id,
+                status="error",
+                code="goal_store_unavailable",
+                message="Goal 状态库暂不可用，请运行 `/doctor` 后重试。",
+            )
+            return
+        if goal is None:
+            await self._emit_goal_lifecycle_action_result(
+                goal_id=goal_id,
+                action=action,
+                request_id=request_id,
+                status="not_found",
+                code="goal_not_found",
+                message="未找到该 Goal，未执行状态变更。",
+            )
+            return
+        if goal.status is not required_source:
+            message = (
+                f"当前 Goal 为 {goal.status.value}，"
+                f"仅允许从 {required_source.value} 执行 {action}。"
+            )
+            await self._emit_goal_lifecycle_action_result(
+                goal_id=goal_id,
+                action=action,
+                request_id=request_id,
+                status="conflict",
+                code="state_conflict",
+                message=message,
+                goal_status=goal.status.value,
+            )
+            return
+
+        async def publish_tool_event(event: str, data: dict[str, object]) -> None:
+            await self.handle_engine_event(event, dict(data))
+
+        async def publish_authoritative_result(
+            *,
+            fallback_status: str,
+            fallback_code: str,
+            fallback_message: str,
+        ) -> None:
+            try:
+                refreshed = goal_store.get(goal_id)
+            except Exception:
+                refreshed = None
+                fallback_status = "error"
+                fallback_code = "goal_store_unavailable"
+                fallback_message = "Goal 状态库暂不可用，请运行 `/doctor` 后重试。"
+            if refreshed is not None and refreshed.status is target:
+                await self._emit_goal_lifecycle_action_result(
+                    goal_id=goal_id,
+                    action=action,
+                    request_id=request_id,
+                    status="completed",
+                    code="goal_paused" if action == "pause" else "goal_resumed",
+                    message=(
+                        "Goal 已暂停，可随时恢复。"
+                        if action == "pause"
+                        else "Goal 已恢复为进行中。"
+                    ),
+                    goal_status=refreshed.status.value,
+                )
+            else:
+                await self._emit_goal_lifecycle_action_result(
+                    goal_id=goal_id,
+                    action=action,
+                    request_id=request_id,
+                    status=fallback_status,
+                    code=fallback_code,
+                    message=fallback_message,
+                    goal_status=(refreshed.status.value if refreshed is not None else ""),
+                )
+
+        async def run() -> None:
+            from naumi_agent.tools.base import ToolCall
+
+            try:
+                await self.engine.get_or_create_session()
+                result = await self.engine.execute_tool(
+                    ToolCall(
+                        id=f"new-ui-goal-{action}-{uuid4().hex}",
+                        name="goal_update",
+                        arguments=json.dumps(
+                            {
+                                "goal_id": goal_id,
+                                "status": target.value,
+                                "note": goal.note,
+                            },
+                            ensure_ascii=False,
+                        ),
+                    ),
+                    on_event=publish_tool_event,
+                    agent_name="new-ui",
+                )
+                await publish_authoritative_result(
+                    fallback_status=("blocked" if result.status == "error" else "conflict"),
+                    fallback_code=(
+                        "tool_execution_rejected"
+                        if result.status == "error"
+                        else "state_not_applied"
+                    ),
+                    fallback_message=("Goal 状态未变更；请检查权限回执后刷新页面。"),
+                )
+                try:
+                    await self.show_goal_panel(
+                        {"selected_goal_id": goal_id},
+                        request_id=request_id,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Goal lifecycle snapshot refresh failed (%s)",
+                        type(exc).__name__,
+                    )
+                    await self.emit_error(
+                        "Goal 状态已处理，但页面刷新失败；请按 `r` 重新读取。",
+                        code="goal_snapshot_refresh_failed",
+                        request_id=request_id,
+                    )
+            except asyncio.CancelledError:
+                if self._closed:
+                    raise
+                await publish_authoritative_result(
+                    fallback_status="error",
+                    fallback_code="cancelled",
+                    fallback_message="Goal 操作已取消，请刷新页面确认持久状态。",
+                )
+            except Exception as exc:
+                logger.warning("Goal lifecycle UI action failed (%s)", type(exc).__name__)
+                await publish_authoritative_result(
+                    fallback_status="error",
+                    fallback_code="internal_error",
+                    fallback_message="Goal 操作未能安全完成，请刷新状态或运行 `/doctor`。",
+                )
+            finally:
+                self._goal_lifecycle_tasks.pop(request_id, None)
+
+        task = asyncio.create_task(run(), name=f"goal-lifecycle-{request_id}")
+        self._goal_lifecycle_tasks[request_id] = task
+
+    async def _emit_goal_lifecycle_action_result(
+        self,
+        *,
+        goal_id: str,
+        action: str,
+        request_id: str,
+        status: str,
+        code: str,
+        message: str,
+        goal_status: str = "",
+    ) -> None:
+        await self.emit(
+            ServerEventType.GOAL_LIFECYCLE_ACTION_RESULT,
+            {
+                "schema_version": 1,
+                "goal_id": goal_id,
+                "action": action,
+                "status": status,
+                "code": code,
+                "message": _bounded_action_message(message),
+                "goal_status": goal_status,
+            },
+            request_id=request_id,
+        )
+
     async def start_pursuit_recovery(
         self,
         payload: dict[str, Any],
@@ -6470,6 +6685,12 @@ class JsonlEngineBridge:
         if promotion_tasks:
             await asyncio.gather(*promotion_tasks, return_exceptions=True)
         self._harness_eval_promotion_tasks.clear()
+        goal_lifecycle_tasks = tuple(self._goal_lifecycle_tasks.values())
+        for task in goal_lifecycle_tasks:
+            task.cancel()
+        if goal_lifecycle_tasks:
+            await asyncio.gather(*goal_lifecycle_tasks, return_exceptions=True)
+        self._goal_lifecycle_tasks.clear()
         pursuit_recovery_tasks = tuple(self._pursuit_recovery_tasks.values())
         for task in pursuit_recovery_tasks:
             task.cancel()

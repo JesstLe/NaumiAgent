@@ -273,6 +273,8 @@ test("Goal page highlights ledger selection and renders typed detail", () => {
 
 test("Goal page renders authority-owned resume action and attempt state", () => {
   const lines = renderGoalPursuitPage({
+    lifecycleActionPending: true,
+    lifecycleActionNotice: "Goal 已暂停，可随时恢复。",
     recoveryActionPending: false,
     recoveryActionNotice: "恢复请求已准入。",
     snapshot: {
@@ -321,6 +323,10 @@ test("Goal page renders authority-owned resume action and attempt state", () => 
     },
   }, 180, 32).map(stripAnsi).join("\n");
 
+  assert.match(lines, /m 暂停\/恢复/);
+  assert.match(lines, /正在通过 ToolExecution 校验权限并更新 Goal/);
+  assert.match(lines, /Goal 已暂停，可随时恢复/);
+  assert.match(lines, /可用操作 · m 暂停 · fallback \/goal pause/);
   assert.match(lines, /x 恢复当前 Pursuit/);
   assert.match(lines, /恢复请求已准入/);
   assert.match(lines, /恢复动作 · 可恢复 · resume_ready/);

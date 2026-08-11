@@ -1389,6 +1389,9 @@ test("replayed assistant token messages stay independent outside a running turn"
 
 test("session replay clears stale run, permission, todo, and perf footer state", () => {
   const state = createInitialState();
+  state.goalPanel.lifecycleActionPending = true;
+  state.goalPanel.lifecycleActionGoalId = "goal-old";
+  state.goalPanel.lifecycleActionRequestId = "request-old";
 
   reduceServerEvent(state, { type: "run/started", payload: {} });
   reduceServerEvent(state, {
@@ -1418,6 +1421,9 @@ test("session replay clears stale run, permission, todo, and perf footer state",
   assert.equal(state.todo, null);
   assert.equal(state.activeToolPrepare, null);
   assert.equal(state.activeRuntimePhase, "");
+  assert.equal(state.goalPanel.lifecycleActionPending, false);
+  assert.equal(state.goalPanel.lifecycleActionGoalId, "");
+  assert.equal(state.goalPanel.lifecycleActionRequestId, "");
 
   const plain = renderScreen(state, 90, 12, { cwd: "/tmp", home: "/Users/lv" }).map(stripAnsi).join("\n");
   assert(!plain.includes("permission: bash_run"));
@@ -2359,6 +2365,93 @@ test("Goal detail command opens the typed historical selection", () => {
       selected_goal_id: "goal-history",
     },
   }]);
+});
+
+test("Goal page pauses and resumes the selected Goal through typed actions", () => {
+  const state = createInitialState();
+  state.route = { name: "goals", originAnchor: null };
+  state.protocolNegotiated = true;
+  state.protocolNegotiation = { capabilities: ["goal_lifecycle_actions"] };
+  state.goalPanel.snapshot = {
+    selected_goal_id: "goal-1",
+    goals: [{ goal_id: "goal-1", status: "active" }],
+    interactions: [],
+  };
+  const sent = [];
+  const send = (type, payload) => {
+    sent.push({ type, payload });
+    return "goal-action-1";
+  };
+
+  assert.equal(handleGoalPanelKey(state, "m", send), true);
+  assert.deepEqual(sent, [{
+    type: "goal/lifecycle/update",
+    payload: { goal_id: "goal-1", action: "pause" },
+  }]);
+  assert.equal(state.goalPanel.lifecycleActionPending, true);
+
+  reduceServerEvent(state, {
+    type: "goal/lifecycle/action_result",
+    request_id: "goal-action-1",
+    payload: {
+      schema_version: 1,
+      goal_id: "goal-1",
+      action: "pause",
+      status: "completed",
+      code: "goal_paused",
+      message: "Goal 已暂停，可随时恢复。",
+      goal_status: "paused",
+    },
+  });
+  assert.equal(state.goalPanel.lifecycleActionPending, false);
+  assert.equal(state.goalPanel.lifecycleActionNotice, "Goal 已暂停，可随时恢复。");
+  assert.equal(state.goalPanel.snapshot.goals[0].status, "active");
+
+  state.goalPanel.lifecycleActionNotice = "";
+  reduceServerEvent(state, {
+    type: "goal/lifecycle/action_result",
+    request_id: "stale-request",
+    payload: {
+      schema_version: 1,
+      goal_id: "goal-1",
+      action: "pause",
+      status: "completed",
+      code: "goal_paused",
+      message: "不应重放到新进程。",
+      goal_status: "paused",
+    },
+  });
+  assert.equal(state.goalPanel.lifecycleActionNotice, "");
+
+  state.goalPanel.snapshot.goals[0].status = "paused";
+  assert.equal(handleGoalPanelKey(state, "m", send), true);
+  assert.deepEqual(sent[1], {
+    type: "goal/lifecycle/update",
+    payload: { goal_id: "goal-1", action: "resume" },
+  });
+});
+
+test("Goal lifecycle action fails closed for terminal state and old Bridge", () => {
+  const state = createInitialState();
+  state.route = { name: "goals", originAnchor: null };
+  state.protocolNegotiated = true;
+  state.protocolNegotiation = { capabilities: [] };
+  state.goalPanel.snapshot = {
+    selected_goal_id: "goal-1",
+    goals: [{ goal_id: "goal-1", status: "active" }],
+    interactions: [],
+  };
+  const sent = [];
+
+  assert.equal(handleGoalPanelKey(state, "m", (...args) => sent.push(args)), true);
+  assert.deepEqual(sent, []);
+  assert.match(state.goalPanel.lifecycleActionNotice, /\/goal pause/);
+
+  state.protocolNegotiation = { capabilities: ["goal_lifecycle_actions"] };
+  state.goalPanel.snapshot.goals[0].status = "completed";
+  assert.equal(handleGoalPanelKey(state, "m", (...args) => sent.push(args)), true);
+  assert.deepEqual(sent, []);
+  assert.match(state.goalPanel.lifecycleActionError, /仅支持暂停/);
 });
 
 test("Goal page resumes current Pursuit through typed ToolExecution action", () => {

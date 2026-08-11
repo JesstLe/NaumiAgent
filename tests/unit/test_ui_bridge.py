@@ -65,7 +65,7 @@ from naumi_agent.model.reasoning import (
 )
 from naumi_agent.model.router import StreamChunk
 from naumi_agent.orchestrator.engine import AgentEngine, AgentResult, AgentRuntimeMode, AgentUsage
-from naumi_agent.orchestrator.goal_store import GoalStore
+from naumi_agent.orchestrator.goal_store import GoalStatus, GoalStore, GoalStoreError
 from naumi_agent.orchestrator.planner import Complexity, ExecutionMode, Plan, Step
 from naumi_agent.orchestrator.pursuit import PursuitRun, PursuitRunStatus
 from naumi_agent.orchestrator.pursuit_checkpoint import (
@@ -1152,6 +1152,7 @@ def test_protocol_contract_matches_python_enums() -> None:
         "capabilities": [
             "agent_recovery_actions",
             "evolution_evaluation_lane",
+            "goal_lifecycle_actions",
             "doctor_export",
             "doctor_live_probe",
             "doctor_trace_index",
@@ -1189,6 +1190,10 @@ def test_protocol_contract_matches_python_enums() -> None:
         "evolution_evaluation_lane": {
             "client_events": ["evolution/evaluation-lane/request"],
             "server_events": ["evolution/evaluation-lane"],
+        },
+        "goal_lifecycle_actions": {
+            "client_events": ["goal/lifecycle/update"],
+            "server_events": ["goal/lifecycle/action_result"],
         },
         "pursuit_recovery_actions": {
             "client_events": [
@@ -7777,6 +7782,241 @@ def _bridge_recovery_checkpoint(run_id: str) -> PursuitCheckpoint:
         worktree_path="",
     )
 
+
+@pytest.mark.asyncio
+async def test_bridge_goal_lifecycle_uses_tool_execution_and_store_authority(
+    tmp_path: Path,
+) -> None:
+    engine = _FakeEngine()
+    engine.workspace_root = tmp_path
+    engine.goal_store = GoalStore(tmp_path / "goals")
+    engine.pursuit_store = PursuitStore(tmp_path / "pursuit")
+    engine.get_or_create_session = AsyncMock(return_value=SimpleNamespace(id="session"))  # type: ignore[attr-defined]
+    goal = engine.goal_store.create("暂停后可继续")
+    engine.goal_store.update(goal.id, GoalStatus.PAUSED, note="保留这条说明")
+    goal = engine.goal_store.update(goal.id, GoalStatus.ACTIVE, note="保留这条说明")
+    tool_calls: list[ToolCall] = []
+
+    async def execute_tool(tool_call: ToolCall, **kwargs: Any) -> ToolResult:
+        assert kwargs["agent_name"] == "new-ui"
+        assert callable(kwargs["on_event"])
+        assert tool_call.name == "goal_update"
+        arguments = json.loads(tool_call.arguments)
+        assert arguments == {
+            "goal_id": goal.id,
+            "status": "paused",
+            "note": "保留这条说明",
+        }
+        tool_calls.append(tool_call)
+        engine.goal_store.update(
+            arguments["goal_id"],
+            arguments["status"],
+            note=arguments["note"],
+        )
+        return ToolResult(
+            call_id=tool_call.id,
+            status="success",
+            content="这段工具文案不是状态权威。",
+        )
+
+    engine.execute_tool = execute_tool  # type: ignore[attr-defined]
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    bridge._client_capabilities = {
+        "goal_lifecycle_actions",
+        "goal_snapshot",
+        "typed_ui_messages",
+    }
+    bridge._protocol_negotiated = True
+
+    await bridge.handle_client_record(
+        {
+            "id": "goal-pause-1",
+            "type": ClientEventType.GOAL_LIFECYCLE_UPDATE,
+            "payload": {"goal_id": goal.id, "action": "pause"},
+        }
+    )
+    tasks = tuple(bridge._goal_lifecycle_tasks.values())
+    assert len(tasks) == 1
+    await asyncio.gather(*tasks)
+
+    assert engine.goal_store.get(goal.id).status is GoalStatus.PAUSED  # type: ignore[union-attr]
+    assert engine.goal_store.get(goal.id).note == "保留这条说明"  # type: ignore[union-attr]
+    records = _records(writer)
+    result = next(item for item in records if item["type"] == "goal/lifecycle/action_result")
+    assert result["request_id"] == "goal-pause-1"
+    assert result["payload"] == {
+        "schema_version": 1,
+        "goal_id": goal.id,
+        "action": "pause",
+        "status": "completed",
+        "code": "goal_paused",
+        "message": "Goal 已暂停，可随时恢复。",
+        "goal_status": "paused",
+    }
+    refreshed = [item for item in records if item["type"] == "goals/snapshot"][-1]
+    assert refreshed["payload"]["selected_goal_id"] == goal.id
+    assert refreshed["payload"]["goals"][0]["status"] == "paused"
+    assert tool_calls[0].id.startswith("new-ui-goal-pause-")
+    assert bridge._goal_lifecycle_tasks == {}
+
+
+@pytest.mark.asyncio
+async def test_bridge_goal_lifecycle_rejects_non_reversible_state_before_tool(
+    tmp_path: Path,
+) -> None:
+    engine = _FakeEngine()
+    engine.goal_store = GoalStore(tmp_path / "goals")
+    goal = engine.goal_store.create("终态不能恢复")
+    engine.goal_store.update(goal.id, GoalStatus.COMPLETED, note="已验收")
+    engine.execute_tool = AsyncMock()  # type: ignore[attr-defined]
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    bridge._client_capabilities = {"goal_lifecycle_actions"}
+    bridge._protocol_negotiated = True
+
+    await bridge.handle_client_record(
+        {
+            "id": "goal-resume-terminal",
+            "type": ClientEventType.GOAL_LIFECYCLE_UPDATE,
+            "payload": {"goal_id": goal.id, "action": "resume"},
+        }
+    )
+
+    result = next(
+        item for item in _records(writer) if item["type"] == "goal/lifecycle/action_result"
+    )
+    assert result["payload"]["status"] == "conflict"
+    assert result["payload"]["code"] == "state_conflict"
+    assert result["payload"]["goal_status"] == "completed"
+    engine.execute_tool.assert_not_awaited()
+    assert bridge._goal_lifecycle_tasks == {}
+
+
+@pytest.mark.asyncio
+async def test_bridge_goal_lifecycle_reports_store_failure_without_tool() -> None:
+    class BrokenGoalStore:
+        def get(self, _goal_id: str) -> None:
+            raise OSError("private database path")
+
+    engine = _FakeEngine()
+    engine.goal_store = BrokenGoalStore()
+    engine.execute_tool = AsyncMock()  # type: ignore[attr-defined]
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    bridge._client_capabilities = {"goal_lifecycle_actions"}
+    bridge._protocol_negotiated = True
+
+    await bridge.handle_client_record(
+        {
+            "id": "goal-store-failed",
+            "type": ClientEventType.GOAL_LIFECYCLE_UPDATE,
+            "payload": {"goal_id": "goal-1", "action": "pause"},
+        }
+    )
+
+    result = next(
+        item for item in _records(writer) if item["type"] == "goal/lifecycle/action_result"
+    )
+    assert result["payload"]["status"] == "error"
+    assert result["payload"]["code"] == "goal_store_unavailable"
+    assert "private database path" not in str(result)
+    engine.execute_tool.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_bridge_goal_lifecycle_emits_one_result_when_refresh_fails(
+    tmp_path: Path,
+) -> None:
+    engine = _FakeEngine()
+    engine.goal_store = GoalStore(tmp_path / "goals")
+    goal = engine.goal_store.create("刷新失败也不能重复回执")
+    engine.get_or_create_session = AsyncMock(return_value=SimpleNamespace(id="session"))  # type: ignore[attr-defined]
+
+    async def execute_tool(tool_call: ToolCall, **_kwargs: Any) -> ToolResult:
+        arguments = json.loads(tool_call.arguments)
+        engine.goal_store.update(goal.id, arguments["status"])
+        return ToolResult(call_id=tool_call.id, status="success", content="done")
+
+    engine.execute_tool = execute_tool  # type: ignore[attr-defined]
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    bridge._client_capabilities = {"goal_lifecycle_actions"}
+    bridge._protocol_negotiated = True
+    bridge.show_goal_panel = AsyncMock(side_effect=RuntimeError("private path"))  # type: ignore[method-assign]
+
+    await bridge.handle_client_record(
+        {
+            "id": "goal-refresh-failed",
+            "type": ClientEventType.GOAL_LIFECYCLE_UPDATE,
+            "payload": {"goal_id": goal.id, "action": "pause"},
+        }
+    )
+    await asyncio.gather(*tuple(bridge._goal_lifecycle_tasks.values()))
+
+    records = _records(writer)
+    results = [item for item in records if item["type"] == "goal/lifecycle/action_result"]
+    assert len(results) == 1
+    assert results[0]["payload"]["status"] == "completed"
+    error = next(item for item in records if item["type"] == "error")
+    assert error["payload"]["code"] == "goal_snapshot_refresh_failed"
+    assert "private path" not in str(records)
+
+
+@pytest.mark.asyncio
+async def test_bridge_goal_lifecycle_concurrent_pause_is_idempotent(
+    tmp_path: Path,
+) -> None:
+    engine = _FakeEngine()
+    engine.workspace_root = tmp_path
+    engine.goal_store = GoalStore(tmp_path / "goals")
+    engine.pursuit_store = PursuitStore(tmp_path / "pursuit")
+    engine.get_or_create_session = AsyncMock(return_value=SimpleNamespace(id="session"))  # type: ignore[attr-defined]
+    goal = engine.goal_store.create("并发暂停只收口一次")
+    gate = asyncio.Event()
+    entered = 0
+
+    async def execute_tool(tool_call: ToolCall, **_kwargs: Any) -> ToolResult:
+        nonlocal entered
+        entered += 1
+        if entered == 2:
+            gate.set()
+        await gate.wait()
+        arguments = json.loads(tool_call.arguments)
+        try:
+            engine.goal_store.update(goal.id, arguments["status"])
+        except GoalStoreError:
+            pass
+        return ToolResult(call_id=tool_call.id, status="success", content="done")
+
+    engine.execute_tool = execute_tool  # type: ignore[attr-defined]
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    bridge._client_capabilities = {"goal_lifecycle_actions", "goal_snapshot"}
+    bridge._protocol_negotiated = True
+
+    for request_id in ("pause-a", "pause-b"):
+        await bridge.handle_client_record(
+            {
+                "id": request_id,
+                "type": ClientEventType.GOAL_LIFECYCLE_UPDATE,
+                "payload": {"goal_id": goal.id, "action": "pause"},
+            }
+        )
+    await asyncio.gather(*tuple(bridge._goal_lifecycle_tasks.values()))
+
+    results = [item for item in _records(writer) if item["type"] == "goal/lifecycle/action_result"]
+    assert len(results) == 2
+    assert {item["payload"]["status"] for item in results} == {"completed"}
+    assert engine.goal_store.get(goal.id).status is GoalStatus.PAUSED  # type: ignore[union-attr]
+
+
+@pytest.mark.asyncio
 
 @pytest.mark.asyncio
 async def test_bridge_pursuit_recovery_uses_tool_execution_and_persisted_attempt(

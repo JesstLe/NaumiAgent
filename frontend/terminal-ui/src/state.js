@@ -472,6 +472,11 @@ export function createInitialState() {
       selectedInteractionIndex: 0,
       selectedDeadLetterIndex: 0,
       selectedAbandonReasonIndex: 0,
+      lifecycleActionPending: false,
+      lifecycleActionGoalId: "",
+      lifecycleActionRequestId: "",
+      lifecycleActionNotice: "",
+      lifecycleActionError: "",
       recoveryActionPending: false,
       recoveryActionRunId: "",
       recoveryActionRequestId: "",
@@ -929,6 +934,9 @@ export function reduceServerEvent(state, record) {
         Math.max(0, Number(state.goalPanel.selectedDeadLetterIndex) || 0),
         Math.max(0, (payload.terminal_outbox?.dead_letters?.length || 1) - 1),
       );
+      break;
+    case "goal/lifecycle/action_result":
+      applyGoalLifecycleActionResult(state, record, payload);
       break;
     case "pursuit/recovery/action_result":
       applyPursuitRecoveryActionResult(state, record, payload);
@@ -1423,6 +1431,11 @@ export function reduceServerEvent(state, record) {
         selectedInteractionIndex: 0,
         selectedDeadLetterIndex: 0,
         selectedAbandonReasonIndex: 0,
+        lifecycleActionPending: false,
+        lifecycleActionGoalId: "",
+        lifecycleActionRequestId: "",
+        lifecycleActionNotice: "",
+        lifecycleActionError: "",
         recoveryActionPending: false,
         recoveryActionRunId: "",
         recoveryActionRequestId: "",
@@ -4845,6 +4858,10 @@ export function handleGoalPanelKey(state, key, send) {
     requestCurrentPursuitRecovery(state, send);
     return true;
   }
+  if (lower === "m") {
+    requestSelectedGoalLifecycleAction(state, send);
+    return true;
+  }
   if (lower === "o") {
     requestTerminalOutboxRunNow(state, send);
     return true;
@@ -5002,6 +5019,72 @@ function requestCurrentPursuitRecovery(state, send) {
   state.goalPanel.recoveryActionPending = true;
   state.goalPanel.recoveryActionRunId = pursuit.run_id;
   state.goalPanel.recoveryActionRequestId = requestId;
+  return true;
+}
+
+function requestSelectedGoalLifecycleAction(state, send) {
+  const goal = (state.goalPanel.snapshot?.goals ?? []).find(
+    (item) => item.goal_id === state.goalPanel.snapshot?.selected_goal_id,
+  );
+  state.goalPanel.lifecycleActionNotice = "";
+  state.goalPanel.lifecycleActionError = "";
+  if (!goal) {
+    state.goalPanel.lifecycleActionError = "当前没有可操作的 Goal。";
+    return false;
+  }
+  const action = goal.status === "active"
+    ? "pause"
+    : goal.status === "paused"
+      ? "resume"
+      : "";
+  if (!action) {
+    state.goalPanel.lifecycleActionError = (
+      `当前 Goal 为 ${goal.status || "未知"}，页内仅支持暂停进行中目标或恢复已暂停目标。`
+    );
+    return false;
+  }
+  if (state.goalPanel.lifecycleActionPending) return false;
+  const capability = negotiatedEventCapabilityStatus(
+    state,
+    "client",
+    "goal/lifecycle/update",
+  );
+  if (capability.status !== "available") {
+    const command = action === "pause" ? "/goal pause" : "/goal resume";
+    state.goalPanel.lifecycleActionNotice = (
+      capability.status === "pending"
+        ? "协议协商尚未完成，未发送 Goal 操作。"
+        : `当前 Bridge 不支持页内 Goal 操作；请使用 ${command}。`
+    );
+    return false;
+  }
+  const requestId = String(send(
+    "goal/lifecycle/update",
+    { goal_id: goal.goal_id, action },
+  ) || "");
+  state.goalPanel.lifecycleActionPending = true;
+  state.goalPanel.lifecycleActionGoalId = goal.goal_id;
+  state.goalPanel.lifecycleActionRequestId = requestId;
+  return true;
+}
+
+function applyGoalLifecycleActionResult(state, record, payload) {
+  const pendingGoalId = String(state.goalPanel.lifecycleActionGoalId || "");
+  const pendingRequestId = String(state.goalPanel.lifecycleActionRequestId || "");
+  if (!pendingGoalId || !pendingRequestId) return false;
+  if (pendingGoalId !== String(payload.goal_id || "")) return false;
+  if (
+    !String(record.request_id || "")
+    || pendingRequestId !== String(record.request_id)
+  ) return false;
+  state.goalPanel.lifecycleActionPending = false;
+  state.goalPanel.lifecycleActionGoalId = "";
+  state.goalPanel.lifecycleActionRequestId = "";
+  const successful = payload.status === "completed";
+  state.goalPanel.lifecycleActionNotice = successful ? String(payload.message || "") : "";
+  state.goalPanel.lifecycleActionError = successful
+    ? ""
+    : String(payload.message || "Goal 操作失败。");
   return true;
 }
 

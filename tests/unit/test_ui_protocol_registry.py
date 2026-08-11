@@ -47,6 +47,12 @@ def test_published_event_registry_exactly_covers_python_protocol_enums() -> None
         "server", "pursuit/recovery/action_result"
     ) == "pursuit_recovery_actions"
     assert registry.required_capability(
+        "client", "goal/lifecycle/update"
+    ) == "goal_lifecycle_actions"
+    assert registry.required_capability(
+        "server", "goal/lifecycle/action_result"
+    ) == "goal_lifecycle_actions"
+    assert registry.required_capability(
         "client", "agents/recovery/resolve_unknown"
     ) == "agent_recovery_actions"
     assert registry.required_capability(
