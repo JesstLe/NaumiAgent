@@ -108,6 +108,11 @@ function createEmptyWorkbenchState() {
     schema_version: 1,
     stream_id: "",
     revision: 0,
+    timeline_stream_id: "",
+    timeline_cursor: 0,
+    timeline_earliest_cursor: 0,
+    timeline_recovery: { mode: "" },
+    timeline_recovering: false,
     generated_at: "",
     full: true,
     session_id: "",
@@ -687,6 +692,7 @@ function applyWorkbenchSnapshot(state, payload) {
     loading: false,
     error: "",
   };
+  state.workbench.timeline_recovering = false;
   reconcileWorkbenchSelection(state.workbench, { previousName, previousIndex });
   reconcileWorkbenchReviewSelection(state.workbench, {
     previousId: previousReviewId,
@@ -725,6 +731,20 @@ export function reduceServerEvent(state, record) {
       }
       if (payload.event === "agents/request" && payload.open === true) {
         state.agents.loading = false;
+      }
+      if (payload.event === "workbench/request" && payload.open === true) {
+        state.workbench.loading = false;
+        state.workbench.error = "";
+        state.workbench.timeline_recovering = false;
+        state.workbench.timeline_recovery = payload.timeline_recovery ?? { mode: "" };
+        if (Number(payload.timeline_recovery?.replayed_count || 0) > 0) {
+          pushSystemMessage(
+            state,
+            "Workbench Timeline",
+            `已补发 ${payload.timeline_recovery.replayed_count} 条断线事件。`,
+            "success",
+          );
+        }
       }
       break;
     case "ready":
@@ -1753,6 +1773,14 @@ export function reduceServerEvent(state, record) {
           "info",
         );
       }
+      if (applied && record.payload.timeline_recovery?.mode === "gap_snapshot") {
+        pushSystemMessage(
+          state,
+          "Workbench Timeline",
+          "增量游标出现缺口，已使用权威完整快照恢复。",
+          "warning",
+        );
+      }
       break;
     }
     case "terminal_events/recovery": {
@@ -1794,36 +1822,33 @@ export function reduceServerEvent(state, record) {
     case "workbench/event": {
       const eventSessionId = String(record.payload.session_id || "");
       const eventStreamId = String(record.payload.stream_id || "");
-      const nextRevision = Number(record.payload.revision) || 0;
-      if (eventSessionId && !workbenchMatchesCurrentSession(state, record.payload)) break;
-      if (eventStreamId && nextRevision > 0) {
-        const currentStreamId = String(state.workbench.stream_id || "");
-        const currentRevision = Number(state.workbench.revision) || 0;
-        if (eventStreamId === currentStreamId && nextRevision <= currentRevision) break;
-        if (
-          !currentStreamId
-          || eventStreamId !== currentStreamId
-          || nextRevision !== currentRevision + 1
-        ) {
-          if (state.workbench.loading) break;
-          state.workbench.loading = true;
-          return [{
-            type: "refresh_workbench",
-            knownRevision: currentRevision,
-            knownStreamId: currentStreamId,
-            sessionId: String(eventSessionId || state.currentSessionId || ""),
-          }];
-        }
-        prependWorkbenchTimelineEvent(state.workbench, record.payload);
+      const eventCursor = Number(record.payload.cursor) || 0;
+      if (!workbenchMatchesCurrentSession(state, record.payload)) break;
+      const currentStreamId = String(state.workbench.timeline_stream_id || "");
+      const currentCursor = Number(state.workbench.timeline_cursor) || 0;
+      if (eventStreamId === currentStreamId && eventCursor <= currentCursor) break;
+      const isFirst = !currentStreamId && currentCursor === 0 && eventCursor === 1;
+      const isContinuous = (
+        eventStreamId === currentStreamId
+        && eventCursor === currentCursor + 1
+      );
+      if (!isFirst && !isContinuous) {
+        if (state.workbench.timeline_recovering) break;
+        state.workbench.timeline_recovering = true;
         state.workbench.loading = true;
         return [{
           type: "refresh_workbench",
-          knownRevision: currentRevision,
-          knownStreamId: currentStreamId,
+          knownRevision: Number(state.workbench.revision) || 0,
+          knownStreamId: String(state.workbench.stream_id || ""),
+          knownTimelineStreamId: currentStreamId,
+          knownTimelineCursor: currentCursor,
           sessionId: String(eventSessionId || state.currentSessionId || ""),
         }];
       }
       prependWorkbenchTimelineEvent(state.workbench, record.payload);
+      state.workbench.timeline_stream_id = eventStreamId;
+      state.workbench.timeline_cursor = eventCursor;
+      state.workbench.timeline_recovering = false;
       break;
     }
     default:
@@ -3849,9 +3874,13 @@ function requestWorkbenchSnapshot(state, send) {
   state.workbench.loading = true;
   state.workbench.error = "";
   send("workbench/request", {
+    open: true,
+    subscribe: true,
     session_id: String(state.currentSessionId || ""),
     known_stream_id: String(state.workbench.stream_id || ""),
     known_revision: Number(state.workbench.revision) || 0,
+    known_timeline_stream_id: String(state.workbench.timeline_stream_id || ""),
+    known_timeline_cursor: Number(state.workbench.timeline_cursor) || 0,
   });
 }
 
@@ -3895,6 +3924,15 @@ export function handleWorkbenchOverviewKey(state, key, send) {
     state.scrollOffset = Math.max(0, Number(anchor.scrollOffset) || 0);
     state.followTail = anchor.followTail !== false;
     state.route = { name: "conversation", originAnchor: null };
+    send("workbench/request", {
+      open: false,
+      subscribe: false,
+      session_id: String(state.currentSessionId || ""),
+      known_stream_id: String(state.workbench.stream_id || ""),
+      known_revision: Number(state.workbench.revision) || 0,
+      known_timeline_stream_id: String(state.workbench.timeline_stream_id || ""),
+      known_timeline_cursor: Number(state.workbench.timeline_cursor) || 0,
+    });
     return true;
   }
   if (normalized === "r") {

@@ -577,6 +577,21 @@ def _normalize_client_payload(
         }
 
     if event_type == ClientEventType.WORKBENCH_REQUEST:
+        unknown = set(payload) - {
+            "open",
+            "subscribe",
+            "session_id",
+            "known_stream_id",
+            "known_revision",
+            "known_timeline_stream_id",
+            "known_timeline_cursor",
+        }
+        if unknown:
+            raise ValueError("Workbench request payload 包含未知字段。")
+        open_value = payload.get("open", True)
+        subscribe_value = payload.get("subscribe", False)
+        if not isinstance(open_value, bool) or not isinstance(subscribe_value, bool):
+            raise ValueError("Workbench open/subscribe 必须是布尔值。")
         raw_revision = payload.get("known_revision", 0)
         if isinstance(raw_revision, bool):
             raise ValueError("Workbench known_revision 必须是非负整数。")
@@ -588,14 +603,38 @@ def _normalize_client_payload(
             raise ValueError("Workbench known_revision 必须是非负整数。")
         session_id = str(payload.get("session_id") or "").strip()
         stream_id = str(payload.get("known_stream_id") or "").strip()
+        timeline_stream_value = payload.get("known_timeline_stream_id", "")
+        if not isinstance(timeline_stream_value, str):
+            raise ValueError("Workbench known_timeline_stream_id 必须是字符串。")
+        timeline_stream_id = timeline_stream_value.strip()
+        if timeline_stream_value != timeline_stream_id or any(
+            ord(char) < 32 or ord(char) == 127 for char in timeline_stream_id
+        ):
+            raise ValueError("Workbench known_timeline_stream_id 格式无效。")
+        raw_timeline_cursor = payload.get("known_timeline_cursor", 0)
+        if (
+            isinstance(raw_timeline_cursor, bool)
+            or not isinstance(raw_timeline_cursor, int)
+            or raw_timeline_cursor < 0
+            or raw_timeline_cursor > 9_007_199_254_740_991
+        ):
+            raise ValueError("Workbench known_timeline_cursor 必须是非负安全整数。")
         if len(session_id) > 500:
             raise ValueError("Workbench session_id 不能超过 500 个字符。")
         if len(stream_id) > 128:
             raise ValueError("Workbench known_stream_id 不能超过 128 个字符。")
+        if len(timeline_stream_id) > 128:
+            raise ValueError(
+                "Workbench known_timeline_stream_id 不能超过 128 个字符。"
+            )
         return {
+            "open": open_value,
+            "subscribe": subscribe_value,
             "session_id": session_id,
             "known_stream_id": stream_id,
             "known_revision": known_revision,
+            "known_timeline_stream_id": timeline_stream_id,
+            "known_timeline_cursor": raw_timeline_cursor,
         }
 
     if event_type == ClientEventType.WORKBENCH_REVIEW_REQUEST:

@@ -1029,7 +1029,8 @@ test("terminal UI process opens refreshes and leaves the Workbench overview", as
       (record) => record.event === "protocol.send"
         && record.payload.record.type === "workbench/request",
     );
-    assert.equal(requests.length, 2);
+    assert.equal(requests.length, 3);
+    assert.equal(requests.at(-1).payload.record.payload.open, false);
     assert.equal(
       events.some(
         (record) => record.event === "protocol.send"

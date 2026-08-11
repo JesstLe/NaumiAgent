@@ -226,3 +226,20 @@ async def test_service_exposes_json_ready_enriched_timeline_window(tmp_path) -> 
     assert result["events"][0]["cursor"] == 1
     assert result["events"][0]["severity"] == "info"
     assert result["events"][0]["task"]["subject"] == "检查 Timeline"
+
+
+@pytest.mark.asyncio
+async def test_dashboard_snapshot_binds_newest_events_to_timeline_cursor(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("session-a")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+    first = await _append(workbench_store, "session-a", 1)
+    second = await _append(workbench_store, "session-a", 2)
+
+    snapshot = await service.dashboard_snapshot("session-a")
+
+    assert snapshot["timeline_stream_id"]
+    assert snapshot["timeline_earliest_cursor"] == first.cursor
+    assert snapshot["timeline_cursor"] == second.cursor
+    assert [event["cursor"] for event in snapshot["events"]] == [2, 1]

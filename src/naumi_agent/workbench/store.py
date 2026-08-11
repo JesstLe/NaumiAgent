@@ -195,6 +195,17 @@ class WorkbenchTimelineReplayWindow:
     gap_reason: str
     events: tuple[WorkbenchEvent, ...]
 
+
+@dataclass(frozen=True)
+class WorkbenchTimelineSnapshot:
+    """One transactionally consistent newest-first Timeline projection."""
+
+    session_id: str
+    stream_id: str
+    earliest_cursor: int
+    latest_cursor: int
+    events: tuple[WorkbenchEvent, ...]
+
 _CREATE_INTENT_LOCKS = """
 CREATE TABLE IF NOT EXISTS workbench_intent_locks (
     id TEXT PRIMARY KEY,
@@ -1107,6 +1118,72 @@ class WorkbenchStore:
             latest_cursor=latest_cursor,
             gap=False,
             gap_reason="",
+            events=tuple(_row_to_event(dict(row)) for row in rows),
+        )
+
+    async def timeline_snapshot(
+        self,
+        session_id: str,
+        *,
+        limit: int = 50,
+    ) -> WorkbenchTimelineSnapshot:
+        """Read stream metadata and newest events from one SQLite snapshot."""
+        if isinstance(limit, bool) or not isinstance(limit, int):
+            raise TypeError("Timeline snapshot limit 必须是整数")
+        if limit < 1 or limit > _MAX_TIMELINE_REPLAY_LIMIT:
+            raise ValueError(
+                f"Timeline snapshot limit 必须在 1..{_MAX_TIMELINE_REPLAY_LIMIT} 之间"
+            )
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            db.row_factory = aiosqlite.Row
+            await db.execute("BEGIN")
+            cursor = await db.execute(
+                """SELECT stream_id, latest_cursor
+                   FROM workbench_audit_streams
+                   WHERE session_id = ?""",
+                (session_id,),
+            )
+            stream_row = await cursor.fetchone()
+            if stream_row is None:
+                await db.commit()
+                return WorkbenchTimelineSnapshot(
+                    session_id=session_id,
+                    stream_id="",
+                    earliest_cursor=0,
+                    latest_cursor=0,
+                    events=(),
+                )
+            stream_id = str(stream_row["stream_id"])
+            latest_cursor = int(stream_row["latest_cursor"])
+            cursor = await db.execute(
+                """SELECT MIN(cursor)
+                   FROM workbench_audit_events
+                   WHERE session_id = ? AND cursor > 0""",
+                (session_id,),
+            )
+            earliest_row = await cursor.fetchone()
+            earliest_cursor = int(
+                earliest_row[0]
+                if earliest_row is not None and earliest_row[0] is not None
+                else latest_cursor + 1
+                if latest_cursor > 0
+                else 0
+            )
+            cursor = await db.execute(
+                """SELECT * FROM workbench_audit_events
+                   WHERE session_id = ? AND cursor > 0
+                   ORDER BY cursor DESC
+                   LIMIT ?""",
+                (session_id, limit),
+            )
+            rows = await cursor.fetchall()
+            await db.commit()
+        return WorkbenchTimelineSnapshot(
+            session_id=session_id,
+            stream_id=stream_id,
+            earliest_cursor=earliest_cursor,
+            latest_cursor=latest_cursor,
             events=tuple(_row_to_event(dict(row)) for row in rows),
         )
 

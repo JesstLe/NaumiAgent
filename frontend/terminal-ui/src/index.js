@@ -938,9 +938,15 @@ function processBridgeRecord(record) {
     }
     if (action.type === "refresh_workbench") {
       send("workbench/request", {
+        open: true,
+        subscribe: true,
         session_id: action.sessionId ?? state.currentSessionId,
         known_stream_id: action.knownStreamId ?? state.workbench.stream_id,
         known_revision: action.knownRevision ?? state.workbench.revision,
+        known_timeline_stream_id:
+          action.knownTimelineStreamId ?? state.workbench.timeline_stream_id,
+        known_timeline_cursor:
+          action.knownTimelineCursor ?? state.workbench.timeline_cursor,
       });
     }
     if (action.type === "doctor_export_preview") {

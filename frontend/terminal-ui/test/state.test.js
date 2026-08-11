@@ -4229,6 +4229,11 @@ test("initial state includes empty workbench bucket", () => {
     schema_version: 1,
     stream_id: "",
     revision: 0,
+    timeline_stream_id: "",
+    timeline_cursor: 0,
+    timeline_earliest_cursor: 0,
+    timeline_recovery: { mode: "" },
+    timeline_recovering: false,
     generated_at: "",
     full: true,
     session_id: "",
@@ -4331,53 +4336,45 @@ test("workbench snapshots reject session leaks and stale same-stream revisions",
   assert.equal(state.workbench.counts.tasks, 3);
 });
 
-test("workbench event gaps request one full snapshot without polluting timeline", () => {
+test("workbench Timeline applies continuous cursors and requests one snapshot on gap", () => {
   const state = createInitialState();
   state.currentSessionId = "s";
   reduceServerEvent(state, {
     type: "workbench/snapshot",
     payload: {
       schema_version: 1, stream_id: "stream-a", revision: 1,
+      timeline_stream_id: "timeline-a", timeline_cursor: 1,
+      timeline_earliest_cursor: 1,
       generated_at: "", full: true, session_id: "s",
-      counts: {}, active_selection: {}, missions: [], tasks: [], issues: [], failures: [], events: [],
+      counts: {}, active_selection: {}, missions: [], tasks: [], issues: [], failures: [],
+      events: [{ id: "e1", session_id: "s", cursor: 1 }],
     },
   });
-  const event = (revision) => ({
+  const event = (cursor) => ({
     type: "workbench/event",
     payload: {
-      id: `e${revision}`, type: "issue.updated", actor: "Agent", subject_id: "1",
-      payload: {}, timestamp: "", session_id: "s", stream_id: "stream-a", revision,
+      id: `e${cursor}`, type: "issue.updated", actor: "Agent", subject_id: "1",
+      payload: {}, timestamp: "", session_id: "s", stream_id: "timeline-a", cursor,
     },
   });
 
-  assert.deepEqual(reduceServerEvent(state, event(2)), [{
-    type: "refresh_workbench",
-    knownRevision: 1,
-    knownStreamId: "stream-a",
-    sessionId: "s",
-  }]);
+  assert.deepEqual(reduceServerEvent(state, event(2)), []);
   assert.equal(state.workbench.revision, 1);
-  assert.equal(state.workbench.events.length, 1);
-  reduceServerEvent(state, {
-    type: "workbench/snapshot",
-    payload: {
-      schema_version: 1, stream_id: "stream-a", revision: 2,
-      generated_at: "", full: true, session_id: "s",
-      counts: {}, active_selection: {}, missions: [], tasks: [], issues: [], failures: [],
-      events: [{ id: "e2" }],
-    },
-  });
+  assert.equal(state.workbench.timeline_cursor, 2);
+  assert.equal(state.workbench.events[0].id, "e2");
   const actions = reduceServerEvent(state, event(4));
   assert.deepEqual(actions, [{
     type: "refresh_workbench",
-    knownRevision: 2,
+    knownRevision: 1,
     knownStreamId: "stream-a",
+    knownTimelineStreamId: "timeline-a",
+    knownTimelineCursor: 2,
     sessionId: "s",
   }]);
-  assert.equal(state.workbench.events.length, 1);
+  assert.equal(state.workbench.events.length, 2);
   assert.equal(state.workbench.loading, true);
   assert.deepEqual(reduceServerEvent(state, event(5)), []);
-  assert.equal(state.workbench.events.length, 1);
+  assert.equal(state.workbench.events.length, 2);
 });
 
 test("workbench slash command requests a read-only current-session snapshot", () => {
@@ -4392,9 +4389,13 @@ test("workbench slash command requests a read-only current-session snapshot", ()
   assert.deepEqual(sent, [{
     type: "workbench/request",
     payload: {
+      open: true,
+      subscribe: true,
       session_id: "session-workbench",
       known_stream_id: "stream-a",
       known_revision: 5,
+      known_timeline_stream_id: "",
+      known_timeline_cursor: 0,
     },
   }]);
   assert.equal(state.workbench.loading, true);
@@ -4445,10 +4446,40 @@ test("workbench overview route refreshes and restores the conversation anchor", 
   assert.equal(handleWorkbenchOverviewKey(state, "r", send), true);
   assert.equal(sent.filter((item) => item.type === "workbench/request").length, 2);
   assert.equal(handleWorkbenchOverviewKey(state, "\u001b", send), true);
+  assert.equal(sent.at(-1).type, "workbench/request");
+  assert.equal(sent.at(-1).payload.open, false);
+  assert.equal(sent.at(-1).payload.subscribe, false);
   assert.deepEqual(state.route, { name: "conversation", originAnchor: null });
   assert.equal(state.scrollOffset, 12);
   assert.equal(state.followTail, false);
   assert.equal(handleWorkbenchOverviewKey(state, "r", send), false);
+});
+
+test("workbench replay acknowledgement clears recovery loading", () => {
+  const state = createInitialState();
+  state.workbench.loading = true;
+  state.workbench.timeline_recovering = true;
+
+  reduceServerEvent(state, {
+    type: "ack",
+    payload: {
+      event: "workbench/request",
+      open: true,
+      subscribed: true,
+      revision: 3,
+      timeline_recovery: {
+        mode: "cursor_replay",
+        replayed_count: 2,
+      },
+    },
+  });
+
+  assert.equal(state.workbench.loading, false);
+  assert.equal(state.workbench.timeline_recovering, false);
+  assert.equal(
+    state.messages.some((message) => message.content?.includes("已补发 2 条断线事件")),
+    true,
+  );
 });
 
 test("workbench tabs navigate 100 worktrees and preserve stable selection on refresh", () => {
@@ -5392,6 +5423,8 @@ test("workbench event prepends, deduplicates, and keeps the newest 100", () => {
     type: "workbench/snapshot",
     payload: {
       session_id: "s",
+      timeline_stream_id: "timeline-a",
+      timeline_cursor: 0,
       missions: [],
       tasks: [],
       issues: [],
@@ -5403,7 +5436,7 @@ test("workbench event prepends, deduplicates, and keeps the newest 100", () => {
   for (let index = 1; index <= 105; index += 1) {
     reduceServerEvent(state, {
       type: "workbench/event",
-      payload: { id: `e${index}`, type: "issue.updated", actor: "agent", subject_id: String(index), payload: {}, timestamp: "" },
+      payload: { id: `e${index}`, session_id: "s", stream_id: "timeline-a", cursor: index, type: "issue.updated", actor: "agent", subject_id: String(index), payload: {}, timestamp: "" },
     });
   }
 
@@ -5415,7 +5448,7 @@ test("workbench event prepends, deduplicates, and keeps the newest 100", () => {
   state.workbench.selected_event_index = state.workbench.events.findIndex((item) => item.id === "e50");
   reduceServerEvent(state, {
     type: "workbench/event",
-    payload: { id: "e105", type: "issue.updated", actor: "agent", subject_id: "105", payload: {}, timestamp: "" },
+    payload: { id: "e105", session_id: "s", stream_id: "timeline-a", cursor: 105, type: "issue.updated", actor: "agent", subject_id: "105", payload: {}, timestamp: "" },
   });
   assert.equal(state.workbench.events.length, 100);
   assert.equal(state.workbench.selected_event_id, "e50");

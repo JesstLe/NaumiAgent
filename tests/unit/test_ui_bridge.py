@@ -692,11 +692,14 @@ class _RevisionedWorkbenchService:
         self,
         snapshots: list[dict[str, Any]] | None = None,
         review_evidence: dict[str, Any] | None = None,
+        replay_windows: list[dict[str, Any]] | None = None,
     ) -> None:
         self.snapshots = list(snapshots or [])
         self.calls: list[str] = []
         self.review_evidence = review_evidence
         self.review_calls: list[tuple[str, str]] = []
+        self.replay_windows = list(replay_windows or [])
+        self.replay_calls: list[dict[str, Any]] = []
 
     async def dashboard_snapshot(self, session_id: str) -> dict[str, Any]:
         self.calls.append(session_id)
@@ -709,6 +712,12 @@ class _RevisionedWorkbenchService:
     ) -> dict[str, Any] | None:
         self.review_calls.append((session_id, review_id))
         return self.review_evidence
+
+    async def timeline_replay_window(self, session_id: str, **kwargs: Any):
+        self.replay_calls.append({"session_id": session_id, **kwargs})
+        if not self.replay_windows:
+            raise RuntimeError("PRIVATE_TIMELINE_FAILURE")
+        return self.replay_windows.pop(0)
 
 
 class _ProposalActionWorkbenchService:
@@ -4516,6 +4525,242 @@ async def test_bridge_workbench_request_returns_current_read_only_snapshot() -> 
 
 
 @pytest.mark.asyncio
+async def test_bridge_workbench_subscription_emits_cursor_bound_increment() -> None:
+    engine = _TaskSubmitFakeEngine()
+    engine._session = SimpleNamespace(id="session-task")
+    event = {
+        "id": "event-3",
+        "session_id": "session-task",
+        "type": "issue.updated",
+        "actor": "Agent",
+        "subject_id": "task-1",
+        "payload": {"status": "ready"},
+        "timestamp": "2026-08-11T12:00:00+08:00",
+        "correlation_id": "",
+        "parent_event_id": "",
+        "severity": "info",
+        "cursor": 3,
+    }
+    service = _RevisionedWorkbenchService(
+        [{
+            "schema_version": 1,
+            "stream_id": "dashboard-a",
+            "revision": 1,
+            "generated_at": "2026-08-11T12:00:00+08:00",
+            "full": True,
+            "session_id": "session-task",
+            "timeline_stream_id": "timeline-a",
+            "timeline_earliest_cursor": 1,
+            "timeline_cursor": 2,
+            "counts": {},
+            "active_selection": {},
+            "events": [],
+        }],
+        replay_windows=[{
+            "schema_version": 1,
+            "session_id": "session-task",
+            "stream_id": "timeline-a",
+            "requested_cursor": 2,
+            "earliest_cursor": 1,
+            "latest_cursor": 3,
+            "gap": False,
+            "gap_reason": "",
+            "events": [event],
+        }],
+    )
+    engine.workbench_service = service
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record({
+        "id": "subscribe",
+        "type": ClientEventType.WORKBENCH_REQUEST,
+        "payload": {"session_id": "session-task", "subscribe": True},
+    })
+    await bridge._refresh_workbench_timeline()
+    await bridge.handle_client_record({
+        "id": "unsubscribe",
+        "type": ClientEventType.WORKBENCH_REQUEST,
+        "payload": {"open": False},
+    })
+
+    increment = next(
+        record for record in _records(writer) if record["type"] == "workbench/event"
+    )
+    assert increment["event_id"] == "event-3"
+    assert increment["stream_id"] == "timeline-a"
+    assert increment["cursor"] == 3
+    assert increment["payload"]["cursor"] == 3
+    assert bridge._workbench_refresh_task is None
+    assert bridge._workbench_subscribed is False
+
+
+@pytest.mark.asyncio
+async def test_bridge_workbench_reconnect_replays_without_advancing_dashboard() -> None:
+    engine = _TaskSubmitFakeEngine()
+    engine._session = SimpleNamespace(id="session-task")
+    event = {
+        "id": "event-3",
+        "session_id": "session-task",
+        "type": "issue.updated",
+        "actor": "Agent",
+        "subject_id": "task-1",
+        "payload": {},
+        "timestamp": "2026-08-11T12:00:00+08:00",
+        "severity": "info",
+        "cursor": 3,
+    }
+    service = _RevisionedWorkbenchService(
+        [{
+            "schema_version": 1,
+            "stream_id": "dashboard-a",
+            "revision": 7,
+            "generated_at": "2026-08-11T12:00:00+08:00",
+            "full": True,
+            "session_id": "session-task",
+            "timeline_stream_id": "timeline-a",
+            "timeline_earliest_cursor": 1,
+            "timeline_cursor": 3,
+            "counts": {},
+            "active_selection": {},
+            "events": [event],
+        }],
+        replay_windows=[{
+            "schema_version": 1,
+            "session_id": "session-task",
+            "stream_id": "timeline-a",
+            "requested_cursor": 2,
+            "earliest_cursor": 1,
+            "latest_cursor": 3,
+            "gap": False,
+            "gap_reason": "",
+            "events": [event],
+        }],
+    )
+    engine.workbench_service = service
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record({
+        "id": "reconnect",
+        "type": ClientEventType.WORKBENCH_REQUEST,
+        "payload": {
+            "session_id": "session-task",
+            "known_stream_id": "dashboard-a",
+            "known_revision": 7,
+            "known_timeline_stream_id": "timeline-a",
+            "known_timeline_cursor": 2,
+        },
+    })
+
+    records = _records(writer)
+    assert not any(record["type"] == "workbench/snapshot" for record in records)
+    assert next(record for record in records if record["type"] == "workbench/event")[
+        "cursor"
+    ] == 3
+    ack = next(record for record in records if record["type"] == "ack")
+    assert ack["payload"]["timeline_recovery"] == {
+        "mode": "cursor_replay",
+        "stream_id": "timeline-a",
+        "requested_cursor": 2,
+        "latest_cursor": 3,
+        "replayed_count": 1,
+    }
+
+
+@pytest.mark.asyncio
+async def test_bridge_workbench_gap_forces_one_full_snapshot() -> None:
+    engine = _TaskSubmitFakeEngine()
+    engine._session = SimpleNamespace(id="session-task")
+    snapshot = {
+        "schema_version": 1,
+        "stream_id": "dashboard-b",
+        "revision": 1,
+        "generated_at": "2026-08-11T12:00:00+08:00",
+        "full": True,
+        "session_id": "session-task",
+        "timeline_stream_id": "timeline-b",
+        "timeline_earliest_cursor": 9,
+        "timeline_cursor": 12,
+        "counts": {},
+        "active_selection": {},
+        "events": [],
+    }
+    service = _RevisionedWorkbenchService(
+        [snapshot],
+        replay_windows=[{
+            "schema_version": 1,
+            "session_id": "session-task",
+            "stream_id": "timeline-b",
+            "requested_cursor": 2,
+            "earliest_cursor": 9,
+            "latest_cursor": 12,
+            "gap": True,
+            "gap_reason": "stream_changed",
+            "events": [],
+        }],
+    )
+    engine.workbench_service = service
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record({
+        "id": "gap",
+        "type": ClientEventType.WORKBENCH_REQUEST,
+        "payload": {
+            "session_id": "session-task",
+            "known_stream_id": "dashboard-a",
+            "known_revision": 7,
+            "known_timeline_stream_id": "timeline-a",
+            "known_timeline_cursor": 2,
+        },
+    })
+
+    records = _records(writer)
+    assert len([record for record in records if record["type"] == "workbench/snapshot"]) == 1
+    assert records[0]["payload"]["timeline_recovery"]["gap_reason"] == "stream_changed"
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"gap": True, "gap_reason": "invented"},
+        {"gap": False, "gap_reason": "cursor_ahead"},
+        {"latest_cursor": 1},
+        {"events": [{"id": "event-4", "session_id": "session-task", "cursor": 4}]},
+        {"events": [{"id": "event-3", "session_id": "other", "cursor": 3}]},
+    ],
+)
+def test_bridge_rejects_malformed_workbench_timeline_recovery(
+    updates: dict[str, Any],
+) -> None:
+    recovery = {
+        "schema_version": 1,
+        "session_id": "session-task",
+        "stream_id": "timeline-a",
+        "requested_cursor": 2,
+        "earliest_cursor": 1,
+        "latest_cursor": 3,
+        "gap": False,
+        "gap_reason": "",
+        "events": [
+            {"id": "event-3", "session_id": "session-task", "cursor": 3}
+        ],
+    }
+    recovery.update(updates)
+
+    with pytest.raises(ValueError):
+        JsonlEngineBridge._validate_workbench_recovery(
+            recovery,
+            session_id="session-task",
+            requested_cursor=2,
+        )
+
+
+@pytest.mark.asyncio
 async def test_bridge_workbench_review_returns_current_read_only_evidence() -> None:
     engine = _TaskSubmitFakeEngine()
     engine._session = SimpleNamespace(id="session-task")
@@ -5554,6 +5799,61 @@ async def test_bridge_task_submit_persists_real_workbench_graph(tmp_path: Path) 
     assert issue.acceptance_criteria == ["记录可追溯"]
     events = await engine.workbench_store.list_events("session-task")
     assert {event.type for event in events} >= {"mission.created", "issue.created"}
+
+
+@pytest.mark.asyncio
+async def test_real_sqlite_timeline_reaches_bridge_snapshot_and_increment(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "timeline-bridge.db"
+    engine = _TaskSubmitFakeEngine()
+    engine._session = SimpleNamespace(id="session-task")
+    engine.task_store = TaskStore(database)
+    engine.task_store.set_session("session-task")
+    engine.workbench_store = WorkbenchStore(database)
+    engine.workbench_service = WorkbenchService(
+        task_store=engine.task_store,
+        workbench_store=engine.workbench_store,
+        workspace_root=str(tmp_path),
+    )
+    first = await engine.workbench_store.append_event(
+        session_id="session-task",
+        type="timeline.started",
+        actor="Harness",
+        subject_id="run-1",
+        payload={"token": "must-not-leak", "status": "started"},
+    )
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record({
+        "id": "real-subscribe",
+        "type": ClientEventType.WORKBENCH_REQUEST,
+        "payload": {"session_id": "session-task", "subscribe": True},
+    })
+    second = await engine.workbench_store.append_event(
+        session_id="session-task",
+        type="timeline.completed",
+        actor="Harness",
+        subject_id="run-1",
+        payload={"status": "completed"},
+    )
+    await bridge._refresh_workbench_timeline()
+    await bridge.handle_client_record({
+        "id": "real-unsubscribe",
+        "type": ClientEventType.WORKBENCH_REQUEST,
+        "payload": {"open": False},
+    })
+
+    records = _records(writer)
+    snapshot = next(record for record in records if record["type"] == "workbench/snapshot")
+    increment = next(record for record in records if record["type"] == "workbench/event")
+    assert snapshot["payload"]["timeline_cursor"] == first.cursor == 1
+    assert snapshot["payload"]["events"][0]["payload"]["token"] == "[REDACTED]"
+    assert increment["event_id"] == second.id
+    assert increment["cursor"] == second.cursor == 2
+    assert increment["payload"]["type"] == "timeline.completed"
 
 
 @pytest.mark.asyncio

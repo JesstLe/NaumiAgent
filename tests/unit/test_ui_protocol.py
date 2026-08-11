@@ -537,9 +537,13 @@ def test_protocol_normalizes_workbench_snapshot_requests() -> None:
     )
 
     assert record["payload"] == {
+        "open": True,
+        "subscribe": False,
         "session_id": "42",
         "known_stream_id": "stream-a",
         "known_revision": 7,
+        "known_timeline_stream_id": "",
+        "known_timeline_cursor": 0,
     }
 
 
@@ -868,6 +872,51 @@ def test_protocol_rejects_invalid_workbench_revisions(revision: object) -> None:
             {
                 "type": ClientEventType.WORKBENCH_REQUEST,
                 "payload": {"known_revision": revision},
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("known_timeline_cursor", True),
+        ("known_timeline_cursor", -1),
+        ("known_timeline_cursor", 1.5),
+        ("known_timeline_cursor", "1"),
+        ("known_timeline_stream_id", 42),
+        ("known_timeline_stream_id", " stream-a"),
+        ("known_timeline_stream_id", "stream\n-a"),
+    ],
+)
+def test_protocol_rejects_invalid_workbench_timeline_cursors(
+    field: str,
+    value: object,
+) -> None:
+    with pytest.raises(ValueError, match="Timeline|timeline"):
+        normalize_client_record(
+            {
+                "type": ClientEventType.WORKBENCH_REQUEST,
+                "payload": {field: value},
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"open": "false"},
+        {"subscribe": 1},
+        {"session_id": "session", "unexpected": True},
+    ],
+)
+def test_protocol_rejects_ambiguous_workbench_lifecycle_fields(
+    payload: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError, match="Workbench"):
+        normalize_client_record(
+            {
+                "type": ClientEventType.WORKBENCH_REQUEST,
+                "payload": payload,
             }
         )
 

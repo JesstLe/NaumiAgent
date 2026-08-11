@@ -9,7 +9,7 @@ Release 与 Timeline 的联合快照；仅收到一条 Timeline 事件时推进�
 因此本模块采用独立的 Timeline `stream_id/cursor`，并按依赖拆成两个可独立验收的切片：
 
 1. **UI-10.5b1（已实现）**：SQLite authority、旧库迁移、并发游标分配、Service replay window 与 gap 判定；
-2. **UI-10.5b2（待实现）**：JSONL Bridge push/reconnect、New UI reducer、Textual TUI 同源刷新与端到端恢复。
+2. **UI-10.5b2（已实现）**：JSONL Bridge push/reconnect、New UI reducer、Textual TUI 同源刷新与端到端恢复。
 
 ## UI-10.5b1 权威模型
 
@@ -55,17 +55,33 @@ Store 写入前的递归 secret redaction 继续生效，replay 不建立第二�
 - [x] Approval 状态与审计事件 cursor 保持同事务；
 - [x] Service 输出 JSON-ready severity、cursor 和同源 task projection。
 
-## UI-10.5b2 待实现与验收
+## UI-10.5b2 实现
 
-- Bridge 打开 Workbench 时发送完整快照并订阅当前 session 的 Timeline stream；关闭页面、切换 session、
-  shutdown 时停止订阅，不能遗留轮询任务；
-- 连续 cursor 发送 `workbench/event`，事件 envelope 同时绑定 session、stream 与 cursor；
-- reconnect 从客户端最后确认 cursor 有界 replay；gap 时只发送一次恢复通知并强制完整 Snapshot；
-- Timeline cursor 不推进 Dashboard revision；其他 Workbench 卡片变化仍必须由完整快照或各自 typed patch 更新；
-- New UI 对重复事件幂等，对跳号/换流/跨会话事件失败关闭；Textual TUI 使用同一 Service 恢复契约；
-- 真实 SQLite append → Bridge → New UI/TUI 的连续、断线、gap、重启场景完成小模块端到端验证。
+- `dashboard_snapshot()` 在一个 SQLite read transaction 内读取 Timeline stream metadata 与最近事件，避免
+  首帧携带彼此不属于同一数据库视图的 cursor 和 event；
+- Bridge 打开 Workbench 时发送完整快照并可订阅当前 session；关闭页面、切换 session、shutdown 时取消
+  0.5 秒有界轮询任务，不把后台刷新遗留到下一会话；
+- 连续 cursor 发送 `workbench/event`，JSONL envelope 与 payload 双重绑定 event、stream、cursor；恢复窗口
+  严格拒绝未知 gap、倒退游标、跨会话或非连续事件；
+- reconnect 从客户端最后确认的 Timeline cursor 最多 replay 100 条；gap 只发一次完整 Snapshot 并带机械
+  recovery 原因。Timeline cursor 独立于 Dashboard revision，增量事件不掩盖其他卡片更新；
+- New UI 对重复事件幂等；跳号、换流时只触发一个完整刷新；离开 Workbench 显式 unsubscribe。Textual TUI
+  通过同一 Service 契约增量刷新，gap 时保留旧视图直到权威快照替换；
+- 前后端都限制 safe integer、stream 长度、控制字符、会话归属和事件数量；Store 的递归 secret redaction
+  在完整快照与 replay 路径均保持生效。
+
+## UI-10.5b2 验收证据
+
+- [x] Store/Service 原子 Timeline snapshot 元数据与事件一致；
+- [x] Bridge subscribe、unsubscribe、shutdown、session switch 不遗留刷新任务；
+- [x] 连续事件 envelope/payload identity 一致，重复、跳号、换流、跨会话输入失败关闭或完整恢复；
+- [x] reconnect 可只 replay Timeline 而不推进 Dashboard revision；retention/stream gap 强制一次完整快照；
+- [x] New UI reducer、显式取消订阅与进程级打开/刷新/退出交互完成小模块验证；
+- [x] Textual TUI 连续增量与 gap fallback 使用同一 Service 完成 app-level 验证；
+- [x] 真实 SQLite append → Service → Bridge 验证 cursor 绑定及敏感字段脱敏。
 
 ## 当前诚实边界
 
-UI-10.5b1 只建立了增量流的持久 authority，尚未声称 UI 已实时推送。当前 New UI/TUI 仍通过完整
-Workbench Snapshot 获得 Timeline；Bridge producer、客户端 cursor 保存与 gap 后整页恢复属于 UI-10.5b2。
+当前 Bridge 与 Textual TUI 使用同进程 0.5 秒轮询获取 SQLite authority 的变化；这不是跨进程通知总线。
+多 Runtime 实例的低延迟 push notification、长期历史翻页和外部审计归档仍属于 HAR-10/ARC-06 后续模块。
+Timeline 通用 payload 继续只显示有界摘要，领域完整证据必须由对应 typed projection 提供。
