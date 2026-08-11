@@ -2749,6 +2749,37 @@ test("evolution command opens typed review route and navigates to detail", () =>
   assert.equal(state.evolutionReview.snapshot, null);
 });
 
+test("outcome discovery uses slash execution then filters its typed projection", () => {
+  const state = createInitialState();
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+  const outcomeId = `evrerollbackout_${"a".repeat(24)}`;
+
+  handleSubmitText(state, `/evolution discover-outcome ${outcomeId}`, send);
+  assert.deepEqual(sent.shift(), {
+    type: "submit",
+    payload: { text: `/evolution discover-outcome ${outcomeId}` },
+  });
+
+  handleSubmitText(
+    state,
+    "/evolution list --source rollback_outcome --limit 20",
+    send,
+  );
+  assert.equal(state.route.name, "evolution_review");
+  assert.deepEqual(sent.shift(), {
+    type: "evolution/review/request",
+    payload: {
+      action: "list",
+      candidate_id: "",
+      query: "",
+      risk: "",
+      source_kind: "rollback_outcome",
+      limit: 20,
+    },
+  });
+});
+
 test("evaluation lane command opens typed receipt route and stays out of chat", () => {
   const state = createInitialState();
   state.protocolNegotiated = true;

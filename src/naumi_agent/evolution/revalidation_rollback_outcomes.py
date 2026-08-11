@@ -180,6 +180,33 @@ class EvolutionRevalidationRollbackOutcomeStore:
                 "Rollback Outcome 损坏或无法读取。",
             ) from exc
 
+    async def get(
+        self, outcome_id: str
+    ) -> EvolutionRevalidationRollbackOutcome | None:
+        if re.fullmatch(r"evrerollbackout_[0-9a-f]{24}", str(outcome_id)) is None:
+            raise ValueError("Rollback Outcome ID 格式无效。")
+        if not self.db_path.is_file():
+            return None
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                db.row_factory = aiosqlite.Row
+                await _ensure_schema(db)
+                row = await (
+                    await db.execute(
+                        "SELECT outcome_json FROM evolution_revalidation_rollback_outcomes "
+                        "WHERE outcome_id = ?",
+                        (outcome_id,),
+                    )
+                ).fetchone()
+            return None if row is None else _restore_outcome(row["outcome_json"])
+        except EvolutionRevalidationRollbackOutcomeError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise EvolutionRevalidationRollbackOutcomeError(
+                "rollback_outcome_store_corrupt",
+                "Rollback Outcome 损坏或无法读取。",
+            ) from exc
+
     async def list_by_session(
         self,
         session_id: str,
@@ -394,6 +421,21 @@ class EvolutionRevalidationRollbackOutcomeService:
         self, *, request_id: str
     ) -> EvolutionRevalidationRollbackOutcomeView:
         item = await self.store.get_by_request(str(request_id or "").strip())
+        if item is None:
+            raise EvolutionRevalidationRollbackOutcomeError(
+                "rollback_outcome_not_found", "Rollback Outcome 不存在。"
+            )
+        return await self._view(item)
+
+    async def inspect_outcome(
+        self, *, outcome_id: str
+    ) -> EvolutionRevalidationRollbackOutcomeView:
+        normalized = str(outcome_id or "").strip()
+        if re.fullmatch(r"evrerollbackout_[0-9a-f]{24}", normalized) is None:
+            raise EvolutionRevalidationRollbackOutcomeError(
+                "rollback_outcome_id_invalid", "Rollback Outcome ID 格式无效。"
+            )
+        item = await self.store.get(normalized)
         if item is None:
             raise EvolutionRevalidationRollbackOutcomeError(
                 "rollback_outcome_not_found", "Rollback Outcome 不存在。"

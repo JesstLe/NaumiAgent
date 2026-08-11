@@ -175,6 +175,7 @@ def generate_proposal_preview(
     stored: EvolutionStoredCandidate,
     *,
     governance: CandidateGovernanceContext | None = None,
+    source_authority_valid: bool = True,
 ) -> EvolutionProposalPreview | None:
     """Build a review preview, or ``None`` when policy disallows proposal entry."""
     if not isinstance(stored, EvolutionStoredCandidate):
@@ -183,7 +184,11 @@ def generate_proposal_preview(
     candidate_sha256 = _candidate_sha256(candidate.model_dump(mode="json"))
     if stored.revision < 1 or stored.draft_sha256 != candidate_sha256:
         raise ValueError("Stored Candidate revision 或摘要不可信。")
-    assessment = assess_candidate_eligibility(candidate, governance=governance)
+    assessment = assess_candidate_eligibility(
+        candidate,
+        governance=governance,
+        source_authority_valid=source_authority_valid,
+    )
     if not assessment.review_ready:
         return None
     aggregation = aggregate_candidate(candidate)

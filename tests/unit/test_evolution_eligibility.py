@@ -62,7 +62,8 @@ async def test_repeated_direct_feedback_is_review_ready_but_not_experiment_eligi
     assert assessment.review_ready is True
     assert assessment.experiment_eligible is False
     assert {check.code for check in assessment.checks} == {
-        "protected_scope",
+            "protected_scope",
+            "source_authority",
         "evidence_strength",
         "mechanical_verifier",
         "cooldown_gate",
@@ -94,7 +95,7 @@ async def test_bound_active_cooldown_suppresses_review_ready(tmp_path: Path) -> 
         ),
     )
 
-    assert assessment.policy_version == "candidate-eligibility-v2"
+    assert assessment.policy_version == "candidate-eligibility-v3"
     assert assessment.decision == "needs_evidence"
     assert assessment.review_ready is False
     cooldown = next(check for check in assessment.checks if check.code == "cooldown_gate")

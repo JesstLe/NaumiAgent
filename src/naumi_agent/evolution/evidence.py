@@ -21,7 +21,12 @@ from naumi_agent.harness.store import HarnessStoredCheck, HarnessStoredEvidence,
 
 _ID_RE = re.compile(r"^eve_[0-9a-f]{24}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-_SAFE_URI_SCHEMES = frozenset({"artifact", "chat-run", "harness"})
+_SAFE_URI_SCHEMES = frozenset({
+    "artifact",
+    "chat-run",
+    "evolution-outcome",
+    "harness",
+})
 
 
 class _StrictModel(BaseModel):
@@ -56,6 +61,7 @@ class EvolutionEvidence(_StrictModel):
         "self_review_static",
         "user_feedback",
         "agent_interpreted_feedback",
+        "rollback_outcome",
     ] = "harness_failure"
     source_uri: str
     observed_at: str = Field(min_length=1, max_length=128)

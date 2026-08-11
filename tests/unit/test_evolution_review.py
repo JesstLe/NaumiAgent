@@ -36,6 +36,7 @@ from naumi_agent.tools.evolution_review import (
     EvolutionFinalEvaluationReceiptTool,
     EvolutionIndependentReviewTool,
     EvolutionMechanicalGateTool,
+    EvolutionOutcomeOpportunityTool,
     EvolutionPostRollbackBehavioralCoverageTool,
     EvolutionPostRollbackBehavioralLaneTool,
     EvolutionPostRollbackBehavioralMatrixTool,
@@ -178,7 +179,7 @@ async def test_review_detail_contains_verified_evidence_and_audit_chain(
     assert snapshot.selected.revision == 2
     assert len(snapshot.events) == 2
     assert "feedback_recurrence" in rendered
-    assert "candidate-eligibility-v2" in rendered
+    assert "candidate-eligibility-v3" in rendered
     assert "candidate-aggregation-v1" in rendered
     assert "24h/7d/30d" in rendered
     assert "review_ready" in rendered
@@ -200,6 +201,9 @@ async def test_review_detail_contains_verified_evidence_and_audit_chain(
 
 
 def test_review_filter_rejects_unbounded_or_unknown_values() -> None:
+    assert EvolutionReviewFilter(source_kind="rollback_outcome").source_kind == (
+        "rollback_outcome"
+    )
     with pytest.raises(ValueError, match="risk"):
         EvolutionReviewFilter(risk="urgent")
     with pytest.raises(ValueError, match="source"):
@@ -274,6 +278,7 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
         "evolution_stable_rollback_readiness",
         "evolution_stable_rollout_authorization",
         "evolution_stable_rollout_finalization",
+        "evolution_discover_outcome_opportunity",
         "evolution_proposal_queue",
     ]
     assert {tool.name for tool in tools if tool.metadata.read_only} == {
@@ -342,7 +347,8 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
     assert isinstance(tools[54], EvolutionStableRollbackReadinessTool)
     assert isinstance(tools[55], EvolutionStableRolloutAuthorizationTool)
     assert isinstance(tools[56], EvolutionStableRolloutFinalizationTool)
-    assert isinstance(tools[57], EvolutionProposalQueueTool)
+    assert isinstance(tools[57], EvolutionOutcomeOpportunityTool)
+    assert isinstance(tools[58], EvolutionProposalQueueTool)
 
 
 class _FakeEngine:

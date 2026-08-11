@@ -70,6 +70,10 @@ from naumi_agent.evolution.mechanical_gates import (
     EvolutionMechanicalGateError,
     render_mechanical_gate,
 )
+from naumi_agent.evolution.opportunity_discovery import (
+    EvolutionOutcomeOpportunityError,
+    render_outcome_opportunity,
+)
 from naumi_agent.evolution.post_rollback_behavioral_coverage import (
     EvolutionPostRollbackBehavioralCoverageError,
     render_post_rollback_behavioral_coverage,
@@ -264,6 +268,7 @@ class EvolutionCandidatesTool(Tool):
                         "self_review_static",
                         "user_feedback",
                         "agent_interpreted_feedback",
+                        "rollback_outcome",
                     ],
                 },
                 "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50},
@@ -312,6 +317,66 @@ class EvolutionCandidatesTool(Tool):
         except (EvolutionStoreError, OSError, ValueError):
             return "Evolution Candidate 状态库不可读，或过滤条件无效。请运行 /doctor。"
         return render_evolution_review(snapshot)
+
+
+class EvolutionOutcomeOpportunityTool(Tool):
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_discover_outcome_opportunity"
+
+    @property
+    def description(self) -> str:
+        return (
+            "把一个当前有效的 rolled_back Outcome 确定性回注为下一轮 "
+            "Evolution Candidate。实时重验来源、去重并保留审计引用；"
+            "不读取源码，不生成补丁，也不授予实验或推广权限。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "outcome_id": {
+                    "type": "string",
+                    "pattern": "^evrerollbackout_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["outcome_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            user_facing_name="Outcome 机会发现",
+            search_hint=(
+                "evolution outcome opportunity discovery feedback loop "
+                "自进化 结果 回注 机会发现"
+            ),
+        )
+
+    async def execute(self, outcome_id: str) -> str:
+        try:
+            result = await self._engine.evolution_outcome_opportunity_service.discover(
+                outcome_id=outcome_id
+            )
+        except (
+            EvolutionOutcomeOpportunityError,
+            EvolutionStoreError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "outcome_opportunity_failed")
+            return f"Outcome 机会发现未完成（`{code}`）：{exc}"
+        return render_outcome_opportunity(result)
 
 
 class EvolutionExperimentContractAuthorityTool(Tool):
@@ -4360,6 +4425,7 @@ def create_evolution_review_tools(
         EvolutionStableRollbackReadinessTool(engine),
         EvolutionStableRolloutAuthorizationTool(engine),
         EvolutionStableRolloutFinalizationTool(engine),
+        EvolutionOutcomeOpportunityTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -4371,6 +4437,7 @@ __all__ = [
     "EvolutionApprovalSignatureAuthorityTool",
     "EvolutionApprovalSignatureTool",
     "EvolutionCandidatesTool",
+    "EvolutionOutcomeOpportunityTool",
     "EvolutionCounterfactualEvidenceTool",
     "EvolutionDecisionInputTool",
     "EvolutionDecisionResolutionTool",

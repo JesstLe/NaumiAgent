@@ -9,7 +9,11 @@ from naumi_agent.evolution.candidate import EvolutionCandidateDraft
 
 EligibilityDecision = Literal["blocked", "needs_evidence", "review_ready"]
 
-_MECHANICAL_SOURCES = frozenset({"harness_failure", "self_review_static"})
+_MECHANICAL_SOURCES = frozenset({
+    "harness_failure",
+    "rollback_outcome",
+    "self_review_static",
+})
 _FEEDBACK_SOURCES = frozenset({"user_feedback", "agent_interpreted_feedback"})
 _PROTECTED_PREFIXES = (
     "src/naumi_agent/safety/",
@@ -68,6 +72,7 @@ def assess_candidate_eligibility(
     candidate: EvolutionCandidateDraft,
     *,
     governance: CandidateGovernanceContext | None = None,
+    source_authority_valid: bool = True,
 ) -> CandidateEligibilityAssessment:
     """Assess proposal readiness without granting experiment authority."""
     if not isinstance(candidate, EvolutionCandidateDraft):
@@ -94,6 +99,16 @@ def assess_candidate_eligibility(
         and governance.reason in _COOLDOWN_ALLOWED_REASONS
     )
     checks = (
+        EligibilityCheck(
+            code="source_authority",
+            passed=source_authority_valid,
+            hard_block=True,
+            detail=(
+                "所有需要动态重验的来源 authority 当前有效。"
+                if source_authority_valid
+                else "Outcome 来源 authority 已失效或无法重验，禁止生成 Proposal。"
+            ),
+        ),
         EligibilityCheck(
             code="protected_scope",
             passed=not protected,
@@ -137,14 +152,14 @@ def assess_candidate_eligibility(
             detail="隔离 worktree、预算和允许工具契约尚未签发。",
         ),
     )
-    if protected or not verifier_ready:
+    if not source_authority_valid or protected or not verifier_ready:
         decision: EligibilityDecision = "blocked"
     elif not evidence_ready or (governance is not None and not cooldown_passed):
         decision = "needs_evidence"
     else:
         decision = "review_ready"
     return CandidateEligibilityAssessment(
-        policy_version="candidate-eligibility-v2",
+        policy_version="candidate-eligibility-v3",
         decision=decision,
         review_ready=decision == "review_ready",
         experiment_eligible=False,
@@ -165,7 +180,7 @@ def _evidence_detail(
     occurrence_count: int,
 ) -> str:
     if mechanical:
-        return "包含 Harness 或静态扫描机械证据。"
+        return "包含 Harness、静态扫描或可信 Outcome 机械证据。"
     if direct_feedback and occurrence_count >= 2:
         return "直接用户反馈已至少出现 2 次，可进入人工审阅。"
     if direct_feedback:

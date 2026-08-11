@@ -18,6 +18,10 @@ from naumi_agent.evolution.experiments import (
     EvolutionExperimentContractStore,
     _manifest_digest,
 )
+from naumi_agent.evolution.opportunity_discovery import (
+    EvolutionOutcomeOpportunityError,
+    EvolutionOutcomeOpportunityService,
+)
 from naumi_agent.evolution.post_rollback_runtime_verifications import (
     EvolutionPostRollbackRuntimeVerificationError,
     EvolutionPostRollbackRuntimeVerificationService,
@@ -79,6 +83,7 @@ from naumi_agent.evolution.revalidation_rollout_stage_entries import (
     EvolutionRevalidationRolloutControlService,
     EvolutionRevalidationRolloutControlStore,
 )
+from naumi_agent.evolution.store import EvolutionCandidateStore
 from naumi_agent.release.slots import ReleaseSlotStore
 from naumi_agent.safety.permissions import (
     PermissionChecker,
@@ -89,6 +94,7 @@ from naumi_agent.safety.permissions import (
 )
 from naumi_agent.tools.base import ToolCall, ToolRegistry, ToolResult
 from naumi_agent.tools.evolution_review import (
+    EvolutionOutcomeOpportunityTool,
     EvolutionPostRollbackRuntimeVerificationTool,
     EvolutionRevalidationRollbackExecutionTool,
     EvolutionRevalidationRollbackOutcomeTool,
@@ -683,6 +689,7 @@ async def test_fenced_slot_rollback_recovers_after_receipt_crash_and_converges(
     assert not view.receipt.git_write_executed
     assert not view.outcome_recorded
     assert not view.promotion_authority
+
     assert (root / "app.py").read_bytes() == b"print('candidate')\n"
     assert (root / "new.py").is_file()
 
@@ -829,6 +836,29 @@ async def test_rollback_outcome_binds_real_receipt_to_proposal_and_fails_closed(
     assert not view.outcome.learning_authority
     assert not view.promotion_authority
 
+    candidate_store = EvolutionCandidateStore(tmp_path / "opportunity.db")
+    opportunity_service = EvolutionOutcomeOpportunityService(
+        workspace_root=root,
+        outcome_service=outcome_service,
+        candidate_store=candidate_store,
+    )
+    opportunities = await asyncio.gather(*(
+        opportunity_service.discover(outcome_id=view.outcome.outcome_id)
+        for _ in range(8)
+    ))
+    opportunity = opportunities[0]
+    assert all(item == opportunity for item in opportunities)
+    assert opportunity.candidate_revision == 1
+    assert opportunity.occurrence_count == 1
+    assert opportunity.candidate_id != view.outcome.candidate_id
+    assert await EvolutionRevalidationRollbackOutcomeStore(db_path).get(
+        view.outcome.outcome_id
+    ) == view.outcome
+    candidate = await candidate_store.get_candidate(root, opportunity.candidate_id)
+    assert candidate is not None
+    assert candidate.draft.source_kinds == ("rollback_outcome",)
+    assert await opportunity_service.validate_candidate_sources(candidate.draft)
+
     projection_service = EvolutionProposalOutcomeProjectionService(
         rollback_outcome_store=EvolutionRevalidationRollbackOutcomeStore(db_path),
         rollback_outcome_service=outcome_service,
@@ -903,6 +933,20 @@ async def test_rollback_outcome_binds_real_receipt_to_proposal_and_fails_closed(
     assert slash_engine.calls[0][0].name == "evolution_revalidation_rollback_outcome"
     assert slash_engine.calls[0][1] == "cli"
 
+    opportunity_tool = EvolutionOutcomeOpportunityTool(
+        SimpleNamespace(evolution_outcome_opportunity_service=opportunity_service)
+    )
+    registry.register(opportunity_tool)
+    opportunity_rendered = await execute_slash_command(
+        slash_engine,
+        f"/evolution discover-outcome {view.outcome.outcome_id}",
+    )
+    assert opportunity.candidate_id in opportunity_rendered
+    assert "未授予实验或推广权限" in opportunity_rendered
+    assert slash_engine.calls[-1][0].name == (
+        "evolution_discover_outcome_opportunity"
+    )
+
     async with aiosqlite.connect(db_path) as db:
         await db.execute(
             "UPDATE evolution_experiment_contracts SET authority_sha256 = ? "
@@ -915,6 +959,10 @@ async def test_rollback_outcome_binds_real_receipt_to_proposal_and_fails_closed(
     assert not stale.proposal_binding_valid
     assert not stale.outcome_authority
     assert not stale.long_term_metrics_authority
+    assert not await opportunity_service.validate_candidate_sources(candidate.draft)
+    with pytest.raises(EvolutionOutcomeOpportunityError) as stale_opportunity:
+        await opportunity_service.discover(outcome_id=view.outcome.outcome_id)
+    assert stale_opportunity.value.code == "outcome_opportunity_source_stale"
     stale_projection = await projection_service.project_session(
         view.outcome.workbench_session_id
     )

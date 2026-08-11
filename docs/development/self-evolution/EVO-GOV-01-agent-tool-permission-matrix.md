@@ -18,7 +18,8 @@ Promotion Input、review-only Package、不可执行 Approval Requirement 或 ro
 
 - 除 `evolution_revalidation_validate` 外不运行项目代码或 Shell；该 Tool 只能执行受信任 Profile 的匹配检查，
   并通过 ARC-04 Worker 隔离；
-- 不修改 Candidate/worktree/main；
+- 除 `evolution_discover_outcome_opportunity` 通过当前有效 Outcome 幂等追加 Candidate Evidence 外，
+  不修改 Candidate；所有工具均不修改 worktree/main；
 - 不扩大 Experiment scope、budget、network 或 dependency 权限；
 - 只有 `evolution_decision_state` 可按固定机械 policy 标记 `accepted_experiment`，且仍不产生 promotion、
   baseline 更新或 Git 写入；其他 Tool 不接受 Candidate；
@@ -64,6 +65,7 @@ authority 并保持所有 Git/Promotion 字段为 false；Revalidation Request T
 | `evolution_revalidation_evaluation_source` | persist exact revalidation overlays for evaluation | `evolution_evaluation_artifact` | 20 |
 | `evolution_revalidation_rollback_execute` | exact-source installed-slot rollback | `evolution_release_rollback` | 20 |
 | `evolution_revalidation_rollback_outcome` | Proposal-bound rolled_back Outcome | `evolution_evaluation_artifact` | 50 |
+| `evolution_discover_outcome_opportunity` | Outcome-backed Candidate Evidence | `evolution_opportunity` | 50 |
 
 Independent Review 的上限更低，因为首次成功路径会调用 Reviewer 模型；durable single-flight 仍负责同一 Gate
 并发去重，权限上限负责限制一个会话内不同 Gate 的总调用面。

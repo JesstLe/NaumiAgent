@@ -118,4 +118,5 @@ modules:
   - {id: EVO-05.6b2a, status: implemented, path: self-evolution/EVO-05-6b2a-fenced-slot-rollback.md, depends_on: [EVO-05.6b1, ARC-07.5a, ARC-07.5b]}
   - {id: EVO-05.6b2a1, status: implemented, path: self-evolution/EVO-05-6b2a1-explicit-rollback-action.md, depends_on: [EVO-05.6b2a, EVO-GOV-01, UI-10]}
   - {id: EVO-05.7a, status: implemented, path: self-evolution/EVO-05-7a-rollback-outcome-authority.md, depends_on: [EVO-05.6b2a1, HAR-09.5c]}
-  - {id: EVO-06, status: planned, path: self-evolution/EVO-06-continuous-evolution.md, depends_on: [EVO-05, HAR-09]}
+  - {id: EVO-06, status: partial, path: self-evolution/EVO-06-continuous-evolution.md, depends_on: [EVO-05, HAR-09], implemented_slices: [EVO-06.1a]}
+  - {id: EVO-06.1a, status: implemented, path: self-evolution/EVO-06-1a-outcome-backed-opportunity-discovery.md, depends_on: [EVO-05.7a, EVO-01, HAR-09]}

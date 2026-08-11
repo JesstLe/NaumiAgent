@@ -7,7 +7,11 @@
 
 ## 子模块
 
-- EVO-06.1 Opportunity discovery：失败聚类、缺失能力、成本/延迟热点、用户明确需求。
+- [EVO-06.1a](EVO-06-1a-outcome-backed-opportunity-discovery.md) Outcome-backed
+  Opportunity discovery（已实现）：把动态有效的真实 `rolled_back` Outcome 确定性回注现有
+  Candidate Store，并在审阅/入队前重新验证来源 authority。
+- EVO-06.1b+ Opportunity discovery（待实现）：accepted/promoted Outcome、缺失能力、成本/延迟热点、
+  用户明确需求、跨类型时间窗聚类与优先级。
 - EVO-06.2 Capability proposal：API、双通道、权限、数据、测试、维护者、淘汰标准。
 - EVO-06.3 Sandbox registration：临时 registry/namespace，不能覆盖内置 tool。
 - EVO-06.4 Shadow evaluation：观察建议调用但不执行，比较路由准确度和价值。
@@ -30,6 +34,9 @@
 EVO-06 不得从“LLM 生成了改进建议”直接开始。每次循环必须可追溯地消费 EVO-01..05 的真实 Outcome：候选源码与补丁、隔离执行、
 RED/GREEN H5a、H5c comparison、失败归因、签名 Decision、staged rollout、运行监控、rollback/accept Outcome 缺一不可。Outcome 必须回注
 opportunity discovery，并以新 Candidate ID 开启下一轮；不得原地改写上一轮证据或把未执行建议计为能力提升。
+
+当前 `EVO-06.1a` 已关闭 `rolled_back` Outcome 的回注断点，但不代表 EVO-06 完成：accepted/promoted
+Outcome、Capability Proposal、Sandbox/Shadow/Limited Activation、选择、退休和 Meta-governance 仍待实现。
 
 ## 终极边界
 

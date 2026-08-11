@@ -68,9 +68,9 @@ def _build_commands() -> list[CommandMeta]:
         CommandMeta("/feedback", "记录隐私安全的纠正或缺陷候选", takes_arg=True, arg_hint="<correction|defect|preference|cancel|praise> <scope> <topic> <摘要>", readonly=False, category="基础"),
         CommandMeta(
             "/evolution",
-            "审查 Candidate、签发评测/决策证据或加入 Workbench 队列",
+            "回注 Outcome、审查 Candidate、签发评测/决策证据或加入 Workbench 队列",
             takes_arg=True,
-            arg_hint="[list|detail|evaluation|stable-population-preview|stable-population-completion|stable-rollback-readiness|stable-rollout-authorization|stable-rollout-finalization|decision-*|reflection-*|promotion-*|approval-*|revalidation-*|outcome-*|enqueue] [arguments]",
+            arg_hint="[list|detail|discover-outcome|evaluation|stable-population-preview|stable-population-completion|stable-rollback-readiness|stable-rollout-authorization|stable-rollout-finalization|decision-*|reflection-*|promotion-*|approval-*|revalidation-*|outcome-*|enqueue] [arguments]",
             readonly=False,
             category="基础",
         ),
