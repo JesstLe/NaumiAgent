@@ -256,7 +256,9 @@
   authenticated network transport 尚未完成。
 - [EVO-05.7b2a2a Fenced Runtime Admission Delivery Worker](EVO-05-7b2a2a-fenced-runtime-admission-delivery-worker.md)：
   已交付；durable owner/epoch/lease Worker、Receipt ACK、retry/dead-letter、真实本地 Control Plane adapter 和双通道已闭合。
-- EVO-05.7 后续：7b2a2b authenticated HTTP transport、7b3 long-term assessment、7b4 promoted/superseded ledger 与 policy learning。
+- [EVO-05.7b2a2b Authenticated Runtime Admission HTTP Transport](EVO-05-7b2a2b-authenticated-runtime-admission-http-transport.md)：
+  已交付；mTLS、member certificate pin、strict HTTP bounds、并发/限流和 Runtime 自动装配已闭合。
+- EVO-05.7 后续：7b3a observation chain cursor、7b3 long-term assessment、7b4 promoted/superseded ledger 与 policy learning。
 
 ## 验收标准
 

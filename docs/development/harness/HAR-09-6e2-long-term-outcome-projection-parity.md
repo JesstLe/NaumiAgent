@@ -101,5 +101,7 @@ installation 的 exact member/runtime 绑定；
 [EVO-05.7b2a1](../self-evolution/EVO-05-7b2a1-stable-promotion-runtime-admission-signed-delivery.md) 已完成 current
 Credential 签名和 Control Plane 幂等接收；
 [EVO-05.7b2a2a](../self-evolution/EVO-05-7b2a2a-fenced-runtime-admission-delivery-worker.md) 已完成 fenced Worker、
-Receipt ACK、重试/dead-letter 和本地真实 adapter，但尚无 mTLS HTTP。下一步必须先完成真实跨安装传输，再聚合长期窗口，最后才设计
+Receipt ACK、重试/dead-letter 和本地真实 adapter；
+[EVO-05.7b2a2b](../self-evolution/EVO-05-7b2a2b-authenticated-runtime-admission-http-transport.md) 已完成真实 mTLS 跨安装
+传输。下一步必须先建立逐 Admission 可恢复 observation chain cursor，再聚合长期窗口，最后才设计
 promoted/superseded ledger；不得复用本 recovery Outcome 越权推广。
