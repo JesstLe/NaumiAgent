@@ -248,6 +248,9 @@ promoted/superseded 路径已分别由 HAR-09.6d/e 与 EVO-05.7b4a–7b4d 后续
 stable `promoted` Outcome 回注为不同于上一轮的新 Candidate。两者均具备同源并发幂等和 Review/Workbench
 入队前动态 authority 重验，不复制源码/补丁，也不授予实验、学习或推广权限。热点/需求发现、Capability
 Proposal、Shadow/Activation 与 learning authority 仍未完成。
+[EVO-01.4b](EVO-01-4b-composite-source-authority-router.md) 已为下一步 runtime metric/Eval Evidence
+补齐 fail-closed 多来源 authority router：所有动态 kind 必须完整注册，不同 reader 并发重验，且 Review
+绑定不能被后续 reader 静默覆盖。
 
 [EVO-05.5f5x3a](EVO-05-5f5x3a-authenticated-remote-readiness-claim.md) 已为跨安装 Stable Finalization
 补齐 Population Credential-bound challenge、Ed25519 assertion 与 durable authenticated claim；它不把远端签名声明冒充

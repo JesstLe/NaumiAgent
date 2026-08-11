@@ -14,7 +14,9 @@
   Opportunity discovery（已实现）：把 current stable promoted Outcome 确定性回注为新的 Candidate，
   并在发现与 Review 前动态重验 head/supersession/Decision/Eligibility authority。
 - EVO-06.1c+ Opportunity discovery（待实现）：缺失能力、成本/延迟热点、用户明确需求、跨类型时间窗
-  聚类与优先级。
+  聚类与优先级。其多动态来源前置
+  [EVO-01.4b](EVO-01-4b-composite-source-authority-router.md) 已实现；下一切片从 H5c typed
+  quantitative regression 建立 Eval Evidence adapter。
 - EVO-06.2 Capability proposal：API、双通道、权限、数据、测试、维护者、淘汰标准。
 - EVO-06.3 Sandbox registration：临时 registry/namespace，不能覆盖内置 tool。
 - EVO-06.4 Shadow evaluation：观察建议调用但不执行，比较路由准确度和价值。

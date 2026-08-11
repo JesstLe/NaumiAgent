@@ -14,6 +14,9 @@ from naumi_agent.evolution.eligibility import (
     CandidateGovernanceContext,
     assess_candidate_eligibility,
 )
+from naumi_agent.evolution.evidence import (
+    EVOLUTION_DYNAMIC_EVIDENCE_SOURCE_KINDS,
+)
 from naumi_agent.evolution.proposal import (
     EvolutionProposalPreview,
     generate_proposal_preview,
@@ -131,7 +134,14 @@ class EvolutionReviewService:
         self,
         reader: CandidateSourceAuthorityReader,
     ) -> None:
-        """Bind dynamic Outcome revalidation after runtime composition."""
+        """Bind the complete dynamic Evidence authority graph exactly once."""
+        if (
+            self._source_authority_reader is not None
+            and self._source_authority_reader is not reader
+        ):
+            raise RuntimeError(
+                "Evolution source authority reader 已绑定；请在 composition root 使用组合器。"
+            )
         self._source_authority_reader = reader
 
     async def list_snapshot(
@@ -223,7 +233,7 @@ class EvolutionReviewService:
         if reader is None:
             return {
                 item.draft.candidate_id: not bool(
-                    {"rollback_outcome", "promoted_outcome"}
+                    EVOLUTION_DYNAMIC_EVIDENCE_SOURCE_KINDS
                     & set(item.draft.source_kinds)
                 )
                 for item in candidates
