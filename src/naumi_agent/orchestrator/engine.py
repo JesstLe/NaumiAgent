@@ -729,6 +729,9 @@ from naumi_agent.ui.tool_output_archive import ToolOutputArchive
 from naumi_agent.ui.workspace_file_index import WorkspaceFileIndex
 from naumi_agent.workbench.review_evidence import ReviewEvidenceCollector
 from naumi_agent.workbench.service import WorkbenchService
+from naumi_agent.workbench.stable_population_finalization import (
+    StablePopulationFinalizationWorkbenchReader,
+)
 from naumi_agent.workbench.tools import create_workbench_tools
 from naumi_agent.workbench.validation import ValidationRunner
 from naumi_agent.worktree import WorktreeManager, create_worktree_tools
@@ -3411,6 +3414,14 @@ class AgentEngine:
         )
         self.workbench_service.bind_proposal_outcome_reader(
             self.evolution_proposal_outcome_projection_service
+        )
+        self.workbench_stable_population_finalization_reader = (
+            StablePopulationFinalizationWorkbenchReader(
+                self.evolution_stable_remote_population_finalization_service
+            )
+        )
+        self.workbench_service.bind_stable_population_finalization_reader(
+            self.workbench_stable_population_finalization_reader
         )
         self.evolution_experiment_contract_issuer.bind_proposal_outcome_reader(
             self.evolution_proposal_outcome_projection_service

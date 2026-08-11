@@ -27,6 +27,8 @@ export function renderWorkbenchOverview(view, width, height) {
     body = renderWorktrees(snapshot, safeWidth, bodyHeight);
   } else if (snapshot.selected_tab === "reviews") {
     body = renderReviews(snapshot, safeWidth, bodyHeight);
+  } else if (snapshot.selected_tab === "release") {
+    body = renderReleaseFinalizationPage(snapshot, safeWidth, bodyHeight);
   } else if (!array(snapshot.missions).length && !array(snapshot.tasks).length) {
     body = [
       color(ANSI.dim, "暂无 Workbench 任务。"),
@@ -45,13 +47,14 @@ export function renderWorkbenchOverview(view, width, height) {
 }
 
 function renderTabs(snapshot) {
-  const selected = ["overview", "worktrees", "reviews"].includes(snapshot.selected_tab)
+  const selected = ["overview", "worktrees", "reviews", "release"].includes(snapshot.selected_tab)
     ? snapshot.selected_tab
     : "overview";
   const overview = selected === "overview" ? color(ANSI.cyan, "[1 概览]") : color(ANSI.dim, "1 概览");
   const worktrees = selected === "worktrees" ? color(ANSI.cyan, "[2 Worktrees]") : color(ANSI.dim, "2 Worktrees");
   const reviews = selected === "reviews" ? color(ANSI.cyan, "[3 Reviews]") : color(ANSI.dim, "3 Reviews");
-  return `Workbench Overview · ${overview} · ${worktrees} · ${reviews}`;
+  const release = selected === "release" ? color(ANSI.cyan, "[4 Release]") : color(ANSI.dim, "4 Release");
+  return `Workbench Overview · ${overview} · ${worktrees} · ${reviews} · ${release}`;
 }
 
 function renderSummary(snapshot) {
@@ -89,7 +92,7 @@ function renderPageState(snapshot) {
   if (snapshot.proposal_action?.phase === "loading") {
     return color(ANSI.cyan, "正在写入 Proposal 决策与审计…");
   }
-  if (["worktrees", "reviews"].includes(snapshot.selected_tab)) {
+  if (["worktrees", "reviews", "release"].includes(snapshot.selected_tab)) {
     return color(ANSI.dim, "Tab/Shift+Tab 标签 · ↑/↓ 选择 · PgUp/PgDn 翻页 · r 刷新 · Esc 返回");
   }
   return color(ANSI.dim, "Tab/Shift+Tab 标签 · r 刷新 · Esc 返回对话");
@@ -683,6 +686,63 @@ function renderRisk(snapshot) {
     lines.push(color(ANSI.dim, "待审 · 无"));
   }
   return lines;
+}
+
+function renderStablePopulationFinalization(snapshot) {
+  const projection = object(snapshot.stable_population_finalization);
+  if (snapshot.stable_population_finalization_error) {
+    return [
+      color(ANSI.yellow, "状态不可用 · 已安全隐藏内部错误"),
+      color(ANSI.dim, "按 r 重新读取 Control Plane 权威状态。"),
+    ];
+  }
+  if (projection.status === "pending") {
+    return [
+      color(ANSI.yellow, "等待全部远端 member 完成"),
+      color(ANSI.dim, "尚未形成 Population Receipt · 当前无发布权限"),
+    ];
+  }
+  if (!["completed", "revoked"].includes(projection.status)) {
+    return [color(ANSI.dim, "尚未接入 Population finalization authority")];
+  }
+  const status = projection.status === "completed"
+    ? color(ANSI.green, "已完成 · authority current")
+    : color(ANSI.red, "历史完成 · current authority 已撤销");
+  const lines = [
+    status,
+    `Candidate · ${compactText(projection.candidate_version || "-", 128)} · Members ${number(projection.completed_members)}/${number(projection.population_denominator)}`,
+    `Population · ${compactText(projection.population_snapshot_id || "-", 80)} · sha ${compactText(projection.population_snapshot_sha256 || "-", 12)}`,
+    `Receipt · ${compactText(projection.receipt_id || "-", 80)} · sha ${compactText(projection.receipt_sha256 || "-", 12)}`,
+    `完成时间 · ${compactText(projection.finalized_at || "-", 100)}`,
+  ];
+  if (projection.status === "revoked") {
+    lines.push(
+      color(
+        ANSI.red,
+        `撤权原因 · ${array(projection.invalidation_reasons).map(populationInvalidationReason).join("、")}`,
+      ),
+    );
+  }
+  lines.push(color(ANSI.dim, "配置/数据 finalization：否 · Promotion：否"));
+  return lines;
+}
+
+function renderReleaseFinalizationPage(snapshot, width, height) {
+  return renderSection(
+    "Stable Population Finalization Authority",
+    renderStablePopulationFinalization(snapshot),
+    width,
+  ).slice(0, height);
+}
+
+function populationInvalidationReason(reason) {
+  return {
+    member_finalization_authority_changed: "成员签名/控制/凭据已变化",
+    member_receipt_set_changed: "成员回执集合已变化",
+    newer_population_finalization_exists: "存在更新的 Population Receipt",
+    population_finalization_receipt_changed: "Population Receipt 已变化",
+    population_snapshot_not_current: "Population Snapshot 已失效",
+  }[String(reason)] || "权威来源已变化";
 }
 
 function activeRecords(snapshot) {

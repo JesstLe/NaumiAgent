@@ -120,6 +120,8 @@ function createEmptyWorkbenchState() {
     worktrees_total: 0,
     worktrees_truncated: false,
     worktrees: [],
+    stable_population_finalization: null,
+    stable_population_finalization_error: "stable_population_finalization_unavailable",
     selected_tab: "overview",
     selected_worktree_name: "",
     selected_worktree_index: 0,
@@ -664,7 +666,7 @@ function applyWorkbenchSnapshot(state, payload) {
   const previousReviewId = String(state.workbench.selected_review_id || "");
   const previousReviewKind = String(state.workbench.selected_review_kind || "");
   const previousReviewIndex = Math.max(0, Number(state.workbench.selected_review_index) || 0);
-  const selectedTab = ["overview", "worktrees", "reviews"].includes(state.workbench.selected_tab)
+  const selectedTab = ["overview", "worktrees", "reviews", "release"].includes(state.workbench.selected_tab)
     ? state.workbench.selected_tab
     : "overview";
   const previousReviewDetail = state.workbench.review_detail;
@@ -3899,8 +3901,12 @@ export function handleWorkbenchOverviewKey(state, key, send) {
     requestWorkbenchReview(state, send);
     return true;
   }
+  if (normalized === "4") {
+    state.workbench.selected_tab = "release";
+    return true;
+  }
   if ([INPUT_KEYS.tab, "]", INPUT_KEYS.right, INPUT_KEYS.rightAlt].includes(key)) {
-    const tabs = ["overview", "worktrees", "reviews"];
+    const tabs = ["overview", "worktrees", "reviews", "release"];
     const index = tabs.indexOf(state.workbench.selected_tab);
     state.workbench.selected_tab = tabs[(index + 1 + tabs.length) % tabs.length];
     reconcileWorkbenchSelection(state.workbench);
@@ -3909,7 +3915,7 @@ export function handleWorkbenchOverviewKey(state, key, send) {
     return true;
   }
   if ([INPUT_KEYS.shiftTab, "[", INPUT_KEYS.left, INPUT_KEYS.leftAlt].includes(key)) {
-    const tabs = ["overview", "worktrees", "reviews"];
+    const tabs = ["overview", "worktrees", "reviews", "release"];
     const index = tabs.indexOf(state.workbench.selected_tab);
     state.workbench.selected_tab = tabs[(index - 1 + tabs.length) % tabs.length];
     reconcileWorkbenchSelection(state.workbench);

@@ -70,6 +70,10 @@ class ProposalOutcomeReader(Protocol):
     async def project_session(self, session_id: str) -> dict[str, Any]: ...
 
 
+class StablePopulationFinalizationReader(Protocol):
+    async def project(self) -> Any: ...
+
+
 def _status_text(value: Any) -> str:
     return str(getattr(value, "value", value) or "").strip().lower()
 
@@ -199,11 +203,22 @@ class WorkbenchService:
         self._snapshot_locks: OrderedDict[str, asyncio.Lock] = OrderedDict()
         self._snapshot_states: OrderedDict[str, tuple[str, str, int]] = OrderedDict()
         self._proposal_outcome_reader: ProposalOutcomeReader | None = None
+        self._stable_population_finalization_reader: StablePopulationFinalizationReader | None = (
+            None
+        )
 
     def bind_proposal_outcome_reader(self, reader: ProposalOutcomeReader) -> None:
         if not callable(getattr(reader, "project_session", None)):
             raise TypeError("Proposal Outcome reader 必须实现 project_session()。")
         self._proposal_outcome_reader = reader
+
+    def bind_stable_population_finalization_reader(
+        self,
+        reader: StablePopulationFinalizationReader,
+    ) -> None:
+        if not callable(getattr(reader, "project", None)):
+            raise TypeError("Stable Population finalization reader 必须实现 project()。")
+        self._stable_population_finalization_reader = reader
 
     def _tasks_for_session(self, session_id: str) -> TaskStore:
         return self._task_store.scoped(session_id)
@@ -900,6 +915,10 @@ class WorkbenchService:
         worktrees, worktrees_status, worktrees_code, worktrees_total = (
             await self._worktree_snapshot(tasks_by_id=tasks_by_id, leases=leases)
         )
+        (
+            stable_population_finalization,
+            stable_population_finalization_error,
+        ) = await self._stable_population_finalization_projection()
         snapshot = {
             "version": 1,
             "session_id": session_id,
@@ -930,8 +949,37 @@ class WorkbenchService:
             "worktrees_code": worktrees_code,
             "worktrees_total": worktrees_total,
             "worktrees_truncated": worktrees_total > len(worktrees),
+            "stable_population_finalization": stable_population_finalization,
+            "stable_population_finalization_error": stable_population_finalization_error,
         }
         return self._version_dashboard_snapshot(snapshot)
+
+    async def _stable_population_finalization_projection(
+        self,
+    ) -> tuple[dict[str, Any] | None, str]:
+        reader = self._stable_population_finalization_reader
+        if reader is None:
+            return None, "stable_population_finalization_unavailable"
+        try:
+            raw = await reader.project()
+            if hasattr(raw, "model_dump"):
+                payload = raw.model_dump(mode="json")
+            elif isinstance(raw, dict):
+                payload = dict(raw)
+            else:
+                raise TypeError("Stable Population finalization projection 类型无效。")
+            from naumi_agent.workbench.stable_population_finalization import (
+                WorkbenchStablePopulationFinalizationProjection,
+            )
+
+            projection = WorkbenchStablePopulationFinalizationProjection.model_validate(payload)
+            return projection.model_dump(mode="json"), ""
+        except Exception as exc:
+            logger.warning(
+                "Workbench Stable Population finalization projection failed (%s)",
+                type(exc).__name__,
+            )
+            return None, "stable_population_finalization_unavailable"
 
     async def _proposal_outcome_projections(
         self,

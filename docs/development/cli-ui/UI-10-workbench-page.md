@@ -14,6 +14,7 @@
 - UI-10.5 Timeline tab：工具、Agent、权限、Git、Harness 事件统一排序。
 - UI-10.6 Actions：open/detail/review/approve/reject/cancel，全部走 Python 权限和 service。
 - UI-10.7 TUI fallback：同数据的简化页面，不复制 Store 查询。
+- UI-10.8 Release tab：结构化显示 Stable Population finalization current authority 与撤权原因。
 
 ## 验收标准
 
@@ -76,6 +77,17 @@
   首次失败提供 `/doctor` 下一步，不泄露底层异常。
 - Store 文本先做控制字符清理、长度限制和 Markdown 转义；80/120/200 列均保留核心状态，空任务有
   明确创建/刷新提示。
+
+### UI-10.8 已实现：Stable Population Finalization Authority
+
+- `EVO-05.5f5x3j` 的 current View 通过只读 typed reader 进入现有 Workbench snapshot；读取不会创建 Receipt、
+  启动任务或授予任何执行权。
+- projection 严格区分 pending、completed、revoked，并固定 config/data finalization 与 promotion authority
+  为 false；source/校验失败只暴露固定 unavailable 码。
+- New UI 与 Textual TUI 都增加 `4 Release` 页签，使用同一后端事实和中文撤权原因；前端只校验、着色和
+  有界渲染，不自行推导 Snapshot/member authority。
+- 真实 x3j→Workbench→Bridge→Node 与 Textual 交互、小/中/宽视口均已定向验证。完整契约见
+  `UI-10-8-stable-population-finalization-authority.md`。
 
 ### UI-10.3 已实现：权威 Worktrees tab
 

@@ -54,6 +54,10 @@ from naumi_agent.tools.base import ToolCall, ToolRegistry, ToolResult
 from naumi_agent.tools.evolution_review import (
     EvolutionStableRemotePopulationFinalizationTool,
 )
+from naumi_agent.workbench.stable_population_finalization import (
+    StablePopulationFinalizationWorkbenchReader,
+    WorkbenchStablePopulationFinalizationProjection,
+)
 from tests.unit.test_evolution_stable_population_completions import T0
 from tests.unit.test_evolution_stable_remote_finalization_authorizations import (
     _authorization_fixture,
@@ -286,6 +290,12 @@ async def test_population_finalization_real_two_member_concurrent_and_survives_g
         )
         == view.receipt
     )
+    projection = await StablePopulationFinalizationWorkbenchReader(data.service).project()
+    assert projection.status == "completed"
+    assert projection.receipt_id == view.receipt.receipt_id
+    assert projection.completed_members == projection.population_denominator == 2
+    assert projection.current_authority
+    assert not projection.promotion_authority
     strict_payload = view.receipt.model_dump(mode="json")
     strict_payload["unknown_authority"] = True
     with pytest.raises(ValueError):
@@ -347,6 +357,15 @@ async def test_population_finalization_rejects_missing_member(
     with pytest.raises(EvolutionStableRemotePopulationFinalizationError) as error:
         await data.service.complete(snapshot_id=data.snapshot.snapshot_id)
     assert error.value.code == "stable_remote_population_member_receipt_missing"
+    pending = await StablePopulationFinalizationWorkbenchReader(data.service).project()
+    assert pending == WorkbenchStablePopulationFinalizationProjection(
+        status="pending",
+        completed_members=0,
+        population_denominator=0,
+        historical_fact=False,
+        current_authority=False,
+        invalidation_reasons=(),
+    )
 
 
 @pytest.mark.asyncio
@@ -411,6 +430,11 @@ async def test_population_finalization_dynamically_revokes_on_control_and_new_sn
     assert paused.stable_population_finalization_fact
     assert not paused.stable_population_finalization_authority
     assert "member_finalization_authority_changed" in paused.invalidation_reasons
+    revoked = await StablePopulationFinalizationWorkbenchReader(data.service).project()
+    assert revoked.status == "revoked"
+    assert revoked.historical_fact
+    assert not revoked.current_authority
+    assert "member_finalization_authority_changed" in revoked.invalidation_reasons
 
     data.fixture.data.fixture.data["policy"][0] = _policy(data.fixture.data.fixture.data["signer"])
     next_snapshot = data.fixture.data.fixture.data["signer"].issue_snapshot(
@@ -577,6 +601,14 @@ async def test_engine_composes_population_finalization_service_and_tool(
         assert (
             engine.evolution_stable_remote_population_finalization_store.db_path
             == session_db.resolve()
+        )
+        assert (
+            engine.workbench_stable_population_finalization_reader.source
+            is engine.evolution_stable_remote_population_finalization_service
+        )
+        assert (
+            engine.workbench_service._stable_population_finalization_reader
+            is engine.workbench_stable_population_finalization_reader
         )
     finally:
         await engine.shutdown()

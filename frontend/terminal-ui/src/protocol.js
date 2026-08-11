@@ -177,6 +177,16 @@ const PURSUIT_LEASE_STATUSES = new Set(["active", "released", "missing", "error"
 const PURSUIT_CHECKPOINT_STATUSES = new Set(["ready", "missing", "error"]);
 const PURSUIT_RECOVERY_ACTION_STATES = new Set(["available", "busy", "blocked", "unavailable"]);
 const PURSUIT_RECOVERY_ATTEMPT_STATES = new Set(["requested", "admitted", "resolved", "failed"]);
+const WORKBENCH_POPULATION_FINALIZATION_STATUSES = new Set([
+  "pending", "completed", "revoked",
+]);
+const WORKBENCH_POPULATION_FINALIZATION_REASONS = new Set([
+  "member_finalization_authority_changed",
+  "member_receipt_set_changed",
+  "newer_population_finalization_exists",
+  "population_finalization_receipt_changed",
+  "population_snapshot_not_current",
+]);
 const INTERACTION_STATES = new Set(["pending", "answered", "expired", "cancelled"]);
 
 export function parseArgs(argv) {
@@ -1016,6 +1026,20 @@ function normalizeServerPayload(type, payload) {
       ? payload.worktrees_status
       : (Array.isArray(payload.worktrees) ? "ready" : "unavailable");
     const worktreesTotal = Math.max(worktrees.length, Number(payload.worktrees_total) || 0);
+    const stablePopulationFinalization = payload.stable_population_finalization == null
+      ? null
+      : normalizeWorkbenchStablePopulationFinalization(
+        payload.stable_population_finalization,
+      );
+    const stablePopulationFinalizationError = [
+      "",
+      "stable_population_finalization_unavailable",
+    ].includes(payload.stable_population_finalization_error)
+      ? String(payload.stable_population_finalization_error)
+      : "stable_population_finalization_unavailable";
+    if (stablePopulationFinalization && stablePopulationFinalizationError) {
+      throw new Error("workbench/snapshot Stable Population availability 投影冲突");
+    }
     return {
       ...payload,
       schema_version: Number(payload.schema_version) || 1,
@@ -1045,6 +1069,8 @@ function normalizeServerPayload(type, payload) {
       worktrees_total: worktreesTotal,
       worktrees_truncated: payload.worktrees_truncated === true || worktreesTotal > worktrees.length,
       worktrees,
+      stable_population_finalization: stablePopulationFinalization,
+      stable_population_finalization_error: stablePopulationFinalizationError,
       missions: Array.isArray(payload.missions) ? payload.missions : [],
       tasks: Array.isArray(payload.tasks) ? payload.tasks : [],
       issues: Array.isArray(payload.issues) ? payload.issues : [],
@@ -1076,6 +1102,162 @@ function normalizeServerPayload(type, payload) {
     };
   }
   return { ...payload };
+}
+
+function normalizeWorkbenchStablePopulationFinalization(value) {
+  const source = "workbench/snapshot stable_population_finalization";
+  const item = harnessObject(value, source);
+  requireExactKeys(item, [
+    "schema_version",
+    "status",
+    "receipt_id",
+    "receipt_sha256",
+    "population_snapshot_id",
+    "population_snapshot_sha256",
+    "candidate_version",
+    "completed_members",
+    "population_denominator",
+    "finalized_at",
+    "historical_fact",
+    "current_authority",
+    "invalidation_reasons",
+    "config_data_finalization_authority",
+    "promotion_authority",
+  ], source);
+  if (item.schema_version !== 1) throw new Error(`${source} schema_version 无效`);
+  const status = strictWorkbenchPopulationText(item.status, `${source}.status`, 16);
+  if (!WORKBENCH_POPULATION_FINALIZATION_STATUSES.has(status)) {
+    throw new Error(`${source}.status 无效`);
+  }
+  const receiptId = strictWorkbenchPopulationText(
+    item.receipt_id,
+    `${source}.receipt_id`,
+    50,
+    true,
+  );
+  const receiptSha = strictWorkbenchPopulationText(
+    item.receipt_sha256,
+    `${source}.receipt_sha256`,
+    64,
+    true,
+  );
+  const snapshotId = strictWorkbenchPopulationText(
+    item.population_snapshot_id,
+    `${source}.population_snapshot_id`,
+    50,
+    true,
+  );
+  const snapshotSha = strictWorkbenchPopulationText(
+    item.population_snapshot_sha256,
+    `${source}.population_snapshot_sha256`,
+    64,
+    true,
+  );
+  const candidateVersion = strictWorkbenchPopulationText(
+    item.candidate_version,
+    `${source}.candidate_version`,
+    128,
+    true,
+  );
+  const finalizedAt = strictWorkbenchPopulationText(
+    item.finalized_at,
+    `${source}.finalized_at`,
+    100,
+    true,
+  );
+  const completedMembers = harnessNonnegativeInteger(
+    item.completed_members,
+    `${source}.completed_members`,
+  );
+  const denominator = harnessNonnegativeInteger(
+    item.population_denominator,
+    `${source}.population_denominator`,
+  );
+  if (completedMembers > 10_000 || denominator > 10_000) {
+    throw new Error(`${source} member 数量越界`);
+  }
+  if (!Array.isArray(item.invalidation_reasons) || item.invalidation_reasons.length > 5) {
+    throw new Error(`${source}.invalidation_reasons 无效`);
+  }
+  const reasons = item.invalidation_reasons.map((reason) => (
+    strictWorkbenchPopulationText(reason, `${source}.invalidation_reasons`, 80)
+  ));
+  if (
+    reasons.some((reason) => !WORKBENCH_POPULATION_FINALIZATION_REASONS.has(reason))
+    || reasons.some((reason, index) => index > 0 && reasons[index - 1] >= reason)
+  ) {
+    throw new Error(`${source}.invalidation_reasons 无效`);
+  }
+  const historicalFact = harnessBoolean(item.historical_fact, `${source}.historical_fact`);
+  const currentAuthority = harnessBoolean(item.current_authority, `${source}.current_authority`);
+  const configAuthority = harnessBoolean(
+    item.config_data_finalization_authority,
+    `${source}.config_data_finalization_authority`,
+  );
+  const promotionAuthority = harnessBoolean(
+    item.promotion_authority,
+    `${source}.promotion_authority`,
+  );
+  const identifiers = [
+    receiptId,
+    receiptSha,
+    snapshotId,
+    snapshotSha,
+    candidateVersion,
+    finalizedAt,
+  ];
+  const pendingValid = status === "pending"
+    && identifiers.every((entry) => entry === "")
+    && completedMembers === 0
+    && denominator === 0
+    && !historicalFact
+    && !currentAuthority
+    && reasons.length === 0;
+  const terminalValid = status !== "pending"
+    && identifiers.every(Boolean)
+    && /^evstableremotepopfinal_[0-9a-f]{24}$/.test(receiptId)
+    && /^[0-9a-f]{64}$/.test(receiptSha)
+    && /^relpopsnapshot_[0-9a-f]{24}$/.test(snapshotId)
+    && /^[0-9a-f]{64}$/.test(snapshotSha)
+    && completedMembers === denominator
+    && denominator > 0
+    && historicalFact
+    && currentAuthority === (status === "completed")
+    && (reasons.length > 0) === (status === "revoked")
+    && Number.isFinite(Date.parse(finalizedAt));
+  if ((!pendingValid && !terminalValid) || configAuthority || promotionAuthority) {
+    throw new Error(`${source} authority 投影无效`);
+  }
+  return {
+    schema_version: 1,
+    status,
+    receipt_id: receiptId,
+    receipt_sha256: receiptSha,
+    population_snapshot_id: snapshotId,
+    population_snapshot_sha256: snapshotSha,
+    candidate_version: candidateVersion,
+    completed_members: completedMembers,
+    population_denominator: denominator,
+    finalized_at: finalizedAt,
+    historical_fact: historicalFact,
+    current_authority: currentAuthority,
+    invalidation_reasons: reasons,
+    config_data_finalization_authority: false,
+    promotion_authority: false,
+  };
+}
+
+function strictWorkbenchPopulationText(value, source, limit, allowEmpty = false) {
+  if (
+    typeof value !== "string"
+    || value.length > limit
+    || (!allowEmpty && value.length < 1)
+    || value !== value.trim()
+    || /[\u0000-\u001f\u007f]/.test(value)
+  ) {
+    throw new Error(`${source} 必须是规范化的有界文本`);
+  }
+  return value;
 }
 
 function normalizeTerminalEventRecovery(payload, { initial = false } = {}) {

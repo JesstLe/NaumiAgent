@@ -48,6 +48,9 @@ from naumi_agent.workbench.models import (
 )
 from naumi_agent.workbench.proposal_governance import ProposalAction
 from naumi_agent.workbench.service import WorkbenchService
+from naumi_agent.workbench.stable_population_finalization import (
+    WorkbenchStablePopulationFinalizationProjection,
+)
 from naumi_agent.workbench.store import WorkbenchStore
 from naumi_agent.workbench.validation import ValidationRunner
 
@@ -498,6 +501,74 @@ async def test_dashboard_snapshot_contains_core_cards(tmp_path) -> None:
     assert snapshot["missions"][0]["title"] == "Mac 工作台"
     assert snapshot["issues"][0]["task_id"] == task.id
     assert snapshot["tasks"][0]["subject"] == "实现任务市场"
+
+
+@pytest.mark.asyncio
+async def test_dashboard_projects_typed_population_finalization_without_leaking_errors(
+    tmp_path,
+) -> None:
+    database = str(tmp_path / "workbench.db")
+    service = WorkbenchService(
+        task_store=TaskStore(database),
+        workbench_store=WorkbenchStore(database),
+    )
+    projection = WorkbenchStablePopulationFinalizationProjection(
+        status="completed",
+        receipt_id="evstableremotepopfinal_" + "1" * 24,
+        receipt_sha256="2" * 64,
+        population_snapshot_id="relpopsnapshot_" + "3" * 24,
+        population_snapshot_sha256="4" * 64,
+        candidate_version="1.2.3",
+        completed_members=2,
+        population_denominator=2,
+        finalized_at="2026-08-11T08:00:00+00:00",
+        historical_fact=True,
+        current_authority=True,
+        invalidation_reasons=(),
+    )
+
+    class _Reader:
+        async def project(self):
+            return projection
+
+    service.bind_stable_population_finalization_reader(_Reader())
+    ready = await service.dashboard_snapshot("s")
+    assert ready["stable_population_finalization"] == projection.model_dump(mode="json")
+    assert ready["stable_population_finalization_error"] == ""
+
+    class _TamperedReader:
+        async def project(self):
+            return {**projection.model_dump(mode="json"), "promotion_authority": True}
+
+    service.bind_stable_population_finalization_reader(_TamperedReader())
+    tampered = await service.dashboard_snapshot("s")
+    assert tampered["stable_population_finalization"] is None
+    assert tampered["stable_population_finalization_error"] == (
+        "stable_population_finalization_unavailable"
+    )
+
+    class _InvalidTimeReader:
+        async def project(self):
+            return {**projection.model_dump(mode="json"), "finalized_at": "not-a-timestamp"}
+
+    service.bind_stable_population_finalization_reader(_InvalidTimeReader())
+    invalid_time = await service.dashboard_snapshot("s")
+    assert invalid_time["stable_population_finalization"] is None
+    assert invalid_time["stable_population_finalization_error"] == (
+        "stable_population_finalization_unavailable"
+    )
+
+    class _UnavailableReader:
+        async def project(self):
+            raise OSError("/private/store?token=do-not-leak")
+
+    service.bind_stable_population_finalization_reader(_UnavailableReader())
+    unavailable = await service.dashboard_snapshot("s")
+    assert unavailable["stable_population_finalization"] is None
+    assert unavailable["stable_population_finalization_error"] == (
+        "stable_population_finalization_unavailable"
+    )
+    assert "do-not-leak" not in str(unavailable)
 
 
 @pytest.mark.asyncio
