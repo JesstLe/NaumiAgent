@@ -223,7 +223,10 @@
   TLS loopback；
 - [EVO-05.5f5x3h Remote Finalization Result Return Worker](EVO-05-5f5x3h-remote-finalization-result-return-worker.md)：
   已交付；ACK 后 writer/补签与 Result 回传进入同一 durable 双阶段 outbox，以 owner/epoch/lease fencing、anti-join 同步、retry
-  budget、dead-letter、shutdown drain 和 exact Receipt 绑定自动收口；Result 网络传输、安装端 daemon 和 Population aggregation 仍未完成；
+  budget、dead-letter、shutdown drain 和 exact Receipt 绑定自动收口；
+- [EVO-05.5f5x3i Authenticated Result Return HTTP Transport](EVO-05-5f5x3i-authenticated-result-return-http-transport.md)：
+  已交付；installation→Control Plane Result 使用独立 mTLS、同连接服务端 pin、leaf→member 授权、strict HTTP bounds 与
+  Control Plane 权威 late mode 自动返回 exact Receipt；安装端 daemon 和 Population aggregation 仍未完成；
 - [EVO-05.6a Automatic Pause and Rollback Request](EVO-05-6a-automatic-pause-rollback-request.md)：已交付；
   exact breach 会触发或复用 kill switch，并冻结只读 exact Rollback Request，不虚报执行完成。
 - [EVO-05.6b1 Immutable Rollback Source](EVO-05-6b1-immutable-rollback-source.md)：已交付；从 exact Git

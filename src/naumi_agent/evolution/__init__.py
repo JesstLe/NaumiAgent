@@ -1187,6 +1187,15 @@ if TYPE_CHECKING:
         StableRemoteFinalizationHTTPServer,
         StableRemoteFinalizationHTTPServerPolicy,
     )
+    from naumi_agent.evolution.stable_remote_finalization_result_http_transport import (
+        STABLE_REMOTE_FINALIZATION_RECEIPT_MEDIA_TYPE,
+        STABLE_REMOTE_FINALIZATION_RESULT_HTTP_PATH,
+        STABLE_REMOTE_FINALIZATION_SUBMISSION_MEDIA_TYPE,
+        MTLSStableRemoteFinalizationResultTransport,
+        StableRemoteFinalizationResultHTTPClientPolicy,
+        StableRemoteFinalizationResultHTTPServer,
+        StableRemoteFinalizationResultHTTPServerPolicy,
+    )
     from naumi_agent.evolution.stable_remote_finalization_result_return_worker import (
         EvolutionStableRemoteFinalizationCredentialResolver,
         EvolutionStableRemoteFinalizationResultReturnError,
@@ -1216,8 +1225,10 @@ if TYPE_CHECKING:
         EvolutionStableRemoteFinalizationSubmission,
         EvolutionStableRemoteFinalizationView,
         decode_stable_remote_finalization_execution_package,
+        decode_stable_remote_finalization_receipt,
         decode_stable_remote_finalization_submission,
         encode_stable_remote_finalization_execution_package,
+        encode_stable_remote_finalization_receipt,
         encode_stable_remote_finalization_submission,
         execute_stable_remote_finalization,
         recover_stable_remote_finalization_submission,
@@ -1746,8 +1757,10 @@ __all__ = [
     "EvolutionStableRemoteFinalizationSubmission",
     "EvolutionStableRemoteFinalizationView",
     "decode_stable_remote_finalization_execution_package",
+    "decode_stable_remote_finalization_receipt",
     "decode_stable_remote_finalization_submission",
     "encode_stable_remote_finalization_execution_package",
+    "encode_stable_remote_finalization_receipt",
     "encode_stable_remote_finalization_submission",
     "execute_stable_remote_finalization",
     "recover_stable_remote_finalization_submission",
@@ -1802,6 +1815,13 @@ __all__ = [
     "StableRemoteFinalizationHTTPClientPolicy",
     "StableRemoteFinalizationHTTPServer",
     "StableRemoteFinalizationHTTPServerPolicy",
+    "MTLSStableRemoteFinalizationResultTransport",
+    "STABLE_REMOTE_FINALIZATION_RECEIPT_MEDIA_TYPE",
+    "STABLE_REMOTE_FINALIZATION_RESULT_HTTP_PATH",
+    "STABLE_REMOTE_FINALIZATION_SUBMISSION_MEDIA_TYPE",
+    "StableRemoteFinalizationResultHTTPClientPolicy",
+    "StableRemoteFinalizationResultHTTPServer",
+    "StableRemoteFinalizationResultHTTPServerPolicy",
     "EVOLUTION_STABLE_ROLLOUT_AUTHORIZATION_POLICY",
     "EvolutionStableRolloutAuthorization",
     "EvolutionStableRolloutAuthorizationError",
@@ -3091,8 +3111,10 @@ def __getattr__(name: str) -> object:
         "EvolutionStableRemoteFinalizationSubmission",
         "EvolutionStableRemoteFinalizationView",
         "decode_stable_remote_finalization_execution_package",
+        "decode_stable_remote_finalization_receipt",
         "decode_stable_remote_finalization_submission",
         "encode_stable_remote_finalization_execution_package",
+        "encode_stable_remote_finalization_receipt",
         "encode_stable_remote_finalization_submission",
         "execute_stable_remote_finalization",
         "recover_stable_remote_finalization_submission",
@@ -3138,6 +3160,15 @@ def __getattr__(name: str) -> object:
         "StableRemoteFinalizationHTTPClientPolicy",
         "StableRemoteFinalizationHTTPServer",
         "StableRemoteFinalizationHTTPServerPolicy",
+    }
+    stable_remote_finalization_result_http_transport_exports = {
+        "MTLSStableRemoteFinalizationResultTransport",
+        "STABLE_REMOTE_FINALIZATION_RECEIPT_MEDIA_TYPE",
+        "STABLE_REMOTE_FINALIZATION_RESULT_HTTP_PATH",
+        "STABLE_REMOTE_FINALIZATION_SUBMISSION_MEDIA_TYPE",
+        "StableRemoteFinalizationResultHTTPClientPolicy",
+        "StableRemoteFinalizationResultHTTPServer",
+        "StableRemoteFinalizationResultHTTPServerPolicy",
     }
     stable_remote_finalization_result_return_exports = {
         "EvolutionStableRemoteFinalizationCredentialResolver",
@@ -3861,6 +3892,8 @@ def __getattr__(name: str) -> object:
         module_name = "stable_remote_finalization_delivery_worker"
     elif name in stable_remote_finalization_http_transport_exports:
         module_name = "stable_remote_finalization_http_transport"
+    elif name in stable_remote_finalization_result_http_transport_exports:
+        module_name = "stable_remote_finalization_result_http_transport"
     elif name in stable_remote_finalization_result_return_exports:
         module_name = "stable_remote_finalization_result_return_worker"
     elif name in stable_rollout_authorization_exports:

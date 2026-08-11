@@ -123,6 +123,7 @@ signals 或 shell 命令；路径使用 `pathlib.Path`，Windows 不把 POSIX mo
 - rate limiter 是单进程 endpoint-local，未来多副本部署必须绑定共享或网关层限流策略。
 
 [EVO-05.5f5x3h Remote Finalization Result Return Worker](EVO-05-5f5x3h-remote-finalization-result-return-worker.md) 已消费 ACKed
-target journal，以 durable 双阶段 outbox 监管 expected-pointer writer/补签、Result 回传和 Control Plane Receipt。下一最小切片是
-x3i authenticated Result HTTP transport；daemon packaging 和三平台 deployment matrix 应作为后续独立 Harness 运维切片，而不是把
-未验证网络声明成 Population 完成。
+target journal，以 durable 双阶段 outbox 监管 expected-pointer writer/补签、Result 回传和 Control Plane Receipt。
+[EVO-05.5f5x3i](EVO-05-5f5x3i-authenticated-result-return-http-transport.md) 已进一步交付 installation→Control Plane 的 member-bound
+mTLS Result transport；daemon packaging 和三平台 deployment matrix 仍作为后续独立 Harness 运维切片，不能把单 member 网络闭环声明成
+Population 完成。

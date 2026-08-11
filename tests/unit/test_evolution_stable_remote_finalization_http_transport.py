@@ -58,6 +58,9 @@ class _TLSBundle:
     client_cert: Path
     client_key: Path
     client_fingerprint: str
+    next_client_cert: Path
+    next_client_key: Path
+    next_client_fingerprint: str
 
 
 def _write(path: Path, value: bytes, *, private: bool = False) -> Path:
@@ -170,6 +173,9 @@ def _tls_bundle(tmp_path: Path) -> _TLSBundle:
     client_cert, client_key, client_fingerprint = leaf(
         "naumi-control-plane", ExtendedKeyUsageOID.CLIENT_AUTH
     )
+    next_client_cert, next_client_key, next_client_fingerprint = leaf(
+        "naumi-installation-next", ExtendedKeyUsageOID.CLIENT_AUTH
+    )
     return _TLSBundle(
         ca=_write(tmp_path / "ca.pem", ca_cert.public_bytes(serialization.Encoding.PEM)),
         server_cert=_write(tmp_path / "server.pem", server_cert),
@@ -181,6 +187,11 @@ def _tls_bundle(tmp_path: Path) -> _TLSBundle:
         client_cert=_write(tmp_path / "client.pem", client_cert),
         client_key=_write(tmp_path / "client.key", client_key, private=True),
         client_fingerprint=client_fingerprint,
+        next_client_cert=_write(tmp_path / "client-next.pem", next_client_cert),
+        next_client_key=_write(
+            tmp_path / "client-next.key", next_client_key, private=True
+        ),
+        next_client_fingerprint=next_client_fingerprint,
     )
 
 
