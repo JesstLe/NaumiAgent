@@ -122,6 +122,7 @@ New UI、CLI 和 Textual TUI 继续共享 Slash Router、Tool Registry 与 Engin
 - production composition 目前只能使用显式注入 transport；
 - macOS 本机真实 fixture 不能替代 Linux/Windows 网络矩阵。
 
-下一最小切片是 `EVO-05.7b2a2b Authenticated Runtime Admission HTTP Transport`：复用现有 bounded TLS HTTP common，定义
+[EVO-05.7b2a2b](EVO-05-7b2a2b-authenticated-runtime-admission-http-transport.md) 已复用 bounded TLS HTTP common，交付
 installation→Control Plane 固定 endpoint/media type、双向证书校验与 current/next pin、canonical Submission/Receipt Base64、严格
-HTTP parser、并发/限流和真实 TLS loopback，然后由 config 自动装配本 Worker。只有 7b2a2b 完成，才进入 7b3 Population 长期窗口。
+HTTP parser、并发/限流、真实 TLS loopback和 config 自动装配。下一步进入 `EVO-05.7b3a` Population observation chain cursor，
+不得从单个网络 Receipt 直接跳到 promoted Outcome。

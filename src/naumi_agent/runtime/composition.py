@@ -17,6 +17,10 @@ from naumi_agent.daemons.permission_decisions import PermissionDecisionReceiptSt
 from naumi_agent.daemons.run_delegation_grants import RunDelegationGrantStore
 from naumi_agent.daemons.tool_jobs import ToolJobStore
 from naumi_agent.daemons.worker_registry import WorkerRegistryStore
+from naumi_agent.evolution.stable_promotion_runtime_admission_http_transport import (
+    MTLSStablePromotionRuntimeAdmissionControlPlaneTransport,
+    StablePromotionRuntimeAdmissionHTTPClientPolicy,
+)
 from naumi_agent.evolution.stable_remote_finalization_http_transport import (
     MTLSStableRemoteFinalizationInstallationTransport,
     StableRemoteFinalizationHTTPClientPolicy,
@@ -399,6 +403,37 @@ def build_runtime_services(
                 max_response_bytes=result_http.max_response_bytes,
             )
         )
+    stable_runtime_admission_transport = (
+        resolved.stable_promotion_runtime_admission_transport
+    )
+    runtime_admission_http = (
+        config.harness.stable_promotion_runtime_admission_http_transport
+    )
+    if stable_runtime_admission_transport is None and runtime_admission_http.enabled:
+        stable_runtime_admission_transport = (
+            MTLSStablePromotionRuntimeAdmissionControlPlaneTransport(
+                StablePromotionRuntimeAdmissionHTTPClientPolicy(
+                    endpoint_url=runtime_admission_http.endpoint_url,
+                    server_ca_path=Path(runtime_admission_http.server_ca_path),
+                    client_certificate_path=Path(
+                        runtime_admission_http.client_certificate_path
+                    ),
+                    client_private_key_path=Path(
+                        runtime_admission_http.client_private_key_path
+                    ),
+                    server_certificate_sha256_pins=tuple(
+                        runtime_admission_http.server_certificate_sha256_pins
+                    ),
+                    connect_timeout_seconds=(
+                        runtime_admission_http.connect_timeout_seconds
+                    ),
+                    request_timeout_seconds=(
+                        runtime_admission_http.request_timeout_seconds
+                    ),
+                    max_response_bytes=runtime_admission_http.max_response_bytes,
+                )
+            )
+        )
     daemon_factory = resolved.stable_remote_finalization_installation_daemon_factory
     daemon_config = config.harness.stable_remote_finalization_installation_daemon
     if daemon_factory is None and daemon_config.enabled:
@@ -449,7 +484,7 @@ def build_runtime_services(
         ),
         stable_remote_finalization_transport=stable_remote_transport,
         stable_promotion_runtime_admission_transport=(
-            resolved.stable_promotion_runtime_admission_transport
+            stable_runtime_admission_transport
         ),
         stable_remote_finalization_result_transport=(
             stable_remote_result_transport

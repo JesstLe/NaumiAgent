@@ -815,6 +815,35 @@ def decode_stable_promotion_runtime_admission_submission(encoded: str):
         ) from exc
 
 
+def encode_stable_promotion_runtime_admission_receipt(receipt) -> str:
+    item = _receipt(receipt)
+    raw = item.model_dump_json().encode("utf-8")
+    _bounded(raw)
+    return base64.b64encode(raw).decode("ascii")
+
+
+def decode_stable_promotion_runtime_admission_receipt(encoded: str):
+    value = str(encoded or "").strip()
+    if not value or len(value) > _MAX_ENCODED_CHARS:
+        raise EvolutionStablePromotionRuntimeAdmissionDeliveryError(
+            "stable_promotion_admission_delivery_receipt_payload_invalid",
+            "Runtime Admission Receipt 编码为空或超过上限。",
+        )
+    try:
+        raw = base64.b64decode(value, validate=True)
+        _bounded(raw)
+        if base64.b64encode(raw).decode("ascii") != value:
+            raise ValueError("non-canonical base64")
+        return EvolutionStablePromotionRuntimeAdmissionDeliveryReceipt.model_validate_json(
+            raw
+        )
+    except (binascii.Error, TypeError, ValueError) as exc:
+        raise EvolutionStablePromotionRuntimeAdmissionDeliveryError(
+            "stable_promotion_admission_delivery_receipt_payload_invalid",
+            "Runtime Admission Receipt 编码或内容无效。",
+        ) from exc
+
+
 def render_stable_promotion_runtime_admission_submission(submission) -> str:
     item = _submission(submission)
     admission = item.payload.admission
@@ -1120,7 +1149,9 @@ __all__ = [
     "EvolutionStablePromotionRuntimeAdmissionSubmission",
     "EvolutionStablePromotionRuntimeAdmissionSubmissionPayload",
     "decode_stable_promotion_runtime_admission_submission",
+    "decode_stable_promotion_runtime_admission_receipt",
     "encode_stable_promotion_runtime_admission_submission",
+    "encode_stable_promotion_runtime_admission_receipt",
     "render_stable_promotion_runtime_admission_delivery",
     "render_stable_promotion_runtime_admission_submission",
     "stable_promotion_runtime_admission_receipt_matches_submission",
