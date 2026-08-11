@@ -199,6 +199,10 @@
 - [EVO-05.5f5x3 Stable Rollout Member Finalization](EVO-05-5f5x3-stable-rollout-member-finalization.md)：已交付；
   消费 exact Authorization，在 release store 内以 expected-pointer writer fence 完成单 member binary finalization，并可从落盘
   release event 恢复 Evolution Completion；Population rollout、配置/数据和 promotion authority 仍关闭；
+- [EVO-05.5f5x3a Authenticated Remote Readiness Claim](EVO-05-5f5x3a-authenticated-remote-readiness-claim.md)：
+  已交付；对 current Population member 签发短期 challenge，验证 installation Credential-bound Ed25519 pointer/slot
+  assertion 并持久化 authenticated claim；尚未远端重读 Release Store，不授予 readiness、execution、rollout 或
+  promotion authority；
 - [EVO-05.6a Automatic Pause and Rollback Request](EVO-05-6a-automatic-pause-rollback-request.md)：已交付；
   exact breach 会触发或复用 kill switch，并冻结只读 exact Rollback Request，不虚报执行完成。
 - [EVO-05.6b1 Immutable Rollback Source](EVO-05-6b1-immutable-rollback-source.md)：已交付；从 exact Git

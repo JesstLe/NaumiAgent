@@ -215,6 +215,11 @@ from naumi_agent.evolution.stable_population_completions import (
     EvolutionStablePopulationCompletionError,
     render_stable_population_completion,
 )
+from naumi_agent.evolution.stable_remote_readiness_claims import (
+    EvolutionStableRemoteReadinessClaimError,
+    render_stable_remote_readiness_challenge,
+    render_stable_remote_readiness_claim,
+)
 from naumi_agent.evolution.stable_rollback_readiness import (
     EvolutionStableRollbackReadinessError,
     render_stable_rollback_readiness,
@@ -2871,6 +2876,104 @@ class EvolutionStableRollbackReadinessTool(Tool):
         return render_stable_rollback_readiness(readiness)
 
 
+class EvolutionStableRemoteReadinessClaimTool(Tool):
+    """Issue, ingest, or inspect an authenticated installation readiness claim."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_stable_remote_readiness_claim"
+
+    @property
+    def description(self) -> str:
+        return (
+            "为 current Stable Population member 签发短期 challenge，验证该安装使用 "
+            "Population Credential 对 pointer/slot/rollback assertion 的 Ed25519 签名，"
+            "并持久化 authenticated claim；不授予 readiness、execution 或 promotion 权限。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["challenge", "ingest", "inspect"],
+                },
+                "completion_receipt_id": {"type": "string"},
+                "installation_member_id": {"type": "string"},
+                "validity_seconds": {"type": "integer", "minimum": 60, "maximum": 900},
+                "challenge_id": {"type": "string"},
+                "assertion_base64": {"type": "string", "maxLength": 131072},
+                "signature_base64": {"type": "string", "maxLength": 128},
+                "receipt_id": {"type": "string"},
+            },
+            "required": ["action"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="Stable 远端就绪身份声明",
+            search_hint=(
+                "evolution stable remote readiness challenge claim signature "
+                "自进化 稳定发布 远端 就绪 身份 签名"
+            ),
+        )
+
+    async def execute(
+        self,
+        action: str,
+        completion_receipt_id: str = "",
+        installation_member_id: str = "",
+        validity_seconds: int = 300,
+        challenge_id: str = "",
+        assertion_base64: str = "",
+        signature_base64: str = "",
+        receipt_id: str = "",
+    ) -> str:
+        try:
+            service = self._engine.evolution_stable_remote_readiness_claim_service
+            if action == "challenge":
+                challenge = await service.issue_challenge(
+                    completion_receipt_id=completion_receipt_id,
+                    installation_member_id=installation_member_id,
+                    validity_seconds=validity_seconds,
+                )
+                return render_stable_remote_readiness_challenge(challenge)
+            if action == "ingest":
+                view = await service.ingest(
+                    challenge_id=challenge_id,
+                    assertion_base64=assertion_base64,
+                    signature_base64=signature_base64,
+                )
+            elif action == "inspect":
+                view = await service.inspect(receipt_id=receipt_id)
+            else:
+                raise ValueError("action 必须是 challenge、ingest 或 inspect。")
+        except (
+            AttributeError,
+            EvolutionStableRemoteReadinessClaimError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "stable_remote_readiness_claim_failed")
+            return f"Stable Remote Readiness Claim 未完成（`{code}`）：{exc}"
+        return render_stable_remote_readiness_claim(view)
+
+
 class EvolutionStableRolloutAuthorizationTool(Tool):
     """Issue or inspect one member-scoped stable rollout capability."""
 
@@ -4423,6 +4526,7 @@ def create_evolution_review_tools(
         EvolutionStablePopulationCandidatePreviewTool(engine),
         EvolutionStablePopulationCompletionTool(engine),
         EvolutionStableRollbackReadinessTool(engine),
+        EvolutionStableRemoteReadinessClaimTool(engine),
         EvolutionStableRolloutAuthorizationTool(engine),
         EvolutionStableRolloutFinalizationTool(engine),
         EvolutionOutcomeOpportunityTool(engine),
@@ -4482,6 +4586,7 @@ __all__ = [
     "EvolutionStablePopulationCandidatePreviewTool",
     "EvolutionStablePopulationCompletionTool",
     "EvolutionStableRollbackReadinessTool",
+    "EvolutionStableRemoteReadinessClaimTool",
     "EvolutionStableRolloutAuthorizationTool",
     "EvolutionStableRolloutFinalizationTool",
     "EvolutionRevalidationRollbackExecutionTool",

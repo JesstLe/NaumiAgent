@@ -63,6 +63,9 @@ Completion Receipt 要求：
 本切片是真实本地 release-store 动作，不是只写一张“成功”证书。但它仍不是跨控制面的 fleet publisher：当前 x2 Authorization
 没有 exporter/signature envelope，远端 worker 不能把本地 SQLite artifact 当作网络 bearer token。
 
-下一最小切片应聚合 current signed Population 中每个 member 的 current 5f5x3 Completion，形成 population-level Stable Rollout
-Completion Authority；若要求跨机器自动执行，应先补独立签名分发、worker claim 与回传协议。配置/数据 finalization 继续等待
-ARC-07.6，Promotion authority 继续独立。
+真实 Population 包含跨机器 member，因此不能让本机 Release Store 冒充 fleet source。
+[EVO-05.5f5x3a](EVO-05-5f5x3a-authenticated-remote-readiness-claim.md) 已先补 installation Credential-bound
+challenge/signature/claim，证明远端 assertion 的身份来源，但仍不等于 remote runtime revalidation。后续需继续完成远端
+freshness/fencing、执行与结果回传；只有每个 member 都形成 current readiness、Authorization 与 Finalization Receipt，才可
+聚合 population-level Stable Rollout Completion Authority。配置/数据 finalization 继续等待 ARC-07.6，Promotion authority
+继续独立。

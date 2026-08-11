@@ -1134,6 +1134,19 @@ if TYPE_CHECKING:
         EvolutionStableReadGraphInspector,
         build_evolution_stable_read_graph_inspector,
     )
+    from naumi_agent.evolution.stable_remote_readiness_claims import (
+        EVOLUTION_STABLE_REMOTE_READINESS_CLAIM_POLICY,
+        EvolutionStableRemoteReadinessAssertion,
+        EvolutionStableRemoteReadinessChallenge,
+        EvolutionStableRemoteReadinessClaimError,
+        EvolutionStableRemoteReadinessClaimReceipt,
+        EvolutionStableRemoteReadinessClaimService,
+        EvolutionStableRemoteReadinessClaimStore,
+        EvolutionStableRemoteReadinessClaimView,
+        encode_stable_remote_readiness_assertion,
+        render_stable_remote_readiness_challenge,
+        render_stable_remote_readiness_claim,
+    )
     from naumi_agent.evolution.stable_rollback_readiness import (
         EVOLUTION_STABLE_ROLLBACK_READINESS_POLICY,
         EvolutionStableDeploymentInspectionPort,
@@ -1572,6 +1585,17 @@ __all__ = [
     "EvolutionStableRollbackReadinessError",
     "EvolutionStableRollbackReadinessService",
     "render_stable_rollback_readiness",
+    "EVOLUTION_STABLE_REMOTE_READINESS_CLAIM_POLICY",
+    "EvolutionStableRemoteReadinessAssertion",
+    "EvolutionStableRemoteReadinessChallenge",
+    "EvolutionStableRemoteReadinessClaimError",
+    "EvolutionStableRemoteReadinessClaimReceipt",
+    "EvolutionStableRemoteReadinessClaimService",
+    "EvolutionStableRemoteReadinessClaimStore",
+    "EvolutionStableRemoteReadinessClaimView",
+    "encode_stable_remote_readiness_assertion",
+    "render_stable_remote_readiness_challenge",
+    "render_stable_remote_readiness_claim",
     "EVOLUTION_STABLE_ROLLOUT_AUTHORIZATION_POLICY",
     "EvolutionStableRolloutAuthorization",
     "EvolutionStableRolloutAuthorizationError",
@@ -2803,6 +2827,19 @@ def __getattr__(name: str) -> object:
         "EvolutionStableRollbackReadinessService",
         "render_stable_rollback_readiness",
     }
+    stable_remote_readiness_claim_exports = {
+        "EVOLUTION_STABLE_REMOTE_READINESS_CLAIM_POLICY",
+        "EvolutionStableRemoteReadinessAssertion",
+        "EvolutionStableRemoteReadinessChallenge",
+        "EvolutionStableRemoteReadinessClaimError",
+        "EvolutionStableRemoteReadinessClaimReceipt",
+        "EvolutionStableRemoteReadinessClaimService",
+        "EvolutionStableRemoteReadinessClaimStore",
+        "EvolutionStableRemoteReadinessClaimView",
+        "encode_stable_remote_readiness_assertion",
+        "render_stable_remote_readiness_challenge",
+        "render_stable_remote_readiness_claim",
+    }
     stable_rollout_authorization_exports = {
         "EVOLUTION_STABLE_ROLLOUT_AUTHORIZATION_POLICY",
         "EvolutionStableRolloutAuthorization",
@@ -3494,6 +3531,8 @@ def __getattr__(name: str) -> object:
         module_name = "stable_read_graph"
     elif name in stable_rollback_readiness_exports:
         module_name = "stable_rollback_readiness"
+    elif name in stable_remote_readiness_claim_exports:
+        module_name = "stable_remote_readiness_claims"
     elif name in stable_rollout_authorization_exports:
         module_name = "stable_rollout_authorizations"
     elif name in stable_rollout_finalization_exports:
