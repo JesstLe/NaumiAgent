@@ -97,8 +97,8 @@ Cursor JSON 上限 2 MiB，单 revision 上限 512 KiB；revision 只保存 HAR 
 ## 当前不足与下一步
 
 7b3a 的 HAR samples 仍只在 installation 本地可信。即使 Cursor ready，也不能声称 Control Plane 已直接验证 heartbeat，更不能跨
-installation 聚合。下一独立切片 `EVO-05.7b3b Signed Observation Revision Delivery` 应复用 current Population Credential、
-current/next mTLS pin、durable fenced worker 与 Receipt ACK，把 Cursor revisions 作为有界 signed batch 传到 Control Plane。完成远端
-逐 revision 验签和幂等接收后，7b3c 才能按 7b1 的 duration、Population denominator/member coverage、
+installation 聚合。[EVO-05.7b3b1](EVO-05-7b3b1-signed-observation-revision-delivery.md) 已用 current Population Credential 把
+Cursor revisions 形成有界 signed batch，并由本地真实 Control Plane boundary 逐 revision 验签、顺序幂等接收。下一步 7b3b2a/2b
+补齐 durable fenced worker、Receipt ACK 与 mTLS transport；完成跨安装投递后，7b3c 才能按 7b1 的 duration、Population denominator/member coverage、
 sample/gap/latest-age 规则形成
 Population long-term assessment。

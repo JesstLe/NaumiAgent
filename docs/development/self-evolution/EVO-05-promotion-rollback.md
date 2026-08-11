@@ -260,7 +260,9 @@
   已交付；mTLS、member certificate pin、strict HTTP bounds、并发/限流和 Runtime 自动装配已闭合。
 - [EVO-05.7b3a Stable Promotion Observation Chain Cursor](EVO-05-7b3a-stable-promotion-observation-chain-cursor.md)：
   已交付；从 acknowledged Admission 和 installation 本地 HAR ledger 建立逐 sample 可恢复 cursor，保持远端与长期 authority 为 false。
-- EVO-05.7 后续：7b3b signed revision delivery、7b3c Population long-term assessment、7b4 promoted/superseded ledger 与 policy learning。
+- [EVO-05.7b3b1 Signed Observation Revision Delivery](EVO-05-7b3b1-signed-observation-revision-delivery.md)：
+  已交付；有界 Ed25519 batch、Control Plane 顺序验签、幂等 Receipt 与动态撤权已闭合，但尚无自动 worker/mTLS。
+- EVO-05.7 后续：7b3b2a/2b worker 与网络交付、7b3c Population long-term assessment、7b4 promoted/superseded ledger 与 policy learning。
 
 ## 验收标准
 
