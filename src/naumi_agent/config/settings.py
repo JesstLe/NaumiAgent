@@ -613,6 +613,70 @@ class StableRemoteFinalizationResultHTTPTransportConfig(BaseSettings):
         return self
 
 
+class StableRemoteFinalizationInstallationDaemonConfig(BaseSettings):
+    """Owner-fenced installation daemon and inbound mTLS endpoint policy."""
+
+    enabled: bool = False
+    installation_member_id: str = ""
+    bind_host: str = "127.0.0.1"
+    advertise_host: str = "localhost"
+    port: int = Field(default=0, ge=0, le=65_535)
+    server_certificate_path: str = ""
+    server_private_key_path: str = ""
+    control_plane_ca_path: str = ""
+    authorized_control_plane_certificate_sha256: list[str] = Field(
+        default_factory=list
+    )
+    max_request_bytes: int = Field(default=2 * 1024 * 1024, ge=1, le=2 * 1024 * 1024)
+    tls_handshake_timeout_seconds: float = Field(default=5.0, ge=0.1, le=120)
+    request_timeout_seconds: float = Field(default=20.0, ge=0.1, le=600)
+    requests_per_minute: int = Field(default=120, ge=1, le=100_000)
+    max_concurrent_requests: int = Field(default=32, ge=1, le=1024)
+    lease_seconds: int = Field(default=60, ge=10, le=86_400)
+    renew_interval_seconds: float = Field(default=10.0, ge=0.1, le=28_800)
+    heartbeat_interval_seconds: float = Field(default=10.0, ge=0.1, le=86_399.9)
+    heartbeat_timeout_seconds: int = Field(default=30, ge=3, le=86_400)
+
+    @model_validator(mode="after")
+    def _validate_installation_daemon(
+        self,
+    ) -> StableRemoteFinalizationInstallationDaemonConfig:
+        configured = bool(
+            self.installation_member_id
+            or self.server_certificate_path
+            or self.server_private_key_path
+            or self.control_plane_ca_path
+            or self.authorized_control_plane_certificate_sha256
+        )
+        if configured and not self.enabled:
+            raise ValueError("Installation daemon 已配置身份或证书，但未显式 enabled")
+        if self.enabled and not all((
+            self.installation_member_id,
+            self.server_certificate_path,
+            self.server_private_key_path,
+            self.control_plane_ca_path,
+        )):
+            raise ValueError("Installation daemon 启用时必须完整配置成员与 mTLS 文件")
+        if self.enabled and re.fullmatch(
+            r"relpopmember_[0-9a-f]{24}", self.installation_member_id
+        ) is None:
+            raise ValueError("Installation daemon member ID 无效")
+        if self.enabled and not 1 <= len(
+            self.authorized_control_plane_certificate_sha256
+        ) <= 2:
+            raise ValueError("Installation daemon 必须配置 1–2 个 Control Plane 证书 pin")
+        if self.enabled and any(
+            re.fullmatch(r"[0-9a-f]{64}", item) is None
+            for item in self.authorized_control_plane_certificate_sha256
+        ):
+            raise ValueError("Installation daemon Control Plane 证书 pin 必须是小写 SHA-256")
+        if self.renew_interval_seconds > self.lease_seconds / 3:
+            raise ValueError("Installation daemon renew interval 不能大于 lease 的三分之一")
+        if self.heartbeat_interval_seconds >= self.heartbeat_timeout_seconds:
+            raise ValueError("Installation daemon heartbeat interval 必须小于 timeout")
+        return self
+
+
 class HarnessConfig(BaseSettings):
     """Harness runtime policy configuration."""
 
@@ -639,6 +703,9 @@ class HarnessConfig(BaseSettings):
     stable_remote_finalization_result_http_transport: (
         StableRemoteFinalizationResultHTTPTransportConfig
     ) = Field(default_factory=StableRemoteFinalizationResultHTTPTransportConfig)
+    stable_remote_finalization_installation_daemon: (
+        StableRemoteFinalizationInstallationDaemonConfig
+    ) = Field(default_factory=StableRemoteFinalizationInstallationDaemonConfig)
 
     @model_validator(mode="after")
     def _validate_stable_remote_transport_timeouts(self) -> HarnessConfig:
@@ -657,6 +724,20 @@ class HarnessConfig(BaseSettings):
         ):
             raise ValueError(
                 "Result HTTP request timeout 必须小于 Result Worker timeout"
+            )
+        daemon = self.stable_remote_finalization_installation_daemon
+        if daemon.enabled and not (
+            result_return.enabled and result_http.enabled
+        ):
+            raise ValueError(
+                "Installation daemon 必须同时启用 Result Worker 与认证 Result HTTP"
+            )
+        if daemon.enabled and daemon.lease_seconds <= (
+            result_return.shutdown_drain_seconds
+            + 2 * daemon.renew_interval_seconds
+        ):
+            raise ValueError(
+                "Installation daemon lease 必须覆盖 Worker drain 与两个续租周期"
             )
         return self
 

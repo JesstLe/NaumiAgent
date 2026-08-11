@@ -233,6 +233,12 @@
     `HAR-10-8f2i-pursuit-terminal-outbox-retention-preview.md`。
   - 未完成：disposed cursor 翻页、retention apply/prune、push stream、跨 Store 原子 terminal commit
     与 A5 故障/soak。
+- HAR-10.9 Remote installation daemon（partial）：
+  - HAR-10.9a 已实现 owner-fenced installation daemon，把 x3g 入站 mTLS、x3h Result Worker、x3i 回传、
+    typed heartbeat 和原子 local discovery 绑定到同一 RunLease epoch；续租/heartbeat 失败会撤销 discovery、
+    停止 admission 并 drain，独立前台 CLI 与 Agent Tool/Slash 提供跨进程可观测性。见
+    [设计](HAR-10-9a-remote-finalization-installation-daemon-supervision.md)。
+  - 未完成：OS service 安装、跨主机 discovery、证书热重载/撤销、全局限流和三平台 soak。
 
 ## 与 Pursuit 的合并原则
 
@@ -268,6 +274,8 @@ Agent 委派 heartbeat producer，HAR-10.2h 已交付 browser producer；同步 
 收口，UI-18.5b1 已让 New UI/TUI fallback 消费该 authority 并完成受控 resume 动作闭环；
 自动 terminal outbox worker 已由 10.8f2a 接入，typed backlog/worker health 已由 10.8f2b 同步到
 New UI/TUI；历史 cursor/retention 与 takeover/cleanup 用户动作仍待独立治理。
+HAR-10.9a 又把 Remote Finalization 安装端从交互式 Runtime 拆为单 owner 前台 daemon，复用同一 heartbeat、
+RunLease 和 Tool/Slash authority；它不替代 OS service manager，也不提前聚合 Population Receipt。
 
 ## 验收标准
 

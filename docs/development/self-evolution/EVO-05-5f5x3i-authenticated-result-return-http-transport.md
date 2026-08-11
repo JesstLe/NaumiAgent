@@ -134,6 +134,6 @@ x3i 已完成单安装端 Result 的跨机器认证传输，但仍不能宣称 f
 - Linux/Windows 真实 service 与网络故障矩阵仍缺发布证据；
 - 单 member Receipt 尚未聚合为 Population Stable Rollout Completion Authority。
 
-下一最小且跨文档的前置切片转为 **HAR-10.9a Remote Finalization Installation Daemon Supervision**：只负责把 x3g server、x3h
-Worker 与生命周期/心跳/service discovery 组合成可恢复的安装端 daemon，不提前实现 Population aggregation。daemon 真实可运维后，
-再回到 EVO-05 交付逐 member Receipt aggregation 和 Population completion authority。
+[HAR-10.9a Remote Finalization Installation Daemon Supervision](../harness/HAR-10-9a-remote-finalization-installation-daemon-supervision.md)
+已把 x3g server、x3h Worker、x3i transport、RunLease、heartbeat 与原子 discovery 组合成可恢复的安装端
+daemon。下一切片回到 EVO-05.5f5x3j，交付逐 member Receipt aggregation 和 Population completion authority。

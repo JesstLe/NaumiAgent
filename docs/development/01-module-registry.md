@@ -12,7 +12,7 @@
 | HAR-07 | Completion Receipt UI 与恢复 | partial (7.1a, 7.1b, 7.2, 7.3, 7.4a, 7.4b1, 7.4b2, 7.5a, 7.5b, 7.5c1, 7.5c2, 7.6) | HAR-05 | `harness/HAR-07-completion-ui.md` |
 | HAR-08 | Eval Suite、Baseline 与回归比较 | partial (8.1a, 8.3a, 8.4a-8.4o3j, 8.5a-8.5c2, 8.6a, 8.6b, 8.7a-8.7e, H5a-H5c, H5b2, 8.8a-8.8e3) | HAR-05, ARC-03, ARC-04 | `harness/HAR-08-eval-baseline.md` |
 | HAR-09 | Feedback Candidate 与受控提升 | partial (9.1a-9.6e2) | HAR-08, EVO-01.3a | `harness/HAR-09-feedback-promotion.md` |
-| HAR-10 | 长周期 Harness Orchestration | partial (10.1a, 10.1b, 10.2a-10.2j, 10.3a, 10.3b1-10.3b5, 10.4a, 10.4b, 10.5a-10.5c, 10.6a-10.6d, 10.7a-10.7h6, 10.8a-10.8f2b) | HAR-06, HAR-08, ARC-06 | `harness/HAR-10-long-running.md` |
+| HAR-10 | 长周期 Harness Orchestration | partial (10.1a, 10.1b, 10.2a-10.2k, 10.3a, 10.3b1-10.3b5, 10.4a, 10.4b, 10.5a-10.5c, 10.6a-10.6d, 10.7a-10.7h6, 10.8a-10.8f2i, 10.9a) | HAR-06, HAR-08, ARC-06 | `harness/HAR-10-long-running.md` |
 
 ## CLI/TUI/New UI
 

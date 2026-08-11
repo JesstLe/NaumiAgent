@@ -77,6 +77,30 @@ harness:
     connect_timeout_seconds: 5
     request_timeout_seconds: 15
     max_response_bytes: 524288
+  stable_remote_finalization_installation_daemon:
+    # 显式前台启动：naumi stable-finalization-daemon
+    # UI Runtime 在启用后不再自行启动 Result Worker，避免双 owner。
+    enabled: false
+    bind_host: "127.0.0.1"
+    advertise_host: "localhost"
+    port: 0
+    # 启用时取消以下注释；只写路径和证书 pin，不写证书/私钥内容。
+    # installation_member_id: "relpopmember_<24-hex>"
+    # server_certificate_path: "/secure/path/installation-server.pem"
+    # server_private_key_path: "/secure/path/installation-server.key"
+    # control_plane_ca_path: "/secure/path/control-plane-ca.pem"
+    # authorized_control_plane_certificate_sha256:
+    #   - "<current-control-plane-client-leaf-sha256>"
+    #   - "<next-control-plane-client-leaf-sha256>"
+    max_request_bytes: 2097152
+    tls_handshake_timeout_seconds: 5
+    request_timeout_seconds: 20
+    requests_per_minute: 120
+    max_concurrent_requests: 32
+    lease_seconds: 60
+    renew_interval_seconds: 10
+    heartbeat_interval_seconds: 10
+    heartbeat_timeout_seconds: 30
 
 search:
   # 实际 token 不写入 YAML；运行时从环境变量解析。

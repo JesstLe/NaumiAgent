@@ -1832,6 +1832,57 @@ def serve(
         )
 
 
+@app.command("stable-finalization-daemon")
+def stable_finalization_daemon_command(
+    config: str = typer.Option(
+        DEFAULT_CONFIG_PATH,
+        "--config",
+        "-c",
+        help="配置文件路径",
+    ),
+) -> None:
+    """以前台进程运行 owner-fenced Remote Finalization 安装服务."""
+    try:
+        asyncio.run(_run_stable_finalization_daemon(config))
+    except KeyboardInterrupt:
+        console.print("[dim]Installation daemon 已收到终止信号。[/dim]")
+    except Exception as exc:
+        console.print(
+            f"[red]Installation daemon 启动失败：{_safe_launch_error(exc)}[/red]"
+        )
+        raise typer.Exit(75) from exc
+
+
+async def _run_stable_finalization_daemon(config_path: str) -> None:
+    from naumi_agent.log_setup import setup_logging
+    from naumi_agent.runtime.composition import create_agent_engine
+
+    resolved = _resolve_config_path(config_path)
+    config = AppConfig.from_yaml(resolved)
+    setup_logging(config.log_level)
+    engine = create_agent_engine(config)
+    try:
+        if not await engine.start_stable_remote_finalization_installation_daemon():
+            raise RuntimeError(
+                "已有 live owner 持有 Installation daemon 租约；当前进程进入 standby。"
+            )
+        snapshot = engine.stable_remote_finalization_installation_daemon_snapshot()
+        console.print(
+            "[green]Installation daemon 已就绪[/green]"
+            f" · epoch {snapshot.lease_epoch} · {snapshot.endpoint_url}"
+        )
+        terminal = (
+            await engine.wait_stable_remote_finalization_installation_daemon()
+        )
+        if terminal.state.value == "failed":
+            raise RuntimeError(
+                "Installation daemon 运行失败并已关闭："
+                f"{terminal.failure_code or 'stable_installation_runtime_failed'}"
+            )
+    finally:
+        await engine.shutdown()
+
+
 def _capture(func: Any) -> str:
     """Capture console output as ANSI text."""
     buf = io.StringIO()
@@ -4008,6 +4059,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "inspect-delivery-worker",
                 "run-result-return-worker",
                 "inspect-result-return-worker",
+                "inspect-installation-daemon",
             }:
                 arguments = {"action": parts[1]}
             else:
@@ -4637,7 +4689,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "ingest-delivery|ingest-delivery-late <delivery-id> <submission-base64>；"
             "inspect-delivery <delivery-id>；run-delivery-worker；"
             "inspect-delivery-worker；run-result-return-worker；"
-            "inspect-result-return-worker；"
+            "inspect-result-return-worker；inspect-installation-daemon；"
             "/evolution discover-outcome <rollback-outcome-id>；"
             "/evolution revalidation-rollback-execute <rollback-request-id>；"
             "/evolution revalidation-rollback-outcome <rollback-request-id>；"
