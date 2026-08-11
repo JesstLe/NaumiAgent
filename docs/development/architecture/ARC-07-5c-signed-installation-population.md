@@ -75,8 +75,9 @@ Snapshot 始终固定 `cohort_assignment_authority=false` 与 `percentage_rollou
 
 ## 当前边界与下一步
 
-本模块实现客户端侧 exact ingest/store/view、生产 trust 文件加载与测试用内存 signer，不实现远端 Registry HTTP 服务、安装 key
-provisioning、credential renewal/revocation API、10,000 以上的 Merkle 分页或 telemetry accounting。生产 Registry 必须在独立
+本模块实现客户端侧 exact ingest/store/view、生产 trust 文件加载与测试用内存 signer；
+[ARC-07.5c1](ARC-07-5c1-installation-key-provisioning.md) 已补齐显式 OS-keyring installation key provisioning 与固定协议域签名。
+仍不实现远端 Registry HTTP 服务、credential renewal/revocation API、10,000 以上的 Merkle 分页或 telemetry accounting。生产 Registry 必须在独立
 服务端部署 signer 和 pseudonym key，客户端只分发 trust policy/public artifacts。
 
 下一切片 EVO-05.5f5a 必须同时消费 current ARC-07.5c Snapshot 与 current EVO-05.5f4e Stage Entry View，并要求安装私钥对

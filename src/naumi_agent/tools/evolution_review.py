@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from naumi_agent.daemons.permission_context import current_permission_receipt
@@ -233,6 +234,10 @@ from naumi_agent.evolution.stable_rollout_finalizations import (
     render_stable_rollout_finalization,
 )
 from naumi_agent.evolution.store import EvolutionStoreError
+from naumi_agent.release.installation_keys import (
+    ReleaseInstallationKeyError,
+    render_release_installation_key,
+)
 from naumi_agent.tools.base import Tool, ToolMetadata
 
 
@@ -2876,6 +2881,82 @@ class EvolutionStableRollbackReadinessTool(Tool):
         return render_stable_rollback_readiness(readiness)
 
 
+class EvolutionInstallationKeyTool(Tool):
+    """Explicitly provision or publicly inspect one installation signing key."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_installation_key"
+
+    @property
+    def description(self) -> str:
+        return (
+            "显式初始化或只读检查 managed installation Ed25519 identity；私钥仅写入"
+            "系统凭据库，启动 AgentEngine 或只读 inspect 均不会访问 keyring。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["provision", "inspect"]},
+                "channel": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$",
+                },
+            },
+            "required": ["action"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="安装身份密钥",
+            search_hint=(
+                "release installation key provision inspect keyring ed25519 "
+                "发行 安装 身份 密钥 系统凭据库"
+            ),
+        )
+
+    async def execute(self, action: str, channel: str = "stable") -> str:
+        normalized = str(action or "").strip().lower()
+        try:
+            service = self._engine.release_installation_key_service
+            if normalized == "provision":
+                handle = await asyncio.to_thread(
+                    service.provision,
+                    channel=channel,
+                )
+            elif normalized == "inspect":
+                if channel not in {"", "stable"}:
+                    raise ValueError("inspect 不接受 channel 覆盖。")
+                handle = await asyncio.to_thread(service.inspect)
+            else:
+                raise ValueError("action 必须是 provision 或 inspect。")
+        except (
+            AttributeError,
+            OSError,
+            ReleaseInstallationKeyError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "release_installation_key_failed")
+            return f"安装身份密钥操作未完成（`{code}`）：{exc}"
+        return render_release_installation_key(handle)
+
+
 class EvolutionStableRemoteReadinessClaimTool(Tool):
     """Issue, ingest, or inspect an authenticated installation readiness claim."""
 
@@ -4526,6 +4607,7 @@ def create_evolution_review_tools(
         EvolutionStablePopulationCandidatePreviewTool(engine),
         EvolutionStablePopulationCompletionTool(engine),
         EvolutionStableRollbackReadinessTool(engine),
+        EvolutionInstallationKeyTool(engine),
         EvolutionStableRemoteReadinessClaimTool(engine),
         EvolutionStableRolloutAuthorizationTool(engine),
         EvolutionStableRolloutFinalizationTool(engine),
@@ -4552,6 +4634,7 @@ __all__ = [
     "EvolutionEvaluationReceiptTool",
     "EvolutionFinalEvaluationReceiptTool",
     "EvolutionIndependentReviewTool",
+    "EvolutionInstallationKeyTool",
     "EvolutionMechanicalGateTool",
     "EvolutionProposalQueueTool",
     "EvolutionPromotionApprovalRequirementTool",

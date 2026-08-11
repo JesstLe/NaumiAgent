@@ -626,6 +626,7 @@ from naumi_agent.release import (
     ReleaseArtifactDownloadStore,
     ReleaseArtifactFetchService,
     ReleaseChannelCatalogStore,
+    ReleaseInstallationKeyService,
     ReleasePopulationSnapshotStore,
     ReleaseSlotStore,
     default_release_root,
@@ -2430,6 +2431,9 @@ class AgentEngine:
             )
         )
         release_root = default_release_root()
+        self.release_installation_key_service = ReleaseInstallationKeyService(
+            release_root
+        )
         self.evolution_release_slot_store = ReleaseSlotStore(release_root)
         self.evolution_release_build_trust_policy_path = (
             release_root / "trust" / "trusted-builders.json"

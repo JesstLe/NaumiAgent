@@ -3644,7 +3644,7 @@ export function handleSubmitText(state, text, send) {
     return;
   }
   if (
-    /^\/evolution\s+(?:discover-outcome|stable-remote-readiness|experiment-contract|evaluation-contract|evaluation-final|decision-input|mechanical-gate|independent-review|counterfactual|reward-hacking|decision-state|decision-resolve|reflection|reflection-revoke|promotion-input|promotion-package|approval-requirement|approval-request|approval-principal|approval-signature|approval-decision)(?:\s|$)/i.test(
+    /^\/evolution\s+(?:discover-outcome|installation-key|stable-remote-readiness|experiment-contract|evaluation-contract|evaluation-final|decision-input|mechanical-gate|independent-review|counterfactual|reward-hacking|decision-state|decision-resolve|reflection|reflection-revoke|promotion-input|promotion-package|approval-requirement|approval-request|approval-principal|approval-signature|approval-decision)(?:\s|$)/i.test(
       commandText,
     )
   ) {
