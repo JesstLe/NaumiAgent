@@ -290,6 +290,7 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
         "evolution_stable_remote_finalization_authorization",
         "evolution_stable_remote_finalization",
         "evolution_stable_remote_population_finalization",
+        "evolution_stable_promotion_observation_contract",
         "evolution_stable_rollout_authorization",
         "evolution_stable_rollout_finalization",
         "evolution_discover_outcome_opportunity",

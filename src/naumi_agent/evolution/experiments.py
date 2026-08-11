@@ -318,6 +318,10 @@ class EvolutionExperimentContractStore:
     def __init__(self, db_path: str | Path) -> None:
         self._db_path = Path(db_path).expanduser().resolve()
 
+    @property
+    def db_path(self) -> Path:
+        return self._db_path
+
     async def record(
         self,
         *,

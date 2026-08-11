@@ -270,6 +270,9 @@ endpoint、同连接 pin、leaf→member 授权、严格 HTTP bounds、Control P
 [EVO-05.5f5x3j](EVO-05-5f5x3j-population-finalization-receipt-aggregation.md) 已把 exact current Snapshot 的逐 member Receipt
 收口为 durable Population finalization fact 和动态 current authority，不把过期 bearer capability、daemon 健康或单成员成功
 冒充 fleet completion。
+[EVO-05.7b1](EVO-05-7b1-stable-promotion-observation-contract.md) 已从 current Population Finalization 继续绑定 exact
+Completion、fresh Approval、Rollout Plan、Promotion Input 与 Experiment/Workbench Proposal，并把长期观察起点冻结在
+`finalized_at` 之后；该 Contract 不读取 heartbeat、不计算长期指标，也不签发 promoted Outcome。
 [EVO-05.3f2c3b1](EVO-05-3f2c3b1-platform-dispatch-outbox.md) 已把实时准入的 required-platform Worker lane 转为 durable
 queued dispatch，并在 exact Worker incarnation 上预留容量。[EVO-05.3f2c3b2a](EVO-05-3f2c3b2a-authenticated-worker-claim.md)
 已增加 supervisor-attested Ed25519 Worker Identity、一次性 claim challenge 和可续期 lease hash chain。
@@ -288,4 +291,5 @@ managed runtime identity 与 startup-origin Harness ledger；6d3 已完成长期
 已进一步签发 rollback-recovery-observed Outcome revision 与 append-only supersede event，保留 immutable rollback fact；
 [HAR-09.6e2](../harness/HAR-09-6e2-long-term-outcome-projection-parity.md) 又通过 Projection v2 同源同步
 Workbench/New UI/Textual TUI，并保持 Contract 终态阻断。promoted Outcome、配置/数据 rollback 与 policy learning
-authority 仍未完成。
+authority 仍未完成。成功 rollout 路径的下一步是 EVO-05.7b2 runtime observation admission，而不是复用 rollback recovery
+Outcome。

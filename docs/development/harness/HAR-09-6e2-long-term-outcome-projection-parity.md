@@ -93,5 +93,7 @@ Textual fallback 从同一 Workbench snapshot 渲染相同字段和边界：长�
 promotion 或 execution authority，也没有解决配置/数据 rollback。New UI 当前展示单个 current head 和关键 supersede event，
 完整历史链浏览器仍待独立设计，不能把详情卡等同于审计导出。
 
-下一独立切片应回到 HAR-09/EVO-05 的成功 rollout 路径，先冻结 `promoted` Outcome 所需的独立长期效果、approval、
-active stable runtime 与 Proposal binding 条件，再设计 promoted/superseded ledger；不得复用本 recovery Outcome 越权推广。
+成功 rollout 路径的第一步已由
+[EVO-05.7b1](../self-evolution/EVO-05-7b1-stable-promotion-observation-contract.md) 完成：它冻结 approval、active stable
+runtime、Proposal binding 与 finalization 后长期观察规则，但不冒充独立长期效果。下一独立切片应建立 managed runtime
+admission，再聚合长期窗口，最后才设计 promoted/superseded ledger；不得复用本 recovery Outcome 越权推广。

@@ -498,6 +498,10 @@ from naumi_agent.evolution.stable_population_completions import (
     EvolutionStablePopulationCompletionService,
     EvolutionStablePopulationCompletionStore,
 )
+from naumi_agent.evolution.stable_promotion_observation_contracts import (
+    EvolutionStablePromotionObservationContractService,
+    EvolutionStablePromotionObservationContractStore,
+)
 from naumi_agent.evolution.stable_read_graph import (
     EvolutionLazyStableReadGraphInspector,
     build_evolution_stable_read_graph_inspector,
@@ -2752,6 +2756,30 @@ class AgentEngine:
                 member_service=self.evolution_stable_remote_finalization_service,
                 store=(
                     self.evolution_stable_remote_population_finalization_store
+                ),
+            )
+        )
+        self.evolution_stable_promotion_observation_contract_store = (
+            EvolutionStablePromotionObservationContractStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_stable_promotion_observation_contract_service = (
+            EvolutionStablePromotionObservationContractService(
+                workspace_root=paths.workspace_root,
+                finalization_service=(
+                    self.evolution_stable_remote_population_finalization_service
+                ),
+                completion_service=(
+                    self.evolution_stable_population_completion_service
+                ),
+                plan_service=self.evolution_revalidation_rollout_plan_service,
+                promotion_input_service=(
+                    self.evolution_revalidation_promotion_input_service
+                ),
+                experiment_store=self.evolution_experiment_contract_store,
+                store=(
+                    self.evolution_stable_promotion_observation_contract_store
                 ),
             )
         )

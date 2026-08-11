@@ -2978,6 +2978,7 @@ def _print_help() -> None:
             "stable-remote-finalization-authorization|"
             "stable-remote-finalization|"
             "stable-remote-population-finalization|"
+            "stable-promotion-observation-contract|"
             "stable-rollout-authorization|"
             "stable-rollout-finalization|"
             "discover-outcome|"
@@ -4111,6 +4112,20 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 arg="",
             )
             return
+        if action == "stable-promotion-observation-contract":
+            if len(parts) != 2:
+                raise ValueError(
+                    "stable-promotion-observation-contract 需要一个 "
+                    "Population Finalization Receipt ID。"
+                )
+            await _run_tool_slash_command(
+                engine,
+                slash_command="/evolution",
+                tool_name="evolution_stable_promotion_observation_contract",
+                parse_args=lambda _arg: {"finalization_receipt_id": parts[1]},
+                arg="",
+            )
+            return
         if action == "stable-rollout-authorization":
             if len(parts) == 4 and parts[1] == "issue":
                 arguments = {
@@ -4497,6 +4512,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "stable-remote-finalization-authorization、"
                 "stable-remote-finalization、"
                 "stable-remote-population-finalization、"
+                "stable-promotion-observation-contract、"
                 "stable-rollout-authorization、"
                 "stable-rollout-finalization、"
                 "discover-outcome、"
@@ -4727,6 +4743,8 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "inspect-result-return-worker；inspect-installation-daemon；"
             "/evolution stable-remote-population-finalization complete "
             "[population-snapshot-id]；inspect <population-finalization-receipt-id>；"
+            "/evolution stable-promotion-observation-contract "
+            "<population-finalization-receipt-id>；"
             "/evolution discover-outcome <rollback-outcome-id>；"
             "/evolution revalidation-rollback-execute <rollback-request-id>；"
             "/evolution revalidation-rollback-outcome <rollback-request-id>；"

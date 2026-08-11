@@ -216,6 +216,10 @@ from naumi_agent.evolution.stable_population_completions import (
     EvolutionStablePopulationCompletionError,
     render_stable_population_completion,
 )
+from naumi_agent.evolution.stable_promotion_observation_contracts import (
+    EvolutionStablePromotionObservationContractError,
+    render_stable_promotion_observation_contract,
+)
 from naumi_agent.evolution.stable_remote_finalization_authorizations import (
     EvolutionStableRemoteFinalizationAuthorizationError,
     render_stable_remote_finalization_authorization,
@@ -3850,6 +3854,75 @@ class EvolutionStableRemotePopulationFinalizationTool(Tool):
         return render_stable_remote_population_finalization(view)
 
 
+class EvolutionStablePromotionObservationContractTool(Tool):
+    """Freeze successful stable-rollout lineage for later long-term observation."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_stable_promotion_observation_contract"
+
+    @property
+    def description(self) -> str:
+        return (
+            "为已完成且当前仍有效的 Stable Population 冻结 Approval、Proposal、"
+            "Runtime 与长期观察规则；不读取长期指标，不签发 promoted Outcome。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "finalization_receipt_id": {
+                    "type": "string",
+                    "pattern": "^evstableremotepopfinal_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["finalization_receipt_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="稳定推广长期观察契约",
+            search_hint=(
+                "evolution stable promotion observation contract promoted outcome "
+                "自进化 稳定 推广 长期观察 契约"
+            ),
+        )
+
+    async def execute(self, finalization_receipt_id: str) -> str:
+        try:
+            view = await (
+                self._engine.evolution_stable_promotion_observation_contract_service.record(
+                    finalization_receipt_id=str(finalization_receipt_id or "").strip()
+                )
+            )
+        except (
+            AttributeError,
+            EvolutionStablePromotionObservationContractError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(
+                exc, "code", "stable_promotion_observation_contract_failed"
+            )
+            return f"稳定推广长期观察契约未完成（`{code}`）：{exc}"
+        return render_stable_promotion_observation_contract(view)
+
+
 class EvolutionStableRolloutAuthorizationTool(Tool):
     """Issue or inspect one member-scoped stable rollout capability."""
 
@@ -5409,6 +5482,7 @@ def create_evolution_review_tools(
         EvolutionStableRemoteFinalizationAuthorizationTool(engine),
         EvolutionStableRemoteFinalizationTool(engine),
         EvolutionStableRemotePopulationFinalizationTool(engine),
+        EvolutionStablePromotionObservationContractTool(engine),
         EvolutionStableRolloutAuthorizationTool(engine),
         EvolutionStableRolloutFinalizationTool(engine),
         EvolutionOutcomeOpportunityTool(engine),
@@ -5475,6 +5549,7 @@ __all__ = [
     "EvolutionStableRemoteFinalizationAuthorizationTool",
     "EvolutionStableRemoteFinalizationTool",
     "EvolutionStableRemotePopulationFinalizationTool",
+    "EvolutionStablePromotionObservationContractTool",
     "EvolutionStableRolloutAuthorizationTool",
     "EvolutionStableRolloutFinalizationTool",
     "EvolutionRevalidationRollbackExecutionTool",
