@@ -18,7 +18,7 @@ from naumi_agent.evolution.evidence import EvolutionEvidence
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _CANDIDATE_ID_RE = re.compile(r"^evc_[0-9a-f]{24}$")
 _FINDING_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
-_METRIC_RE = re.compile(r"^[a-z][a-z0-9_.]{0,127}$")
+_METRIC_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,127}$")
 _ABSOLUTE_SCOPE_RE = re.compile(r"(?:^|:)(?:/|[A-Za-z]:[\\/])")
 _SENSITIVE_HYPOTHESIS_RE = re.compile(
     r"(?:\b(?:api[_-]?key|password|secret|token|authorization|cookie)\b\s*[:=]\s*\S+)"
@@ -64,6 +64,10 @@ _FINDING_LABELS = MappingProxyType({
     "verification_failure": "机械验证失败",
     "rollback_guardrail_breach": "发布后护栏回退",
     "stable_promotion_improvement": "稳定晋升能力的下一轮改进",
+    "eval_latency_regression": "评测延迟回归",
+    "eval_cost_regression": "评测成本回归",
+    "eval_token_regression": "评测 Token 消耗回归",
+    "eval_metric_regression": "评测定量指标回归",
 })
 
 
@@ -345,6 +349,17 @@ def _expected_metrics(
                 name="harness.stable_promotion_improvement.regression_rate",
                 direction="decrease",
                 target=0,
+                verifier="harness_replay",
+            )
+        elif item.source_kind == "eval_metric_regression":
+            source_key = item.source_kind
+            quantitative = item.quantitative_metric
+            if quantitative is None:
+                raise ValueError("Eval metric regression 缺少定量指标。")
+            metric = CandidateExpectedMetric(
+                name=quantitative.name,
+                direction=quantitative.direction,
+                target=quantitative.target,
                 verifier="harness_replay",
             )
         else:

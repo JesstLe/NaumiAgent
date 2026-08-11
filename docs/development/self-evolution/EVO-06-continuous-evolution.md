@@ -13,10 +13,10 @@
 - [EVO-06.1b](EVO-06-1b-promoted-outcome-opportunity-discovery.md) Promoted Outcome-backed
   Opportunity discovery（已实现）：把 current stable promoted Outcome 确定性回注为新的 Candidate，
   并在发现与 Review 前动态重验 head/supersession/Decision/Eligibility authority。
-- EVO-06.1c+ Opportunity discovery（待实现）：缺失能力、成本/延迟热点、用户明确需求、跨类型时间窗
-  聚类与优先级。其多动态来源前置
-  [EVO-01.4b](EVO-01-4b-composite-source-authority-router.md) 已实现；下一切片从 H5c typed
-  quantitative regression 建立 Eval Evidence adapter。
+- [EVO-06.1c1](EVO-06-1c1-h5c-quantitative-regression-opportunity.md) H5c quantitative regression
+  opportunity（已实现）：从完整重建的 H5a/H5c authority 发现经 95% CI 确认的主定量指标回归，形成
+  动态可撤权的 latency/cost/token/general metric Candidate。
+- EVO-06.1c2+ Opportunity discovery（待实现）：缺失能力、用户明确需求、跨类型时间窗聚类与可解释优先级。
 - EVO-06.2 Capability proposal：API、双通道、权限、数据、测试、维护者、淘汰标准。
 - EVO-06.3 Sandbox registration：临时 registry/namespace，不能覆盖内置 tool。
 - EVO-06.4 Shadow evaluation：观察建议调用但不执行，比较路由准确度和价值。
@@ -40,9 +40,9 @@ EVO-06 不得从“LLM 生成了改进建议”直接开始。每次循环必须
 RED/GREEN H5a、H5c comparison、失败归因、签名 Decision、staged rollout、运行监控、rollback/accept Outcome 缺一不可。Outcome 必须回注
 opportunity discovery，并以新 Candidate ID 开启下一轮；不得原地改写上一轮证据或把未执行建议计为能力提升。
 
-当前 `EVO-06.1a/1b` 已分别关闭 `rolled_back` 与 stable `promoted` Outcome 的回注断点，但不代表
-EVO-06 完成：热点/需求发现、Capability Proposal、Sandbox/Shadow/Limited Activation、选择、退休和
-Meta-governance 仍待实现。
+当前 `EVO-06.1a/1b/1c1` 已分别关闭 rolled_back、stable promoted Outcome 与 H5c 定量回归的发现断点，
+但不代表 EVO-06 完成：缺失能力/明确需求、跨类型聚类与优先级、Capability Proposal、
+Sandbox/Shadow/Limited Activation、选择、退休和 Meta-governance 仍待实现。
 
 ## 终极边界
 

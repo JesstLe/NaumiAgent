@@ -29,6 +29,7 @@ from naumi_agent.tools.evolution_review import (
     EvolutionDecisionInputTool,
     EvolutionDecisionResolutionTool,
     EvolutionDecisionStateTool,
+    EvolutionEvalMetricOpportunityTool,
     EvolutionEvaluationAggregationContractTool,
     EvolutionEvaluationReceiptTool,
     EvolutionExperimentContractAuthorityTool,
@@ -77,9 +78,14 @@ from naumi_agent.tools.evolution_review import (
     EvolutionRolloutControlKeyTool,
     EvolutionStablePopulationCandidatePreviewTool,
     EvolutionStablePopulationCompletionTool,
+    EvolutionStablePromotionInstallationObservationAssessmentTool,
     EvolutionStablePromotionObservationChainCursorTool,
     EvolutionStablePromotionObservationContractTool,
     EvolutionStablePromotionObservationRevisionDeliveryTool,
+    EvolutionStablePromotionOutcomeDecisionTool,
+    EvolutionStablePromotionOutcomeEligibilityTool,
+    EvolutionStablePromotionOutcomeTool,
+    EvolutionStablePromotionPopulationObservationAssessmentTool,
     EvolutionStablePromotionRuntimeAdmissionDeliveryTool,
     EvolutionStablePromotionRuntimeObservationAdmissionTool,
     EvolutionStableRemoteFinalizationAuthorizationTool,
@@ -216,6 +222,9 @@ def test_review_filter_rejects_unbounded_or_unknown_values() -> None:
     assert EvolutionReviewFilter(source_kind="rollback_outcome").source_kind == (
         "rollback_outcome"
     )
+    assert EvolutionReviewFilter(
+        source_kind="eval_metric_regression"
+    ).source_kind == "eval_metric_regression"
     with pytest.raises(ValueError, match="risk"):
         EvolutionReviewFilter(risk="urgent")
     with pytest.raises(ValueError, match="source"):
@@ -299,10 +308,16 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
         "evolution_stable_promotion_runtime_observation_admission",
         "evolution_stable_promotion_observation_chain_cursor",
         "evolution_stable_promotion_observation_revision_delivery",
+        "evolution_stable_promotion_installation_observation_assessment",
+        "evolution_stable_promotion_population_observation_assessment",
+        "evolution_stable_promotion_outcome_eligibility",
+        "evolution_stable_promotion_outcome_decision",
+        "evolution_stable_promotion_outcome",
         "evolution_stable_promotion_runtime_admission_delivery",
         "evolution_stable_rollout_authorization",
         "evolution_stable_rollout_finalization",
         "evolution_discover_outcome_opportunity",
+        "evolution_discover_eval_metric_opportunity",
         "evolution_proposal_queue",
     ]
     assert {tool.name for tool in tools if tool.metadata.read_only} == {
@@ -389,12 +404,22 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
         tools[65], EvolutionStablePromotionObservationRevisionDeliveryTool
     )
     assert isinstance(
-        tools[66], EvolutionStablePromotionRuntimeAdmissionDeliveryTool
+        tools[66], EvolutionStablePromotionInstallationObservationAssessmentTool
     )
-    assert isinstance(tools[67], EvolutionStableRolloutAuthorizationTool)
-    assert isinstance(tools[68], EvolutionStableRolloutFinalizationTool)
-    assert isinstance(tools[69], EvolutionOutcomeOpportunityTool)
-    assert isinstance(tools[70], EvolutionProposalQueueTool)
+    assert isinstance(
+        tools[67], EvolutionStablePromotionPopulationObservationAssessmentTool
+    )
+    assert isinstance(tools[68], EvolutionStablePromotionOutcomeEligibilityTool)
+    assert isinstance(tools[69], EvolutionStablePromotionOutcomeDecisionTool)
+    assert isinstance(tools[70], EvolutionStablePromotionOutcomeTool)
+    assert isinstance(
+        tools[71], EvolutionStablePromotionRuntimeAdmissionDeliveryTool
+    )
+    assert isinstance(tools[72], EvolutionStableRolloutAuthorizationTool)
+    assert isinstance(tools[73], EvolutionStableRolloutFinalizationTool)
+    assert isinstance(tools[74], EvolutionOutcomeOpportunityTool)
+    assert isinstance(tools[75], EvolutionEvalMetricOpportunityTool)
+    assert isinstance(tools[76], EvolutionProposalQueueTool)
 
 
 class _FakeEngine:

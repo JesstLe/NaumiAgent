@@ -1418,6 +1418,33 @@ class TestPermissionChecker:
         assert bypass.outcome is PermissionOutcome.ALLOW
         assert not bypass.requires_confirmation
         assert not lockdown.allowed
+
+    def test_eval_metric_opportunity_permission_is_bounded_and_bypass_is_direct(
+        self,
+    ) -> None:
+        arguments = {"comparison_id": "a" * 64}
+        moderate = PermissionChecker(PermissionMode.MODERATE).check(
+            "evolution_discover_eval_metric_opportunity",
+            arguments,
+        )
+        bypass = PermissionChecker(PermissionMode.BYPASS).check(
+            "evolution_discover_eval_metric_opportunity",
+            arguments,
+        )
+        lockdown = PermissionChecker(PermissionMode.LOCKDOWN).check(
+            "evolution_discover_eval_metric_opportunity",
+            arguments,
+        )
+
+        assert moderate.allowed
+        assert moderate.outcome is PermissionOutcome.ALLOW
+        assert not moderate.requires_confirmation
+        assert moderate.risk_level is PermissionRiskLevel.MEDIUM
+        assert moderate.tool_family == "evolution_opportunity"
+        assert bypass.allowed
+        assert bypass.outcome is PermissionOutcome.ALLOW
+        assert not bypass.requires_confirmation
+        assert not lockdown.allowed
         assert lockdown.outcome is PermissionOutcome.BLOCK
 
     def test_reset_counts(self) -> None:
