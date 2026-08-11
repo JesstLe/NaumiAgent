@@ -9,6 +9,9 @@ from naumi_agent.daemons.agent_worker_supervisor import AgentWorkerSupervisorFac
 from naumi_agent.evolution.stable_population_candidate_previews import (
     EvolutionStableStageCompletionInspectionPort,
 )
+from naumi_agent.evolution.stable_remote_finalization_delivery_worker import (
+    EvolutionStableRemoteFinalizationInstallationTransport,
+)
 from naumi_agent.runtime.agent_heartbeat import AgentExecutionHeartbeatFactory
 from naumi_agent.runtime.browser_heartbeat import BrowserExecutionHeartbeatFactory
 from naumi_agent.runtime.terminal_runtime import TerminalRuntimeLifecycleFactory
@@ -25,6 +28,9 @@ class RuntimeServices:
     agent_worker_supervisor_factory: AgentWorkerSupervisorFactory
     stable_stage_completion_inspector: (
         EvolutionStableStageCompletionInspectionPort | None
+    ) = None
+    stable_remote_finalization_transport: (
+        EvolutionStableRemoteFinalizationInstallationTransport | None
     ) = None
 
     def __post_init__(self) -> None:
@@ -74,6 +80,13 @@ class RuntimeServices:
             raise TypeError(
                 "stable_stage_completion_inspector 必须实现 5f5r inspect 契约。"
             )
+        if self.stable_remote_finalization_transport is not None and not isinstance(
+            self.stable_remote_finalization_transport,
+            EvolutionStableRemoteFinalizationInstallationTransport,
+        ):
+            raise TypeError(
+                "stable_remote_finalization_transport 必须实现认证安装传输契约。"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +100,9 @@ class RuntimeServiceOverrides:
     agent_worker_supervisor_factory: AgentWorkerSupervisorFactory | None = None
     stable_stage_completion_inspector: (
         EvolutionStableStageCompletionInspectionPort | None
+    ) = None
+    stable_remote_finalization_transport: (
+        EvolutionStableRemoteFinalizationInstallationTransport | None
     ) = None
 
 

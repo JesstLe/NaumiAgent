@@ -72,7 +72,9 @@ Release Store 并返回短期 installation-signed binary readiness；
 [EVO-05.5f5x3d](EVO-05-5f5x3d-remote-stable-member-finalization-executor.md) 已完成手动 portable transport 下的 signed
 Execution Grant、目标 Release Store CAS、installation-signed Result 与 Control Plane Receipt。
 [EVO-05.5f5x3e](EVO-05-5f5x3e-remote-finalization-delivery-recovery.md) 已补 durable delivery、installation-signed ACK、
-claim/retry fencing、目标 journal 与受限 late-result recovery。后续仍需完成真实 daemon transport worker 与自动重投；只有每个
+claim/retry fencing、目标 journal 与受限 late-result recovery。
+[EVO-05.5f5x3f](EVO-05-5f5x3f-remote-finalization-delivery-worker.md) 已增加认证 transport Protocol、本机安装 adapter、周期 claim、
+ACK timeout、retry budget、dead-letter 与 shutdown drain。后续仍需生产 HTTP/mTLS 远端 adapter 与 Result 主动回传；只有每个
 member 都形成 current readiness、Authorization 与 Finalization Receipt，才可
 聚合 population-level Stable Rollout Completion Authority。配置/数据 finalization 继续等待 ARC-07.6，Promotion authority
 继续独立。

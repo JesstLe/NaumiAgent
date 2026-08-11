@@ -125,7 +125,9 @@ class EvolutionStableRemoteFinalizationDeliveryEvent(_StrictModel):
     event_sha256: str = Field(pattern=_SHA256_RE)
     delivery_id: str = Field(pattern=r"^evstableremotedelivery_[0-9a-f]{24}$")
     sequence: int = Field(ge=1, le=1_000_000)
-    state: Literal["queued", "in_flight", "acknowledged", "completed"]
+    state: Literal[
+        "queued", "in_flight", "acknowledged", "completed", "dead_letter"
+    ]
     owner_sha256: str | None = Field(default=None, pattern=_SHA256_RE)
     claim_epoch: int = Field(ge=0, le=1_000_000)
     attempt_count: int = Field(ge=0, le=1_000_000)
@@ -149,12 +151,28 @@ class EvolutionStableRemoteFinalizationDeliveryEvent(_StrictModel):
             self.owner_sha256 and self.lease_expires_at
         ):
             raise ValueError("in_flight Delivery event 缺少 owner/lease。")
-        if self.state != "in_flight" and self.lease_expires_at is not None:
-            raise ValueError("非 in_flight Delivery event 不得携带 lease。")
+        if self.state != "in_flight" and (
+            self.owner_sha256 is not None or self.lease_expires_at is not None
+        ):
+            raise ValueError("非 in_flight Delivery event 不得携带 owner/lease。")
         if self.state in {"acknowledged", "completed"} and self.ack_sha256 is None:
             raise ValueError("ACK 后 Delivery event 必须绑定 ACK。")
+        if (
+            self.state not in {"acknowledged", "completed"}
+            and self.ack_sha256 is not None
+        ):
+            raise ValueError("ACK 前 Delivery event 不得绑定 ACK。")
         if self.state == "completed" and self.receipt_id is None:
             raise ValueError("completed Delivery event 必须绑定 finalization receipt。")
+        if self.state != "completed" and self.receipt_id is not None:
+            raise ValueError("非 completed Delivery event 不得绑定 finalization receipt。")
+        if self.state == "dead_letter" and self.failure_code is None:
+            raise ValueError("dead-letter Delivery event 必须绑定 failure code。")
+        if (
+            self.state not in {"queued", "dead_letter"}
+            and self.failure_code is not None
+        ):
+            raise ValueError("仅 retry/dead-letter Delivery event 可绑定 failure code。")
         core = self.model_dump(mode="json", exclude={"event_id", "event_sha256"})
         digest = _digest(core)
         if self.event_sha256 != digest or self.event_id != (
@@ -355,6 +373,57 @@ class EvolutionStableRemoteFinalizationDeliveryStore:
             await _update_event(db, view.package.delivery_id, queued)
             await db.commit()
             return view.model_copy(update={"latest_event": queued})
+
+    async def dead_letter(
+        self,
+        *,
+        delivery_id: str,
+        owner_id: str,
+        claim_epoch: int,
+        failure_code: str,
+        now: str,
+    ) -> EvolutionStableRemoteFinalizationDeliveryView:
+        """Fence the live claim and make the exhausted record non-claimable."""
+        timestamp = _aware(now)
+        owner = _owner_sha256(owner_id)
+        code = _failure_code(failure_code)
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            await _ensure_schema(db)
+            await db.execute("BEGIN IMMEDIATE")
+            row = await _row(db, _delivery_id(delivery_id))
+            if row is None:
+                raise EvolutionStableRemoteFinalizationDeliveryError(
+                    "stable_remote_delivery_missing", "Delivery 不存在。"
+                )
+            view = _restore_view(row)
+            await _verify_chain(db, view)
+            event = view.latest_event
+            if not (
+                event.state == "in_flight"
+                and event.owner_sha256 == owner
+                and event.claim_epoch == claim_epoch
+                and event.lease_expires_at is not None
+                and timestamp < _aware(event.lease_expires_at)
+            ):
+                raise EvolutionStableRemoteFinalizationDeliveryError(
+                    "stable_remote_delivery_claim_fenced",
+                    "Delivery dead-letter claim 已失效。",
+                )
+            dead_letter = _event(
+                package=view.package,
+                sequence=event.sequence + 1,
+                state="dead_letter",
+                claim_epoch=event.claim_epoch,
+                attempt_count=event.attempt_count,
+                next_attempt_at=timestamp,
+                occurred_at=timestamp,
+                previous_event_sha256=event.event_sha256,
+                failure_code=code,
+            )
+            await _update_event(db, view.package.delivery_id, dead_letter)
+            await db.commit()
+            return view.model_copy(update={"latest_event": dead_letter})
 
     async def acknowledge(
         self,
@@ -811,6 +880,8 @@ def render_stable_remote_finalization_delivery(view, *, include_package=False) -
         f"- ACK：`{'present' if view.ack else 'missing'}`",
         f"- Finalization Receipt：`{view.receipt.receipt_id if view.receipt else 'missing'}`",
     ]
+    if event.failure_code is not None:
+        lines.append(f"- Failure code：`{event.failure_code}`")
     if include_package:
         lines.extend((
             "",
@@ -962,6 +1033,7 @@ async def _verify_chain(db, view):
         ("in_flight", "queued"),
         ("in_flight", "in_flight"),
         ("in_flight", "acknowledged"),
+        ("in_flight", "dead_letter"),
         ("acknowledged", "completed"),
     }
     for index, event in enumerate(events):

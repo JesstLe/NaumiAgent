@@ -127,6 +127,6 @@ Agent Tool 继续复用 `evolution_stable_remote_finalization`，新增 actions�
 - 24 小时 late window 当前是协议常量，后续需纳入 signed policy/config，而不是 UI 自定义；
 - 尚未用 fresh remote Probe 把 Receipt 的 `remote_active_pointer_current_unverified` 更新为当前事实。
 
-下一最小切片应比较 Harness delivery worker、Supervisor/heartbeat 与 Population aggregation 的依赖，优先补
-**EVO-05.5f5x3f Remote Finalization Delivery Worker**：只把现有 outbox 接到 authenticated installation transport，加入有界周期
-claim、ACK timeout、retry budget、dead-letter 与 shutdown drain。完成真实自动 transport 后，才进入 Population member Receipt 聚合。
+[EVO-05.5f5x3f](EVO-05-5f5x3f-remote-finalization-delivery-worker.md) 已继续交付认证安装传输 Protocol、真实本机 adapter、
+有界周期 claim、ACK timeout、retry budget、dead-letter 与 shutdown drain。生产 HTTP/mTLS adapter 仍由 x3g 接续；在远端网络
+transport 与 Result 回传完成前，不进入 Population member Receipt 聚合。

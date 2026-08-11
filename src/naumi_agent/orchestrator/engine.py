@@ -510,6 +510,12 @@ from naumi_agent.evolution.stable_remote_finalization_deliveries import (
     EvolutionStableRemoteFinalizationDeliveryService,
     EvolutionStableRemoteFinalizationDeliveryStore,
 )
+from naumi_agent.evolution.stable_remote_finalization_delivery_worker import (
+    EvolutionStableRemoteFinalizationDeliveryPassResult,
+    EvolutionStableRemoteFinalizationDeliveryWorker,
+    EvolutionStableRemoteFinalizationDeliveryWorkerPolicy,
+    EvolutionStableRemoteFinalizationDeliveryWorkerSnapshot,
+)
 from naumi_agent.evolution.stable_remote_finalizations import (
     EvolutionStableRemoteFinalizationService,
     EvolutionStableRemoteFinalizationStore,
@@ -2717,6 +2723,45 @@ class AgentEngine:
                 store=self.evolution_stable_remote_finalization_delivery_store,
             )
         )
+        self.evolution_stable_remote_finalization_delivery_worker: (
+            EvolutionStableRemoteFinalizationDeliveryWorker | None
+        ) = None
+        if services.stable_remote_finalization_transport is not None:
+            delivery_worker_config = (
+                config.harness.stable_remote_finalization_delivery
+            )
+            self.evolution_stable_remote_finalization_delivery_worker = (
+                EvolutionStableRemoteFinalizationDeliveryWorker(
+                    service=(
+                        self.evolution_stable_remote_finalization_delivery_service
+                    ),
+                    store=self.evolution_stable_remote_finalization_delivery_store,
+                    transport=services.stable_remote_finalization_transport,
+                    policy=EvolutionStableRemoteFinalizationDeliveryWorkerPolicy(
+                        interval_seconds=delivery_worker_config.interval_seconds,
+                        max_empty_backoff_seconds=(
+                            delivery_worker_config.max_empty_backoff_seconds
+                        ),
+                        max_failure_backoff_seconds=(
+                            delivery_worker_config.max_failure_backoff_seconds
+                        ),
+                        claim_lease_seconds=(
+                            delivery_worker_config.claim_lease_seconds
+                        ),
+                        scan_limit=delivery_worker_config.scan_limit,
+                        ack_timeout_seconds=(
+                            delivery_worker_config.ack_timeout_seconds
+                        ),
+                        retry_base_seconds=delivery_worker_config.retry_base_seconds,
+                        retry_max_seconds=delivery_worker_config.retry_max_seconds,
+                        max_attempts=delivery_worker_config.max_attempts,
+                        shutdown_drain_seconds=(
+                            delivery_worker_config.shutdown_drain_seconds
+                        ),
+                        jitter_ratio=delivery_worker_config.jitter_ratio,
+                    ),
+                )
+            )
         self.evolution_stable_rollout_authorization_store = (
             EvolutionStableRolloutAuthorizationStore(config.memory.session_db_path)
         )
@@ -3969,6 +4014,11 @@ class AgentEngine:
             "pursuit_terminal_outbox_worker",
             self._pursuit_terminal_outbox_worker.stop,
         )
+        if self.evolution_stable_remote_finalization_delivery_worker is not None:
+            await self._shutdown_component(
+                "stable_remote_finalization_delivery_worker",
+                self.evolution_stable_remote_finalization_delivery_worker.stop,
+            )
         if hasattr(self, "_agent_publication_recovery_worker"):
             await self._shutdown_component(
                 "agent_publication_recovery_worker",
@@ -4518,8 +4568,35 @@ class AgentEngine:
         if self._config.harness.pursuit_terminal_outbox.enabled:
             await self._pursuit_terminal_outbox_worker.run_once()
             self._pursuit_terminal_outbox_worker.start()
+        delivery_worker = self.evolution_stable_remote_finalization_delivery_worker
+        if (
+            delivery_worker is not None
+            and self._config.harness.stable_remote_finalization_delivery.enabled
+        ):
+            await delivery_worker.run_once()
+            delivery_worker.start()
         self.start_session_retention_worker()
         return recovered
+
+    async def run_stable_remote_finalization_delivery_once(
+        self,
+    ) -> EvolutionStableRemoteFinalizationDeliveryPassResult:
+        worker = self.evolution_stable_remote_finalization_delivery_worker
+        if worker is None:
+            raise RuntimeError(
+                "尚未绑定 authenticated installation transport，无法自动投递。"
+            )
+        return await worker.run_once()
+
+    def stable_remote_finalization_delivery_worker_snapshot(
+        self,
+    ) -> EvolutionStableRemoteFinalizationDeliveryWorkerSnapshot:
+        worker = self.evolution_stable_remote_finalization_delivery_worker
+        if worker is None:
+            raise RuntimeError(
+                "尚未绑定 authenticated installation transport，无法读取 Worker。"
+            )
+        return worker.snapshot()
 
     async def run_pursuit_terminal_outbox_once(
         self,
