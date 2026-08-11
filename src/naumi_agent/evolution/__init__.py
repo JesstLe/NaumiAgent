@@ -1148,6 +1148,26 @@ if TYPE_CHECKING:
         render_stable_remote_finalization_authorization,
         verify_stable_remote_finalization_authorization,
     )
+    from naumi_agent.evolution.stable_remote_finalizations import (
+        EVOLUTION_STABLE_REMOTE_FINALIZATION_POLICY,
+        EvolutionStableRemoteFinalizationError,
+        EvolutionStableRemoteFinalizationExecutionGrant,
+        EvolutionStableRemoteFinalizationExecutionPackage,
+        EvolutionStableRemoteFinalizationReceipt,
+        EvolutionStableRemoteFinalizationResult,
+        EvolutionStableRemoteFinalizationService,
+        EvolutionStableRemoteFinalizationStore,
+        EvolutionStableRemoteFinalizationSubmission,
+        EvolutionStableRemoteFinalizationView,
+        decode_stable_remote_finalization_execution_package,
+        decode_stable_remote_finalization_submission,
+        encode_stable_remote_finalization_execution_package,
+        encode_stable_remote_finalization_submission,
+        execute_stable_remote_finalization,
+        render_stable_remote_finalization,
+        render_stable_remote_finalization_submission,
+        verify_stable_remote_finalization_execution_package,
+    )
     from naumi_agent.evolution.stable_remote_readiness_claims import (
         EVOLUTION_STABLE_REMOTE_READINESS_CLAIM_POLICY,
         EvolutionStableRemoteReadinessAssertion,
@@ -1658,6 +1678,24 @@ __all__ = [
     "encode_stable_remote_finalization_authorization",
     "render_stable_remote_finalization_authorization",
     "verify_stable_remote_finalization_authorization",
+    "EVOLUTION_STABLE_REMOTE_FINALIZATION_POLICY",
+    "EvolutionStableRemoteFinalizationError",
+    "EvolutionStableRemoteFinalizationExecutionGrant",
+    "EvolutionStableRemoteFinalizationExecutionPackage",
+    "EvolutionStableRemoteFinalizationReceipt",
+    "EvolutionStableRemoteFinalizationResult",
+    "EvolutionStableRemoteFinalizationService",
+    "EvolutionStableRemoteFinalizationStore",
+    "EvolutionStableRemoteFinalizationSubmission",
+    "EvolutionStableRemoteFinalizationView",
+    "decode_stable_remote_finalization_execution_package",
+    "decode_stable_remote_finalization_submission",
+    "encode_stable_remote_finalization_execution_package",
+    "encode_stable_remote_finalization_submission",
+    "execute_stable_remote_finalization",
+    "render_stable_remote_finalization",
+    "render_stable_remote_finalization_submission",
+    "verify_stable_remote_finalization_execution_package",
     "EVOLUTION_STABLE_ROLLOUT_AUTHORIZATION_POLICY",
     "EvolutionStableRolloutAuthorization",
     "EvolutionStableRolloutAuthorizationError",
@@ -2935,6 +2973,26 @@ def __getattr__(name: str) -> object:
         "render_stable_remote_finalization_authorization",
         "verify_stable_remote_finalization_authorization",
     }
+    stable_remote_finalization_exports = {
+        "EVOLUTION_STABLE_REMOTE_FINALIZATION_POLICY",
+        "EvolutionStableRemoteFinalizationError",
+        "EvolutionStableRemoteFinalizationExecutionGrant",
+        "EvolutionStableRemoteFinalizationExecutionPackage",
+        "EvolutionStableRemoteFinalizationReceipt",
+        "EvolutionStableRemoteFinalizationResult",
+        "EvolutionStableRemoteFinalizationService",
+        "EvolutionStableRemoteFinalizationStore",
+        "EvolutionStableRemoteFinalizationSubmission",
+        "EvolutionStableRemoteFinalizationView",
+        "decode_stable_remote_finalization_execution_package",
+        "decode_stable_remote_finalization_submission",
+        "encode_stable_remote_finalization_execution_package",
+        "encode_stable_remote_finalization_submission",
+        "execute_stable_remote_finalization",
+        "render_stable_remote_finalization",
+        "render_stable_remote_finalization_submission",
+        "verify_stable_remote_finalization_execution_package",
+    }
     stable_rollout_authorization_exports = {
         "EVOLUTION_STABLE_ROLLOUT_AUTHORIZATION_POLICY",
         "EvolutionStableRolloutAuthorization",
@@ -3632,6 +3690,8 @@ def __getattr__(name: str) -> object:
         module_name = "stable_remote_readiness_probes"
     elif name in stable_remote_finalization_authorization_exports:
         module_name = "stable_remote_finalization_authorizations"
+    elif name in stable_remote_finalization_exports:
+        module_name = "stable_remote_finalizations"
     elif name in stable_rollout_authorization_exports:
         module_name = "stable_rollout_authorizations"
     elif name in stable_rollout_finalization_exports:

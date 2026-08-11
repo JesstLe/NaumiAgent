@@ -221,10 +221,15 @@ class ReleaseActivePointer(_StrictModel):
 
 
 class ReleaseStableMemberFinalizationAuthority(_StrictModel):
-    kind: Literal["evolution_stable_rollout_authorization"] = (
+    kind: Literal[
+        "evolution_stable_rollout_authorization",
+        "evolution_stable_remote_finalization_authorization",
+    ] = (
         "evolution_stable_rollout_authorization"
     )
-    authority_id: str = Field(pattern=r"^evstablerolloutauth_[0-9a-f]{24}$")
+    authority_id: str = Field(
+        pattern=r"^(?:evstablerolloutauth|evstableremotefinalauth)_[0-9a-f]{24}$"
+    )
     authority_sha256: str = Field(pattern=_SHA256_RE)
     completion_receipt_id: str = Field(
         pattern=r"^evstablepopcomplete_[0-9a-f]{24}$"
@@ -935,7 +940,10 @@ class ReleaseSlotStore:
         self,
         authority_id: str,
     ) -> ReleaseStableMemberFinalization | None:
-        if re.fullmatch(r"evstablerolloutauth_[0-9a-f]{24}", authority_id) is None:
+        if re.fullmatch(
+            r"(?:evstablerolloutauth|evstableremotefinalauth)_[0-9a-f]{24}",
+            authority_id,
+        ) is None:
             raise ValueError("Stable member finalization authority ID 格式无效。")
         if not self.db_path.is_file():
             return None

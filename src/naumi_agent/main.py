@@ -2923,6 +2923,7 @@ def _print_help() -> None:
             "stable-remote-readiness|"
             "stable-remote-readiness-probe|"
             "stable-remote-finalization-authorization|"
+            "stable-remote-finalization|"
             "stable-rollout-authorization|"
             "stable-rollout-finalization|"
             "discover-outcome|"
@@ -3943,6 +3944,41 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 arg="",
             )
             return
+        if action == "stable-remote-finalization":
+            if len(parts) == 3 and parts[1] == "prepare":
+                arguments = {
+                    "action": "prepare",
+                    "authorization_id": parts[2],
+                }
+            elif len(parts) == 3 and parts[1] == "export":
+                arguments = {"action": "export", "grant_id": parts[2]}
+            elif len(parts) == 3 and parts[1] == "execute-local":
+                arguments = {
+                    "action": "execute-local",
+                    "package_base64": parts[2],
+                }
+            elif len(parts) == 4 and parts[1] == "ingest":
+                arguments = {
+                    "action": "ingest",
+                    "grant_id": parts[2],
+                    "submission_base64": parts[3],
+                }
+            elif len(parts) == 3 and parts[1] == "inspect":
+                arguments = {"action": "inspect", "receipt_id": parts[2]}
+            else:
+                raise ValueError(
+                    "stable-remote-finalization 需要 prepare <authorization-id>、"
+                    "export <grant-id>、execute-local <package-base64>、"
+                    "ingest <grant-id> <submission-base64> 或 inspect <receipt-id>。"
+                )
+            await _run_tool_slash_command(
+                engine,
+                slash_command="/evolution",
+                tool_name="evolution_stable_remote_finalization",
+                parse_args=lambda _arg: arguments,
+                arg="",
+            )
+            return
         if action == "stable-rollout-authorization":
             if len(parts) == 4 and parts[1] == "issue":
                 arguments = {
@@ -4327,6 +4363,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "stable-remote-readiness、"
                 "stable-remote-readiness-probe、"
                 "stable-remote-finalization-authorization、"
+                "stable-remote-finalization、"
                 "stable-rollout-authorization、"
                 "stable-rollout-finalization、"
                 "discover-outcome、"
@@ -4545,6 +4582,9 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution stable-remote-finalization-authorization issue "
             "<probe-receipt-id> [validity-seconds]；inspect <authorization-id>；"
             "export <authorization-id>；"
+            "/evolution stable-remote-finalization prepare <authorization-id>；"
+            "export <grant-id>；execute-local <package-base64>；"
+            "ingest <grant-id> <submission-base64>；inspect <receipt-id>；"
             "/evolution discover-outcome <rollback-outcome-id>；"
             "/evolution revalidation-rollback-execute <rollback-request-id>；"
             "/evolution revalidation-rollback-outcome <rollback-request-id>；"

@@ -220,6 +220,13 @@ from naumi_agent.evolution.stable_remote_finalization_authorizations import (
     EvolutionStableRemoteFinalizationAuthorizationError,
     render_stable_remote_finalization_authorization,
 )
+from naumi_agent.evolution.stable_remote_finalizations import (
+    EvolutionStableRemoteFinalizationError,
+    decode_stable_remote_finalization_execution_package,
+    execute_stable_remote_finalization,
+    render_stable_remote_finalization,
+    render_stable_remote_finalization_submission,
+)
 from naumi_agent.evolution.stable_remote_readiness_claims import (
     EvolutionStableRemoteReadinessClaimError,
     render_stable_remote_readiness_challenge,
@@ -252,6 +259,7 @@ from naumi_agent.release.installation_keys import (
 )
 from naumi_agent.release.rollout_control_keys import (
     ReleaseRolloutControlKeyError,
+    load_release_rollout_control_trust_policy,
     render_release_rollout_control_key,
 )
 from naumi_agent.tools.base import Tool, ToolMetadata
@@ -3402,6 +3410,146 @@ class EvolutionStableRemoteFinalizationAuthorizationTool(Tool):
         )
 
 
+class EvolutionStableRemoteFinalizationTool(Tool):
+    """Coordinate, execute, and ingest one remote stable-member finalization."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_stable_remote_finalization"
+
+    @property
+    def description(self) -> str:
+        return (
+            "把 signed remote Authorization 原子消费为 Execution Grant；目标端重验 "
+            "Release Store 并执行 expected-pointer CAS，以 installation key 签署结果，"
+            "再由 Control Plane 重验并形成 durable Receipt。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["prepare", "export", "execute-local", "ingest", "inspect"],
+                },
+                "authorization_id": {"type": "string"},
+                "grant_id": {"type": "string"},
+                "package_base64": {"type": "string", "maxLength": 699052},
+                "submission_base64": {"type": "string", "maxLength": 699052},
+                "receipt_id": {"type": "string"},
+            },
+            "required": ["action"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="Stable 远端成员最终化",
+            search_hint=(
+                "evolution stable remote finalization execution grant signed result "
+                "自进化 稳定发布 远端 最终化 CAS"
+            ),
+        )
+
+    async def execute(
+        self,
+        action: str,
+        authorization_id: str = "",
+        grant_id: str = "",
+        package_base64: str = "",
+        submission_base64: str = "",
+        receipt_id: str = "",
+    ) -> str:
+        normalized = str(action or "").strip().lower()
+        try:
+            service = self._engine.evolution_stable_remote_finalization_service
+            if normalized == "prepare":
+                package = await service.prepare(authorization_id=authorization_id)
+                return render_stable_remote_finalization(package)
+            if normalized == "export":
+                package = await service.current_package(grant_id=grant_id)
+                return render_stable_remote_finalization(
+                    package, include_package=True
+                )
+            if normalized == "execute-local":
+                package = decode_stable_remote_finalization_execution_package(
+                    package_base64
+                )
+                auth = package.authorization.authorization
+                snapshot = await (
+                    self._engine.evolution_release_population_snapshot_store.inspect(
+                        snapshot_id=auth.population_snapshot_id
+                    )
+                )
+                if not snapshot.population_snapshot_authority:
+                    raise EvolutionStableRemoteFinalizationError(
+                        "stable_remote_finalization_population_snapshot_stale",
+                        "本机 Population Snapshot 已失效。",
+                    )
+                credential = next(
+                    (
+                        item
+                        for item in snapshot.snapshot.payload.credentials
+                        if item.payload.member_id == auth.installation_member_id
+                    ),
+                    None,
+                )
+                if credential is None:
+                    raise EvolutionStableRemoteFinalizationError(
+                        "stable_remote_finalization_member_not_local",
+                        "本机 Population Snapshot 不包含目标 member。",
+                    )
+                trust_policy = load_release_rollout_control_trust_policy(
+                    self._engine.evolution_release_rollout_control_trust_policy_path
+                )
+                submission = await asyncio.to_thread(
+                    execute_stable_remote_finalization,
+                    package=package,
+                    trust_policy=trust_policy,
+                    credential=credential,
+                    release_slot_store=self._engine.evolution_release_slot_store,
+                    installation_key_service=(
+                        self._engine.release_installation_key_service
+                    ),
+                    clock=self._engine.release_installation_key_service.clock,
+                )
+                return render_stable_remote_finalization_submission(submission)
+            if normalized == "ingest":
+                view = await service.ingest(
+                    grant_id=grant_id,
+                    submission_base64=submission_base64,
+                )
+            elif normalized == "inspect":
+                view = await service.inspect(receipt_id=receipt_id)
+            else:
+                raise ValueError(
+                    "action 必须是 prepare、export、execute-local、ingest 或 inspect。"
+                )
+        except (
+            AttributeError,
+            EvolutionStableRemoteFinalizationError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "stable_remote_finalization_failed")
+            return f"Stable Remote Finalization 未完成（`{code}`）：{exc}"
+        return render_stable_remote_finalization(view)
+
+
 class EvolutionStableRolloutAuthorizationTool(Tool):
     """Issue or inspect one member-scoped stable rollout capability."""
 
@@ -4959,6 +5107,7 @@ def create_evolution_review_tools(
         EvolutionStableRemoteReadinessClaimTool(engine),
         EvolutionStableRemoteReadinessProbeTool(engine),
         EvolutionStableRemoteFinalizationAuthorizationTool(engine),
+        EvolutionStableRemoteFinalizationTool(engine),
         EvolutionStableRolloutAuthorizationTool(engine),
         EvolutionStableRolloutFinalizationTool(engine),
         EvolutionOutcomeOpportunityTool(engine),
@@ -5023,6 +5172,7 @@ __all__ = [
     "EvolutionStableRemoteReadinessClaimTool",
     "EvolutionStableRemoteReadinessProbeTool",
     "EvolutionStableRemoteFinalizationAuthorizationTool",
+    "EvolutionStableRemoteFinalizationTool",
     "EvolutionStableRolloutAuthorizationTool",
     "EvolutionStableRolloutFinalizationTool",
     "EvolutionRevalidationRollbackExecutionTool",

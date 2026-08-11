@@ -28,6 +28,9 @@ RELEASE_ROLLOUT_CONTROL_TRUST_POLICY = "release-rollout-control-trust-v1"
 RELEASE_ROLLOUT_CONTROL_SIGNATURE_DOMAIN = (
     "naumi.release.stable-rollout-authorization.v1"
 )
+RELEASE_ROLLOUT_CONTROL_EXECUTION_GRANT_SIGNATURE_DOMAIN = (
+    "naumi.release.stable-remote-finalization-execution-grant.v1"
+)
 _SERVICE_NAME = "NaumiAgent"
 _CONTROL_PLANE_RE = re.compile(r"^[a-z][a-z0-9._-]{2,63}$")
 _CHANNEL_RE = re.compile(r"^[a-z][a-z0-9._-]{0,63}$")
@@ -213,7 +216,10 @@ class ReleaseRolloutControlSignature(_StrictModel):
     )
     signature_id: str = Field(pattern=r"^relrolloutsig_[0-9a-f]{24}$")
     signature_artifact_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    domain: Literal["naumi.release.stable-rollout-authorization.v1"] = (
+    domain: Literal[
+        "naumi.release.stable-rollout-authorization.v1",
+        "naumi.release.stable-remote-finalization-execution-grant.v1",
+    ] = (
         RELEASE_ROLLOUT_CONTROL_SIGNATURE_DOMAIN
     )
     signer: ReleaseRolloutControlSignerIdentity
@@ -256,7 +262,7 @@ class ReleaseRolloutControlKeyError(RuntimeError):
 
 
 class ReleaseRolloutControlKeyService:
-    """Explicit control-plane key provisioning with fixed-domain signing."""
+    """Explicit control-plane key provisioning with enumerated-domain signing."""
 
     def __init__(
         self,
@@ -383,6 +389,31 @@ class ReleaseRolloutControlKeyService:
         channel: str,
         payload: bytes,
     ) -> ReleaseRolloutControlSignature:
+        return self._sign(
+            domain=RELEASE_ROLLOUT_CONTROL_SIGNATURE_DOMAIN,
+            channel=channel,
+            payload=payload,
+        )
+
+    def sign_remote_finalization_execution_grant(
+        self,
+        *,
+        channel: str,
+        payload: bytes,
+    ) -> ReleaseRolloutControlSignature:
+        return self._sign(
+            domain=RELEASE_ROLLOUT_CONTROL_EXECUTION_GRANT_SIGNATURE_DOMAIN,
+            channel=channel,
+            payload=payload,
+        )
+
+    def _sign(
+        self,
+        *,
+        domain: str,
+        channel: str,
+        payload: bytes,
+    ) -> ReleaseRolloutControlSignature:
         normalized_channel = _channel(channel)
         _payload(payload)
         handle = self.inspect()
@@ -390,6 +421,7 @@ class ReleaseRolloutControlKeyService:
         signer = handle.signer_identity()
         private = self._load_private_key(handle)
         signature = private.sign(rollout_control_signature_message(
+            domain=domain,
             signer=signer,
             channel=normalized_channel,
             payload=payload,
@@ -398,7 +430,7 @@ class ReleaseRolloutControlKeyService:
         core = {
             "schema_version": 1,
             "policy_version": RELEASE_ROLLOUT_CONTROL_KEY_POLICY,
-            "domain": RELEASE_ROLLOUT_CONTROL_SIGNATURE_DOMAIN,
+            "domain": domain,
             "signer": signer.model_dump(mode="json"),
             "channel": normalized_channel,
             "payload_sha256": hashlib.sha256(payload).hexdigest(),
@@ -579,6 +611,7 @@ def load_release_rollout_control_trust_policy(
 
 def rollout_control_signature_message(
     *,
+    domain: str = RELEASE_ROLLOUT_CONTROL_SIGNATURE_DOMAIN,
     signer: ReleaseRolloutControlSignerIdentity,
     channel: str,
     payload: bytes,
@@ -587,7 +620,7 @@ def rollout_control_signature_message(
     normalized_channel = _channel(channel)
     _payload(payload)
     return _canonical_bytes({
-        "domain": RELEASE_ROLLOUT_CONTROL_SIGNATURE_DOMAIN,
+        "domain": _signature_domain(domain),
         "signer": signer.model_dump(mode="json"),
         "channel": normalized_channel,
         "payload_sha256": hashlib.sha256(payload).hexdigest(),
@@ -602,11 +635,13 @@ def verify_release_rollout_control_signature(
     channel: str,
     payload: bytes,
     artifact: ReleaseRolloutControlSignature,
+    expected_domain: str = RELEASE_ROLLOUT_CONTROL_SIGNATURE_DOMAIN,
 ) -> ReleaseTrustedRolloutControlKey:
     normalized_channel = _channel(channel)
     _payload(payload)
     if not (
-        artifact.channel == normalized_channel
+        artifact.domain == _signature_domain(expected_domain)
+        and artifact.channel == normalized_channel
         and artifact.payload_sha256 == hashlib.sha256(payload).hexdigest()
         and artifact.payload_bytes == len(payload)
     ):
@@ -649,6 +684,7 @@ def verify_release_rollout_control_signature(
         Ed25519PublicKey.from_public_bytes(public).verify(
             signature,
             rollout_control_signature_message(
+                domain=artifact.domain,
                 signer=artifact.signer,
                 channel=artifact.channel,
                 payload=payload,
@@ -661,6 +697,15 @@ def verify_release_rollout_control_signature(
             "Rollout Control signature 无法由 trusted public key 验证。",
         ) from exc
     return trusted
+
+
+def _signature_domain(value: str) -> str:
+    if value not in {
+        RELEASE_ROLLOUT_CONTROL_SIGNATURE_DOMAIN,
+        RELEASE_ROLLOUT_CONTROL_EXECUTION_GRANT_SIGNATURE_DOMAIN,
+    }:
+        raise ValueError("Rollout Control signature domain 无效。")
+    return value
 
 
 def render_release_rollout_control_key(
@@ -878,6 +923,7 @@ def _digest(payload: object) -> str:
 
 
 __all__ = [
+    "RELEASE_ROLLOUT_CONTROL_EXECUTION_GRANT_SIGNATURE_DOMAIN",
     "RELEASE_ROLLOUT_CONTROL_KEY_POLICY",
     "RELEASE_ROLLOUT_CONTROL_SIGNATURE_DOMAIN",
     "RELEASE_ROLLOUT_CONTROL_TRUST_POLICY",

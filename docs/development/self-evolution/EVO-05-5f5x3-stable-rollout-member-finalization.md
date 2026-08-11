@@ -68,7 +68,9 @@ Completion Receipt 要求：
 challenge/signature/claim；[EVO-05.5f5x3b](EVO-05-5f5x3b-remote-release-store-probe.md) 已继续让目标安装真实重验
 Release Store 并返回短期 installation-signed binary readiness；
 [EVO-05.5f5x3c](EVO-05-5f5x3c-signed-remote-finalization-authorization.md) 已进一步交付独立 Rollout Control key
-签名的逐 member portable capability、Trust Policy 验证与 single-use consumption ledger。后续仍需完成自动 daemon
-transport、目标侧 Finalization 与结果回传；只有每个 member 都形成 current readiness、Authorization 与 Finalization Receipt，才可
+签名的逐 member portable capability、Trust Policy 验证与 single-use consumption ledger。
+[EVO-05.5f5x3d](EVO-05-5f5x3d-remote-stable-member-finalization-executor.md) 已完成手动 portable transport 下的 signed
+Execution Grant、目标 Release Store CAS、installation-signed Result 与 Control Plane Receipt。后续仍需完成自动 daemon
+transport、超期恢复与重投；只有每个 member 都形成 current readiness、Authorization 与 Finalization Receipt，才可
 聚合 population-level Stable Rollout Completion Authority。配置/数据 finalization 继续等待 ARC-07.6，Promotion authority
 继续独立。
