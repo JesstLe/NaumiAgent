@@ -12,6 +12,7 @@ import threading
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
@@ -60,6 +61,11 @@ from naumi_agent.orchestrator.pursuit_terminal_outbox import (
     PursuitTerminalOutboxState,
     pursuit_terminal_outbox_id,
 )
+
+if TYPE_CHECKING:
+    from naumi_agent.orchestrator.pursuit_terminal_retention_admission import (
+        PursuitTerminalOutboxRetentionAdmission,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,6 +158,21 @@ class PursuitTerminalOutboxRetentionPage:
     eligible_count: int
     scanned_count: int
     records: tuple[PursuitTerminalOutboxRetentionRecord, ...]
+
+
+_RETENTION_DELETE_OPERATIONS: tuple[tuple[str, str], ...] = (
+    (
+        "delete_requeue_receipts",
+        "pursuit_terminal_outbox_dead_letter_requeues",
+    ),
+    ("delete_abandon_receipt", "pursuit_terminal_outbox_dead_letter_abandons"),
+    ("delete_failure_head", "pursuit_terminal_outbox_failure_heads"),
+    ("delete_failure_events", "pursuit_terminal_outbox_failures"),
+    ("delete_dispatch_events", "pursuit_terminal_outbox_dispatch_events"),
+    ("delete_dispatch_snapshot", "pursuit_terminal_outbox_dispatch"),
+    ("delete_outbox_events", "pursuit_terminal_outbox_events"),
+    ("delete_outbox_snapshot", "pursuit_terminal_outbox"),
+)
 
 
 class PursuitStoreError(RuntimeError):
@@ -1382,72 +1403,13 @@ class PursuitStore:
         try:
             conn.execute("PRAGMA query_only = ON")
             conn.execute("BEGIN DEFERRED")
-            count_row = conn.execute(
-                """
-                SELECT
-                    COUNT(*) AS total_count,
-                    SUM(CASE WHEN o.state = 'delivered' THEN 1 ELSE 0 END)
-                        AS delivered_count,
-                    SUM(CASE WHEN a.outbox_id IS NOT NULL THEN 1 ELSE 0 END)
-                        AS abandoned_count,
-                    SUM(CASE WHEN o.state = 'delivered' AND a.outbox_id IS NOT NULL
-                        THEN 1 ELSE 0 END) AS overlap_count
-                FROM pursuit_terminal_outbox AS o
-                LEFT JOIN pursuit_terminal_outbox_dead_letter_abandons AS a
-                  ON a.outbox_id = o.outbox_id
-                """
-            ).fetchone()
-            total = int(count_row["total_count"] or 0)
-            delivered = int(count_row["delivered_count"] or 0)
-            abandoned = int(count_row["abandoned_count"] or 0)
-            if int(count_row["overlap_count"] or 0):
-                raise PursuitStoreError(
-                    "terminal outbox retention 发现 delivered/abandoned 重叠。"
-                )
-            pending = total - delivered - abandoned
-            if pending < 0:
-                raise PursuitStoreError(
-                    "terminal outbox retention effective-state 汇总不一致。"
-                )
-            eligible_row = conn.execute(
-                """
-                SELECT COUNT(*) AS eligible_count
-                FROM pursuit_terminal_outbox_dead_letter_abandons
-                WHERE created_at <= ?
-                """,
-                (cutoff_at,),
-            ).fetchone()
-            eligible = int(eligible_row["eligible_count"] or 0)
-            rows = conn.execute(
-                """
-                SELECT outbox_id
-                FROM pursuit_terminal_outbox_dead_letter_abandons
-                WHERE created_at <= ?
-                ORDER BY created_at ASC, receipt_id ASC
-                LIMIT ?
-                """,
-                (cutoff_at, scan_limit),
-            ).fetchall()
-            records = tuple(
-                self._terminal_outbox_retention_record_with_connection(
-                    conn,
-                    str(row["outbox_id"]),
-                )
-                for row in rows[:limit]
-            )
-            return PursuitTerminalOutboxRetentionPage(
+            return self._preview_terminal_outbox_retention_with_connection(
+                conn,
                 assessed_at=assessed_at,
                 cutoff_at=cutoff_at,
                 retention_days=retention_days,
                 limit=limit,
                 scan_limit=scan_limit,
-                total_outbox_count=total,
-                pending_count=pending,
-                delivered_count=delivered,
-                abandoned_count=abandoned,
-                eligible_count=eligible,
-                scanned_count=len(rows),
-                records=records,
             )
         except PursuitStoreError:
             raise
@@ -1462,6 +1424,403 @@ class PursuitStore:
         finally:
             conn.rollback()
             conn.close()
+
+    def _preview_terminal_outbox_retention_with_connection(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        assessed_at: float,
+        cutoff_at: float,
+        retention_days: int,
+        limit: int,
+        scan_limit: int,
+    ) -> PursuitTerminalOutboxRetentionPage:
+        count_row = conn.execute(
+            """
+            SELECT
+                COUNT(*) AS total_count,
+                SUM(CASE WHEN o.state = 'delivered' THEN 1 ELSE 0 END)
+                    AS delivered_count,
+                SUM(CASE WHEN a.outbox_id IS NOT NULL THEN 1 ELSE 0 END)
+                    AS abandoned_count,
+                SUM(CASE WHEN o.state = 'delivered' AND a.outbox_id IS NOT NULL
+                    THEN 1 ELSE 0 END) AS overlap_count
+            FROM pursuit_terminal_outbox AS o
+            LEFT JOIN pursuit_terminal_outbox_dead_letter_abandons AS a
+              ON a.outbox_id = o.outbox_id
+            """
+        ).fetchone()
+        total = int(count_row["total_count"] or 0)
+        delivered = int(count_row["delivered_count"] or 0)
+        abandoned = int(count_row["abandoned_count"] or 0)
+        if int(count_row["overlap_count"] or 0):
+            raise PursuitStoreError(
+                "terminal outbox retention 发现 delivered/abandoned 重叠。"
+            )
+        pending = total - delivered - abandoned
+        if pending < 0:
+            raise PursuitStoreError(
+                "terminal outbox retention effective-state 汇总不一致。"
+            )
+        eligible_row = conn.execute(
+            """
+            SELECT COUNT(*) AS eligible_count
+            FROM pursuit_terminal_outbox_dead_letter_abandons
+            WHERE created_at <= ?
+            """,
+            (cutoff_at,),
+        ).fetchone()
+        eligible = int(eligible_row["eligible_count"] or 0)
+        rows = conn.execute(
+            """
+            SELECT outbox_id
+            FROM pursuit_terminal_outbox_dead_letter_abandons
+            WHERE created_at <= ?
+            ORDER BY created_at ASC, receipt_id ASC
+            LIMIT ?
+            """,
+            (cutoff_at, scan_limit),
+        ).fetchall()
+        records = tuple(
+            self._terminal_outbox_retention_record_with_connection(
+                conn,
+                str(row["outbox_id"]),
+            )
+            for row in rows[:limit]
+        )
+        return PursuitTerminalOutboxRetentionPage(
+            assessed_at=assessed_at,
+            cutoff_at=cutoff_at,
+            retention_days=retention_days,
+            limit=limit,
+            scan_limit=scan_limit,
+            total_outbox_count=total,
+            pending_count=pending,
+            delivered_count=delivered,
+            abandoned_count=abandoned,
+            eligible_count=eligible,
+            scanned_count=len(rows),
+            records=records,
+        )
+
+    def admit_terminal_outbox_retention(
+        self,
+        *,
+        preview_id: str,
+        preview_sha256: str,
+        workspace_root: str,
+        assessed_at: float,
+        retention_days: int,
+        limit: int,
+        scan_limit: int,
+        source_request_id: str,
+        now: float,
+    ) -> PursuitTerminalOutboxRetentionAdmission:
+        """Re-authenticate one preview and persist a non-executable recovery plan."""
+        from naumi_agent.orchestrator.pursuit_terminal_retention import (
+            build_terminal_outbox_retention_preview,
+        )
+        from naumi_agent.orchestrator.pursuit_terminal_retention_admission import (
+            new_retention_admission,
+            new_retention_candidate_plan,
+        )
+
+        normalized_preview_id = str(preview_id or "").strip()
+        normalized_preview_sha = str(preview_sha256 or "").strip()
+        normalized_source = str(source_request_id or "").strip()
+        if (
+            not re.fullmatch(r"ptorpv_[0-9a-f]{24}", normalized_preview_id)
+            or not re.fullmatch(r"[0-9a-f]{64}", normalized_preview_sha)
+            or normalized_preview_id != f"ptorpv_{normalized_preview_sha[:24]}"
+            or not normalized_source
+            or len(normalized_source) > 256
+            or not math.isfinite(now)
+            or now <= 0
+        ):
+            raise ValueError("terminal outbox retention admission 请求无效。")
+        if (
+            not math.isfinite(assessed_at)
+            or assessed_at <= 0
+            or isinstance(retention_days, bool)
+            or not 1 <= retention_days <= 3650
+            or isinstance(limit, bool)
+            or not 1 <= limit <= 20
+            or isinstance(scan_limit, bool)
+            or not limit <= scan_limit <= 100
+        ):
+            raise ValueError("terminal outbox retention admission 策略无效。")
+        workspace_sha256 = hashlib.sha256(
+            str(workspace_root).encode("utf-8")
+        ).hexdigest()
+        source_request_sha256 = hashlib.sha256(
+            normalized_source.encode("utf-8")
+        ).hexdigest()
+        self._ensure_initialized()
+        conn = self._open_connection()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            cutoff_at = assessed_at - retention_days * 86_400
+            page = self._preview_terminal_outbox_retention_with_connection(
+                conn,
+                assessed_at=assessed_at,
+                cutoff_at=cutoff_at,
+                retention_days=retention_days,
+                limit=limit,
+                scan_limit=scan_limit,
+            )
+            fresh = build_terminal_outbox_retention_preview(
+                page,
+                workspace_root=workspace_root,
+            )
+            if (
+                not hmac.compare_digest(fresh.preview_sha256, normalized_preview_sha)
+                or fresh.preview_id != normalized_preview_id
+            ):
+                conn.rollback()
+                return new_retention_admission(
+                    status="rejected",
+                    preview_id=normalized_preview_id,
+                    preview_sha256=normalized_preview_sha,
+                    workspace_sha256=workspace_sha256,
+                    decided_at=now,
+                    rejection_reasons=("preview_authority_changed",),
+                )
+            if not fresh.candidates:
+                conn.rollback()
+                return new_retention_admission(
+                    status="rejected",
+                    preview_id=normalized_preview_id,
+                    preview_sha256=normalized_preview_sha,
+                    workspace_sha256=workspace_sha256,
+                    decided_at=now,
+                    rejection_reasons=("no_candidates",),
+                )
+
+            private_snapshots: list[dict[str, object]] = []
+            candidate_plans = []
+            for record, candidate in zip(
+                page.records,
+                fresh.candidates,
+                strict=True,
+            ):
+                outbox_id = record.disposed.outbox.outbox_id
+                operations: list[dict[str, object]] = []
+                operation_counts: list[tuple[str, int]] = []
+                for operation, table in _RETENTION_DELETE_OPERATIONS:
+                    rows = conn.execute(
+                        f"SELECT * FROM {table} WHERE outbox_id = ? ORDER BY rowid",
+                        (outbox_id,),
+                    ).fetchall()
+                    serialized = [dict(row) for row in rows]
+                    if serialized:
+                        operations.append({
+                            "operation": operation,
+                            "table": table,
+                            "rows": serialized,
+                        })
+                        operation_counts.append((operation, len(serialized)))
+                snapshot = {
+                    "schema_version": 1,
+                    "candidate_id": candidate.candidate_id,
+                    "operations": operations,
+                }
+                snapshot_sha256 = _canonical_sha256(snapshot)
+                private_snapshots.append({
+                    **snapshot,
+                    "snapshot_sha256": snapshot_sha256,
+                })
+                candidate_plans.append(new_retention_candidate_plan(
+                    candidate_id=candidate.candidate_id,
+                    candidate_sha256=candidate.candidate_sha256,
+                    protection_refs_sha256=candidate.protection_refs_sha256,
+                    recovery_snapshot_sha256=snapshot_sha256,
+                    operation_counts=tuple(operation_counts),
+                ))
+            snapshot_set_sha256 = _canonical_sha256(private_snapshots)
+            admission = new_retention_admission(
+                status="admitted",
+                preview_id=fresh.preview_id,
+                preview_sha256=fresh.preview_sha256,
+                workspace_sha256=fresh.workspace_sha256,
+                decided_at=now,
+                candidates=tuple(candidate_plans),
+                recovery_snapshot_set_sha256=snapshot_set_sha256,
+            )
+            source_existing = conn.execute(
+                """
+                SELECT * FROM pursuit_terminal_outbox_retention_admissions
+                WHERE source_request_sha256 = ?
+                """,
+                (source_request_sha256,),
+            ).fetchone()
+            if (
+                source_existing is not None
+                and str(source_existing["preview_sha256"])
+                != fresh.preview_sha256
+            ):
+                raise PursuitStoreConflictError(
+                    "terminal outbox retention admission 请求已绑定其他 preview。"
+                )
+            preview_existing = conn.execute(
+                """
+                SELECT * FROM pursuit_terminal_outbox_retention_admissions
+                WHERE preview_sha256 = ?
+                """,
+                (fresh.preview_sha256,),
+            ).fetchone()
+            existing = source_existing or preview_existing
+            if existing is not None:
+                restored = self._retention_admission_from_row(existing)
+                if (
+                    restored.preview_sha256 != fresh.preview_sha256
+                    or restored.recovery_snapshot_set_sha256
+                    != snapshot_set_sha256
+                ):
+                    raise PursuitStoreConflictError(
+                        "terminal outbox retention admission 幂等键已绑定其他事实。"
+                    )
+                conn.rollback()
+                return restored
+
+            payload_json = admission.model_dump_json()
+            recovery_json = json.dumps(
+                private_snapshots,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            payload_sha256 = hashlib.sha256(
+                payload_json.encode("utf-8")
+            ).hexdigest()
+            index_sha256 = _retention_admission_index_sha256(
+                admission_id=admission.admission_id,
+                preview_id=admission.preview_id,
+                preview_sha256=admission.preview_sha256,
+                source_request_sha256=source_request_sha256,
+                payload_sha256=payload_sha256,
+                recovery_sha256=snapshot_set_sha256,
+                created_at=now,
+            )
+            self._retention_admission_fault_point("before_admission_insert")
+            conn.execute(
+                """
+                INSERT INTO pursuit_terminal_outbox_retention_admissions (
+                    admission_id, preview_id, preview_sha256,
+                    source_request_sha256, payload_json, payload_sha256,
+                    recovery_json, recovery_sha256, created_at, index_sha256
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    admission.admission_id,
+                    admission.preview_id,
+                    admission.preview_sha256,
+                    source_request_sha256,
+                    payload_json,
+                    payload_sha256,
+                    recovery_json,
+                    snapshot_set_sha256,
+                    now,
+                    index_sha256,
+                ),
+            )
+            self._retention_admission_fault_point("after_admission_insert")
+            conn.commit()
+            return admission
+        except PursuitStoreError:
+            conn.rollback()
+            raise
+        except (ValidationError, TypeError, ValueError) as exc:
+            conn.rollback()
+            raise PursuitStoreError(
+                "terminal outbox retention admission 校验失败。"
+            ) from exc
+        except sqlite3.Error as exc:
+            conn.rollback()
+            raise PursuitStoreError(
+                "写入 terminal outbox retention admission 失败。"
+            ) from exc
+        finally:
+            conn.close()
+
+    def get_terminal_outbox_retention_admission(
+        self,
+        admission_id: str,
+    ) -> PursuitTerminalOutboxRetentionAdmission | None:
+        normalized = str(admission_id or "").strip()
+        if not re.fullmatch(r"ptora_[0-9a-f]{24}", normalized):
+            raise ValueError("terminal outbox retention admission_id 格式无效。")
+        if not self._db_path.is_file() or self._db_path.stat().st_size == 0:
+            return None
+        conn = self._open_connection()
+        try:
+            conn.execute("PRAGMA query_only = ON")
+            table_exists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' "
+                "AND name = 'pursuit_terminal_outbox_retention_admissions'"
+            ).fetchone()
+            if table_exists is None:
+                return None
+            row = conn.execute(
+                "SELECT * FROM pursuit_terminal_outbox_retention_admissions "
+                "WHERE admission_id = ?",
+                (normalized,),
+            ).fetchone()
+            return self._retention_admission_from_row(row) if row is not None else None
+        except PursuitStoreError:
+            raise
+        except sqlite3.Error as exc:
+            raise PursuitStoreError(
+                "读取 terminal outbox retention admission 失败。"
+            ) from exc
+        finally:
+            conn.close()
+
+    def _retention_admission_from_row(
+        self,
+        row: sqlite3.Row,
+    ) -> PursuitTerminalOutboxRetentionAdmission:
+        from naumi_agent.orchestrator.pursuit_terminal_retention_admission import (
+            PursuitTerminalOutboxRetentionAdmission,
+        )
+
+        payload_json = str(row["payload_json"])
+        recovery_json = str(row["recovery_json"])
+        payload_sha256 = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+        recovery_sha256 = hashlib.sha256(recovery_json.encode("utf-8")).hexdigest()
+        index_sha256 = _retention_admission_index_sha256(
+            admission_id=str(row["admission_id"]),
+            preview_id=str(row["preview_id"]),
+            preview_sha256=str(row["preview_sha256"]),
+            source_request_sha256=str(row["source_request_sha256"]),
+            payload_sha256=str(row["payload_sha256"]),
+            recovery_sha256=str(row["recovery_sha256"]),
+            created_at=float(row["created_at"]),
+        )
+        if (
+            not hmac.compare_digest(payload_sha256, str(row["payload_sha256"]))
+            or not hmac.compare_digest(recovery_sha256, str(row["recovery_sha256"]))
+            or not hmac.compare_digest(index_sha256, str(row["index_sha256"]))
+        ):
+            raise PursuitStoreError(
+                "terminal outbox retention admission 持久化摘要不匹配。"
+            )
+        admission = PursuitTerminalOutboxRetentionAdmission.model_validate_json(
+            payload_json
+        )
+        if (
+            admission.admission_id != str(row["admission_id"])
+            or admission.preview_id != str(row["preview_id"])
+            or admission.preview_sha256 != str(row["preview_sha256"])
+            or admission.recovery_snapshot_set_sha256
+            != str(row["recovery_sha256"])
+        ):
+            raise PursuitStoreError(
+                "terminal outbox retention admission 索引事实不一致。"
+            )
+        return admission
+
+    def _retention_admission_fault_point(self, _name: str) -> None:
+        """Test seam for transaction-bound admission persistence failures."""
 
     def get_terminal_dead_letter_requeue(
         self,
@@ -4556,8 +4915,55 @@ class PursuitStore:
                     )
                     """
                 )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS
+                    pursuit_terminal_outbox_retention_admissions (
+                        admission_id TEXT PRIMARY KEY,
+                        preview_id TEXT NOT NULL UNIQUE,
+                        preview_sha256 TEXT NOT NULL UNIQUE,
+                        source_request_sha256 TEXT NOT NULL UNIQUE,
+                        payload_json TEXT NOT NULL,
+                        payload_sha256 TEXT NOT NULL,
+                        recovery_json TEXT NOT NULL,
+                        recovery_sha256 TEXT NOT NULL,
+                        created_at REAL NOT NULL,
+                        index_sha256 TEXT NOT NULL
+                    )
+                    """
+                )
                 self._backfill_terminal_dispatches_with_connection(conn)
             self._initialized = True
+
+
+def _canonical_sha256(value: object) -> str:
+    return hashlib.sha256(json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+
+
+def _retention_admission_index_sha256(
+    *,
+    admission_id: str,
+    preview_id: str,
+    preview_sha256: str,
+    source_request_sha256: str,
+    payload_sha256: str,
+    recovery_sha256: str,
+    created_at: float,
+) -> str:
+    return _canonical_sha256({
+        "admission_id": admission_id,
+        "created_at": created_at,
+        "payload_sha256": payload_sha256,
+        "preview_id": preview_id,
+        "preview_sha256": preview_sha256,
+        "recovery_sha256": recovery_sha256,
+        "source_request_sha256": source_request_sha256,
+    })
 
 
 def _terminal_dispatch_owner_sha256(owner_id: str) -> str:

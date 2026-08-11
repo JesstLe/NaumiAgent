@@ -115,6 +115,6 @@ CLI 与 TUI 共用严格 option parser：未知参数、重复参数、缺值、
 - disposed history 与 retention preview 尚无 cursor 翻页；本轮最多扫描 100、选择 20；
 - push stream、跨 Store 原子 terminal commit、kill-at-every-write-point 与长时 soak 仍未完成。
 
-下一最小切片不能直接做删除。应先设计 retention apply admission：精确绑定 preview SHA、重新认证全部引用、生成
-可恢复变更计划和拒绝原因，并加入 kill-before/after-each-write 故障矩阵；只有 admission 与恢复协议通过后，才允许
-独立实现物理 prune。
+HAR-10.8f2j 已交付 retention apply admission：精确绑定 preview SHA、在写事务中重新认证全部引用、持久化私有
+恢复快照、结构化拒绝原因和逐写点 before/after killpoint。它仍固定声明无执行/物理 prune authority；下一切片必须
+以该 admission 为唯一输入，补齐 tombstone、逐写点真实故障注入和机械恢复后，才允许显式执行物理 prune。

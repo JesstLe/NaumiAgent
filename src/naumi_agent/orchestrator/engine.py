@@ -651,6 +651,9 @@ from naumi_agent.orchestrator.pursuit_terminal_retention import (
     PursuitTerminalOutboxRetentionPreview,
     build_terminal_outbox_retention_preview,
 )
+from naumi_agent.orchestrator.pursuit_terminal_retention_admission import (
+    PursuitTerminalOutboxRetentionAdmission,
+)
 from naumi_agent.orchestrator.system_prompt import (
     PromptAssemblyInput,
     build_system_prompt,
@@ -3685,6 +3688,9 @@ class AgentEngine:
             terminal_outbox_retention_preview=(
                 self.preview_pursuit_terminal_outbox_retention
             ),
+            terminal_outbox_retention_admission=(
+                self.admit_pursuit_terminal_outbox_retention
+            ),
         ):
             self._tool_registry.register(tool)
 
@@ -4960,6 +4966,41 @@ class AgentEngine:
         return build_terminal_outbox_retention_preview(
             page,
             workspace_root=str(self.workspace_root),
+        )
+
+    async def admit_pursuit_terminal_outbox_retention(
+        self,
+        preview_id: str,
+        preview_sha256: str,
+        retention_days: int,
+        limit: int,
+        scan_limit: int,
+        assessed_at: str,
+        source_request_id: str,
+    ) -> PursuitTerminalOutboxRetentionAdmission:
+        """Re-authenticate and durably admit one non-executable retention plan."""
+        try:
+            assessment = datetime.fromisoformat(
+                assessed_at.replace("Z", "+00:00")
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError("assessed_at 必须是有效的 ISO 时间。") from exc
+        if assessment.tzinfo is None or assessment.utcoffset() is None:
+            raise ValueError("assessed_at 必须包含时区。")
+        try:
+            assessed_timestamp = assessment.astimezone(UTC).timestamp()
+        except (OverflowError, OSError, ValueError) as exc:
+            raise ValueError("assessed_at 超出可支持的时间范围。") from exc
+        return self.pursuit_store.admit_terminal_outbox_retention(
+            preview_id=preview_id,
+            preview_sha256=preview_sha256,
+            workspace_root=str(self.workspace_root),
+            assessed_at=assessed_timestamp,
+            retention_days=retention_days,
+            limit=limit,
+            scan_limit=scan_limit,
+            source_request_id=source_request_id,
+            now=datetime.now(UTC).timestamp(),
         )
 
     async def run_agent_publication_recovery_once(

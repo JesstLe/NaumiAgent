@@ -4445,6 +4445,29 @@ class NaumiApp(App):
                 ))
                 return
             tool_name = "pursuit_terminal_outbox_retention_preview"
+        elif outbox_parts and outbox_parts[0] in {
+            "retention-admit", "retention_admit",
+        }:
+            from naumi_agent.tools.pursuit import (
+                parse_terminal_outbox_retention_admission_args,
+            )
+
+            try:
+                retention_kwargs = (
+                    parse_terminal_outbox_retention_admission_args(
+                        outbox_parts[1:]
+                    )
+                )
+            except ValueError as exc:
+                status.status_text = str(exc)
+                chat.mount(Markdown(
+                    "**用法**: `/pursue outbox retention-admit "
+                    "<ptorpv_...> <sha256> --assessed-at ISO "
+                    "[--retention-days N] [--limit N] [--scan-limit N]`",
+                    classes="agent-msg",
+                ))
+                return
+            tool_name = "pursuit_terminal_outbox_retention_admission"
         tool = self.engine.tool_registry.get(tool_name)
         if tool is None:
             chat.mount(Markdown(f"**工具未注册**: `{tool_name}`", classes="agent-msg"))
@@ -4475,7 +4498,8 @@ class NaumiApp(App):
                 "用法: /pursue outbox run-now | requeue <ptfail_...> | "
                 "abandon <ptfail_...> <reason> | retention-preview "
                 "[--retention-days N] [--limit N] [--scan-limit N] "
-                "[--assessed-at ISO]"
+                "[--assessed-at ISO] | retention-admit <ptorpv_...> "
+                "<sha256> --assessed-at ISO"
             )
             return
         status.status_text = "目标追踪状态处理中..."
