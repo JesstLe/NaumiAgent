@@ -92,6 +92,22 @@ class _EngineFake:
                 "interaction_cursor": "opaque-cursor",
             },
         ),
+        (
+            "outbox history",
+            "goal_list",
+            {
+                "include_finished": True,
+                "terminal_outbox_disposed_cursor": "",
+            },
+        ),
+        (
+            "outbox history opaque_cursor",
+            "goal_list",
+            {
+                "include_finished": True,
+                "terminal_outbox_disposed_cursor": "opaque_cursor",
+            },
+        ),
     ],
 )
 async def test_run_goal_routes_all_operations_through_engine_executor(
@@ -123,6 +139,9 @@ async def test_run_goal_routes_all_operations_through_engine_executor(
         "interaction takeover bad",
         "interaction list unknown",
         "interaction list pending cursor extra",
+        "outbox",
+        "outbox unknown",
+        "outbox history bad cursor",
         "unknown later",
     ],
 )

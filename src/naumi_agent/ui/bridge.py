@@ -4965,6 +4965,20 @@ class JsonlEngineBridge:
             render_goal_pursuit_snapshot,
         )
 
+        disposed_cursor = str(
+            payload.get("terminal_outbox_disposed_cursor") or ""
+        )
+        if (
+            disposed_cursor
+            and "goal_terminal_outbox_disposed_cursor"
+            not in self._client_capabilities
+        ):
+            await self.emit_error(
+                "当前终端版本不支持终态历史翻页，请升级后重试。",
+                code="goal_disposed_cursor_unsupported",
+                request_id=request_id,
+            )
+            return
         harness_service = getattr(self.engine, "harness_service", None)
         snapshot = await build_goal_pursuit_snapshot_with_recovery(
             self.engine.goal_store,
@@ -4980,6 +4994,7 @@ class JsonlEngineBridge:
             selected_interaction_id=str(
                 payload.get("selected_interaction_id") or ""
             ),
+            terminal_outbox_disposed_cursor=disposed_cursor,
             terminal_outbox_enabled=(
                 bool(getattr(self.engine, "pursuit_terminal_outbox_enabled", False))
             ),
@@ -4992,9 +5007,24 @@ class JsonlEngineBridge:
             ),
         )
         if "goal_snapshot" in self._client_capabilities:
+            public_snapshot = snapshot.to_protocol_dict()
+            if (
+                "goal_terminal_outbox_disposed_cursor"
+                not in self._client_capabilities
+            ):
+                terminal_outbox = public_snapshot.get("terminal_outbox")
+                if isinstance(terminal_outbox, dict):
+                    terminal_outbox["schema_version"] = 4
+                    for field in (
+                        "disposed_cursor",
+                        "disposed_next_cursor",
+                        "disposed_has_more",
+                        "disposed_warning",
+                    ):
+                        terminal_outbox.pop(field, None)
             await self.emit(
                 ServerEventType.GOALS_SNAPSHOT,
-                snapshot.to_protocol_dict(),
+                public_snapshot,
                 request_id=request_id,
             )
         else:

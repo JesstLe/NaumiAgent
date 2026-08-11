@@ -55,7 +55,8 @@ effective-state，并把脱敏 disposed history 同源投影到 Agent Tool、New
 进一步交付最旧优先的只读 retention preview、保护引用图与防篡改回执；HAR-10.8f2j 再精确绑定 preview，
 于写事务中重新认证全部引用并持久化含逐写点 killpoint 的可恢复准入计划，四端继续复用同一 Tool/Slash 后端。
 HAR-10.8f2k 已交付默认 dry-run、bypass 显式物理 prune、逐写点事务回滚、完成回执与永久防复活 tombstone。
-cursor 翻页、独立加密 archive/外部 anchor 与 push stream 仍未完成。
+HAR-10.8f2l 又交付 snapshot-bound disposed cursor、四端分页与新旧客户端能力协商降级。
+独立加密 archive/外部 anchor 与 push stream 仍未完成。
 UI-18.5b1 已让 New UI 通过 typed ToolExecution 消费该账本，并让 TUI fallback 显示同源动作、共享命令
 和最近 attempt；前端不解析工具文案生成结果状态。
 HAR-10.2a 在 Harness DB v12 建立 typed heartbeat，并接入 Pursuit lease worker 的 acquire/renew/release；

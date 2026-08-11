@@ -80,7 +80,7 @@ normalizer 复验 ID、枚举、时区、数量和截断关系。
 
 ## 自我审视与未完成边界
 
-- 本切片提供最新 20 项的有界历史和 `truncated`，尚未提供用户可导航的 cursor 翻页；不能称完整审计浏览器；
+- HAR-10.8f2l 已补齐 snapshot-bound cursor 与四端分页；独立 archive、外部 anchor 和超大历史索引仍未实现；
 - 全局 authority 仍以单个 SQLite Store 为信任域；若攻击者同时删除 outbox、failure head/events 与 receipt 的全部
   可发现行，当前没有外部 Merkle anchor 证明曾经存在；
 - HAR-10.8f2i 已基于 disposed history 交付 retention protection graph 与只读 preview receipt；apply 仍未实现；

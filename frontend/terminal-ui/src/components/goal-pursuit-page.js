@@ -14,12 +14,12 @@ export function renderGoalPursuitPage(view, width, height) {
   const snapshot = value.snapshot && typeof value.snapshot === "object"
     ? value.snapshot
     : null;
+  const help = safeWidth >= 140
+    ? "r 刷新 · ←/→ 选择 Goal · m 暂停/恢复 · x 恢复当前 Pursuit · o 恢复终态队列 · d/u/a/z 死信 · {/} 处置历史 · ↑/↓ 滚动 · j/k 交互 · Enter 详情 · f 筛选 · n/p 交互翻页 · Esc 返回"
+    : "r 刷新 · m 暂停/恢复 · x 恢复当前 Pursuit · o 队列 · d/u/a/z 死信 · {/} 历史 · Esc";
   const logical = [
     color(ANSI.cyan, "Goal / Pursuit"),
-    color(
-      ANSI.dim,
-      "r 刷新 · ←/→ 选择 Goal · m 暂停/恢复 · x 恢复当前 Pursuit · o 恢复终态队列 · d 选择死信 · u 重入队 · a 原因 · z 放弃 · ↑/↓ 滚动 · j/k 选择交互 · Enter 详情 · f 筛选 · n/p 翻页 · Esc 返回",
-    ),
+    color(ANSI.dim, help),
   ];
   if (value.lifecycleActionPending) {
     logical.push(color(ANSI.yellow, "正在通过 ToolExecution 校验权限并更新 Goal…"));
@@ -202,7 +202,16 @@ function renderTerminalOutbox(value, selectedDeadLetterIndex, selectedAbandonRea
     }
   }
   if (value.disposed_truncated) {
-    lines.push(color(ANSI.yellow, "已处置历史已按当前视图上限截断。"));
+    lines.push(color(ANSI.yellow, "已处置历史当前只显示一页。"));
+  }
+  if (value.disposed_has_more) {
+    lines.push(color(ANSI.cyan, "按 } 查看更早的已处置历史。"));
+  }
+  if (value.disposed_cursor) {
+    lines.push(color(ANSI.dim, "当前为历史后续页；按 { 返回上一页。"));
+  }
+  if (value.disposed_warning) {
+    lines.push(color(ANSI.yellow, `⚠ ${compactText(value.disposed_warning, 500)}`));
   }
   if (value.warning) {
     lines.push(color(ANSI.yellow, `⚠ ${compactText(value.warning, 500)}`));

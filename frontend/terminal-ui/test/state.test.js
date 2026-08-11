@@ -2321,6 +2321,39 @@ test("Goal interaction ledger navigates filters pages and opens typed detail", (
   assert.equal(state.goalPanel.snapshot.selected_interaction, null);
 });
 
+test("Goal disposed history uses independent snapshot-bound cursor pages", () => {
+  const state = createInitialState();
+  state.route = { name: "goals", originAnchor: null };
+  state.goalPanel.snapshot = {
+    selected_goal_id: "goal-current",
+    goals: [{ goal_id: "goal-current" }],
+    interactions: [],
+    terminal_outbox: {
+      disposed_cursor: "",
+      disposed_next_cursor: "disposed-next",
+      disposed_has_more: true,
+    },
+  };
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+
+  assert.equal(handleGoalPanelKey(state, "}", send), true);
+  assert.equal(state.goalPanel.disposedCursor, "disposed-next");
+  assert.deepEqual(state.goalPanel.disposedCursorStack, [""]);
+  assert.equal(sent[0].payload.terminal_outbox_disposed_cursor, "disposed-next");
+
+  state.goalPanel.loading = false;
+  state.goalPanel.snapshot.terminal_outbox.disposed_cursor = "disposed-next";
+  state.goalPanel.snapshot.terminal_outbox.disposed_next_cursor = "";
+  assert.equal(handleGoalPanelKey(state, "{", send), true);
+  assert.equal(state.goalPanel.disposedCursor, "");
+  assert.deepEqual(state.goalPanel.disposedCursorStack, []);
+  assert.equal(
+    Object.hasOwn(sent[1].payload, "terminal_outbox_disposed_cursor"),
+    false,
+  );
+});
+
 test("Goal page selects historical detail through typed authority", () => {
   const state = createInitialState();
   state.route = { name: "goals", originAnchor: null };
@@ -2363,6 +2396,26 @@ test("Goal detail command opens the typed historical selection", () => {
       limit: 20,
       include_finished: true,
       selected_goal_id: "goal-history",
+    },
+  }]);
+});
+
+test("Goal disposed history command opens the requested cursor page", () => {
+  const state = createInitialState();
+  const sent = [];
+
+  handleSubmitText(state, "/goal outbox history cursor_page_2", (type, payload) => {
+    sent.push({ type, payload });
+  });
+
+  assert.equal(state.route.name, "goals");
+  assert.equal(state.goalPanel.disposedCursor, "cursor_page_2");
+  assert.deepEqual(sent, [{
+    type: "goal_panel",
+    payload: {
+      limit: 20,
+      include_finished: true,
+      terminal_outbox_disposed_cursor: "cursor_page_2",
     },
   }]);
 });

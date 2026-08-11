@@ -237,7 +237,10 @@
   - HAR-10.8f2k 已实现：默认 dry-run、bypass 显式 prune、逐写点事务故障回滚、内容寻址完成回执、append-only
     member tombstone 与 checkpoint 防复活，并同步四端共用 Tool/Slash；详见
     `HAR-10-8f2k-pursuit-terminal-outbox-retention-prune-execution.md`。
-  - 未完成：disposed cursor 翻页、独立加密 archive/外部 anchor、push stream、跨 Store 原子 terminal commit
+  - HAR-10.8f2l 已实现：完整 authority 重认证、snapshot/query/Store 绑定 cursor、Goal Tool/CLI/TUI/New UI
+    翻页与协商式 schema v5/旧客户端 v4 降级；详见
+    `HAR-10-8f2l-pursuit-terminal-outbox-disposed-history-cursor.md`。
+  - 未完成：独立加密 archive/外部 anchor、push stream、跨 Store 原子 terminal commit
     与 A5 故障/soak。
 - HAR-10.9 Remote installation daemon（partial）：
   - HAR-10.9a 已实现 owner-fenced installation daemon，把 x3g 入站 mTLS、x3h Result Worker、x3i 回传、

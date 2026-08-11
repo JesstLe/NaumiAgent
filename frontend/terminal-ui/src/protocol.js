@@ -6766,7 +6766,7 @@ function normalizeGoalSnapshot(payload) {
 function normalizeGoalTerminalOutbox(value) {
   const item = harnessObject(value, "goals/snapshot terminal_outbox");
   const schemaVersion = Number(item.schema_version);
-  if (![1, 2, 3, 4].includes(schemaVersion)) {
+  if (![1, 2, 3, 4, 5].includes(schemaVersion)) {
     throw new Error("goals/snapshot terminal_outbox schema_version 不兼容");
   }
   const counts = harnessObject(
@@ -6933,7 +6933,11 @@ function normalizeGoalTerminalOutbox(value) {
   let disposedCount = 0;
   let disposed = [];
   let disposedTruncated = false;
-  if (schemaVersion === 4) {
+  let disposedCursor = "";
+  let disposedNextCursor = "";
+  let disposedHasMore = false;
+  let disposedWarning = "";
+  if (schemaVersion >= 4) {
     disposedCount = harnessNonnegativeInteger(
       item.disposed_count,
       "goals/snapshot terminal_outbox.disposed_count",
@@ -7004,6 +7008,27 @@ function normalizeGoalTerminalOutbox(value) {
       "goals/snapshot terminal_outbox.disposed_truncated",
     );
   }
+  if (schemaVersion >= 5) {
+    disposedCursor = goalDisposedCursor(
+      item.disposed_cursor,
+      "goals/snapshot terminal_outbox.disposed_cursor",
+    );
+    disposedNextCursor = goalDisposedCursor(
+      item.disposed_next_cursor,
+      "goals/snapshot terminal_outbox.disposed_next_cursor",
+    );
+    disposedHasMore = harnessBoolean(
+      item.disposed_has_more,
+      "goals/snapshot terminal_outbox.disposed_has_more",
+    );
+    disposedWarning = harnessText(
+      item.disposed_warning,
+      "goals/snapshot terminal_outbox.disposed_warning",
+    );
+    if (disposedWarning.length > 500 || /[\u0000-\u001f\u007f]/.test(disposedWarning)) {
+      throw new Error("goals/snapshot terminal_outbox disposed_warning 格式无效");
+    }
+  }
   if (
     new Set(disposed.map((entry) => entry.receipt_id)).size !== disposed.length
     || new Set(disposed.map((entry) => entry.dead_letter_id)).size !== disposed.length
@@ -7013,8 +7038,25 @@ function normalizeGoalTerminalOutbox(value) {
   ) {
     throw new Error("goals/snapshot terminal_outbox disposed 目录与总数不一致");
   }
+  if (
+    disposedHasMore !== Boolean(disposedNextCursor)
+    || (disposedHasMore && !disposedTruncated)
+    || (
+      disposedWarning
+      && (
+        disposed.length
+        || disposedCount
+        || disposedCursor
+        || disposedNextCursor
+        || disposedHasMore
+        || disposedTruncated
+      )
+    )
+  ) {
+    throw new Error("goals/snapshot terminal_outbox disposed 分页状态不一致");
+  }
   return {
-    schema_version: 4,
+    schema_version: 5,
     enabled,
     status,
     worker_state: workerState,
@@ -7053,7 +7095,19 @@ function normalizeGoalTerminalOutbox(value) {
     disposed_count: disposedCount,
     disposed,
     disposed_truncated: disposedTruncated,
+    disposed_cursor: disposedCursor,
+    disposed_next_cursor: disposedNextCursor,
+    disposed_has_more: disposedHasMore,
+    disposed_warning: disposedWarning,
   };
+}
+
+function goalDisposedCursor(value, name) {
+  const cursor = harnessText(value ?? "", name);
+  if (cursor.length > 1_024 || (cursor && !/^[A-Za-z0-9_-]+$/.test(cursor))) {
+    throw new Error(`${name} 格式无效`);
+  }
+  return cursor;
 }
 
 function goalTerminalTimestamp(value, name) {

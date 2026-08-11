@@ -117,7 +117,7 @@ test("Goal page renders authenticated disposed history with distinct semantics",
         warning: "",
         dead_letters: [],
         dead_letters_truncated: false,
-        disposed_count: 1,
+        disposed_count: 2,
         disposed: [{
           receipt_id: `ptabn_${"b".repeat(24)}`,
           dead_letter_id: `ptfail_${"a".repeat(24)}`,
@@ -127,15 +127,21 @@ test("Goal page renders authenticated disposed history with distinct semantics",
           failure_sequence: 2,
           abandoned_at: "2026-08-05T00:00:20+00:00",
         }],
-        disposed_truncated: false,
+        disposed_truncated: true,
+        disposed_cursor: "cursor-current",
+        disposed_next_cursor: "cursor-next",
+        disposed_has_more: true,
+        disposed_warning: "",
       },
     },
   }, 180, 20).map(stripAnsi).join("\n");
 
-  assert.match(lines, /已处置历史 · 1/);
+  assert.match(lines, /已处置历史 · 2/);
   assert.match(lines, /✓ 已放弃 ptfail_a{24} · 已被替代 · lease_missing/);
   assert.match(lines, /effective-state abandoned · failure seq 2 · 回执 ptabn_b{24}/);
   assert.doesNotMatch(lines, /重入队命令/);
+  assert.match(lines, /按 } 查看更早/);
+  assert.match(lines, /按 \{ 返回上一页/);
 });
 
 test("Goal page exposes shared interaction detail command for every state", () => {

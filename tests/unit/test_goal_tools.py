@@ -6,6 +6,7 @@ import re
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -240,6 +241,58 @@ async def test_goal_list_pages_interactions_for_tui_fallback(tmp_path) -> None:
         interaction_cursor=match.group(1),
     )
     assert "ask-tui-page-0" in second
+
+
+@pytest.mark.asyncio
+async def test_goal_list_passes_disposed_cursor_to_shared_store_authority(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    goal_store = GoalStore(tmp_path / "goals")
+    pursuit_store = PursuitStore(tmp_path / "pursuit")
+    pursuit_store.save_run(
+        PursuitRun(
+            id="pursuit_disposed_page",
+            goal="查看已处置历史后续页",
+            status=PursuitRunStatus.COMPLETED,
+            phase="completed",
+            started_at=time.time(),
+            updated_at=time.time(),
+        )
+    )
+    observed: list[dict[str, Any]] = []
+
+    def fake_disposed_page(**kwargs: Any) -> Any:
+        observed.append(kwargs)
+        return SimpleNamespace(
+            records=(),
+            total=0,
+            cursor=kwargs["cursor"],
+            next_cursor="",
+        )
+
+    monkeypatch.setattr(
+        pursuit_store,
+        "terminal_outbox_disposed_page",
+        fake_disposed_page,
+    )
+    tool = _tool_map(
+        goal_store,
+        pursuit_store=pursuit_store,
+        terminal_outbox_enabled=False,
+    )["goal_list"]
+
+    output = await tool.execute(
+        terminal_outbox_disposed_cursor="opaque_cursor",
+    )
+
+    assert observed == [{
+        "limit": 20,
+        "scan_limit": 10_000,
+        "cursor": "opaque_cursor",
+    }]
+    assert "当前为历史后续页" in output
+    assert "/goal outbox history" in output
 
 
 @pytest.mark.asyncio

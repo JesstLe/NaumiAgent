@@ -30,6 +30,7 @@ PROTOCOL_CAPABILITIES = (
     "evolution_evaluation_lane",
     "goal_lifecycle_actions",
     "goal_snapshot",
+    "goal_terminal_outbox_disposed_cursor",
     "heartbeat",
     "pursuit_recovery_actions",
     "session_list",
@@ -966,6 +967,15 @@ def _normalize_client_payload(
         }
 
     if event_type == ClientEventType.GOAL_PANEL:
+        raw_disposed_cursor = payload.get("terminal_outbox_disposed_cursor", "")
+        if not isinstance(raw_disposed_cursor, str):
+            raise ValueError("Goal 已处置历史 cursor 必须是字符串。")
+        disposed_cursor = raw_disposed_cursor.strip()
+        if raw_disposed_cursor != disposed_cursor or (
+            disposed_cursor
+            and not re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", disposed_cursor)
+        ):
+            raise ValueError("Goal 已处置历史 cursor 格式无效。")
         interaction_filter = str(
             payload.get("interaction_filter") or "all"
         ).strip().lower()
@@ -1005,6 +1015,7 @@ def _normalize_client_payload(
             "interaction_filter": interaction_filter,
             "interaction_cursor": interaction_cursor,
             "selected_interaction_id": selected_interaction_id,
+            "terminal_outbox_disposed_cursor": disposed_cursor,
         }
 
     if event_type == ClientEventType.TASK_PANEL:

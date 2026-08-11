@@ -28,6 +28,7 @@
       "doctor_live_probe",
       "doctor_trace_index",
       "goal_snapshot",
+      "goal_terminal_outbox_disposed_cursor",
       "heartbeat",
       "pursuit_recovery_actions",
       "session_list",

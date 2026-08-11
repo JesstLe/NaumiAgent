@@ -479,6 +479,8 @@ export function createInitialState() {
       interactionFilter: "all",
       interactionCursor: "",
       interactionCursorStack: [],
+      disposedCursor: "",
+      disposedCursorStack: [],
       selectedInteractionIndex: 0,
       selectedDeadLetterIndex: 0,
       selectedAbandonReasonIndex: 0,
@@ -953,6 +955,10 @@ export function reduceServerEvent(state, record) {
       state.goalPanel.error = "";
       state.goalPanel.interactionFilter = payload.interaction_filter || "all";
       state.goalPanel.interactionCursor = payload.interaction_cursor || "";
+      state.goalPanel.disposedCursor = payload.terminal_outbox?.disposed_cursor || "";
+      if (payload.terminal_outbox?.disposed_warning) {
+        state.goalPanel.disposedCursorStack = [];
+      }
       state.goalPanel.selectedGoalIndex = Math.max(
         0,
         (payload.goals || []).findIndex(
@@ -1461,6 +1467,8 @@ export function reduceServerEvent(state, record) {
         interactionFilter: "all",
         interactionCursor: "",
         interactionCursorStack: [],
+        disposedCursor: "",
+        disposedCursorStack: [],
         selectedInteractionIndex: 0,
         selectedDeadLetterIndex: 0,
         selectedAbandonReasonIndex: 0,
@@ -3342,6 +3350,16 @@ function parseGoalPanelCommand(commandText) {
   if (normalized === "/goal list --active") {
     return { limit: 20, include_finished: false };
   }
+  const outboxHistory = raw.match(
+    /^\/goal\s+outbox\s+history(?:\s+([A-Za-z0-9_-]{1,1024}))?$/i,
+  );
+  if (outboxHistory) {
+    return {
+      limit: 20,
+      include_finished: true,
+      terminal_outbox_disposed_cursor: outboxHistory[1] || "",
+    };
+  }
   const detail = raw.match(/^\/goal\s+(?:detail|status)\s+([A-Za-z0-9_.:-]{1,128})$/i);
   if (detail) {
     return { limit: 20, include_finished: true, selected_goal_id: detail[1] };
@@ -3602,6 +3620,8 @@ export function handleSubmitText(state, text, send) {
     state.goalPanel.interactionFilter = "all";
     state.goalPanel.interactionCursor = "";
     state.goalPanel.interactionCursorStack = [];
+    state.goalPanel.disposedCursor = goalPanelRequest.terminal_outbox_disposed_cursor || "";
+    state.goalPanel.disposedCursorStack = [];
     state.goalPanel.selectedInteractionIndex = 0;
     state.goalPanel.selectedGoalIndex = 0;
     send("goal_panel", goalPanelRequest);
@@ -5110,7 +5130,7 @@ export function handleGoalPanelKey(state, key, send) {
   if (
     state.goalPanel.loading
     && (
-      ["r", "x", "o", "d", "u", "a", "z", "j", "k", "f", "n", "p", "[", "]", "\r", "\n"].includes(lower)
+      ["r", "x", "o", "d", "u", "a", "z", "j", "k", "f", "n", "p", "[", "]", "{", "}", "\r", "\n"].includes(lower)
       || [INPUT_KEYS.left, INPUT_KEYS.leftAlt, INPUT_KEYS.right, INPUT_KEYS.rightAlt].includes(key)
     )
   ) {
@@ -5153,6 +5173,30 @@ export function handleGoalPanelKey(state, key, send) {
   }
   if (lower === "z") {
     requestSelectedTerminalDeadLetterAbandon(state, send);
+    return true;
+  }
+  if (key === "}") {
+    const nextCursor = (
+      state.goalPanel.snapshot?.terminal_outbox?.disposed_next_cursor || ""
+    );
+    if (nextCursor) {
+      state.goalPanel.disposedCursorStack.push(
+        state.goalPanel.disposedCursor || "",
+      );
+      state.goalPanel.disposedCursor = nextCursor;
+      state.goalPanel.scrollOffset = 0;
+      requestGoalPanelPage(state, send);
+    }
+    return true;
+  }
+  if (key === "{") {
+    if (state.goalPanel.disposedCursorStack.length) {
+      state.goalPanel.disposedCursor = (
+        state.goalPanel.disposedCursorStack.pop() || ""
+      );
+      state.goalPanel.scrollOffset = 0;
+      requestGoalPanelPage(state, send);
+    }
     return true;
   }
   const goals = state.goalPanel.snapshot?.goals ?? [];
@@ -5553,7 +5597,7 @@ function applyPursuitTerminalDeadLetterAbandonResult(state, record, payload) {
 function requestGoalPanelPage(state, send, extra = {}) {
   state.goalPanel.loading = true;
   state.goalPanel.error = "";
-  send("goal_panel", {
+  const payload = {
     limit: state.goalPanel.limit,
     include_finished: state.goalPanel.includeFinished,
     interaction_limit: 10,
@@ -5562,7 +5606,11 @@ function requestGoalPanelPage(state, send, extra = {}) {
     selected_interaction_id: "",
     selected_goal_id: state.goalPanel.snapshot?.selected_goal_id || "",
     ...extra,
-  });
+  };
+  if (state.goalPanel.disposedCursor) {
+    payload.terminal_outbox_disposed_cursor = state.goalPanel.disposedCursor;
+  }
+  send("goal_panel", payload);
 }
 
 export function handleEvolutionReviewKey(state, key, send) {

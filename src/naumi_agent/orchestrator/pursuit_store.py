@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
@@ -133,6 +134,16 @@ class PursuitTerminalOutboxDisposedCatalog:
     records: tuple[PursuitTerminalOutboxDisposedCatalogRecord, ...]
     total: int
     truncated: bool
+
+
+@dataclass(frozen=True, slots=True)
+class PursuitTerminalOutboxDisposedPage:
+    """One snapshot-bound page of authenticated abandoned outboxes."""
+
+    records: tuple[PursuitTerminalOutboxDisposedCatalogRecord, ...]
+    total: int
+    cursor: str
+    next_cursor: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -1278,13 +1289,48 @@ class PursuitStore:
         """Return a bounded, authenticated history of abandoned outboxes."""
         if (
             isinstance(limit, bool)
+            or not isinstance(limit, int)
             or not 1 <= limit <= 100
             or isinstance(scan_limit, bool)
+            or not isinstance(scan_limit, int)
             or not limit <= scan_limit <= 10_000
         ):
             raise ValueError("terminal outbox disposed catalog 策略无效。")
+        page = self.terminal_outbox_disposed_page(
+            limit=limit,
+            scan_limit=scan_limit,
+        )
+        return PursuitTerminalOutboxDisposedCatalog(
+            records=page.records,
+            total=page.total,
+            truncated=bool(page.next_cursor),
+        )
+
+    def terminal_outbox_disposed_page(
+        self,
+        *,
+        limit: int = 20,
+        scan_limit: int = 10_000,
+        cursor: str = "",
+    ) -> PursuitTerminalOutboxDisposedPage:
+        """Return one immutable-catalog page or reject a stale/tampered cursor."""
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= 100
+            or isinstance(scan_limit, bool)
+            or not isinstance(scan_limit, int)
+            or not limit <= scan_limit <= 10_000
+            or not isinstance(cursor, str)
+            or len(cursor) > 1_024
+        ):
+            raise ValueError("terminal outbox disposed page 策略无效。")
         if not self._db_path.exists():
-            return PursuitTerminalOutboxDisposedCatalog((), 0, False)
+            if cursor:
+                raise PursuitStoreError(
+                    "terminal outbox disposed cursor 对应的 authority 不存在。"
+                )
+            return PursuitTerminalOutboxDisposedPage((), 0, "", "")
         try:
             with self._connect() as conn:
                 rows = conn.execute(
@@ -1350,20 +1396,47 @@ class PursuitStore:
                     reverse=True,
                 )
                 total = len(disposed)
-                return PursuitTerminalOutboxDisposedCatalog(
-                    records=tuple(disposed[:limit]),
+                snapshot_sha256 = _terminal_outbox_disposed_snapshot_sha256(disposed)
+                offset = 0
+                if cursor:
+                    offset = _decode_terminal_outbox_disposed_cursor(
+                        cursor,
+                        db_path=self._db_path,
+                        limit=limit,
+                        scan_limit=scan_limit,
+                        snapshot_sha256=snapshot_sha256,
+                    )
+                    if offset >= total:
+                        raise ValueError(
+                            "terminal outbox disposed cursor 已超过当前历史。"
+                        )
+                end = min(total, offset + limit)
+                next_cursor = (
+                    _encode_terminal_outbox_disposed_cursor(
+                        db_path=self._db_path,
+                        offset=end,
+                        limit=limit,
+                        scan_limit=scan_limit,
+                        snapshot_sha256=snapshot_sha256,
+                    )
+                    if end < total
+                    else ""
+                )
+                return PursuitTerminalOutboxDisposedPage(
+                    records=tuple(disposed[offset:end]),
                     total=total,
-                    truncated=total > limit,
+                    cursor=cursor,
+                    next_cursor=next_cursor,
                 )
         except PursuitStoreError:
             raise
         except (ValidationError, TypeError, ValueError) as exc:
             raise PursuitStoreError(
-                f"terminal outbox disposed catalog 校验失败：{exc}"
+                f"terminal outbox disposed page 校验失败：{exc}"
             ) from exc
         except sqlite3.Error as exc:
             raise PursuitStoreError(
-                f"读取 terminal outbox disposed catalog 失败：{exc}"
+                f"读取 terminal outbox disposed page 失败：{exc}"
             ) from exc
 
     def preview_terminal_outbox_retention(
@@ -5609,6 +5682,102 @@ def _terminal_dispatch_owner_sha256(owner_id: str) -> str:
     if not normalized or len(normalized) > 256:
         raise ValueError("terminal dispatch owner_id 必须为 1 到 256 个字符。")
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _terminal_outbox_disposed_snapshot_sha256(
+    records: list[PursuitTerminalOutboxDisposedCatalogRecord],
+) -> str:
+    return _canonical_sha256({
+        "records": [record.receipt.receipt_sha256 for record in records],
+        "total": len(records),
+    })
+
+
+def _encode_terminal_outbox_disposed_cursor(
+    *,
+    db_path: Path,
+    offset: int,
+    limit: int,
+    scan_limit: int,
+    snapshot_sha256: str,
+) -> str:
+    payload = {
+        "d": hashlib.sha256(str(db_path.resolve()).encode("utf-8")).hexdigest(),
+        "l": limit,
+        "o": offset,
+        "s": scan_limit,
+        "v": 1,
+        "x": snapshot_sha256,
+    }
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    envelope = json.dumps(
+        {"h": hashlib.sha256(canonical).hexdigest(), "p": payload},
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(envelope).decode("ascii").rstrip("=")
+
+
+def _decode_terminal_outbox_disposed_cursor(
+    value: str,
+    *,
+    db_path: Path,
+    limit: int,
+    scan_limit: int,
+    snapshot_sha256: str,
+) -> int:
+    token = value.strip()
+    if not token or token != value or len(token) > 1_024:
+        raise ValueError("terminal outbox disposed cursor 为空、过长或含空白。")
+    try:
+        decoded = base64.b64decode(
+            token + "=" * (-len(token) % 4),
+            altchars=b"-_",
+            validate=True,
+        )
+        envelope = json.loads(decoded.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("terminal outbox disposed cursor 格式无效。") from exc
+    if not isinstance(envelope, dict) or set(envelope) != {"h", "p"}:
+        raise ValueError("terminal outbox disposed cursor envelope 无效。")
+    payload = envelope.get("p")
+    digest = envelope.get("h")
+    if not isinstance(payload, dict) or set(payload) != {"d", "l", "o", "s", "v", "x"}:
+        raise ValueError("terminal outbox disposed cursor payload 无效。")
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    expected_digest = hashlib.sha256(canonical).hexdigest()
+    if not isinstance(digest, str) or not hmac.compare_digest(digest, expected_digest):
+        raise ValueError("terminal outbox disposed cursor 摘要校验失败。")
+    expected_text = {
+        "d": hashlib.sha256(str(db_path.resolve()).encode("utf-8")).hexdigest(),
+        "x": snapshot_sha256,
+    }
+    if payload.get("v") != 1 or payload.get("l") != limit or payload.get("s") != scan_limit:
+        raise ValueError("terminal outbox disposed cursor 与当前查询不匹配。")
+    for key, expected in expected_text.items():
+        actual = payload.get(key)
+        if not isinstance(actual, str) or not hmac.compare_digest(actual, expected):
+            raise ValueError("terminal outbox disposed cursor 已失效。")
+    offset = payload.get("o")
+    if (
+        isinstance(offset, bool)
+        or not isinstance(offset, int)
+        or offset < 1
+        or offset > scan_limit
+    ):
+        raise ValueError("terminal outbox disposed cursor offset 无效。")
+    return offset
 
 
 def format_run(run: PursuitRun) -> str:
