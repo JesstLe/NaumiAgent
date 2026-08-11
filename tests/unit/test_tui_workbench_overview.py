@@ -11,18 +11,24 @@ from textual.widgets import Input, Markdown, Static
 
 from naumi_agent.config.settings import AppConfig, MemoryConfig
 from naumi_agent.runtime.composition import create_agent_engine
+from naumi_agent.tasks.store import TaskStore
 from naumi_agent.tui.app import NaumiApp
 from naumi_agent.tui.workbench_overview import (
     ExperimentContractIssueScreen,
     ProposalDecisionScreen,
     ProposalMergeScreen,
     WorkbenchOverviewScreen,
+    WorkbenchSnapshotError,
     format_workbench_overview_markdown,
     format_workbench_release_markdown,
     format_workbench_reviews_markdown,
+    format_workbench_timeline_markdown,
     format_workbench_worktrees_markdown,
 )
+from naumi_agent.workbench.models import EventSeverity
 from naumi_agent.workbench.proposal_governance import ProposalAction
+from naumi_agent.workbench.service import WorkbenchService
+from naumi_agent.workbench.store import WorkbenchStore
 
 
 def test_workbench_formatter_renders_authoritative_overview_fields() -> None:
@@ -289,6 +295,116 @@ def test_workbench_formatter_escapes_store_markdown_and_control_characters() -> 
     assert "\x00" not in rendered
 
 
+def test_workbench_timeline_formats_persisted_categories_and_bounded_payload() -> None:
+    snapshot = _snapshot()
+    snapshot["events"] = [
+        {
+            "id": "event-1",
+            "session_id": "session-workbench-tui",
+            "type": "validation.failed",
+            "actor": "Harness",
+            "subject_id": "task-1",
+            "payload": {
+                "exit_code": 1,
+                "command": ["pytest", "-q"],
+                "detail": {"private": "not-rendered"},
+                "note": "line 1\nline 2",
+            },
+            "timestamp": "2026-08-11T12:00:00+00:00",
+            "correlation_id": "run-1",
+            "parent_event_id": None,
+            "severity": "error",
+        },
+        {
+            "id": "event-2",
+            "session_id": "session-workbench-tui",
+            "type": "worktree.created",
+            "actor": "Git-Agent",
+            "subject_id": "worktree-1",
+            "payload": {"branch": "codex/ui-10-5a"},
+            "timestamp": "2026-08-11T11:59:00+00:00",
+            "correlation_id": None,
+            "parent_event_id": None,
+            "severity": "info",
+        },
+    ]
+
+    rendered = format_workbench_timeline_markdown(snapshot)
+
+    assert "Timeline" in rendered
+    assert "工具" in rendered
+    assert "Git" in rendered
+    assert "🔴" in rendered
+    assert "exit\\_code：1" in rendered
+    assert "command：\\[2 项\\]" in rendered
+    assert "private" not in rendered
+    assert "note：line 1 line 2" in rendered
+
+
+def test_workbench_timeline_rejects_control_characters_and_oversized_history() -> None:
+    snapshot = _snapshot()
+    event = {
+        "id": "event-1",
+        "session_id": "session-workbench-tui",
+        "type": "agent.started",
+        "actor": "Agent",
+        "subject_id": "task-1",
+        "payload": {},
+        "timestamp": "2026-08-11T12:00:00+00:00",
+        "severity": "info",
+    }
+    snapshot["events"] = [{**event, "actor": "bad\nactor"}]
+    with pytest.raises(WorkbenchSnapshotError, match="Timeline 文本字段"):
+        format_workbench_timeline_markdown(snapshot)
+
+    snapshot["events"] = [event] * 101
+    with pytest.raises(WorkbenchSnapshotError, match="不超过 100 项"):
+        format_workbench_timeline_markdown(snapshot)
+
+    snapshot["events"] = [{**event, "session_id": "other-session"}]
+    with pytest.raises(WorkbenchSnapshotError, match="会话不匹配"):
+        format_workbench_timeline_markdown(snapshot)
+
+    snapshot["events"] = [{**event, "payload": {"duration": float("nan")}}]
+    with pytest.raises(WorkbenchSnapshotError, match="数值无效"):
+        format_workbench_timeline_markdown(snapshot)
+
+
+@pytest.mark.asyncio
+async def test_workbench_timeline_uses_real_sqlite_service_order_and_redaction(
+    tmp_path,
+) -> None:
+    database = str(tmp_path / "workbench-timeline.db")
+    store = WorkbenchStore(database)
+    service = WorkbenchService(
+        task_store=TaskStore(database),
+        workbench_store=store,
+    )
+    await store.append_event(
+        session_id="session-workbench-tui",
+        type="worktree.created",
+        actor="Git-Agent",
+        subject_id="worktree-1",
+        payload={"branch": "codex/ui-10-5a", "api_key": "must-not-render"},
+    )
+    latest = await store.append_event(
+        session_id="session-workbench-tui",
+        type="validation.failed",
+        actor="Harness",
+        subject_id="task-1",
+        payload={"exit_code": 1},
+        severity=EventSeverity.ERROR,
+    )
+
+    snapshot = await service.dashboard_snapshot("session-workbench-tui")
+    rendered = format_workbench_timeline_markdown(snapshot)
+
+    assert snapshot["events"][0]["id"] == latest.id
+    assert "validation › failed" in rendered
+    assert "worktree › created" in rendered
+    assert "must-not-render" not in rendered
+
+
 @pytest.mark.asyncio
 async def test_textual_workbench_slash_route_refreshes_and_retains_last_snapshot() -> None:
     engine = create_agent_engine(AppConfig())
@@ -345,6 +461,57 @@ async def test_textual_workbench_slash_route_refreshes_and_retains_last_snapshot
         await pilot.press("escape")
         await pilot.pause(0.05)
         assert not isinstance(app.screen, WorkbenchOverviewScreen)
+
+
+@pytest.mark.asyncio
+async def test_textual_workbench_timeline_tab_navigates_persisted_events() -> None:
+    snapshot = _snapshot()
+    snapshot["events"] = [
+        {
+            "id": f"event-{index}",
+            "session_id": "session-workbench-tui",
+            "type": "agent.started" if index == 0 else "worktree.created",
+            "actor": "Agent",
+            "subject_id": f"task-{index}",
+            "payload": {},
+            "timestamp": f"2026-08-11T12:00:0{index}+00:00",
+            "severity": "info",
+        }
+        for index in range(2)
+    ]
+    refreshed = {
+        **snapshot,
+        "revision": 4,
+        "events": list(reversed(snapshot["events"])),
+    }
+    engine = create_agent_engine(AppConfig())
+    engine._session = SimpleNamespace(id="session-workbench-tui")
+    engine.workbench_service.dashboard_snapshot = AsyncMock(  # type: ignore[method-assign]
+        side_effect=[snapshot, refreshed]
+    )
+    app = NaumiApp(engine)
+
+    async with app.run_test(size=(90, 30)) as pilot:
+        app._handle_slash_command("/workbench")
+        await pilot.pause(0.1)
+        await pilot.press("5")
+        await pilot.pause(0.05)
+
+        screen = app.screen
+        assert isinstance(screen, WorkbenchOverviewScreen)
+        assert screen.selected_tab == "timeline"
+        assert "task-0" in screen.query_one("#workbench-content", Markdown)._markdown
+
+        await pilot.press("down")
+        await pilot.pause(0.05)
+        assert screen.selected_event_index == 1
+        assert screen.selected_event_id == "event-1"
+        assert "task-1" in screen.query_one("#workbench-content", Markdown)._markdown
+
+        await pilot.press("r")
+        await pilot.pause(0.1)
+        assert screen.selected_event_id == "event-1"
+        assert screen.selected_event_index == 0
 
 
 @pytest.mark.asyncio

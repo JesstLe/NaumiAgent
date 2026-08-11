@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import re
 from collections.abc import Mapping
 from typing import Any
@@ -219,6 +220,104 @@ def format_workbench_release_markdown(value: Mapping[str, Any]) -> str:
             *_format_stable_population_finalization(snapshot),
         ]
     )
+
+
+def format_workbench_timeline_markdown(
+    value: Mapping[str, Any],
+    *,
+    selected_index: int = 0,
+) -> str:
+    """Render bounded persisted Workbench facts without inferring chat events."""
+    snapshot = _validate_snapshot(value)
+    events = _records(snapshot.get("events"))
+    if not events:
+        return (
+            "## Timeline\n\n"
+            "当前会话尚无 Workbench 审计事件。\n\n"
+            "Timeline 只展示后端已持久化的事实，不从聊天文本推断事件。"
+        )
+    index = min(len(events) - 1, max(0, int(selected_index)))
+    start = max(0, min(index - 4, len(events) - 9))
+    selected = events[index]
+    lines = [
+        "## Timeline",
+        "",
+        f"共 {len(events)} 条 · 当前 {index + 1}/{len(events)} · ↑/↓ 选择",
+        "",
+        "### 事件",
+    ]
+    for offset, event in enumerate(events[start : start + 9], start=start):
+        marker = "▶" if offset == index else "·"
+        lines.append(
+            f"- {marker} {_timeline_symbol(event)} "
+            f"{_timeline_category(event.get('type'))} · "
+            f"{_plain(str(event.get('type') or 'unknown').replace('.', ' › '), 160)} · "
+            f"{_plain(event.get('subject_id'), 160) or '无对象'}"
+        )
+    lines.extend(
+        [
+            "",
+            "### 当前事件",
+            f"- 级别：{_timeline_severity(selected.get('severity'))}",
+            f"- 时间：{_plain(selected.get('timestamp'), 100) or '-'}",
+            f"- 执行者：{_plain(selected.get('actor'), 300) or '未知'}",
+            f"- 对象：{_plain(selected.get('subject_id'), 300) or '-'}",
+            f"- Event：`{_code(selected.get('id') or '-')}`",
+        ]
+    )
+    correlation_id = _plain(selected.get("correlation_id"), 128)
+    if correlation_id:
+        lines.append(f"- 关联：`{_code(correlation_id)}`")
+    payload = _mapping(selected.get("payload"))
+    if payload:
+        lines.extend(["", "### 证据字段"])
+        for key, item in list(payload.items())[:12]:
+            lines.append(f"- {_plain(key, 80)}：{_plain(item, 500)}")
+        if len(payload) > 12:
+            lines.append(f"- 另有 {len(payload) - 12} 个字段")
+    else:
+        lines.extend(["", "证据字段：无公开字段"])
+    return "\n".join(lines)
+
+
+def _timeline_category(value: Any) -> str:
+    event_type = _normalized(value).lower()
+    if re.search(r"permission|approval|proposal|review", event_type):
+        return "权限"
+    if re.search(r"git|worktree|branch|commit|merge", event_type):
+        return "Git"
+    if re.search(r"harness|pursuit|heartbeat|run\.|daemon|worker", event_type):
+        return "Harness"
+    if re.search(r"agent|lease|bid|dispatch", event_type):
+        return "Agent"
+    if re.search(r"tool|validation|check|eval", event_type):
+        return "工具"
+    return "工作台"
+
+
+def _timeline_symbol(event: Mapping[str, Any]) -> str:
+    severity = _normalized(event.get("severity"))
+    if severity in {"error", "critical"}:
+        return "🔴"
+    if severity == "warning":
+        return "🟡"
+    return {
+        "权限": "🟡",
+        "Git": "🟢",
+        "Harness": "🟣",
+        "Agent": "🔵",
+        "工具": "🔷",
+        "工作台": "⚪",
+    }[_timeline_category(event.get("type"))]
+
+
+def _timeline_severity(value: Any) -> str:
+    return {
+        "info": "信息",
+        "warning": "警告",
+        "error": "错误",
+        "critical": "严重",
+    }.get(_normalized(value), "未知")
 
 
 def format_workbench_worktrees_markdown(
@@ -868,6 +967,7 @@ class WorkbenchOverviewScreen(Screen[None]):
         Binding("2", "worktrees_tab", "Worktrees", show=False),
         Binding("3", "reviews_tab", "Reviews", show=False),
         Binding("4", "release_tab", "Release", show=False),
+        Binding("5", "timeline_tab", "Timeline", show=False),
         Binding("up", "select_previous", "上一项", show=False),
         Binding("down", "select_next", "下一项", show=False),
         Binding("a", "approve_proposal", "批准 Proposal", show=False),
@@ -912,6 +1012,8 @@ class WorkbenchOverviewScreen(Screen[None]):
         self.selected_tab = "overview"
         self.selected_worktree_index = 0
         self.selected_review_index = 0
+        self.selected_event_index = 0
+        self.selected_event_id = ""
         self.review_detail: Mapping[str, Any] | None = None
         self.review_loading = False
         self.review_error = ""
@@ -960,6 +1062,7 @@ class WorkbenchOverviewScreen(Screen[None]):
             else:
                 error.update("刷新失败，已保留上一次快照；请稍后重试。")
             return
+        previous_event_id = self.selected_event_id
         self.snapshot = snapshot
         self.selected_worktree_index = min(
             self.selected_worktree_index,
@@ -969,6 +1072,16 @@ class WorkbenchOverviewScreen(Screen[None]):
             self.selected_review_index,
             max(0, len(_review_records(snapshot)) - 1),
         )
+        events = _records(snapshot.get("events"))
+        preserved_index = next(
+            (
+                index
+                for index, event in enumerate(events)
+                if _normalized(event.get("id")) == previous_event_id
+            ),
+            min(self.selected_event_index, max(0, len(events) - 1)),
+        )
+        self._set_selected_event_index(preserved_index)
         self._render_snapshot()
         if self.selected_tab == "reviews":
             self.refresh_review_detail()
@@ -980,14 +1093,14 @@ class WorkbenchOverviewScreen(Screen[None]):
         self.app.pop_screen()
 
     def action_next_tab(self) -> None:
-        tabs = ("overview", "worktrees", "reviews", "release")
+        tabs = ("overview", "worktrees", "reviews", "timeline", "release")
         self.selected_tab = tabs[(tabs.index(self.selected_tab) + 1) % len(tabs)]
         self._render_snapshot()
         if self.selected_tab == "reviews":
             self.refresh_review_detail()
 
     def action_previous_tab(self) -> None:
-        tabs = ("overview", "worktrees", "reviews", "release")
+        tabs = ("overview", "worktrees", "reviews", "timeline", "release")
         self.selected_tab = tabs[(tabs.index(self.selected_tab) - 1) % len(tabs)]
         self._render_snapshot()
         if self.selected_tab == "reviews":
@@ -1011,6 +1124,11 @@ class WorkbenchOverviewScreen(Screen[None]):
         self.selected_tab = "release"
         self._render_snapshot()
 
+    def action_timeline_tab(self) -> None:
+        self.selected_tab = "timeline"
+        self._set_selected_event_index(self.selected_event_index)
+        self._render_snapshot()
+
     def action_select_previous(self) -> None:
         if self.selected_tab == "worktrees":
             self.selected_worktree_index = max(0, self.selected_worktree_index - 1)
@@ -1021,6 +1139,9 @@ class WorkbenchOverviewScreen(Screen[None]):
             self.review_error = ""
             self._render_snapshot()
             self.refresh_review_detail()
+        elif self.selected_tab == "timeline":
+            self._set_selected_event_index(self.selected_event_index - 1)
+            self._render_snapshot()
 
     def action_select_next(self) -> None:
         if self.selected_tab == "worktrees" and self.snapshot is not None:
@@ -1034,6 +1155,20 @@ class WorkbenchOverviewScreen(Screen[None]):
             self.review_error = ""
             self._render_snapshot()
             self.refresh_review_detail()
+        elif self.selected_tab == "timeline" and self.snapshot is not None:
+            self._set_selected_event_index(self.selected_event_index + 1)
+            self._render_snapshot()
+
+    def _set_selected_event_index(self, index: int) -> None:
+        events = _records((self.snapshot or {}).get("events"))
+        if not events:
+            self.selected_event_index = 0
+            self.selected_event_id = ""
+            return
+        self.selected_event_index = min(len(events) - 1, max(0, int(index)))
+        self.selected_event_id = _normalized(
+            events[self.selected_event_index].get("id")
+        )
 
     @work(exclusive=True, group="workbench-review", exit_on_error=False)
     async def refresh_review_detail(self) -> None:
@@ -1445,6 +1580,7 @@ class WorkbenchOverviewScreen(Screen[None]):
             ("worktrees", "2 Worktrees"),
             ("reviews", "3 Reviews"),
             ("release", "4 Release"),
+            ("timeline", "5 Timeline"),
         )
         title.update("Workbench · " + " · ".join(
             f"[{label}]" if self.selected_tab == name else label for name, label in tabs
@@ -1472,6 +1608,13 @@ class WorkbenchOverviewScreen(Screen[None]):
             )
         elif self.selected_tab == "release":
             content.update(format_workbench_release_markdown(self.snapshot))
+        elif self.selected_tab == "timeline":
+            content.update(
+                format_workbench_timeline_markdown(
+                    self.snapshot,
+                    selected_index=self.selected_event_index,
+                )
+            )
         else:
             content.update(format_workbench_overview_markdown(self.snapshot))
 
@@ -1508,7 +1651,84 @@ def _validate_snapshot(
             raise WorkbenchSnapshotError("Stable Population finalization projection 无效") from exc
         normalized["stable_population_finalization"] = projection.model_dump(mode="json")
     normalized["stable_population_finalization_error"] = error
+    normalized["events"] = _validate_timeline_events(
+        value.get("events"),
+        session_id=_normalized(value.get("session_id")),
+    )
     return normalized
+
+
+def _validate_timeline_events(
+    value: Any,
+    *,
+    session_id: str,
+) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    if not isinstance(value, (list, tuple)) or len(value) > 100:
+        raise WorkbenchSnapshotError("Workbench Timeline 必须是不超过 100 项的数组")
+    events: list[dict[str, Any]] = []
+    for raw in value:
+        if not isinstance(raw, Mapping):
+            raise WorkbenchSnapshotError("Workbench Timeline event 必须是对象")
+        severity = _strict_timeline_text(raw.get("severity", "info"), 16)
+        if severity not in {"info", "warning", "error", "critical"}:
+            raise WorkbenchSnapshotError("Workbench Timeline severity 无效")
+        payload = raw.get("payload")
+        if not isinstance(payload, Mapping) or len(payload) > 20:
+            raise WorkbenchSnapshotError("Workbench Timeline payload 无效")
+        safe_payload: dict[str, str] = {}
+        for key, item in payload.items():
+            safe_key = _strict_timeline_text(key, 80)
+            if item is None:
+                rendered = "null"
+            elif isinstance(item, float) and not math.isfinite(item):
+                raise WorkbenchSnapshotError("Workbench Timeline payload 数值无效")
+            elif isinstance(item, (str, int, float, bool)):
+                rendered = _normalized(item, limit=500)
+            elif isinstance(item, (list, tuple)):
+                rendered = f"[{min(len(item), 10_000)} 项]"
+            else:
+                rendered = "[结构化对象]"
+            safe_payload[safe_key] = rendered
+        event = {
+                "id": _strict_timeline_text(raw.get("id"), 128),
+                "session_id": _strict_timeline_text(raw.get("session_id"), 500),
+                "type": _strict_timeline_text(raw.get("type"), 160),
+                "actor": _strict_timeline_text(raw.get("actor"), 500),
+                "subject_id": _strict_timeline_text(raw.get("subject_id"), 500),
+                "timestamp": _strict_timeline_text(raw.get("timestamp"), 100),
+                "correlation_id": _strict_timeline_text(
+                    raw.get("correlation_id") or "", 128, allow_empty=True
+                ),
+                "parent_event_id": _strict_timeline_text(
+                    raw.get("parent_event_id") or "", 128, allow_empty=True
+                ),
+                "severity": severity,
+                "payload": safe_payload,
+            }
+        if event["session_id"] != session_id:
+            raise WorkbenchSnapshotError("Workbench Timeline event 会话不匹配")
+        events.append(event)
+    return events
+
+
+def _strict_timeline_text(
+    value: Any,
+    limit: int,
+    *,
+    allow_empty: bool = False,
+) -> str:
+    if not isinstance(value, str):
+        raise WorkbenchSnapshotError("Workbench Timeline 文本字段类型无效")
+    if (
+        len(value) > limit
+        or value != value.strip()
+        or (not allow_empty and not value)
+        or re.search(r"[\x00-\x1f\x7f]", value)
+    ):
+        raise WorkbenchSnapshotError("Workbench Timeline 文本字段无效")
+    return value
 
 
 def _review_records(snapshot: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -1681,6 +1901,7 @@ __all__ = [
     "WorkbenchSnapshotError",
     "format_workbench_overview_markdown",
     "format_workbench_release_markdown",
+    "format_workbench_timeline_markdown",
     "format_workbench_reviews_markdown",
     "format_workbench_worktrees_markdown",
 ]

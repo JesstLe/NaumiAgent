@@ -1084,21 +1084,22 @@ function normalizeServerPayload(type, payload) {
           .map(normalizeWorkbenchProposal)
         : [],
       failures: Array.isArray(payload.failures) ? payload.failures : [],
-      events: Array.isArray(payload.events) ? payload.events : [],
+      events: normalizeWorkbenchTimelineEvents(
+        payload.events,
+        String(payload.session_id ?? ""),
+      ),
     };
   }
   if (type === "workbench/event") {
+    const event = normalizeWorkbenchTimelineEvent(payload);
     return {
-      ...payload,
-      session_id: String(payload.session_id ?? ""),
-      stream_id: String(payload.stream_id ?? ""),
+      ...event,
+      stream_id: strictWorkbenchPopulationText(
+        payload.stream_id,
+        "workbench/event stream_id",
+        128,
+      ),
       revision: Math.max(0, Number(payload.revision) || 0),
-      id: String(payload.id ?? ""),
-      type: String(payload.type ?? ""),
-      actor: String(payload.actor ?? ""),
-      subject_id: String(payload.subject_id ?? ""),
-      payload: normalizeObject(payload.payload),
-      timestamp: String(payload.timestamp ?? ""),
     };
   }
   return { ...payload };
@@ -1390,6 +1391,99 @@ function normalizeWorkbenchApproval(value) {
     created_at: String(item.created_at ?? "").slice(0, 100),
     updated_at: String(item.updated_at ?? "").slice(0, 100),
   };
+}
+
+function normalizeWorkbenchTimelineEvent(value) {
+  const item = normalizeObject(value);
+  const severity = strictWorkbenchPopulationText(
+    item.severity ?? "info",
+    "workbench timeline event.severity",
+    16,
+  );
+  if (!["info", "warning", "error", "critical"].includes(severity)) {
+    throw new Error("workbench timeline event.severity 无效");
+  }
+  return {
+    id: strictWorkbenchPopulationText(item.id, "workbench timeline event.id", 128),
+    session_id: strictWorkbenchPopulationText(
+      item.session_id,
+      "workbench timeline event.session_id",
+      500,
+    ),
+    type: strictWorkbenchPopulationText(item.type, "workbench timeline event.type", 160),
+    actor: strictWorkbenchPopulationText(item.actor, "workbench timeline event.actor", 500),
+    subject_id: strictWorkbenchPopulationText(
+      item.subject_id,
+      "workbench timeline event.subject_id",
+      500,
+    ),
+    timestamp: strictWorkbenchPopulationText(
+      item.timestamp,
+      "workbench timeline event.timestamp",
+      100,
+    ),
+    correlation_id: item.correlation_id == null
+      ? ""
+      : strictWorkbenchPopulationText(
+        item.correlation_id,
+        "workbench timeline event.correlation_id",
+        128,
+      ),
+    parent_event_id: item.parent_event_id == null
+      ? ""
+      : strictWorkbenchPopulationText(
+        item.parent_event_id,
+        "workbench timeline event.parent_event_id",
+        128,
+      ),
+    severity,
+    payload: normalizeWorkbenchTimelinePayload(item.payload),
+  };
+}
+
+function normalizeWorkbenchTimelineEvents(value, sessionId) {
+  if (value == null) return [];
+  if (!Array.isArray(value) || value.length > 100) {
+    throw new Error("workbench timeline events 必须是不超过 100 项的数组");
+  }
+  return value.map((item) => {
+    const event = normalizeWorkbenchTimelineEvent(item);
+    if (event.session_id !== sessionId) {
+      throw new Error("workbench timeline event 会话不匹配");
+    }
+    return event;
+  });
+}
+
+function normalizeWorkbenchTimelinePayload(value) {
+  const entries = Object.entries(normalizeObject(value));
+  if (entries.length > 20) {
+    throw new Error("workbench timeline event.payload 字段过多");
+  }
+  return Object.fromEntries(entries.map(([rawKey, rawValue]) => {
+    const key = strictWorkbenchPopulationText(
+      rawKey,
+      "workbench timeline event.payload key",
+      80,
+    );
+    let rendered;
+    if (rawValue == null) rendered = "null";
+    else if (["string", "number", "boolean"].includes(typeof rawValue)) {
+      if (typeof rawValue === "number" && !Number.isFinite(rawValue)) {
+        throw new Error(`workbench timeline event.payload.${key} 数值无效`);
+      }
+      rendered = String(rawValue)
+        .replace(/[\u0000-\u001f\u007f]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 500);
+    } else if (Array.isArray(rawValue)) {
+      rendered = `[${Math.min(rawValue.length, 10_000)} 项]`;
+    } else {
+      rendered = "[结构化对象]";
+    }
+    return [key, rendered];
+  }));
 }
 
 function normalizeWorkbenchProposal(value) {
