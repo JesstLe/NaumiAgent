@@ -114,10 +114,11 @@ uv run pytest -q \
 
 ## 5. 尚未完成
 
-下一独立切片为 `EVO-05.7b3c2 Population Observation Aggregation`，至少需要：
+下一独立切片 [EVO-05.7b3c2 Population Observation Aggregation](EVO-05-7b3c2-population-observation-aggregation.md)
+现已交付：
 
 - 从 current Population Finalization 冻结 denominator 和 exact member set；
 - 对每个 member 选择 current Admission/Assessment，并区分 missing、insufficient、passing、breached、censored；
 - 计算 member coverage、duration coverage、缺失成员和 breach guardrail；
 - 对所有输入做动态撤权和 content-addressed Population Receipt；
-- 仍不直接复用单安装 health 作为 promoted Outcome；7b4 才负责 promoted/superseded ledger。
+- 仍不直接复用单安装 health 作为 promoted Outcome；下一步 7b4 才负责 promoted/superseded ledger。

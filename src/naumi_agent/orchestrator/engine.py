@@ -521,6 +521,10 @@ from naumi_agent.evolution.stable_promotion_observation_revision_delivery_worker
     EvolutionStablePromotionObservationRevisionWorkerPolicy,
     EvolutionStablePromotionObservationRevisionWorkerSnapshot,
 )
+from naumi_agent.evolution.stable_promotion_population_observation_assessments import (
+    EvolutionStablePromotionPopulationObservationAssessmentService,
+    EvolutionStablePromotionPopulationObservationAssessmentStore,
+)
 from naumi_agent.evolution.stable_promotion_runtime_admission_deliveries import (
     EvolutionStablePromotionRuntimeAdmissionDeliveryService,
     EvolutionStablePromotionRuntimeAdmissionDeliveryStore,
@@ -2964,6 +2968,52 @@ class AgentEngine:
                 ),
                 store=(
                     self.evolution_stable_promotion_installation_observation_assessment_store
+                ),
+            )
+        )
+        self.evolution_stable_promotion_population_observation_assessment_store = (
+            EvolutionStablePromotionPopulationObservationAssessmentStore(
+                config.memory.session_db_path,
+                contract_store=(
+                    self.evolution_stable_promotion_observation_contract_store
+                ),
+                finalization_store=(
+                    self.evolution_stable_remote_population_finalization_store
+                ),
+                admission_store=(
+                    self.evolution_stable_promotion_runtime_observation_admission_store
+                ),
+                installation_assessment_store=(
+                    self.evolution_stable_promotion_installation_observation_assessment_store
+                ),
+            )
+        )
+        self.evolution_stable_promotion_population_observation_assessment_service = (
+            EvolutionStablePromotionPopulationObservationAssessmentService(
+                workspace_root=paths.workspace_root,
+                contract_store=(
+                    self.evolution_stable_promotion_observation_contract_store
+                ),
+                contract_service=(
+                    self.evolution_stable_promotion_observation_contract_service
+                ),
+                finalization_service=(
+                    self.evolution_stable_remote_population_finalization_service
+                ),
+                admission_store=(
+                    self.evolution_stable_promotion_runtime_observation_admission_store
+                ),
+                admission_service=(
+                    self.evolution_stable_promotion_runtime_observation_admission_service
+                ),
+                installation_assessment_store=(
+                    self.evolution_stable_promotion_installation_observation_assessment_store
+                ),
+                installation_assessment_service=(
+                    self.evolution_stable_promotion_installation_observation_assessment_service
+                ),
+                store=(
+                    self.evolution_stable_promotion_population_observation_assessment_store
                 ),
             )
         )

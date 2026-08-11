@@ -240,6 +240,10 @@ from naumi_agent.evolution.stable_promotion_observation_revision_delivery_worker
     render_stable_promotion_observation_revision_worker,
     render_stable_promotion_observation_revision_worker_pass,
 )
+from naumi_agent.evolution.stable_promotion_population_observation_assessments import (
+    EvolutionStablePromotionPopulationObservationAssessmentError,
+    render_stable_promotion_population_observation_assessment,
+)
 from naumi_agent.evolution.stable_promotion_runtime_admission_deliveries import (
     EvolutionStablePromotionRuntimeAdmissionDeliveryError,
     decode_stable_promotion_runtime_admission_submission,
@@ -4395,6 +4399,93 @@ class EvolutionStablePromotionInstallationObservationAssessmentTool(Tool):
         return render_stable_promotion_installation_observation_assessment(view)
 
 
+class EvolutionStablePromotionPopulationObservationAssessmentTool(Tool):
+    """Aggregate or inspect the exact stable Population observation verdict."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_stable_promotion_population_observation_assessment"
+
+    @property
+    def description(self) -> str:
+        return (
+            "冻结 current Population Finalization 的 exact denominator/member set，"
+            "聚合逐安装长期观察为缺失、不足、通过、违约或删失结论；"
+            "不授予 promoted outcome、学习、推广或执行权限。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["assess", "inspect"]},
+                "finalization_receipt_id": {
+                    "type": "string",
+                    "pattern": "^evstableremotepopfinal_[0-9a-f]{24}$",
+                },
+                "assessment_id": {
+                    "type": "string",
+                    "pattern": "^evstableprompopobserve_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["action"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="稳定推广群体长期观察聚合",
+            search_hint=(
+                "evolution stable promotion population observation assessment "
+                "自进化 稳定推广 群体 长期观察 聚合"
+            ),
+        )
+
+    async def execute(
+        self,
+        action: str,
+        finalization_receipt_id: str = "",
+        assessment_id: str = "",
+    ) -> str:
+        operation = str(action or "").strip().lower()
+        service = (
+            self._engine.evolution_stable_promotion_population_observation_assessment_service
+        )
+        try:
+            if operation == "assess":
+                view = await service.assess(
+                    finalization_receipt_id=str(finalization_receipt_id or "").strip()
+                )
+            elif operation == "inspect":
+                view = await service.inspect(
+                    assessment_id=str(assessment_id or "").strip()
+                )
+            else:
+                raise ValueError("action 必须是 assess 或 inspect。")
+        except (
+            AttributeError,
+            EvolutionStablePromotionPopulationObservationAssessmentError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "stable_promotion_population_assessment_failed")
+            return f"稳定推广群体长期观察聚合未完成（`{code}`）：{exc}"
+        return render_stable_promotion_population_observation_assessment(view)
+
+
 class EvolutionStablePromotionRuntimeAdmissionDeliveryTool(Tool):
     """Prepare, export, receive, or inspect one signed runtime Admission."""
 
@@ -6117,6 +6208,7 @@ def create_evolution_review_tools(
         EvolutionStablePromotionObservationChainCursorTool(engine),
         EvolutionStablePromotionObservationRevisionDeliveryTool(engine),
         EvolutionStablePromotionInstallationObservationAssessmentTool(engine),
+        EvolutionStablePromotionPopulationObservationAssessmentTool(engine),
         EvolutionStablePromotionRuntimeAdmissionDeliveryTool(engine),
         EvolutionStableRolloutAuthorizationTool(engine),
         EvolutionStableRolloutFinalizationTool(engine),
@@ -6186,6 +6278,7 @@ __all__ = [
     "EvolutionStableRemotePopulationFinalizationTool",
     "EvolutionStablePromotionObservationContractTool",
     "EvolutionStablePromotionInstallationObservationAssessmentTool",
+    "EvolutionStablePromotionPopulationObservationAssessmentTool",
     "EvolutionStablePromotionRuntimeAdmissionDeliveryTool",
     "EvolutionStablePromotionObservationChainCursorTool",
     "EvolutionStablePromotionObservationRevisionDeliveryTool",

@@ -303,6 +303,54 @@ class EvolutionStablePromotionRuntimeObservationAdmissionStore:
                 "稳定推广 Runtime Admission 损坏或无法读取。",
             ) from exc
 
+    async def list_for_contract(
+        self,
+        contract_id: str,
+    ) -> tuple[EvolutionStablePromotionRuntimeObservationAdmission, ...]:
+        contract = _contract_id(contract_id)
+        if not self.db_path.is_file():
+            return ()
+        try:
+            async with aiosqlite.connect(self.db_path, timeout=5.0) as db:
+                db.row_factory = aiosqlite.Row
+                await _ensure_schema(db)
+                rows = await (
+                    await db.execute(
+                        "SELECT * FROM evolution_stable_promotion_runtime_admissions "
+                        "WHERE observation_contract_id = ? ORDER BY "
+                        "installation_member_id, admitted_at, admission_id LIMIT 10001",
+                        (contract,),
+                    )
+                ).fetchall()
+            if len(rows) > 10_000:
+                raise EvolutionStablePromotionRuntimeObservationAdmissionError(
+                    "stable_promotion_runtime_admission_population_oversized",
+                    "稳定推广 Runtime Admission 超过 10000 个 Population 成员上限。",
+                )
+            items = tuple(_restore(str(row["admission_json"])) for row in rows)
+            if any(
+                not (
+                    item.admission_id == row["admission_id"]
+                    and item.admission_sha256 == row["admission_sha256"]
+                    and item.observation_contract_id == row["observation_contract_id"]
+                    and item.installation_member_id == row["installation_member_id"]
+                    and item.stable_intent_id == row["stable_intent_id"]
+                    and item.subject_id == row["subject_id"]
+                    and item.binding_id == row["binding_id"]
+                    and item.origin_sample_id == row["origin_sample_id"]
+                )
+                for item, row in zip(items, rows, strict=True)
+            ):
+                raise ValueError("stable promotion runtime admission row mismatch")
+            return items
+        except EvolutionStablePromotionRuntimeObservationAdmissionError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise EvolutionStablePromotionRuntimeObservationAdmissionError(
+                "stable_promotion_runtime_admission_store_corrupt",
+                "稳定推广 Runtime Admission 集合损坏或无法读取。",
+            ) from exc
+
     async def record(
         self, admission: EvolutionStablePromotionRuntimeObservationAdmission
     ) -> EvolutionStablePromotionRuntimeObservationAdmission:
