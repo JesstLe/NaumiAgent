@@ -65,7 +65,8 @@ Completion Receipt 要求：
 
 真实 Population 包含跨机器 member，因此不能让本机 Release Store 冒充 fleet source。
 [EVO-05.5f5x3a](EVO-05-5f5x3a-authenticated-remote-readiness-claim.md) 已先补 installation Credential-bound
-challenge/signature/claim，证明远端 assertion 的身份来源，但仍不等于 remote runtime revalidation。后续需继续完成远端
-freshness/fencing、执行与结果回传；只有每个 member 都形成 current readiness、Authorization 与 Finalization Receipt，才可
+challenge/signature/claim；[EVO-05.5f5x3b](EVO-05-5f5x3b-remote-release-store-probe.md) 已继续让目标安装真实重验
+Release Store 并返回短期 installation-signed binary readiness。后续仍需完成自动 daemon transport、远端受限 Authorization、
+Finalization 与结果回传；只有每个 member 都形成 current readiness、Authorization 与 Finalization Receipt，才可
 聚合 population-level Stable Rollout Completion Authority。配置/数据 finalization 继续等待 ARC-07.6，Promotion authority
 继续独立。

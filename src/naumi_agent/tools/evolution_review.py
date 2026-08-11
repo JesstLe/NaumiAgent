@@ -221,6 +221,14 @@ from naumi_agent.evolution.stable_remote_readiness_claims import (
     render_stable_remote_readiness_challenge,
     render_stable_remote_readiness_claim,
 )
+from naumi_agent.evolution.stable_remote_readiness_probes import (
+    EvolutionStableRemoteReadinessProbeError,
+    decode_stable_remote_readiness_probe_challenge,
+    execute_stable_remote_readiness_probe,
+    render_stable_remote_readiness_probe,
+    render_stable_remote_readiness_probe_challenge,
+    render_stable_remote_readiness_probe_submission,
+)
 from naumi_agent.evolution.stable_rollback_readiness import (
     EvolutionStableRollbackReadinessError,
     render_stable_rollback_readiness,
@@ -3055,6 +3063,145 @@ class EvolutionStableRemoteReadinessClaimTool(Tool):
         return render_stable_remote_readiness_claim(view)
 
 
+class EvolutionStableRemoteReadinessProbeTool(Tool):
+    """Prepare, execute locally, ingest, or inspect a fresh remote store probe."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_stable_remote_readiness_probe"
+
+    @property
+    def description(self) -> str:
+        return (
+            "基于 current authenticated remote claim 签发短期 Probe；远端本机机械"
+            "重验 active/candidate/previous/rollback slot 与 Boot Receipt 后使用安装"
+            "私钥签名，Control Plane ingest 后仅授予短期 binary rollback readiness。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["prepare", "execute-local", "ingest", "inspect"],
+                },
+                "claim_receipt_id": {"type": "string"},
+                "validity_seconds": {
+                    "type": "integer",
+                    "minimum": 60,
+                    "maximum": 300,
+                },
+                "challenge_base64": {"type": "string", "maxLength": 524288},
+                "challenge_id": {"type": "string"},
+                "submission_base64": {"type": "string", "maxLength": 524288},
+                "receipt_id": {"type": "string"},
+            },
+            "required": ["action"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="Stable 远端 Release Store 新鲜探测",
+            search_hint=(
+                "evolution stable remote release store fresh probe rollback "
+                "自进化 稳定发布 远端 重验 回滚"
+            ),
+        )
+
+    async def execute(
+        self,
+        action: str,
+        claim_receipt_id: str = "",
+        validity_seconds: int = 180,
+        challenge_base64: str = "",
+        challenge_id: str = "",
+        submission_base64: str = "",
+        receipt_id: str = "",
+    ) -> str:
+        try:
+            service = self._engine.evolution_stable_remote_readiness_probe_service
+            if action == "prepare":
+                challenge = await service.prepare(
+                    claim_receipt_id=claim_receipt_id,
+                    validity_seconds=validity_seconds,
+                )
+                return render_stable_remote_readiness_probe_challenge(challenge)
+            if action == "execute-local":
+                challenge = decode_stable_remote_readiness_probe_challenge(
+                    challenge_base64
+                )
+                snapshot = await (
+                    self._engine.evolution_release_population_snapshot_store.inspect(
+                        snapshot_id=challenge.population_snapshot_id
+                    )
+                )
+                if not snapshot.population_snapshot_authority:
+                    raise EvolutionStableRemoteReadinessProbeError(
+                        "stable_remote_probe_population_snapshot_stale",
+                        "本机 Population Snapshot 已失效。",
+                    )
+                credential = next(
+                    (
+                        item
+                        for item in snapshot.snapshot.payload.credentials
+                        if item.payload.member_id
+                        == challenge.installation_member_id
+                    ),
+                    None,
+                )
+                if credential is None:
+                    raise EvolutionStableRemoteReadinessProbeError(
+                        "stable_remote_probe_member_not_local",
+                        "本机 Population Snapshot 不包含 Probe 目标 member。",
+                    )
+                submission = await asyncio.to_thread(
+                    execute_stable_remote_readiness_probe,
+                    challenge=challenge,
+                    credential=credential,
+                    release_slot_store=self._engine.evolution_release_slot_store,
+                    installation_key_service=(
+                        self._engine.release_installation_key_service
+                    ),
+                    clock=self._engine.release_installation_key_service.clock,
+                )
+                return render_stable_remote_readiness_probe_submission(submission)
+            if action == "ingest":
+                view = await service.ingest(
+                    challenge_id=challenge_id,
+                    submission_base64=submission_base64,
+                )
+            elif action == "inspect":
+                view = await service.inspect(receipt_id=receipt_id)
+            else:
+                raise ValueError(
+                    "action 必须是 prepare、execute-local、ingest 或 inspect。"
+                )
+        except (
+            AttributeError,
+            EvolutionStableRemoteReadinessProbeError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "stable_remote_readiness_probe_failed")
+            return f"Stable Remote Readiness Probe 未完成（`{code}`）：{exc}"
+        return render_stable_remote_readiness_probe(view)
+
+
 class EvolutionStableRolloutAuthorizationTool(Tool):
     """Issue or inspect one member-scoped stable rollout capability."""
 
@@ -4609,6 +4756,7 @@ def create_evolution_review_tools(
         EvolutionStableRollbackReadinessTool(engine),
         EvolutionInstallationKeyTool(engine),
         EvolutionStableRemoteReadinessClaimTool(engine),
+        EvolutionStableRemoteReadinessProbeTool(engine),
         EvolutionStableRolloutAuthorizationTool(engine),
         EvolutionStableRolloutFinalizationTool(engine),
         EvolutionOutcomeOpportunityTool(engine),
@@ -4670,6 +4818,7 @@ __all__ = [
     "EvolutionStablePopulationCompletionTool",
     "EvolutionStableRollbackReadinessTool",
     "EvolutionStableRemoteReadinessClaimTool",
+    "EvolutionStableRemoteReadinessProbeTool",
     "EvolutionStableRolloutAuthorizationTool",
     "EvolutionStableRolloutFinalizationTool",
     "EvolutionRevalidationRollbackExecutionTool",

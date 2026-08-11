@@ -1147,6 +1147,25 @@ if TYPE_CHECKING:
         render_stable_remote_readiness_challenge,
         render_stable_remote_readiness_claim,
     )
+    from naumi_agent.evolution.stable_remote_readiness_probes import (
+        EVOLUTION_STABLE_REMOTE_READINESS_PROBE_POLICY,
+        EvolutionStableRemoteReadinessProbeChallenge,
+        EvolutionStableRemoteReadinessProbeError,
+        EvolutionStableRemoteReadinessProbeReceipt,
+        EvolutionStableRemoteReadinessProbeResult,
+        EvolutionStableRemoteReadinessProbeService,
+        EvolutionStableRemoteReadinessProbeStore,
+        EvolutionStableRemoteReadinessProbeSubmission,
+        EvolutionStableRemoteReadinessProbeView,
+        decode_stable_remote_readiness_probe_challenge,
+        decode_stable_remote_readiness_probe_submission,
+        encode_stable_remote_readiness_probe_challenge,
+        encode_stable_remote_readiness_probe_submission,
+        execute_stable_remote_readiness_probe,
+        render_stable_remote_readiness_probe,
+        render_stable_remote_readiness_probe_challenge,
+        render_stable_remote_readiness_probe_submission,
+    )
     from naumi_agent.evolution.stable_rollback_readiness import (
         EVOLUTION_STABLE_ROLLBACK_READINESS_POLICY,
         EvolutionStableDeploymentInspectionPort,
@@ -1596,6 +1615,23 @@ __all__ = [
     "encode_stable_remote_readiness_assertion",
     "render_stable_remote_readiness_challenge",
     "render_stable_remote_readiness_claim",
+    "EVOLUTION_STABLE_REMOTE_READINESS_PROBE_POLICY",
+    "EvolutionStableRemoteReadinessProbeChallenge",
+    "EvolutionStableRemoteReadinessProbeError",
+    "EvolutionStableRemoteReadinessProbeReceipt",
+    "EvolutionStableRemoteReadinessProbeResult",
+    "EvolutionStableRemoteReadinessProbeService",
+    "EvolutionStableRemoteReadinessProbeStore",
+    "EvolutionStableRemoteReadinessProbeSubmission",
+    "EvolutionStableRemoteReadinessProbeView",
+    "decode_stable_remote_readiness_probe_challenge",
+    "decode_stable_remote_readiness_probe_submission",
+    "encode_stable_remote_readiness_probe_challenge",
+    "encode_stable_remote_readiness_probe_submission",
+    "execute_stable_remote_readiness_probe",
+    "render_stable_remote_readiness_probe",
+    "render_stable_remote_readiness_probe_challenge",
+    "render_stable_remote_readiness_probe_submission",
     "EVOLUTION_STABLE_ROLLOUT_AUTHORIZATION_POLICY",
     "EvolutionStableRolloutAuthorization",
     "EvolutionStableRolloutAuthorizationError",
@@ -2840,6 +2876,25 @@ def __getattr__(name: str) -> object:
         "render_stable_remote_readiness_challenge",
         "render_stable_remote_readiness_claim",
     }
+    stable_remote_readiness_probe_exports = {
+        "EVOLUTION_STABLE_REMOTE_READINESS_PROBE_POLICY",
+        "EvolutionStableRemoteReadinessProbeChallenge",
+        "EvolutionStableRemoteReadinessProbeError",
+        "EvolutionStableRemoteReadinessProbeReceipt",
+        "EvolutionStableRemoteReadinessProbeResult",
+        "EvolutionStableRemoteReadinessProbeService",
+        "EvolutionStableRemoteReadinessProbeStore",
+        "EvolutionStableRemoteReadinessProbeSubmission",
+        "EvolutionStableRemoteReadinessProbeView",
+        "decode_stable_remote_readiness_probe_challenge",
+        "decode_stable_remote_readiness_probe_submission",
+        "encode_stable_remote_readiness_probe_challenge",
+        "encode_stable_remote_readiness_probe_submission",
+        "execute_stable_remote_readiness_probe",
+        "render_stable_remote_readiness_probe",
+        "render_stable_remote_readiness_probe_challenge",
+        "render_stable_remote_readiness_probe_submission",
+    }
     stable_rollout_authorization_exports = {
         "EVOLUTION_STABLE_ROLLOUT_AUTHORIZATION_POLICY",
         "EvolutionStableRolloutAuthorization",
@@ -3533,6 +3588,8 @@ def __getattr__(name: str) -> object:
         module_name = "stable_rollback_readiness"
     elif name in stable_remote_readiness_claim_exports:
         module_name = "stable_remote_readiness_claims"
+    elif name in stable_remote_readiness_probe_exports:
+        module_name = "stable_remote_readiness_probes"
     elif name in stable_rollout_authorization_exports:
         module_name = "stable_rollout_authorizations"
     elif name in stable_rollout_finalization_exports:

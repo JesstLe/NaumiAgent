@@ -2796,6 +2796,22 @@ test("stable remote readiness uses the shared slash execution path", () => {
   }]);
 });
 
+test("stable remote readiness probe uses the shared slash execution path", () => {
+  const state = createInitialState();
+  const sent = [];
+  handleSubmitText(
+    state,
+    "/evolution stable-remote-readiness-probe inspect evstableremoteprobereceipt_aaaaaaaaaaaaaaaaaaaaaaaa",
+    (type, payload) => sent.push({ type, payload }),
+  );
+  assert.deepEqual(sent, [{
+    type: "submit",
+    payload: {
+      text: "/evolution stable-remote-readiness-probe inspect evstableremoteprobereceipt_aaaaaaaaaaaaaaaaaaaaaaaa",
+    },
+  }]);
+});
+
 test("installation key provisioning uses the shared slash execution path", () => {
   const state = createInitialState();
   const sent = [];

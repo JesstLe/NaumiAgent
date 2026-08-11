@@ -90,6 +90,8 @@ Receipt 绑定完整 Challenge、Assertion、signature 和 recorded time。Store
 
 本切片只证明“这份 assertion 由 current managed installation identity 签发”，没有证明远端 daemon 从它自己的
 Release Store 重新读取了这些字段。[ARC-07.5c1](../architecture/ARC-07-5c1-installation-key-provisioning.md) 已先补齐显式
-OS-keyring installation key 与固定 readiness-probe 签名域。下一切片必须继续加入 freshness/fencing、远端 daemon execution challenge 与可验证
-source digest，再把成功结果适配为 remote `EvolutionStableRollbackReadiness` 等价物。只有本地/远端每个 member 都形成
+OS-keyring installation key 与固定 readiness-probe 签名域。[EVO-05.5f5x3b](EVO-05-5f5x3b-remote-release-store-probe.md)
+现已加入短期 freshness challenge、目标安装 Release Store 机械重验、TOCTOU 检测、可验证 source digest 和 installation-signed
+Result，形成独立的 binary rollback readiness authority。自动 daemon dispatch、远端受限 Authorization/Finalization 仍未完成。
+只有本地/远端每个 member 都形成
 current readiness、受限 Authorization、Finalization Receipt 后，才允许实现 Population Finalization Authority。

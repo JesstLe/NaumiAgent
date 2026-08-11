@@ -249,6 +249,9 @@ restore/remove step 并写入只读 content-addressed storage。
 [EVO-05.5f5x3a](EVO-05-5f5x3a-authenticated-remote-readiness-claim.md) 已为跨安装 Stable Finalization
 补齐 Population Credential-bound challenge、Ed25519 assertion 与 durable authenticated claim；它不把远端签名声明冒充
 runtime revalidation，也不授予 readiness、execution、rollout 或 promotion authority。
+[EVO-05.5f5x3b](EVO-05-5f5x3b-remote-release-store-probe.md) 已让目标安装真实重读 active/candidate/previous/rollback
+pointer、slot 与 Boot Receipt，以 ARC-07.5c1 installation key 签署 fresh source digest；Control Plane 只形成短期 binary
+readiness，不授予 remote execution、stable rollout、配置/数据或 promotion authority。
 [EVO-05.3f2c3b1](EVO-05-3f2c3b1-platform-dispatch-outbox.md) 已把实时准入的 required-platform Worker lane 转为 durable
 queued dispatch，并在 exact Worker incarnation 上预留容量。[EVO-05.3f2c3b2a](EVO-05-3f2c3b2a-authenticated-worker-claim.md)
 已增加 supervisor-attested Ed25519 Worker Identity、一次性 claim challenge 和可续期 lease hash chain。

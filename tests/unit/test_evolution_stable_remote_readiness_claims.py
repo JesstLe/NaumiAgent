@@ -27,7 +27,10 @@ from naumi_agent.evolution.stable_remote_readiness_claims import (
 )
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.tools.base import ToolCall, ToolRegistry, ToolResult
-from naumi_agent.tools.evolution_review import EvolutionStableRemoteReadinessClaimTool
+from naumi_agent.tools.evolution_review import (
+    EvolutionStableRemoteReadinessClaimTool,
+    EvolutionStableRemoteReadinessProbeTool,
+)
 from tests.unit.test_evolution_stable_rollback_readiness import _readiness_fixture
 
 
@@ -323,6 +326,18 @@ async def test_engine_composes_remote_readiness_claim_service_and_tool(
             is engine.evolution_stable_remote_readiness_claim_store
         )
         assert engine.evolution_stable_remote_readiness_claim_store.db_path == (
+            session_db.resolve()
+        )
+        probe_tool = engine.tool_registry.get(
+            "evolution_stable_remote_readiness_probe"
+        )
+        assert isinstance(probe_tool, EvolutionStableRemoteReadinessProbeTool)
+        assert probe_tool._engine is engine
+        assert (
+            engine.evolution_stable_remote_readiness_probe_service.store
+            is engine.evolution_stable_remote_readiness_probe_store
+        )
+        assert engine.evolution_stable_remote_readiness_probe_store.db_path == (
             session_db.resolve()
         )
     finally:
