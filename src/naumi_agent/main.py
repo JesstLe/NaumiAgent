@@ -2918,6 +2918,7 @@ def _print_help() -> None:
             "/evolution [list|detail|experiment-contract|evaluation|"
             "stable-population-preview|stable-population-completion|"
             "stable-rollback-readiness|"
+            "installation-key|"
             "stable-remote-readiness|"
             "stable-rollout-authorization|"
             "stable-rollout-finalization|"
@@ -3801,6 +3802,26 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 arg="",
             )
             return
+        if action == "installation-key":
+            if len(parts) in {2, 3} and parts[1] == "provision":
+                arguments = {
+                    "action": "provision",
+                    "channel": parts[2] if len(parts) == 3 else "stable",
+                }
+            elif len(parts) == 2 and parts[1] == "inspect":
+                arguments = {"action": "inspect"}
+            else:
+                raise ValueError(
+                    "installation-key 需要 provision [channel] 或 inspect。"
+                )
+            await _run_tool_slash_command(
+                engine,
+                slash_command="/evolution",
+                tool_name="evolution_installation_key",
+                parse_args=lambda _arg: arguments,
+                arg="",
+            )
+            return
         if action == "stable-remote-readiness":
             if len(parts) in {4, 5} and parts[1] == "challenge":
                 arguments = {
@@ -4211,6 +4232,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "approval-signature、approval-decision、revalidation-request、"
                 "stable-population-preview、stable-population-completion、"
                 "stable-rollback-readiness、"
+                "installation-key、"
                 "stable-remote-readiness、"
                 "stable-rollout-authorization、"
                 "stable-rollout-finalization、"
@@ -4419,6 +4441,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "<stable-intent-id>；inspect <authorization-id>；"
             "/evolution stable-rollout-finalization execute <authorization-id>；"
             "inspect <authorization-id>；"
+            "/evolution installation-key provision [channel]；inspect；"
             "/evolution stable-remote-readiness challenge <completion-id> "
             "<member-id> [validity-seconds]；"
             "/evolution discover-outcome <rollback-outcome-id>；"

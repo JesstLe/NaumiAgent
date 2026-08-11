@@ -2796,6 +2796,20 @@ test("stable remote readiness uses the shared slash execution path", () => {
   }]);
 });
 
+test("installation key provisioning uses the shared slash execution path", () => {
+  const state = createInitialState();
+  const sent = [];
+  handleSubmitText(
+    state,
+    "/evolution installation-key provision stable",
+    (type, payload) => sent.push({ type, payload }),
+  );
+  assert.deepEqual(sent, [{
+    type: "submit",
+    payload: { text: "/evolution installation-key provision stable" },
+  }]);
+});
+
 test("evaluation lane command opens typed receipt route and stays out of chat", () => {
   const state = createInitialState();
   state.protocolNegotiated = true;
