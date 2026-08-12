@@ -3089,8 +3089,12 @@ test("evolution review snapshot is strict and drops private fields", () => {
           class_name: "SandboxTool",
           declared_tool_name: completeSpecification.interface.tool_name,
           temporary_tool_name: `evolution_sandbox:${specificationId.slice(5, 17)}:${completeSpecification.interface.tool_name}`,
+          parameters_schema_sha256: "5".repeat(64),
+          permission_specification_sha256: "4".repeat(64),
+          verification_specification_sha256: "3".repeat(64),
           admission_ready: true,
           registry_state: "preview_only",
+          created_at: "2026-08-12T12:15:00+00:00",
           registration_authorized: false,
           shadow_authorized: false,
           executable: false,
@@ -3101,6 +3105,78 @@ test("evolution review snapshot is strict and drops private fields", () => {
   } }).payload;
   assert.equal(artifactReview.selected.capability_artifact.state, "preview_ready");
   assert.equal(artifactReview.selected.capability_artifact.artifact.checks.length, 8);
+  const scenarioBindingReview = normalizeServerRecord({ type: "evolution/review", payload: {
+    ...artifactReview,
+    selected: {
+      ...artifactReview.selected,
+      capability_scenario_binding: {
+        schema_version: 1,
+        candidate_id: capabilitySource.candidate_id,
+        artifact_id: artifactReview.selected.capability_artifact.artifact.artifact_id,
+        state: "ready",
+        pending_interaction_id: "",
+        artifact_current: true,
+        binding_current: true,
+        sandbox_execution_eligible: true,
+        sandbox_execution_authorized: false,
+        registration_authorized: false,
+        shadow_authorized: false,
+        executable: false,
+        binding: {
+          schema_version: 1,
+          policy_version: "evolution-capability-scenario-binding-v1",
+          binding_id: `evcsb_${"5".repeat(24)}`,
+          binding_sha256: "4".repeat(64),
+          candidate_id: capabilitySource.candidate_id,
+          specification_id: specificationId,
+          specification_sha256: specificationSha256,
+          artifact_id: artifactReview.selected.capability_artifact.artifact.artifact_id,
+          artifact_sha256: artifactReview.selected.capability_artifact.artifact.artifact_sha256,
+          permission_specification_sha256: artifactReview.selected.capability_artifact.artifact.permission_specification_sha256,
+          verification_specification_sha256: artifactReview.selected.capability_artifact.artifact.verification_specification_sha256,
+          source_interaction_id: `ask-evcsbind-${"9".repeat(24)}-1`,
+          source_interaction_sequence: 2,
+          source_interaction_sha256: "2".repeat(64),
+          answered_by: "user",
+          schema_dialect: "https://json-schema.org/draft/2020-12",
+          sandbox_execution_eligible: true,
+          sandbox_execution_authorized: false,
+          registration_authorized: false,
+          shadow_authorized: false,
+          executable: false,
+          created_at: "2026-08-12T12:20:00+00:00",
+          scenarios: [{
+            name: "比较两份真实轨迹",
+            expectation_kind: "result",
+            timeout_ms: 1500,
+            arguments: { private: true },
+          }],
+        },
+      },
+    },
+  } }).payload;
+  assert.equal(scenarioBindingReview.selected.capability_scenario_binding.state, "ready");
+  assert.deepEqual(
+    scenarioBindingReview.selected.capability_scenario_binding.binding.scenarios[0],
+    { name: "比较两份真实轨迹", expectation_kind: "result", timeout_ms: 1500 },
+  );
+  assert.equal(
+    Object.hasOwn(
+      scenarioBindingReview.selected.capability_scenario_binding.binding.scenarios[0],
+      "arguments",
+    ),
+    false,
+  );
+  assert.throws(() => normalizeServerRecord({ type: "evolution/review", payload: {
+    ...scenarioBindingReview,
+    selected: {
+      ...scenarioBindingReview.selected,
+      capability_scenario_binding: {
+        ...scenarioBindingReview.selected.capability_scenario_binding,
+        executable: true,
+      },
+    },
+  } }), /authority/);
   assert.throws(() => normalizeServerRecord({ type: "evolution/review", payload: {
     ...governed,
     selected: {

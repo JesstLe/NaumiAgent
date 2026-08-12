@@ -6105,6 +6105,10 @@ class JsonlEngineBridge:
             CapabilityGovernanceError,
             render_capability_governance,
         )
+        from naumi_agent.evolution.capability_scenario_binding import (
+            CapabilityScenarioBindingError,
+            render_capability_scenario_binding,
+        )
         from naumi_agent.evolution.capability_specification import (
             CapabilitySpecificationStoreError,
             render_capability_specification,
@@ -6175,6 +6179,22 @@ class JsonlEngineBridge:
                     self.engine.workspace_root,
                     str(payload.get("candidate_id") or ""),
                 )
+            elif action == "capability-bind":
+                view = (
+                    await self.engine.evolution_capability_scenario_binding_service.advance(
+                        self.engine.workspace_root,
+                        candidate_id=str(payload.get("candidate_id") or ""),
+                    )
+                )
+                await self._emit_system_notice(
+                    "Capability 可执行场景绑定",
+                    render_capability_scenario_binding(view),
+                    request_id=request_id,
+                )
+                snapshot = await service.detail_snapshot(
+                    self.engine.workspace_root,
+                    str(payload.get("candidate_id") or ""),
+                )
             elif action == "enqueue":
                 session = getattr(self.engine, "_session", None)
                 if session is None:
@@ -6217,29 +6237,39 @@ class JsonlEngineBridge:
             CapabilitySpecificationStoreError,
             CapabilityGovernanceError,
             CapabilityArtifactError,
+            CapabilityScenarioBindingError,
             EvolutionStoreError,
             OSError,
             ValueError,
         ):
             if action in {
-                "capability-spec", "capability-govern", "capability-artifact"
+                "capability-spec", "capability-govern", "capability-artifact",
+                "capability-bind",
             }:
                 await self.emit_error(
                     (
                         "Capability 实现制品未就绪；源码、规格或治理来源已失效。"
                         if action == "capability-artifact"
                         else (
-                            "Capability Specification/Governance 未推进；"
-                            "来源失效、答案无效或交互仍待处理。"
+                            "Capability 场景未绑定；Artifact、人工答案或 JSON Schema 已失效。"
+                            if action == "capability-bind"
+                            else (
+                                "Capability Specification/Governance 未推进；"
+                                "来源失效、答案无效或交互仍待处理。"
+                            )
                         )
                     ),
                     code=(
                         "evolution_capability_artifact_failed"
                         if action == "capability-artifact"
                         else (
-                            "evolution_capability_governance_failed"
-                            if action == "capability-govern"
-                            else "evolution_capability_specification_failed"
+                            "evolution_capability_scenario_binding_failed"
+                            if action == "capability-bind"
+                            else (
+                                "evolution_capability_governance_failed"
+                                if action == "capability-govern"
+                                else "evolution_capability_specification_failed"
+                            )
                         )
                     ),
                     request_id=request_id,

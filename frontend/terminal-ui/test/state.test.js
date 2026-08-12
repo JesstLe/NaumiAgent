@@ -2930,6 +2930,29 @@ test("evolution capability-artifact uses typed inspect and create requests", () 
   }
 });
 
+test("evolution capability-bind uses the typed scenario-binding route", () => {
+  const state = createInitialState();
+  const sent = [];
+  const candidateId = `evc_${"f".repeat(24)}`;
+  handleSubmitText(
+    state,
+    `/evolution capability-bind ${candidateId}`,
+    (type, payload) => sent.push({ type, payload }),
+  );
+  assert.equal(state.route.name, "evolution_review");
+  assert.deepEqual(sent, [{
+    type: "evolution/review/request",
+    payload: {
+      action: "capability-bind",
+      candidate_id: candidateId,
+      query: "",
+      risk: "",
+      source_kind: "",
+      limit: 50,
+    },
+  }]);
+});
+
 test("outcome discovery uses slash execution then filters its typed projection", () => {
   const state = createInitialState();
   const sent = [];

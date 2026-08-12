@@ -197,6 +197,24 @@ function detailLines(item, rawEvents) {
       lines.push(color(ANSI.dim, `创建 · /evolution capability-artifact ${item.candidate_id} <source.py> <ClassName>`));
     }
   }
+  if (item.capability_scenario_binding) {
+    const view = item.capability_scenario_binding;
+    lines.push(
+      color(ANSI.cyan, `── Capability 可执行场景绑定 · ${view.state}`),
+      color(view.sandbox_execution_eligible ? ANSI.green : ANSI.yellow, `Sandbox 执行资格 · ${view.sandbox_execution_eligible ? "是" : "否"}`),
+      color(ANSI.red, "执行授权 否 · Registry 否 · Shadow 否 · 可执行 否"),
+    );
+    if (view.binding) {
+      lines.push(color(ANSI.dim, `${view.binding.binding_id} · 人工来源 ${view.binding.source_interaction_id}`));
+      for (const scenario of view.binding.scenarios) {
+        lines.push(color(ANSI.dim, `• ${scenario.name} · ${scenario.expectation_kind} · ${scenario.timeout_ms}ms`));
+      }
+    } else if (view.pending_interaction_id) {
+      lines.push(color(ANSI.yellow, `待回答交互 · ${view.pending_interaction_id}`));
+    } else if (view.artifact_current) {
+      lines.push(color(ANSI.cyan, `绑定 · /evolution capability-bind ${item.candidate_id}`));
+    }
+  }
   const aggregation = item.aggregation;
   if (aggregation) {
     lines.push(

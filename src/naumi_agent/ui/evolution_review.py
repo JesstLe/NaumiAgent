@@ -82,6 +82,7 @@ def _item_payload(item: EvolutionReviewItem, *, detail: bool) -> dict[str, Any]:
             "capability_specification": _capability_specification_payload(item),
             "capability_governance": _capability_governance_payload(item),
             "capability_artifact": _capability_artifact_payload(item),
+            "capability_scenario_binding": _capability_scenario_binding_payload(item),
         })
     return payload
 
@@ -257,6 +258,26 @@ def _capability_artifact_payload(item: EvolutionReviewItem) -> dict[str, Any] | 
     artifact = payload.get("artifact")
     if isinstance(artifact, dict):
         artifact.pop("source_text", None)
+    return payload
+
+
+def _capability_scenario_binding_payload(
+    item: EvolutionReviewItem,
+) -> dict[str, Any] | None:
+    value = item.capability_scenario_binding
+    if value is None:
+        return None
+    payload = value.model_dump(mode="json")
+    binding = payload.get("binding")
+    if isinstance(binding, dict) and value.binding is not None:
+        binding["scenarios"] = [
+            {
+                "name": scenario.name,
+                "expectation_kind": scenario.expectation.kind,
+                "timeout_ms": scenario.timeout_ms,
+            }
+            for scenario in value.binding.scenarios
+        ]
     return payload
 
 

@@ -109,8 +109,28 @@ test("evolution review list and detail stay bounded at common widths", () => {
         },
         decision: null,
       },
+      capability_scenario_binding: {
+        state: "ready",
+        artifact_current: true,
+        binding_current: true,
+        sandbox_execution_eligible: true,
+        sandbox_execution_authorized: false,
+        registration_authorized: false,
+        shadow_authorized: false,
+        executable: false,
+        pending_interaction_id: "",
+        binding: {
+          binding_id: `evcsb_${"f".repeat(24)}`,
+          source_interaction_id: `ask-evcsbind-${"e".repeat(24)}-1`,
+          scenarios: [{
+            name: "比较两份真实轨迹",
+            expectation_kind: "result",
+            timeout_ms: 1500,
+          }],
+        },
+      },
     };
-    const detail = renderEvolutionReviewPage({ snapshot: { mode: "detail", filters: {}, items: [], selected, events: [] }, scrollOffset: 0 }, width, 60);
+    const detail = renderEvolutionReviewPage({ snapshot: { mode: "detail", filters: {}, items: [], selected, events: [] }, scrollOffset: 0 }, width, 80);
     const plain = detail.map(stripAnsi).join("\n");
     assert(detail.every((line) => visibleWidth(line) <= width));
     assert(plain.includes("Eligibility Gates"));
@@ -128,6 +148,8 @@ test("evolution review list and detail stay bounded at common widths", () => {
     assert(plain.includes("Capability Governance · awaiting_decision"));
     assert(plain.includes("Registry 注册 否 · Shadow 否 · 可执行 否"));
     assert(plain.includes(`/evolution capability-govern ${candidate.candidate_id}`));
+    assert(plain.includes("Capability 可执行场景绑定 · ready"));
+    assert(plain.includes("比较两份真实轨迹 · result · 1500ms"));
     assert(plain.includes("Workbench 治理"));
     assert(plain.includes("可解释优先级"));
     assert(plain.includes("严重度 4 × 频次 2"));

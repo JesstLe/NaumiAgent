@@ -105,6 +105,10 @@ from naumi_agent.evolution.capability_governance import (
     EvolutionCapabilityGovernanceService,
     EvolutionCapabilityGovernanceStore,
 )
+from naumi_agent.evolution.capability_scenario_binding import (
+    EvolutionCapabilityScenarioBindingService,
+    EvolutionCapabilityScenarioBindingStore,
+)
 from naumi_agent.evolution.capability_specification import (
     EvolutionCapabilitySpecificationService,
     EvolutionCapabilitySpecificationStore,
@@ -1526,6 +1530,24 @@ class AgentEngine:
         )
         self.evolution_review_service.bind_capability_artifact_reader(
             self.evolution_capability_artifact_service
+        )
+        self.evolution_capability_scenario_binding_store = (
+            EvolutionCapabilityScenarioBindingStore(
+                self.evolution_candidate_store.db_path,
+            )
+        )
+        self.evolution_capability_scenario_binding_service = (
+            EvolutionCapabilityScenarioBindingService(
+                review_service=self.evolution_review_service,
+                specification_service=self.evolution_capability_specification_service,
+                artifact_service=self.evolution_capability_artifact_service,
+                store=self.evolution_capability_scenario_binding_store,
+                interaction_store=self._harness_store,
+                request_user_input=self.request_user_input,
+            )
+        )
+        self.evolution_review_service.bind_capability_scenario_binding_reader(
+            self.evolution_capability_scenario_binding_service
         )
         self.evolution_experiment_contract_store = EvolutionExperimentContractStore(
             config.memory.session_db_path

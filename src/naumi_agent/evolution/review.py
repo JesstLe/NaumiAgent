@@ -15,6 +15,9 @@ from naumi_agent.evolution.capability_proposal import (
     EvolutionCapabilityProposal,
     generate_capability_proposal,
 )
+from naumi_agent.evolution.capability_scenario_binding import (
+    CapabilityScenarioBindingView,
+)
 from naumi_agent.evolution.capability_specification import CapabilitySpecificationView
 from naumi_agent.evolution.eligibility import (
     CandidateEligibilityAssessment,
@@ -98,6 +101,15 @@ class CapabilityArtifactReader(Protocol):
     ) -> CapabilityArtifactView: ...
 
 
+class CapabilityScenarioBindingReader(Protocol):
+    async def inspect_capability_scenario_binding(
+        self,
+        workspace_root: str | Path,
+        candidate_id: str,
+        artifact_view: CapabilityArtifactView,
+    ) -> CapabilityScenarioBindingView | None: ...
+
+
 @dataclass(frozen=True, slots=True)
 class EvolutionReviewFilter:
     query: str = ""
@@ -147,6 +159,7 @@ class EvolutionReviewItem:
     capability_specification: CapabilitySpecificationView | None
     capability_governance: CapabilityGovernanceView | None
     capability_artifact: CapabilityArtifactView | None
+    capability_scenario_binding: CapabilityScenarioBindingView | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,6 +184,7 @@ class EvolutionReviewService:
         capability_specification_reader: CapabilitySpecificationReader | None = None,
         capability_governance_reader: CapabilityGovernanceReader | None = None,
         capability_artifact_reader: CapabilityArtifactReader | None = None,
+        capability_scenario_binding_reader: CapabilityScenarioBindingReader | None = None,
     ) -> None:
         self._store = store
         self._governance_reader = governance_reader
@@ -178,6 +192,7 @@ class EvolutionReviewService:
         self._capability_specification_reader = capability_specification_reader
         self._capability_governance_reader = capability_governance_reader
         self._capability_artifact_reader = capability_artifact_reader
+        self._capability_scenario_binding_reader = capability_scenario_binding_reader
 
     def bind_governance_reader(self, reader: CandidateGovernanceReader) -> None:
         """Bind the durable read path after runtime services are composed."""
@@ -229,6 +244,17 @@ class EvolutionReviewService:
         ):
             raise RuntimeError("Capability Artifact reader 已绑定。")
         self._capability_artifact_reader = reader
+
+    def bind_capability_scenario_binding_reader(
+        self,
+        reader: CapabilityScenarioBindingReader,
+    ) -> None:
+        if (
+            self._capability_scenario_binding_reader is not None
+            and self._capability_scenario_binding_reader is not reader
+        ):
+            raise RuntimeError("Capability Scenario Binding reader 已绑定。")
+        self._capability_scenario_binding_reader = reader
 
     async def list_snapshot(
         self,
@@ -351,6 +377,19 @@ class EvolutionReviewService:
                     selected,
                     capability_artifact=capability_artifact,
                 )
+                if self._capability_scenario_binding_reader is not None:
+                    scenario_binding = (
+                        await self._capability_scenario_binding_reader
+                        .inspect_capability_scenario_binding(
+                            workspace_root,
+                            selected.candidate_id,
+                            capability_artifact,
+                        )
+                    )
+                    selected = replace(
+                        selected,
+                        capability_scenario_binding=scenario_binding,
+                    )
         return EvolutionReviewSnapshot(
             mode="detail",
             selected=selected,
@@ -700,6 +739,28 @@ def _render_detail(snapshot: EvolutionReviewSnapshot) -> str:
                 f"- 源码当前：{'是' if artifact_view.source_current else '否'}",
                 f"- 治理当前：{'是' if artifact_view.governance_current else '否'}",
             ])
+    if item.capability_scenario_binding is not None:
+        binding_view = item.capability_scenario_binding
+        lines.extend([
+            "",
+            f"## Capability 可执行场景绑定 · `{binding_view.state}`",
+            "",
+            (
+                "- Sandbox 执行资格：是"
+                if binding_view.sandbox_execution_eligible
+                else "- Sandbox 执行资格：否"
+            ),
+            "- Sandbox 执行授权：否 · Registry：否 · Shadow：否 · 可执行：否",
+        ])
+        if binding_view.binding is not None:
+            lines.extend([
+                f"- Binding：`{binding_view.binding.binding_id}`",
+                f"- 场景数：{len(binding_view.binding.scenarios)}",
+            ])
+        elif not binding_view.pending_interaction_id:
+            lines.append(
+                f"- 继续：`/evolution capability-bind {item.candidate_id}`"
+            )
     lines.extend(["", "## Evidence 引用", ""])
     lines.extend(f"- `{_escape(ref)}`" for ref in item.evidence_refs[:20])
     if len(item.evidence_refs) > 20:
@@ -801,6 +862,7 @@ def _review_item(
         capability_specification=None,
         capability_governance=None,
         capability_artifact=None,
+        capability_scenario_binding=None,
     )
 
 

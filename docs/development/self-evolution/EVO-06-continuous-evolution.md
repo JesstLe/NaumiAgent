@@ -39,7 +39,10 @@
 - [EVO-06.3a](EVO-06-3a-sealed-capability-artifact-admission-preview.md) Sealed Capability Artifact
   与 Sandbox 准入预检（已实现）：封存 approved Specification 对应的真实 Python Tool 源码，执行
   AST/schema/顶层副作用/内置名冲突/临时 namespace 检查；源码或治理变化动态撤权，但不 import、注册或执行。
-- EVO-06.3b Sandbox execution 与临时注册 lease：在 ARC-04/Harness Sandbox 中验证 fixture、结果/错误
+- [EVO-06.3b1](EVO-06-3b1-executable-scenario-binding.md) Interaction-backed executable scenario
+  binding（已实现）：把 prose verification 转为参数 schema、result/error oracle 与 timeout 均可机械校验的
+  Harness 人工 Binding；Artifact 或交互来源变化动态撤权，仍不 import、执行或注册。
+- EVO-06.3b2 Sandbox execution 与临时注册 lease：在 ARC-04/Harness Sandbox 中验证已绑定场景、结果/错误
   schema 和权限观察后，才能获得短期、可撤销 Registry lease；不能覆盖内置 Tool。
 - EVO-06.4 Shadow evaluation：观察建议调用但不执行，比较路由准确度和价值。
 - EVO-06.5 Limited activation：低风险、明确 scope、预算和用户可见标识。
@@ -62,9 +65,9 @@ EVO-06 不得从“LLM 生成了改进建议”直接开始。每次循环必须
 RED/GREEN H5a、H5c comparison、失败归因、签名 Decision、staged rollout、运行监控、rollback/accept Outcome 缺一不可。Outcome 必须回注
 opportunity discovery，并以新 Candidate ID 开启下一轮；不得原地改写上一轮证据或把未执行建议计为能力提升。
 
-当前 `EVO-06.1a/1b/1c1/1c2/1c3/1c4` 已分别关闭 rolled_back、stable promoted Outcome、H5c 定量回归、
+当前 `EVO-06.1a/1b/1c1/1c2/1c3/1c4/2a/2b/2c/3a/3b1` 已分别关闭 rolled_back、stable promoted Outcome、H5c 定量回归、
 durable Goal 明确需求与 exact Tool Catalog miss 的发现断点，但不代表 EVO-06 完成：自然语言缺失意图、
-更细粒度可验证语义聚类、Sandbox implementation/registration、
+更细粒度可验证语义聚类、真实 Sandbox execution/registration、
 Sandbox/Shadow/Limited Activation、选择、退休和 Meta-governance 仍待实现。
 
 ## 终极边界
