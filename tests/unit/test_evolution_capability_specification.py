@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 from naumi_agent.cli.slash_router import execute_slash_command
+from naumi_agent.clipboard import strip_ansi
 from naumi_agent.config.settings import AppConfig, MemoryConfig, ModelConfig, ModelMeta
 from naumi_agent.daemons.permission_decisions import (
     PermissionDecisionActor,
@@ -73,6 +74,10 @@ from naumi_agent.evolution.capability_shadow_descriptors import (
 from naumi_agent.evolution.capability_shadow_observation_contracts import (
     EvolutionCapabilityShadowObservationContractService,
     EvolutionCapabilityShadowObservationContractStore,
+)
+from naumi_agent.evolution.capability_shadow_run_admissions import (
+    EvolutionCapabilityShadowRunAdmissionService,
+    EvolutionCapabilityShadowRunAdmissionStore,
 )
 from naumi_agent.evolution.capability_specification import (
     CapabilityDataSpecification,
@@ -2283,6 +2288,16 @@ async def test_capability_sandbox_executes_real_arc04_worker_and_seals_receipt(
         ),
         now=lambda: registry_clock[0].isoformat(),
     )
+    shadow_run_service = EvolutionCapabilityShadowRunAdmissionService(
+        workspace_root=tmp_path,
+        observation_contract_service=shadow_observation_service,
+        store=EvolutionCapabilityShadowRunAdmissionStore(tmp_path / "evolution.db"),
+        harness_store=engine._harness_store,
+        permission_store=engine._resources.permission_decision_store,
+        run_grant_authority=engine.run_delegation_grant_authority,
+        runtime_instance_id="evcsrart_" + "9" * 24,
+        now=lambda: datetime.now(UTC).isoformat(),
+    )
     decided_at = datetime.now(UTC).isoformat()
     parent = await engine._resources.permission_decision_store.issue(
         request_id="capability-sandbox-request",
@@ -2444,6 +2459,25 @@ async def test_capability_sandbox_executes_real_arc04_worker_and_seals_receipt(
             f"{proposal.source.candidate_id}",
         )
         assert shadow_observation.contract.contract_id in shadow_observation_slash
+        engine.evolution_capability_shadow_run_admission_service = shadow_run_service
+        shadow_run_output = await execute_slash_command(
+            engine,
+            f"/evolution capability-shadow-run {proposal.source.candidate_id}",
+        )
+        shadow_run = await shadow_run_service.inspect(proposal.source.candidate_id)
+        assert shadow_run.state == "ready", shadow_run_output
+        assert shadow_run.provider_call_authorized is True
+        assert shadow_run.provider_call_completed is False
+        assert shadow_run.candidate_execution_authorized is False
+        assert shadow_run.admission is not None
+        assert shadow_run.admission.admission_id in shadow_run_output
+        shadow_run_status = await execute_slash_command(
+            engine,
+            f"/evolution capability-shadow-run-status "
+            f"{proposal.source.candidate_id}",
+        )
+        assert shadow_run.admission.admission_id in shadow_run_status
+        assert "Provider 调用授权：是" in shadow_run_status
         candidate_source = tmp_path / "candidate.py"
         sealed_source = candidate_source.read_text(encoding="utf-8")
         candidate_source.write_text(
@@ -2467,6 +2501,21 @@ async def test_capability_sandbox_executes_real_arc04_worker_and_seals_receipt(
         )
         assert revoked_observation.state == "descriptor_revoked"
         assert revoked_observation.observation_input_eligible is False
+        revoked_admission = await shadow_run_service.inspect(
+            proposal.source.candidate_id
+        )
+        assert revoked_admission.state == "contract_revoked"
+        assert revoked_admission.provider_call_authorized is False
+        shadow_run_revoke_output = await execute_slash_command(
+            engine,
+            f"/evolution capability-shadow-run-revoke "
+            f"{proposal.source.candidate_id}",
+        )
+        revoked_admission = await shadow_run_service.inspect(
+            proposal.source.candidate_id
+        )
+        assert revoked_admission.state == "revoked"
+        assert "状态：revoked" in strip_ansi(shadow_run_revoke_output)
         candidate_source.write_text(sealed_source, encoding="utf-8")
         final_parent = await engine._resources.permission_decision_store.issue(
             request_id="capability-registry-final-request",

@@ -338,6 +338,19 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         risk_level=PermissionRiskLevel.MEDIUM,
         tool_family="evolution_capability_shadow",
     ),
+    "evolution_capability_shadow_run_admission": PermissionRule(
+        tool_name="evolution_capability_shadow_run_admission",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+        max_calls_per_session=20,
+        risk_level=PermissionRiskLevel.MEDIUM,
+        tool_family="evolution_capability_shadow",
+    ),
     "file_read": PermissionRule(
         tool_name="file_read",
         allowed_modes=[

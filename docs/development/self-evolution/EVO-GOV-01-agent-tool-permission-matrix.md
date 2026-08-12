@@ -37,6 +37,7 @@ authority 并保持所有 Git/Promotion 字段为 false；Revalidation Request T
 | Tool | Artifact | Family | Session 上限 |
 | --- | --- | --- | ---: |
 | `evolution_capability_shadow_observation_contract` | non-executing Shadow observation input contract | `evolution_capability_shadow` | 50 |
+| `evolution_capability_shadow_run_admission` | bounded Provider-call scope backed by exact Harness lease/grant; no call in this Tool | `evolution_capability_shadow` | 20 |
 | `evolution_evaluation_receipt` | 单 lane Evaluation Receipt | `evolution_evaluation_artifact` | 200 |
 | `evolution_evaluation_contract` | Evaluation Aggregation Contract | `evolution_evaluation_artifact` | 50 |
 | `evolution_final_evaluation_receipt` | Final Evaluation Receipt | `evolution_evaluation_artifact` | 50 |
