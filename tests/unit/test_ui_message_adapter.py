@@ -339,9 +339,13 @@ class TestToolLifecycle:
             "status": "error",
             "duration_ms": 50,
             "content": "command failed",
+            "error_code": "command_failed",
+            "retryable": True,
         })
         assert isinstance(msg, ToolResultMessage)
         assert msg.status == "error"
+        assert msg.error_code == "command_failed"
+        assert msg.retryable is True
 
     def test_tool_end_skipped(self, adapter: EngineEventAdapter) -> None:
         msg = adapter.adapt("tool_end", {

@@ -575,6 +575,8 @@
         "tool_call_id",
         "status",
         "duration_ms",
+        "error_code",
+        "retryable",
         "content_preview",
         "content_length",
         "preview_format",

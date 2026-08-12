@@ -42,6 +42,9 @@
 - [EVO-06.3b1](EVO-06-3b1-executable-scenario-binding.md) Interaction-backed executable scenario
   binding（已实现）：把 prose verification 转为参数 schema、result/error oracle 与 timeout 均可机械校验的
   Harness 人工 Binding；Artifact 或交互来源变化动态撤权，仍不 import、执行或注册。
+- [ARC-01.3d1](../architecture/ARC-01-3d1-structured-tool-failure-contract.md) 已补齐 EVO-06.3b2 所需的最小
+  结构化 Tool 失败契约：稳定 error code、用户安全 message 与 retryable 贯通 Engine、事件、UI 和 Worker RPC；
+  旧 Tool/RPC 保持兼容，但该契约自身不授予 Sandbox 或 Registry authority。
 - EVO-06.3b2 Sandbox execution 与临时注册 lease：在 ARC-04/Harness Sandbox 中验证已绑定场景、结果/错误
   schema 和权限观察后，才能获得短期、可撤销 Registry lease；不能覆盖内置 Tool。
 - EVO-06.4 Shadow evaluation：观察建议调用但不执行，比较路由准确度和价值。

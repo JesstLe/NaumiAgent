@@ -96,6 +96,8 @@ export function messageRenderKey(message, ctx) {
     prepareMetrics: message.prepareMetrics ?? null,
     prepareDetails: message.prepareDetails ?? [],
     durationMs: message.durationMs ?? 0,
+    errorCode: message.errorCode ?? "",
+    retryable: message.retryable === true,
     output: message.output ?? "",
     outputLength: message.outputLength ?? 0,
     outputBytes: message.outputBytes ?? 0,

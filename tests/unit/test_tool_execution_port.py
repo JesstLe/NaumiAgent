@@ -22,7 +22,9 @@ from naumi_agent.runtime.ports.tool_execution import (
     ToolExecutionPort,
 )
 from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
-from naumi_agent.tools.base import Tool, ToolCall
+from naumi_agent.streaming.publisher import RuntimeEventPublisher
+from naumi_agent.streaming.sinks import CallbackEventSink
+from naumi_agent.tools.base import Tool, ToolCall, ToolExecutionError, ToolResult
 from naumi_agent.tools.builtin import FileReadTool, FileWriteTool
 from naumi_agent.tools.execution import LocalToolExecutor
 
@@ -65,6 +67,36 @@ class _FailingExecutor:
     ) -> ToolExecutionOutcome:
         del tool, arguments, event_callback
         raise RuntimeError("remote-worker-down")
+
+
+class _DeclaredFailingExecutor:
+    async def invoke(
+        self,
+        tool: Any,
+        arguments: Mapping[str, object],
+        *,
+        event_callback: ToolEventCallback | None = None,
+    ) -> ToolExecutionOutcome:
+        del tool, arguments, event_callback
+        raise ToolExecutionError(
+            "source_unavailable",
+            "来源暂时不可用，请稍后重试。",
+            retryable=True,
+        )
+
+
+class _TamperedDeclaredFailingExecutor:
+    async def invoke(
+        self,
+        tool: Any,
+        arguments: Mapping[str, object],
+        *,
+        event_callback: ToolEventCallback | None = None,
+    ) -> ToolExecutionOutcome:
+        del tool, arguments, event_callback
+        error = ToolExecutionError("source_unavailable", "安全消息。")
+        error.args = ("token=sk-secretvalue",)
+        raise error
 
 
 class _BlockingExecutor:
@@ -224,6 +256,36 @@ def test_tool_execution_outcome_rejects_invalid_values() -> None:
         ToolExecutionOutcome(content="ok", duration_ms=True)  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="duration_ms 必须是非负整数"):
         ToolExecutionOutcome(content="ok", duration_ms=-1)
+
+
+def test_declared_tool_failure_is_bounded_and_tool_result_is_consistent() -> None:
+    error = ToolExecutionError(
+        "source_unavailable",
+        "来源暂时不可用，请稍后重试。",
+        retryable=True,
+    )
+    assert str(error) == "来源暂时不可用，请稍后重试。"
+    assert error.code == "source_unavailable"
+    assert error.retryable is True
+
+    result = ToolResult(
+        "call-1",
+        "error",
+        str(error),
+        error_code=error.code,
+        retryable=error.retryable,
+    )
+    assert result.error_code == "source_unavailable"
+    assert result.retryable is True
+
+    with pytest.raises(ValueError, match="错误码"):
+        ToolExecutionError("Source-Unavailable", "失败。")
+    with pytest.raises(ValueError, match="疑似凭据"):
+        ToolExecutionError("source_unavailable", "token=sk-secretvalue")
+    with pytest.raises(ValueError, match="只有 error"):
+        ToolResult("call-1", "success", "ok", error_code="unexpected")
+    with pytest.raises(ValueError, match="必须携带 error_code"):
+        ToolResult("call-1", "error", "稍后重试。", retryable=True)
 
 
 def _engine_config(tmp_path: Path) -> AppConfig:
@@ -665,6 +727,30 @@ async def test_engine_normalizes_port_failure_but_propagates_cancellation(
     finally:
         await failing.shutdown()
 
+    declared = AgentEngine(
+        _engine_config(tmp_path / "declared"),
+        tool_execution_port=_DeclaredFailingExecutor(),
+    )
+    declared.set_runtime_mode("bypass")
+    try:
+        failed = await declared.execute_tool(
+            ToolCall(
+                id="declared-failure",
+                name="file_read",
+                arguments='{"path":"missing.txt"}',
+            )
+        )
+        assert failed == ToolResult(
+            call_id="declared-failure",
+            status="error",
+            content="来源暂时不可用，请稍后重试。",
+            error_code="source_unavailable",
+            retryable=True,
+        )
+        assert "ToolExecutionError" not in failed.content
+    finally:
+        await declared.shutdown()
+
     entered = asyncio.Event()
     blocking = AgentEngine(
         _engine_config(tmp_path / "blocking"),
@@ -688,6 +774,76 @@ async def test_engine_normalizes_port_failure_but_propagates_cancellation(
     finally:
         task.cancel()
         await blocking.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_declared_tool_failure_reaches_runtime_tool_end_event(
+    tmp_path: Path,
+) -> None:
+    observed: list[tuple[str, dict[str, object]]] = []
+
+    async def capture(name: str, payload: dict[str, object]) -> None:
+        observed.append((name, payload))
+
+    engine = AgentEngine(
+        _engine_config(tmp_path),
+        tool_execution_port=_DeclaredFailingExecutor(),
+    )
+    engine.set_runtime_mode("bypass")
+    session = await engine.get_or_create_session()
+    publisher = RuntimeEventPublisher(
+        CallbackEventSink(capture),
+        session_id=session.id,
+        run_id="structured-failure-run",
+    )
+    try:
+        await engine._execute_tool_calls(
+            [
+                {
+                    "id": "declared-event",
+                    "function": {
+                        "name": "file_read",
+                        "arguments": '{"path":"missing.txt"}',
+                    },
+                }
+            ],
+            tool_call_history=[],
+            session_id=session.id,
+            turn=1,
+            events=publisher,
+        )
+        end_payload = next(payload for name, payload in observed if name == "tool_end")
+        assert end_payload["status"] == "error"
+        assert end_payload["content"] == "来源暂时不可用，请稍后重试。"
+        assert end_payload["error_code"] == "source_unavailable"
+        assert end_payload["retryable"] is True
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_engine_revalidates_mutated_declared_failure_before_projection(
+    tmp_path: Path,
+) -> None:
+    engine = AgentEngine(
+        _engine_config(tmp_path),
+        tool_execution_port=_TamperedDeclaredFailingExecutor(),
+    )
+    engine.set_runtime_mode("bypass")
+    try:
+        failed = await engine.execute_tool(
+            ToolCall(
+                id="tampered-failure",
+                name="file_read",
+                arguments='{"path":"missing.txt"}',
+            )
+        )
+        assert failed.error_code == "tool_failure_contract_invalid"
+        assert failed.retryable is False
+        assert "安全终止" in failed.content
+        assert "sk-secretvalue" not in failed.content
+    finally:
+        await engine.shutdown()
 
 
 @pytest.mark.asyncio

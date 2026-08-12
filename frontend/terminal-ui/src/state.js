@@ -3333,6 +3333,8 @@ export function handleToolResult(state, message) {
   }
   target.status = message.status;
   target.durationMs = message.duration_ms;
+  target.errorCode = message.error_code ?? "";
+  target.retryable = message.retryable === true;
   target.output = message.content_preview ?? "";
   target.outputLength = message.content_length ?? 0;
   target.outputBytes = message.content_bytes ?? 0;

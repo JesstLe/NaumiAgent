@@ -121,6 +121,25 @@ def test_tool_result_exposes_shared_paged_output_command() -> None:
     assert "共 3 页" in preview
 
 
+def test_tool_result_exposes_retryable_structured_failure() -> None:
+    msg = ToolResultMessage(
+        type=MessageType.TOOL_RESULT,
+        tool_name="catalog_read",
+        status="error",
+        error_code="source_unavailable",
+        retryable=True,
+        content_preview="来源暂时不可用。",
+    )
+    renderer = TUIRenderer()
+    chat = FakeChat()
+
+    renderer.render(msg, chat, FakeStatus(), FakeTodo())
+
+    preview = chat.mounted[0][3]
+    assert "错误码：source_unavailable（可重试）" in preview
+    assert "来源暂时不可用。" in preview
+
+
 def test_recovery_renderer_escapes_markup_sensitive_text() -> None:
     adapter = EngineEventAdapter()
     renderer = TUIRenderer()

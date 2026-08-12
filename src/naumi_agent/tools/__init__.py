@@ -6,6 +6,7 @@ from naumi_agent.tools.base import (
     InterruptBehavior,
     Tool,
     ToolCall,
+    ToolExecutionError,
     ToolMetadata,
     ToolRegistry,
     ToolResult,
@@ -27,6 +28,7 @@ def __getattr__(name: str) -> Any:
 __all__ = [
     "Tool",
     "ToolCall",
+    "ToolExecutionError",
     "ToolMetadata",
     "ToolResult",
     "ToolSchema",

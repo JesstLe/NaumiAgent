@@ -64,10 +64,44 @@ def test_tool_rpc_contracts_round_trip_with_exact_order() -> None:
         call_batch=calls,
         results=[
             ToolResult("call-alpha", "success", "alpha 完成", 3),
-            ToolResult("call-beta", "error", "beta 被权限拒绝", 0),
+            ToolResult(
+                "call-beta",
+                "error",
+                "beta 来源暂时不可用",
+                0,
+                error_code="source_unavailable",
+                retryable=True,
+            ),
         ],
     )
     assert decode_tool_result_batch(encode_tool_result_batch(results)) == results
+
+
+def test_tool_rpc_accepts_legacy_result_without_structured_failure_fields() -> None:
+    calls = issue_tool_call_batch(
+        execution_id="legacy-result",
+        turn=1,
+        raw_calls=[
+            {
+                "id": "call-alpha",
+                "type": "function",
+                "function": {"name": "alpha", "arguments": "{}"},
+            }
+        ],
+        tool_scope=("alpha",),
+    )
+    batch = issue_tool_result_batch(
+        call_batch=calls,
+        results=[ToolResult("call-alpha", "error", "旧错误")],
+    )
+    payload = json.loads(encode_tool_result_batch(batch))
+    assert set(payload["results"][0]) == {
+        "call_id",
+        "status",
+        "content",
+        "duration_ms",
+    }
+    assert decode_tool_result_batch(json.dumps(payload).encode("utf-8")) == batch
 
 
 def test_tool_manifest_requires_exact_sorted_scope_and_schema_fields() -> None:

@@ -966,6 +966,26 @@ test("tool card renders diff output inside a bounded card", () => {
   assert(card.every((line) => visibleWidth(line) <= 80));
 });
 
+test("tool card highlights retryable structured failures", () => {
+  const card = renderToolCard(
+    {
+      kind: "tool",
+      name: "catalog_read",
+      status: "error",
+      errorCode: "source_unavailable",
+      retryable: true,
+      output: "来源暂时不可用，请稍后重试。",
+      outputLength: 0,
+    },
+    80,
+  );
+  const plain = card.map(stripAnsi).join("\n");
+
+  assert.match(plain, /error catalog_read · source_unavailable · 可重试/);
+  assert(card.some((line) => line.includes(ANSI.yellow)));
+  assert(card.every((line) => visibleWidth(line) <= 80));
+});
+
 test("footer wraps complete status fields without ellipsis", () => {
   const state = createInitialState();
   state.mode = "bypass";

@@ -4,12 +4,43 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+_TOOL_ERROR_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_SECRET_RE = re.compile(
+    r"(?:\b(?:api[_-]?key|password|secret|token|authorization|cookie)\b\s*[:=]\s*\S+)"
+    r"|(?:\bbearer\s+\S+)|(?:\bsk-[A-Za-z0-9_-]{8,})",
+    re.IGNORECASE,
+)
+
+
+class ToolExecutionError(RuntimeError):
+    """A declared, user-safe failure raised by a Tool implementation."""
+
+    def __init__(self, code: str, message: str, *, retryable: bool = False) -> None:
+        if not isinstance(code, str) or _TOOL_ERROR_CODE_RE.fullmatch(code) is None:
+            raise ValueError("工具错误码必须是最长 64 字符的小写标识符")
+        if not isinstance(message, str):
+            raise TypeError("工具错误消息必须是字符串")
+        if (
+            not message
+            or message != message.strip()
+            or len(message) > 300
+            or any(ord(character) < 32 or ord(character) == 127 for character in message)
+            or _SECRET_RE.search(message)
+        ):
+            raise ValueError("工具错误消息必须简洁、无控制字符且不包含疑似凭据")
+        if not isinstance(retryable, bool):
+            raise TypeError("工具错误 retryable 必须是布尔值")
+        self.code = code
+        self.retryable = retryable
+        super().__init__(message)
 
 
 @dataclass(frozen=True)
@@ -38,6 +69,18 @@ class ToolResult:
     status: str  # "success" | "error"
     content: str
     duration_ms: int = 0
+    error_code: str = ""
+    retryable: bool = False
+
+    def __post_init__(self) -> None:
+        if self.error_code and _TOOL_ERROR_CODE_RE.fullmatch(self.error_code) is None:
+            raise ValueError("ToolResult.error_code 格式无效")
+        if not isinstance(self.retryable, bool):
+            raise TypeError("ToolResult.retryable 必须是布尔值")
+        if self.status != "error" and (self.error_code or self.retryable):
+            raise ValueError("只有 error ToolResult 可以携带结构化错误字段")
+        if self.retryable and not self.error_code:
+            raise ValueError("retryable ToolResult 必须携带 error_code")
 
 
 class InterruptBehavior(StrEnum):

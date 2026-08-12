@@ -516,6 +516,8 @@ class EngineEventAdapter:
             tool_call_id=_safe_str(data.get("call_id") or data.get("tool_call_id")),
             status=_safe_str(data.get("status")),
             duration_ms=_safe_int(data.get("duration_ms")),
+            error_code=_safe_str(data.get("error_code")),
+            retryable=data.get("retryable") is True,
             content_preview=preview,
             content_length=length,
             content_bytes=max(length, _safe_int(data.get("content_bytes"))),

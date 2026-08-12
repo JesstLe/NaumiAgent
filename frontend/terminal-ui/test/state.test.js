@@ -1683,6 +1683,30 @@ test("tool result stores preview highlight metadata", () => {
   assert.equal(state.tools[0].outputLanguage, "python");
 });
 
+test("tool result retains structured failure metadata", () => {
+  const state = createInitialState();
+
+  reduceServerEvent(state, {
+    type: "ui/message",
+    payload: { type: "tool_use", tool_call_id: "call-error", tool_name: "catalog_read" },
+  });
+  reduceServerEvent(state, {
+    type: "ui/message",
+    payload: {
+      type: "tool_result",
+      tool_call_id: "call-error",
+      tool_name: "catalog_read",
+      status: "error",
+      error_code: "source_unavailable",
+      retryable: true,
+      content_preview: "来源暂时不可用，请稍后重试。",
+    },
+  });
+
+  assert.equal(state.tools[0].errorCode, "source_unavailable");
+  assert.equal(state.tools[0].retryable, true);
+});
+
 test("tool result stores bounded paging reference without full output", () => {
   const state = createInitialState();
   state.welcome.dismissed = true;
