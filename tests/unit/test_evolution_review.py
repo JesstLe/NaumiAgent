@@ -28,6 +28,7 @@ from naumi_agent.tools.evolution_review import (
     EvolutionApprovalSignatureAuthorityTool,
     EvolutionApprovalSignatureTool,
     EvolutionCandidatesTool,
+    EvolutionCapabilitySpecificationTool,
     EvolutionCounterfactualEvidenceTool,
     EvolutionDecisionInputTool,
     EvolutionDecisionResolutionTool,
@@ -382,6 +383,7 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
 
     assert [tool.name for tool in tools] == [
         "evolution_candidates",
+        "evolution_capability_specification",
         "evolution_experiment_contract_authority",
         "evolution_issue_experiment_contract",
         "evolution_evaluation_receipt",
@@ -461,6 +463,8 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
         "evolution_discover_tool_catalog_miss_opportunity",
         "evolution_proposal_queue",
     ]
+    assert isinstance(tools[1], EvolutionCapabilitySpecificationTool)
+    tools = [tools[0], *tools[2:]]
     assert {tool.name for tool in tools if tool.metadata.read_only} == {
         "evolution_candidates",
         "evolution_experiment_contract_authority",

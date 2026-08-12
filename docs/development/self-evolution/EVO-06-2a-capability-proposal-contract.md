@@ -95,7 +95,8 @@ Priority rank/policy 与 typed page 当前快照交叉核对，拒绝传输层�
 
 ## 当前不足与后续依赖
 
-EVO-06.2a 刻意不把未知字段交给 LLM 自动填写。下一最小切片应是 EVO-06.2b：通过 typed interaction
-让用户逐项提供或确认 API、权限、数据、owner/SLO 和真实验收场景，生成带 revision 的不可变规格快照；
-仍不得直接注册。只有规格完整、独立校验通过且治理明确批准后，EVO-06.3 才能设计临时 namespace、
+EVO-06.2a 刻意不把未知字段交给 LLM 自动填写。[EVO-06.2b](EVO-06-2b-interaction-backed-capability-specification.md)
+现已通过 Harness typed interaction 让用户逐项提供 API、权限、数据、owner/SLO 和真实验收场景，并形成
+带 revision 的不可变规格快照；它仍不得直接注册。下一最小切片是 EVO-06.2c 的独立校验与明确治理决策。
+只有规格完整、校验通过且治理明确批准后，EVO-06.3 才能设计临时 namespace、
 内置 Tool 冲突拒绝和可撤销 Sandbox Registry。

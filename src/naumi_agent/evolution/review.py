@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -13,6 +13,7 @@ from naumi_agent.evolution.capability_proposal import (
     EvolutionCapabilityProposal,
     generate_capability_proposal,
 )
+from naumi_agent.evolution.capability_specification import CapabilitySpecificationView
 from naumi_agent.evolution.eligibility import (
     CandidateEligibilityAssessment,
     CandidateGovernanceContext,
@@ -70,6 +71,14 @@ class CandidateSourceAuthorityReader(Protocol):
     ) -> bool: ...
 
 
+class CapabilitySpecificationReader(Protocol):
+    async def inspect_capability_specification(
+        self,
+        workspace_root: str | Path,
+        proposal: EvolutionCapabilityProposal,
+    ) -> CapabilitySpecificationView: ...
+
+
 @dataclass(frozen=True, slots=True)
 class EvolutionReviewFilter:
     query: str = ""
@@ -116,6 +125,7 @@ class EvolutionReviewItem:
     aggregation: CandidateAggregation | None
     proposal: EvolutionProposalPreview | None
     capability_proposal: EvolutionCapabilityProposal | None
+    capability_specification: CapabilitySpecificationView | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,10 +147,12 @@ class EvolutionReviewService:
         *,
         governance_reader: CandidateGovernanceReader | None = None,
         source_authority_reader: CandidateSourceAuthorityReader | None = None,
+        capability_specification_reader: CapabilitySpecificationReader | None = None,
     ) -> None:
         self._store = store
         self._governance_reader = governance_reader
         self._source_authority_reader = source_authority_reader
+        self._capability_specification_reader = capability_specification_reader
 
     def bind_governance_reader(self, reader: CandidateGovernanceReader) -> None:
         """Bind the durable read path after runtime services are composed."""
@@ -159,6 +171,17 @@ class EvolutionReviewService:
                 "Evolution source authority reader 已绑定；请在 composition root 使用组合器。"
             )
         self._source_authority_reader = reader
+
+    def bind_capability_specification_reader(
+        self,
+        reader: CapabilitySpecificationReader,
+    ) -> None:
+        if (
+            self._capability_specification_reader is not None
+            and self._capability_specification_reader is not reader
+        ):
+            raise RuntimeError("Capability Specification reader 已绑定。")
+        self._capability_specification_reader = reader
 
     async def list_snapshot(
         self,
@@ -234,17 +257,32 @@ class EvolutionReviewService:
             for item in candidates
         )
         priorities = {item.candidate_id: item for item in portfolio.priorities}
+        selected = _review_item(
+            stored,
+            include_refs=True,
+            governance=governance.get(candidate_id),
+            source_authority_valid=source_authority.get(candidate_id, False),
+            eligibility=assessments[candidate_id],
+            priority=priorities.get(candidate_id),
+            portfolio=portfolio,
+        )
+        if (
+            selected.capability_proposal is not None
+            and self._capability_specification_reader is not None
+        ):
+            capability_specification = (
+                await self._capability_specification_reader.inspect_capability_specification(
+                    workspace_root,
+                    selected.capability_proposal,
+                )
+            )
+            selected = replace(
+                selected,
+                capability_specification=capability_specification,
+            )
         return EvolutionReviewSnapshot(
             mode="detail",
-            selected=_review_item(
-                stored,
-                include_refs=True,
-                governance=governance.get(candidate_id),
-                source_authority_valid=source_authority.get(candidate_id, False),
-                eligibility=assessments[candidate_id],
-                priority=priorities.get(candidate_id),
-                portfolio=portfolio,
-            ),
+            selected=selected,
             events=events[-100:],
             portfolio=portfolio,
         )
@@ -514,6 +552,30 @@ def _render_detail(snapshot: EvolutionReviewSnapshot) -> str:
             f"- `{_escape(requirement)}`"
             for requirement in capability.unresolved_requirements
         )
+    if item.capability_specification is not None:
+        specification = item.capability_specification
+        lines.extend([
+            "",
+            f"## Capability Specification · `{specification.state}`",
+            "",
+            f"- ID：`{specification.specification_id}`",
+            f"- Revision：{specification.revision}/5",
+            (
+                "- 已完成：`"
+                + (_escape(", ".join(specification.completed_steps)) or "-")
+                + "`"
+            ),
+            f"- 下一步：`{specification.pending_step or '无'}`",
+            "- Sandbox：否 · Shadow：否 · 可执行：否",
+        ])
+        if specification.pending_interaction_id:
+            lines.append(
+                f"- 待回答交互：`{_escape(specification.pending_interaction_id)}`"
+            )
+        if specification.pending_step is not None:
+            lines.append(
+                f"- 继续：`/evolution capability-spec {item.candidate_id}`"
+            )
     lines.extend(["", "## Evidence 引用", ""])
     lines.extend(f"- `{_escape(ref)}`" for ref in item.evidence_refs[:20])
     if len(item.evidence_refs) > 20:
@@ -612,6 +674,7 @@ def _review_item(
             if include_refs and portfolio is not None
             else None
         ),
+        capability_specification=None,
     )
 
 

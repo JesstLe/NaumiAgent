@@ -87,6 +87,14 @@ test("evolution review list and detail stay bounded at common widths", () => {
         interface: { requested_name: "browser.trace_compare" },
         unresolved_requirements: ["api.parameters_schema", "permissions.required_families"],
       },
+      capability_specification: {
+        specification_id: `evcs_${"d".repeat(24)}`,
+        state: "drafting",
+        revision: 2,
+        completed_steps: ["interface", "permissions"],
+        pending_step: "data",
+        pending_interaction_id: "",
+      },
     };
     const detail = renderEvolutionReviewPage({ snapshot: { mode: "detail", filters: {}, items: [], selected, events: [] }, scrollOffset: 0 }, width, 60);
     const plain = detail.map(stripAnsi).join("\n");
@@ -100,6 +108,9 @@ test("evolution review list and detail stay bounded at common widths", () => {
     assert(plain.includes("Capability Proposal"));
     assert(plain.includes("可注册 否 · 可执行 否 · Shadow 否"));
     assert(plain.includes("api.parameters_schema"));
+    assert(plain.includes("Capability Specification · drafting"));
+    assert(plain.includes("revision 2/5"));
+    assert(plain.includes(`/evolution capability-spec ${candidate.candidate_id}`));
     assert(plain.includes("Workbench 治理"));
     assert(plain.includes("可解释优先级"));
     assert(plain.includes("严重度 4 × 频次 2"));

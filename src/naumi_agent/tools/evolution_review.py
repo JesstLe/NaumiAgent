@@ -30,6 +30,10 @@ from naumi_agent.evolution.approval_signatures import (
     EvolutionApprovalSignatureError,
     render_evolution_approval_signature,
 )
+from naumi_agent.evolution.capability_specification import (
+    CapabilitySpecificationStoreError,
+    render_capability_specification,
+)
 from naumi_agent.evolution.counterfactual_evidence import (
     EvolutionCounterfactualEvidenceError,
     render_counterfactual_evidence,
@@ -344,6 +348,7 @@ from naumi_agent.evolution.tool_catalog_miss_opportunities import (
     EvolutionToolCatalogMissOpportunityError,
     render_tool_catalog_miss_opportunity,
 )
+from naumi_agent.harness.store import HarnessStoreError
 from naumi_agent.release.installation_keys import (
     ReleaseInstallationKeyError,
     render_release_installation_key,
@@ -447,6 +452,83 @@ class EvolutionCandidatesTool(Tool):
         except (EvolutionStoreError, OSError, ValueError):
             return "Evolution Candidate 状态库不可读，或过滤条件无效。请运行 /doctor。"
         return render_evolution_review(snapshot)
+
+
+class EvolutionCapabilitySpecificationTool(Tool):
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_capability_specification"
+
+    @property
+    def description(self) -> str:
+        return (
+            "查看或推进一个 Capability Proposal 的持久规格补全。advance 每次只询问一个"
+            " API/权限/数据/验证/运维步骤，答案形成不可变 revision；"
+            "完整规格仍不授予 Sandbox、Shadow 或执行权限。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["inspect", "advance"],
+                    "default": "inspect",
+                },
+                "candidate_id": {
+                    "type": "string",
+                    "pattern": "^evc_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["candidate_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=False,
+            user_facing_name="能力规格补全",
+            search_hint="evolution capability proposal specification API permission data SLO",
+        )
+
+    async def execute(
+        self,
+        candidate_id: str,
+        action: str = "inspect",
+    ) -> str:
+        try:
+            service = self._engine.evolution_capability_specification_service
+            if action == "inspect":
+                view = await service.inspect(
+                    self._engine.workspace_root,
+                    candidate_id.strip(),
+                )
+            elif action == "advance":
+                session = getattr(self._engine, "_session", None)
+                view = await service.advance(
+                    self._engine.workspace_root,
+                    candidate_id=candidate_id.strip(),
+                    session_id=getattr(session, "id", ""),
+                    agent_name="Agent",
+                )
+            else:
+                return "action 仅支持 inspect 或 advance。"
+            return render_capability_specification(view)
+        except (
+            CapabilitySpecificationStoreError,
+            HarnessStoreError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            return f"Capability Specification 未推进：{exc}"
 
 
 class EvolutionOutcomeOpportunityTool(Tool):
@@ -6610,6 +6692,7 @@ def create_evolution_review_tools(
 ) -> list[Tool]:
     return [
         EvolutionCandidatesTool(engine, service),
+        EvolutionCapabilitySpecificationTool(engine),
         EvolutionExperimentContractAuthorityTool(engine),
         EvolutionExperimentContractIssueTool(engine),
         EvolutionEvaluationReceiptTool(engine),
@@ -6698,6 +6781,7 @@ __all__ = [
     "EvolutionApprovalSignatureAuthorityTool",
     "EvolutionApprovalSignatureTool",
     "EvolutionCandidatesTool",
+    "EvolutionCapabilitySpecificationTool",
     "EvolutionEvalMetricOpportunityTool",
     "EvolutionGoalNeedOpportunityTool",
     "EvolutionToolCatalogMissOpportunityTool",
