@@ -3101,6 +3101,29 @@ test("evolution capability-shadow uses the typed descriptor route", () => {
   }]);
 });
 
+test("evolution capability-shadow-observation uses the typed contract route", () => {
+  const state = createInitialState();
+  const sent = [];
+  const candidateId = `evc_${"a".repeat(24)}`;
+  handleSubmitText(
+    state,
+    `/evolution capability-shadow-observation ${candidateId} openai/gpt-shadow`,
+    (type, payload) => sent.push({ type, payload }),
+  );
+  assert.deepEqual(sent, [{
+    type: "evolution/review/request",
+    payload: {
+      action: "capability-shadow-observation",
+      candidate_id: candidateId,
+      model: "openai/gpt-shadow",
+      query: "",
+      risk: "",
+      source_kind: "",
+      limit: 50,
+    },
+  }]);
+});
+
 test("outcome discovery uses slash execution then filters its typed projection", () => {
   const state = createInitialState();
   const sent = [];
