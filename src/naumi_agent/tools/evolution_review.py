@@ -38,6 +38,10 @@ from naumi_agent.evolution.capability_governance import (
     CapabilityGovernanceError,
     render_capability_governance,
 )
+from naumi_agent.evolution.capability_scenario_binding import (
+    CapabilityScenarioBindingError,
+    render_capability_scenario_binding,
+)
 from naumi_agent.evolution.capability_specification import (
     CapabilitySpecificationStoreError,
     render_capability_specification,
@@ -690,6 +694,74 @@ class EvolutionCapabilityArtifactTool(Tool):
             return render_capability_artifact(view)
         except (CapabilityArtifactError, OSError, TypeError, ValueError) as exc:
             return f"Capability 实现制品未就绪：{exc}"
+
+
+class EvolutionCapabilityScenarioBindingTool(Tool):
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_capability_scenario_binding"
+
+    @property
+    def description(self) -> str:
+        return (
+            "查看或请求用户为 sealed Capability Artifact 绑定机械可执行的参数 JSON、"
+            "预期结果/错误和时限；使用 Draft 2020-12 JSON Schema 验证，"
+            "但不运行、注册或授权候选 Tool。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["inspect", "advance"],
+                    "default": "inspect",
+                },
+                "candidate_id": {
+                    "type": "string",
+                    "pattern": "^evc_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["candidate_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=False,
+            user_facing_name="能力可执行场景绑定",
+            search_hint="evolution capability sandbox executable scenario oracle binding",
+        )
+
+    async def execute(
+        self,
+        candidate_id: str,
+        action: str = "inspect",
+    ) -> str:
+        try:
+            service = self._engine.evolution_capability_scenario_binding_service
+            if action == "inspect":
+                view = await service.inspect(
+                    self._engine.workspace_root,
+                    candidate_id.strip(),
+                )
+            elif action == "advance":
+                view = await service.advance(
+                    self._engine.workspace_root,
+                    candidate_id=candidate_id.strip(),
+                )
+            else:
+                return "action 仅支持 inspect 或 advance。"
+            return render_capability_scenario_binding(view)
+        except (CapabilityScenarioBindingError, OSError, TypeError, ValueError) as exc:
+            return f"Capability 可执行场景未绑定：{exc}"
 
 
 class EvolutionOutcomeOpportunityTool(Tool):
@@ -6856,6 +6928,7 @@ def create_evolution_review_tools(
         EvolutionCapabilitySpecificationTool(engine),
         EvolutionCapabilityGovernanceTool(engine),
         EvolutionCapabilityArtifactTool(engine),
+        EvolutionCapabilityScenarioBindingTool(engine),
         EvolutionExperimentContractAuthorityTool(engine),
         EvolutionExperimentContractIssueTool(engine),
         EvolutionEvaluationReceiptTool(engine),
@@ -6947,6 +7020,7 @@ __all__ = [
     "EvolutionCapabilitySpecificationTool",
     "EvolutionCapabilityGovernanceTool",
     "EvolutionCapabilityArtifactTool",
+    "EvolutionCapabilityScenarioBindingTool",
     "EvolutionEvalMetricOpportunityTool",
     "EvolutionGoalNeedOpportunityTool",
     "EvolutionToolCatalogMissOpportunityTool",

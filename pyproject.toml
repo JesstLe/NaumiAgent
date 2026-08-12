@@ -30,6 +30,7 @@ dependencies = [
     # 安全与可观测
     "pydantic>=2.10",
     "pydantic-settings>=2.7",
+    "jsonschema>=4.23,<5",
     "python-dotenv>=1.0",
     "keyring>=25.6",
     "cryptography>=44.0",

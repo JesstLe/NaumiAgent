@@ -3311,6 +3311,10 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
         CapabilityGovernanceError,
         render_capability_governance,
     )
+    from naumi_agent.evolution.capability_scenario_binding import (
+        CapabilityScenarioBindingError,
+        render_capability_scenario_binding,
+    )
     from naumi_agent.evolution.capability_specification import (
         CapabilitySpecificationStoreError,
         render_capability_specification,
@@ -4839,6 +4843,15 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 )
             console.print(Markdown(render_capability_artifact(view)))
             return
+        if action == "capability-bind":
+            if len(parts) != 2:
+                raise ValueError("capability-bind 需要一个 Candidate ID。")
+            view = await engine.evolution_capability_scenario_binding_service.advance(
+                engine.workspace_root,
+                candidate_id=parts[1],
+            )
+            console.print(Markdown(render_capability_scenario_binding(view)))
+            return
         if action == "detail":
             if len(parts) != 2:
                 raise ValueError("detail 需要一个 Candidate ID。")
@@ -4865,6 +4878,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             raise ValueError(
                 "仅支持 list、priorities、detail、capability-spec、capability-govern、"
                 "capability-artifact、"
+                "capability-bind、"
                 "experiment-contract、evaluation、"
                 "evaluation-contract、"
                 "evaluation-final、decision-input、mechanical-gate、"
@@ -5054,6 +5068,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution capability-govern <candidate-id>；"
             "/evolution capability-artifact <candidate-id> "
             "[workspace-relative-source.py ClassName]；"
+            "/evolution capability-bind <candidate-id>；"
             "/evolution experiment-contract <contract-id>；"
             "/evolution evaluation <comparison-id>；"
             "/evolution evaluation-contract <workspace-relative-request.json>；"
@@ -5411,6 +5426,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     except CapabilityArtifactError as exc:
         console.print(
             f"Capability 实现制品未就绪：{exc}",
+            style="yellow",
+            markup=False,
+        )
+        return
+    except CapabilityScenarioBindingError as exc:
+        console.print(
+            f"Capability 可执行场景未绑定：{exc}",
             style="yellow",
             markup=False,
         )

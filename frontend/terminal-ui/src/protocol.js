@@ -6415,6 +6415,13 @@ function normalizeEvolutionItem(value, detail) {
       capabilitySpecification,
       capabilityGovernance,
     );
+  const capabilityScenarioBinding = item.capability_scenario_binding == null
+    ? null
+    : normalizeEvolutionCapabilityScenarioBinding(
+      item.capability_scenario_binding,
+      candidateId,
+      capabilityArtifact,
+    );
   if (normalized.review_ready && proposal === null) {
     throw new Error("evolution/review review_ready detail 必须包含 Proposal Preview");
   }
@@ -6466,6 +6473,171 @@ function normalizeEvolutionItem(value, detail) {
     capability_specification: capabilitySpecification,
     capability_governance: capabilityGovernance,
     capability_artifact: capabilityArtifact,
+    capability_scenario_binding: capabilityScenarioBinding,
+  };
+}
+
+function normalizeEvolutionCapabilityScenarioBinding(value, candidateId, capabilityArtifact) {
+  const view = harnessObject(value, "evolution/review capability_scenario_binding");
+  const state = harnessChoice(
+    view.state,
+    "evolution/review capability_scenario_binding.state",
+    new Set(["missing", "awaiting_input", "ready", "revoked"]),
+  );
+  const artifactCurrent = harnessBoolean(
+    view.artifact_current,
+    "evolution/review capability_scenario_binding.artifact_current",
+  );
+  const bindingCurrent = harnessBoolean(
+    view.binding_current,
+    "evolution/review capability_scenario_binding.binding_current",
+  );
+  const eligible = harnessBoolean(
+    view.sandbox_execution_eligible,
+    "evolution/review capability_scenario_binding.sandbox_execution_eligible",
+  );
+  const authorityClosed = [
+    view.sandbox_execution_authorized,
+    view.registration_authorized,
+    view.shadow_authorized,
+    view.executable,
+  ].every((field) => harnessBoolean(field, "evolution/review capability_scenario_binding authority") === false);
+  const artifactId = harnessText(view.artifact_id, "evolution/review capability_scenario_binding.artifact_id");
+  const viewCandidateId = harnessText(
+    view.candidate_id,
+    "evolution/review capability_scenario_binding.candidate_id",
+  );
+  if (
+    harnessNonnegativeInteger(view.schema_version, "evolution/review capability_scenario_binding.schema_version") !== 1
+    || !capabilityArtifact?.artifact
+    || viewCandidateId !== candidateId
+    || artifactId !== capabilityArtifact.artifact.artifact_id
+    || artifactCurrent !== (capabilityArtifact.state === "preview_ready")
+    || !authorityClosed
+  ) throw new Error("evolution/review Capability Scenario Binding 来源或 authority 无效");
+  const pendingInteractionId = harnessText(
+    view.pending_interaction_id,
+    "evolution/review capability_scenario_binding.pending_interaction_id",
+  );
+  if (view.binding == null) {
+    if (
+      !["missing", "awaiting_input"].includes(state)
+      || bindingCurrent
+      || eligible
+      || (state === "awaiting_input") !== Boolean(pendingInteractionId)
+      || (state === "awaiting_input" && !artifactCurrent)
+    ) throw new Error("evolution/review missing Scenario Binding 状态无效");
+    return {
+      schema_version: 1,
+      candidate_id: candidateId,
+      artifact_id: artifactId,
+      binding: null,
+      state,
+      pending_interaction_id: pendingInteractionId,
+      artifact_current: artifactCurrent,
+      binding_current: false,
+      sandbox_execution_eligible: false,
+      sandbox_execution_authorized: false,
+      registration_authorized: false,
+      shadow_authorized: false,
+      executable: false,
+    };
+  }
+  const binding = harnessObject(view.binding, "evolution/review capability_scenario_binding.binding");
+  const scenarios = harnessObjectArray(
+    binding.scenarios,
+    "evolution/review capability_scenario_binding.scenarios",
+    8,
+  ).map((scenario) => ({
+    name: harnessText(scenario.name, "evolution/review capability_scenario_binding.scenario.name"),
+    expectation_kind: harnessChoice(
+      scenario.expectation_kind,
+      "evolution/review capability_scenario_binding.scenario.expectation_kind",
+      new Set(["result", "error"]),
+    ),
+    timeout_ms: harnessNonnegativeInteger(
+      scenario.timeout_ms,
+      "evolution/review capability_scenario_binding.scenario.timeout_ms",
+    ),
+  }));
+  if (
+    new Set(scenarios.map((scenario) => scenario.name)).size !== scenarios.length
+    || scenarios.some((scenario) => scenario.timeout_ms < 100 || scenario.timeout_ms > 300000)
+  ) throw new Error("evolution/review Capability Scenario Binding 场景无效");
+  const normalizedBinding = {
+    schema_version: harnessNonnegativeInteger(binding.schema_version, "evolution/review capability_scenario_binding.binding.schema_version"),
+    policy_version: harnessText(binding.policy_version, "evolution/review capability_scenario_binding.binding.policy_version"),
+    binding_id: harnessText(binding.binding_id, "evolution/review capability_scenario_binding.binding_id"),
+    binding_sha256: harnessText(binding.binding_sha256, "evolution/review capability_scenario_binding.binding_sha256"),
+    candidate_id: harnessText(binding.candidate_id, "evolution/review capability_scenario_binding.binding.candidate_id"),
+    specification_id: harnessText(binding.specification_id, "evolution/review capability_scenario_binding.binding.specification_id"),
+    specification_sha256: harnessText(binding.specification_sha256, "evolution/review capability_scenario_binding.binding.specification_sha256"),
+    artifact_id: harnessText(binding.artifact_id, "evolution/review capability_scenario_binding.binding.artifact_id"),
+    artifact_sha256: harnessText(binding.artifact_sha256, "evolution/review capability_scenario_binding.binding.artifact_sha256"),
+    permission_specification_sha256: harnessText(binding.permission_specification_sha256, "evolution/review capability_scenario_binding.binding.permission_specification_sha256"),
+    verification_specification_sha256: harnessText(binding.verification_specification_sha256, "evolution/review capability_scenario_binding.binding.verification_specification_sha256"),
+    source_interaction_id: harnessText(binding.source_interaction_id, "evolution/review capability_scenario_binding.source_interaction_id"),
+    source_interaction_sequence: harnessNonnegativeInteger(binding.source_interaction_sequence, "evolution/review capability_scenario_binding.source_interaction_sequence"),
+    source_interaction_sha256: harnessText(binding.source_interaction_sha256, "evolution/review capability_scenario_binding.source_interaction_sha256"),
+    answered_by: harnessText(binding.answered_by, "evolution/review capability_scenario_binding.answered_by"),
+    schema_dialect: harnessText(binding.schema_dialect, "evolution/review capability_scenario_binding.schema_dialect"),
+    created_at: harnessText(binding.created_at, "evolution/review capability_scenario_binding.created_at"),
+    sandbox_execution_eligible: true,
+    sandbox_execution_authorized: false,
+    registration_authorized: false,
+    shadow_authorized: false,
+    executable: false,
+    scenarios,
+  };
+  if (
+    normalizedBinding.schema_version !== 1
+    || normalizedBinding.policy_version !== "evolution-capability-scenario-binding-v1"
+    || normalizedBinding.candidate_id !== candidateId
+    || normalizedBinding.specification_id !== capabilityArtifact.artifact.specification_id
+    || normalizedBinding.specification_sha256 !== capabilityArtifact.artifact.specification_sha256
+    || normalizedBinding.artifact_id !== artifactId
+    || normalizedBinding.artifact_sha256 !== capabilityArtifact.artifact.artifact_sha256
+    || normalizedBinding.permission_specification_sha256 !== capabilityArtifact.artifact.permission_specification_sha256
+    || normalizedBinding.verification_specification_sha256 !== capabilityArtifact.artifact.verification_specification_sha256
+    || !/^evcsb_[0-9a-f]{24}$/.test(normalizedBinding.binding_id)
+    || [
+      normalizedBinding.binding_sha256,
+      normalizedBinding.specification_sha256,
+      normalizedBinding.permission_specification_sha256,
+      normalizedBinding.verification_specification_sha256,
+      normalizedBinding.source_interaction_sha256,
+    ].some((item) => !/^[0-9a-f]{64}$/.test(item))
+    || !/^ask-evcsbind-[0-9a-f]{24}-\d{1,3}$/.test(normalizedBinding.source_interaction_id)
+    || !normalizedBinding.source_interaction_id.startsWith(`ask-evcsbind-${artifactId.slice(6)}-`)
+    || normalizedBinding.source_interaction_sequence < 2
+    || normalizedBinding.answered_by !== "user"
+    || normalizedBinding.schema_dialect !== "https://json-schema.org/draft/2020-12"
+    || scenarios.length < 1
+    || pendingInteractionId
+    || !["ready", "revoked"].includes(state)
+    || bindingCurrent !== (state === "ready")
+    || eligible !== (state === "ready")
+    || (state === "ready" && !artifactCurrent)
+    || harnessBoolean(binding.sandbox_execution_eligible, "evolution/review capability_scenario_binding.binding.sandbox_execution_eligible") !== true
+    || harnessBoolean(binding.sandbox_execution_authorized, "evolution/review capability_scenario_binding.binding.sandbox_execution_authorized")
+    || harnessBoolean(binding.registration_authorized, "evolution/review capability_scenario_binding.binding.registration_authorized")
+    || harnessBoolean(binding.shadow_authorized, "evolution/review capability_scenario_binding.binding.shadow_authorized")
+    || harnessBoolean(binding.executable, "evolution/review capability_scenario_binding.binding.executable")
+  ) throw new Error("evolution/review Capability Scenario Binding 绑定或状态无效");
+  return {
+    schema_version: 1,
+    candidate_id: candidateId,
+    artifact_id: artifactId,
+    binding: normalizedBinding,
+    state,
+    pending_interaction_id: "",
+    artifact_current: artifactCurrent,
+    binding_current: bindingCurrent,
+    sandbox_execution_eligible: eligible,
+    sandbox_execution_authorized: false,
+    registration_authorized: false,
+    shadow_authorized: false,
+    executable: false,
   };
 }
 
@@ -6546,13 +6718,22 @@ function normalizeEvolutionCapabilityArtifact(
     class_name: harnessText(artifact.class_name, "evolution/review capability_artifact.class_name"),
     declared_tool_name: harnessText(artifact.declared_tool_name, "evolution/review capability_artifact.declared_tool_name"),
     temporary_tool_name: harnessText(artifact.temporary_tool_name, "evolution/review capability_artifact.temporary_tool_name"),
+    parameters_schema_sha256: harnessText(artifact.parameters_schema_sha256, "evolution/review capability_artifact.parameters_schema_sha256"),
+    permission_specification_sha256: harnessText(artifact.permission_specification_sha256, "evolution/review capability_artifact.permission_specification_sha256"),
+    verification_specification_sha256: harnessText(artifact.verification_specification_sha256, "evolution/review capability_artifact.verification_specification_sha256"),
     admission_ready: harnessBoolean(artifact.admission_ready, "evolution/review capability_artifact.admission_ready"),
     registry_state: harnessText(artifact.registry_state, "evolution/review capability_artifact.registry_state"),
+    created_at: harnessText(artifact.created_at, "evolution/review capability_artifact.created_at"),
+    registration_authorized: false,
+    shadow_authorized: false,
+    executable: false,
     checks,
   };
   const shaFields = [
     normalized.artifact_sha256, normalized.specification_sha256,
     normalized.governance_decision_sha256, normalized.source_sha256,
+    normalized.parameters_schema_sha256, normalized.permission_specification_sha256,
+    normalized.verification_specification_sha256,
   ];
   if (
     normalized.schema_version !== 1

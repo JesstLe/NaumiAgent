@@ -85,6 +85,8 @@ evolution_sandbox:<specification-id 前 12 位>:<declared-tool-name>
 本切片验证的是“代码是什么、是否与批准规格静态一致、是否有资格进入隔离验证”，尚未证明代码行为正确。
 AST 无法证明权限实际使用、结果 schema、错误契约、真实 fixture、性能 SLO 或恶意运行时行为。
 
-下一最小切片 EVO-06.3b 必须在 ARC-04/Harness Sandbox 中从 sealed source snapshot materialize 候选，
-逐项运行 Specification scenarios、验证结果/错误 schema 与 permission observations；全部通过后才可签发短期、
+下一最小前置 [EVO-06.3b1](EVO-06-3b1-executable-scenario-binding.md) 已把 prose scenario 转成
+arguments、result/error oracle 与 timeout 均可机械校验的 Harness 人工 Binding。后续 EVO-06.3b2 必须在
+ARC-04/Harness Sandbox 中从 sealed source snapshot materialize 候选，逐项运行已绑定 scenarios、验证
+结果/错误 schema 与 permission observations；全部通过后才可签发短期、
 可撤销的临时 Registry lease。仍不得进入 Shadow 或 Limited Activation。

@@ -147,7 +147,7 @@ modules:
   - {id: EVO-05.6b2a, status: implemented, path: self-evolution/EVO-05-6b2a-fenced-slot-rollback.md, depends_on: [EVO-05.6b1, ARC-07.5a, ARC-07.5b]}
   - {id: EVO-05.6b2a1, status: implemented, path: self-evolution/EVO-05-6b2a1-explicit-rollback-action.md, depends_on: [EVO-05.6b2a, EVO-GOV-01, UI-10]}
   - {id: EVO-05.7a, status: implemented, path: self-evolution/EVO-05-7a-rollback-outcome-authority.md, depends_on: [EVO-05.6b2a1, HAR-09.5c]}
-  - {id: EVO-06, status: partial, path: self-evolution/EVO-06-continuous-evolution.md, depends_on: [EVO-05, HAR-09], implemented_slices: [EVO-06.1a, EVO-06.1b, EVO-06.1c1, EVO-06.1c2, EVO-06.1c3, EVO-06.1c4, EVO-06.2a, EVO-06.2b, EVO-06.2c, EVO-06.3a]}
+  - {id: EVO-06, status: partial, path: self-evolution/EVO-06-continuous-evolution.md, depends_on: [EVO-05, HAR-09], implemented_slices: [EVO-06.1a, EVO-06.1b, EVO-06.1c1, EVO-06.1c2, EVO-06.1c3, EVO-06.1c4, EVO-06.2a, EVO-06.2b, EVO-06.2c, EVO-06.3a, EVO-06.3b1]}
   - {id: EVO-06.1a, status: implemented, path: self-evolution/EVO-06-1a-outcome-backed-opportunity-discovery.md, depends_on: [EVO-05.7a, EVO-01, HAR-09]}
   - {id: EVO-06.1b, status: implemented, path: self-evolution/EVO-06-1b-promoted-outcome-opportunity-discovery.md, depends_on: [EVO-05.7b4c, EVO-01.4b]}
   - {id: EVO-06.1c1, status: implemented, path: self-evolution/EVO-06-1c1-h5c-quantitative-regression-opportunity.md, depends_on: [EVO-01.4b, EVO-03.5c]}
@@ -158,3 +158,4 @@ modules:
   - {id: EVO-06.2b, status: implemented, path: self-evolution/EVO-06-2b-interaction-backed-capability-specification.md, depends_on: [EVO-06.2a, UI-18.4b]}
   - {id: EVO-06.2c, status: implemented, path: self-evolution/EVO-06-2c-capability-specification-governance.md, depends_on: [EVO-06.2b, HAR-09, UI-18.4b]}
   - {id: EVO-06.3a, status: implemented, path: self-evolution/EVO-06-3a-sealed-capability-artifact-admission-preview.md, depends_on: [EVO-06.2c, ARC-04, UI-18.4b]}
+  - {id: EVO-06.3b1, status: implemented, path: self-evolution/EVO-06-3b1-executable-scenario-binding.md, depends_on: [EVO-06.3a, UI-18.4b]}

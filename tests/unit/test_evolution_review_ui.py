@@ -5,10 +5,14 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
 from naumi_agent.config.settings import AppConfig, MemoryConfig
+from naumi_agent.evolution.capability_scenario_binding import (
+    CapabilityScenarioBindingView,
+)
 from naumi_agent.evolution.proposal import generate_proposal_preview
 from naumi_agent.evolution.review import EvolutionReviewService
 from naumi_agent.evolution.store import EvolutionCandidateStore
@@ -18,6 +22,7 @@ from naumi_agent.tasks.store import TaskStore
 from naumi_agent.ui.bridge import JsonlEngineBridge
 from naumi_agent.ui.evolution_review import (
     _capability_artifact_payload,
+    _capability_scenario_binding_payload,
     evolution_review_payload,
 )
 from naumi_agent.ui.protocol import ClientEventType, normalize_client_record
@@ -223,6 +228,15 @@ def test_capability_artifact_public_payload_and_protocol() -> None:
         },
     })
     assert artifact["payload"]["source_path"] == "sandbox/tool.py"
+    binding = normalize_client_record({
+        "type": ClientEventType.EVOLUTION_REVIEW_REQUEST,
+        "payload": {
+            "action": "capability-bind",
+            "candidate_id": f"evc_{'d' * 24}",
+        },
+    })
+    assert binding["payload"]["action"] == "capability-bind"
+    assert binding["payload"]["candidate_id"] == f"evc_{'d' * 24}"
     with pytest.raises(ValueError, match="同时提供"):
         normalize_client_record({
             "type": ClientEventType.EVOLUTION_REVIEW_REQUEST,
@@ -232,6 +246,36 @@ def test_capability_artifact_public_payload_and_protocol() -> None:
                 "source_path": "sandbox/tool.py",
             },
         })
+
+
+def test_capability_scenario_binding_payload_hides_oracle_values() -> None:
+    scenario = SimpleNamespace(
+        name="真实场景",
+        expectation=SimpleNamespace(kind="result"),
+        timeout_ms=1500,
+    )
+    value = SimpleNamespace(
+        binding=SimpleNamespace(scenarios=(scenario,)),
+        model_dump=lambda **_kwargs: {
+            "binding": {
+                "scenarios": [{
+                    "name": "真实场景",
+                    "arguments": {"secret_path": "private"},
+                    "expectation": {"kind": "result", "value": {"private": True}},
+                    "timeout_ms": 1500,
+                }],
+            },
+        },
+    )
+    payload = _capability_scenario_binding_payload(
+        SimpleNamespace(capability_scenario_binding=value)  # type: ignore[arg-type]
+    )
+    assert payload is not None
+    assert payload["binding"]["scenarios"] == [{
+        "name": "真实场景",
+        "expectation_kind": "result",
+        "timeout_ms": 1500,
+    }]
 
 
 @pytest.mark.asyncio
@@ -268,6 +312,52 @@ async def test_real_bridge_emits_typed_read_only_detail(tmp_path: Path) -> None:
         assert payload["selected"]["proposal"]["proposal_id"].startswith("evp_")
         assert payload["read_only"] is True
         assert await store.list_events(tmp_path, candidate_id) == before
+    finally:
+        await bridge.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_real_bridge_routes_capability_scenario_binding(tmp_path: Path) -> None:
+    engine = create_agent_engine(AppConfig(
+        workspace_root=str(tmp_path),
+        memory=MemoryConfig(
+            session_db_path=str(tmp_path / "sessions.db"),
+            long_term_enabled=False,
+        ),
+    ))
+    store = EvolutionCandidateStore(tmp_path / "evolution.db")
+    candidate_id = await _seed(tmp_path, store)
+    engine.evolution_candidate_store = store
+    engine.evolution_review_service = EvolutionReviewService(store)
+    view = CapabilityScenarioBindingView(
+        candidate_id=candidate_id,
+        artifact_id=f"evcia_{'a' * 24}",
+        binding=None,
+        state="missing",
+        pending_interaction_id="",
+        artifact_current=True,
+        binding_current=False,
+        sandbox_execution_eligible=False,
+    )
+    advance = AsyncMock(return_value=view)
+    engine.evolution_capability_scenario_binding_service = SimpleNamespace(
+        advance=advance,
+    )
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    try:
+        await bridge.handle_client_record({
+            "id": "evolution-capability-bind-1",
+            "type": ClientEventType.EVOLUTION_REVIEW_REQUEST,
+            "payload": {"action": "capability-bind", "candidate_id": candidate_id},
+        })
+        records = [json.loads(line) for line in writer.getvalue().splitlines()]
+        notice = next(record for record in records if record["type"] == "ui/message")
+        assert notice["payload"]["title"] == "Capability 可执行场景绑定"
+        assert "Sandbox 执行授权：否" in notice["payload"]["content"]
+        assert any(record["type"] == "evolution/review" for record in records)
+        advance.assert_awaited_once_with(tmp_path, candidate_id=candidate_id)
     finally:
         await bridge.shutdown()
 

@@ -28,6 +28,13 @@ from naumi_agent.evolution.capability_governance import (
     render_capability_governance,
 )
 from naumi_agent.evolution.capability_proposal import generate_capability_proposal
+from naumi_agent.evolution.capability_scenario_binding import (
+    CapabilityScenarioBindingError,
+    EvolutionCapabilityScenarioBindingService,
+    EvolutionCapabilityScenarioBindingStore,
+    build_capability_scenario_binding,
+    render_capability_scenario_binding,
+)
 from naumi_agent.evolution.capability_specification import (
     CapabilityDataSpecification,
     CapabilityInterfaceSpecification,
@@ -52,6 +59,7 @@ from naumi_agent.harness.store import HarnessStore
 from naumi_agent.tools.evolution_review import (
     EvolutionCapabilityArtifactTool,
     EvolutionCapabilityGovernanceTool,
+    EvolutionCapabilityScenarioBindingTool,
 )
 from naumi_agent.user_interaction import normalize_interaction_request
 
@@ -1297,3 +1305,366 @@ async def test_capability_artifact_service_revokes_changed_source(
     assert revoked.source_current is False
     assert revoked.governance_current is True
     assert revoked.registration_authorized is False
+
+
+def _scenario_binding_answer() -> dict[str, str]:
+    return {
+        "kind": "custom",
+        "custom_text": json.dumps({
+            "scenarios": [{
+                "name": "比较两份真实轨迹",
+                "arguments": {"left": "data/traces/a.json"},
+                "expectation": {
+                    "kind": "result",
+                    "value": {"differences": []},
+                },
+                "timeout_ms": 1500,
+            }],
+        }, ensure_ascii=False),
+    }
+
+
+async def _approved_artifact(tmp_path: Path):
+    proposal, specification_service, _, harness, _, specification_view = (
+        await _complete_specification(tmp_path)
+    )
+    governance, _, _ = _governance_service(
+        tmp_path=tmp_path,
+        proposal=proposal,
+        specification_service=specification_service,
+        harness_store=harness,
+        responses=[{"kind": "option", "value": "approve"}],
+    )
+    await governance.decide(tmp_path, candidate_id=proposal.source.candidate_id)
+    specification = specification_view.specification
+    assert specification is not None and specification.interface is not None
+    path = tmp_path / "candidate.py"
+    path.write_text(
+        _implementation_source(
+            specification.interface.tool_name,
+            specification.interface.parameters_schema,
+        ),
+        encoding="utf-8",
+    )
+    artifact_service = EvolutionCapabilityArtifactService(
+        review_service=_Review(proposal),
+        specification_service=specification_service,
+        governance_service=governance,
+        store=EvolutionCapabilityArtifactStore(tmp_path / "evolution.db"),
+        registered_tool_names=lambda: ("bash_run",),
+        now=lambda: NOW.isoformat(),
+    )
+    artifact_view = await artifact_service.create(
+        tmp_path,
+        candidate_id=proposal.source.candidate_id,
+        source_path="candidate.py",
+        class_name="BrowserTraceCompareTool",
+    )
+    assert artifact_view.artifact is not None
+    return (
+        proposal,
+        specification_service,
+        harness,
+        specification,
+        artifact_service,
+        artifact_view.artifact,
+        path,
+    )
+
+
+def _scenario_binding_service(
+    *,
+    tmp_path: Path,
+    proposal,
+    specification_service,
+    artifact_service,
+    harness,
+    responses: list[dict[str, str]],
+    fail_after_commit: bool = False,
+):
+    clock = _Clock()
+    host = _InteractionHost(
+        store=harness,
+        workspace=tmp_path,
+        responses=responses,
+        clock=clock,
+        fail_after_commit=fail_after_commit,
+    )
+    store = EvolutionCapabilityScenarioBindingStore(tmp_path / "evolution.db")
+    service = EvolutionCapabilityScenarioBindingService(
+        review_service=_Review(proposal),
+        specification_service=specification_service,
+        artifact_service=artifact_service,
+        store=store,
+        interaction_store=harness,
+        request_user_input=host,
+    )
+    return service, store, host
+
+
+@pytest.mark.asyncio
+async def test_scenario_binding_uses_real_harness_answer_and_json_schema(
+    tmp_path: Path,
+) -> None:
+    (
+        proposal,
+        specification_service,
+        harness,
+        specification,
+        artifact_service,
+        artifact,
+        _,
+    ) = await _approved_artifact(tmp_path)
+    service, store, host = _scenario_binding_service(
+        tmp_path=tmp_path,
+        proposal=proposal,
+        specification_service=specification_service,
+        artifact_service=artifact_service,
+        harness=harness,
+        responses=[_scenario_binding_answer()],
+    )
+
+    view = await service.advance(
+        tmp_path,
+        candidate_id=proposal.source.candidate_id,
+    )
+
+    assert view.state == "ready"
+    assert view.sandbox_execution_eligible is True
+    assert view.sandbox_execution_authorized is False
+    assert view.registration_authorized is False
+    assert view.executable is False
+    assert view.binding is not None
+    assert view.binding.specification_sha256 == specification.digest()
+    assert view.binding.artifact_id == artifact.artifact_id
+    assert view.binding.source_interaction_id.startswith("ask-evcsbind-")
+    assert view.binding.scenarios[0].arguments["left"] == "data/traces/a.json"
+    assert await store.get(tmp_path, artifact.artifact_id) == view.binding
+    assert len(host.requests) == 1
+    rendered = render_capability_scenario_binding(view)
+    assert "Sandbox 执行资格：是" in rendered
+    assert "Sandbox 执行授权：否" in rendered
+    engine = SimpleNamespace(
+        workspace_root=tmp_path,
+        evolution_capability_scenario_binding_service=service,
+        evolution_review_service=service.review_service,
+    )
+    tool_output = await EvolutionCapabilityScenarioBindingTool(engine).execute(
+        candidate_id=proposal.source.candidate_id,
+        action="inspect",
+    )
+    slash_output = await execute_slash_command(
+        engine,
+        f"/evolution capability-bind {proposal.source.candidate_id}",
+    )
+    assert view.binding.binding_id in tool_output
+    assert view.binding.binding_id in slash_output
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (
+            lambda payload: payload["scenarios"][0].update(arguments={}),
+            "arguments 不满足 JSON Schema",
+        ),
+        (
+            lambda payload: payload["scenarios"][0]["expectation"].update(
+                value={"wrong": []}
+            ),
+            "expectation.value 不满足 JSON Schema",
+        ),
+        (
+            lambda payload: payload["scenarios"][0].update(
+                expectation={"kind": "error", "error_code": "unknown"}
+            ),
+            "error_code 未在接口错误契约声明",
+        ),
+    ],
+)
+async def test_scenario_binding_rejects_invalid_machine_oracle(
+    tmp_path: Path,
+    mutate: Callable[[dict[str, object]], None],
+    message: str,
+) -> None:
+    (
+        proposal,
+        specification_service,
+        harness,
+        _,
+        artifact_service,
+        _,
+        _,
+    ) = await _approved_artifact(tmp_path)
+    answer = json.loads(_scenario_binding_answer()["custom_text"])
+    mutate(answer)
+    service, _, _ = _scenario_binding_service(
+        tmp_path=tmp_path,
+        proposal=proposal,
+        specification_service=specification_service,
+        artifact_service=artifact_service,
+        harness=harness,
+        responses=[{
+            "kind": "custom",
+            "custom_text": json.dumps(answer, ensure_ascii=False),
+        }],
+    )
+
+    with pytest.raises(CapabilityScenarioBindingError, match=message):
+        await service.advance(tmp_path, candidate_id=proposal.source.candidate_id)
+
+
+@pytest.mark.asyncio
+async def test_scenario_binding_retries_after_invalid_durable_answer(
+    tmp_path: Path,
+) -> None:
+    (
+        proposal,
+        specification_service,
+        harness,
+        _,
+        artifact_service,
+        _,
+        _,
+    ) = await _approved_artifact(tmp_path)
+    invalid, _, _ = _scenario_binding_service(
+        tmp_path=tmp_path,
+        proposal=proposal,
+        specification_service=specification_service,
+        artifact_service=artifact_service,
+        harness=harness,
+        responses=[{"kind": "custom", "custom_text": "not-json"}],
+    )
+    with pytest.raises(CapabilityScenarioBindingError, match="有效 JSON"):
+        await invalid.advance(tmp_path, candidate_id=proposal.source.candidate_id)
+
+    retrying, _, host = _scenario_binding_service(
+        tmp_path=tmp_path,
+        proposal=proposal,
+        specification_service=specification_service,
+        artifact_service=artifact_service,
+        harness=harness,
+        responses=[_scenario_binding_answer()],
+    )
+    recovered = await retrying.advance(
+        tmp_path,
+        candidate_id=proposal.source.candidate_id,
+    )
+
+    assert recovered.state == "ready"
+    assert recovered.binding is not None
+    assert recovered.binding.source_interaction_id.endswith("-2")
+    assert len(host.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_scenario_binding_recovers_answer_and_revokes_with_artifact(
+    tmp_path: Path,
+) -> None:
+    (
+        proposal,
+        specification_service,
+        harness,
+        _,
+        artifact_service,
+        artifact,
+        source_path,
+    ) = await _approved_artifact(tmp_path)
+    crashing, store, _ = _scenario_binding_service(
+        tmp_path=tmp_path,
+        proposal=proposal,
+        specification_service=specification_service,
+        artifact_service=artifact_service,
+        harness=harness,
+        responses=[_scenario_binding_answer()],
+        fail_after_commit=True,
+    )
+    with pytest.raises(RuntimeError, match="simulated host crash"):
+        await crashing.advance(tmp_path, candidate_id=proposal.source.candidate_id)
+    recovering = EvolutionCapabilityScenarioBindingService(
+        review_service=_Review(proposal),
+        specification_service=specification_service,
+        artifact_service=artifact_service,
+        store=store,
+        interaction_store=harness,
+        request_user_input=lambda _payload: pytest.fail("不应创建第二条交互"),
+    )
+    recovered = await recovering.advance(
+        tmp_path,
+        candidate_id=proposal.source.candidate_id,
+    )
+    assert recovered.state == "ready"
+    assert recovered.binding is not None
+
+    source_path.write_text(
+        source_path.read_text(encoding="utf-8") + "\n# drift\n",
+        encoding="utf-8",
+    )
+    revoked = await recovering.inspect(tmp_path, proposal.source.candidate_id)
+    assert revoked.state == "revoked"
+    assert revoked.artifact_current is False
+    assert revoked.sandbox_execution_eligible is False
+    assert revoked.binding.artifact_id == artifact.artifact_id  # type: ignore[union-attr]
+
+    recovering.interaction_store = SimpleNamespace(
+        get_interaction=lambda **_kwargs: asyncio.sleep(0, result=None),
+    )
+    interaction_revoked = await recovering.inspect(
+        tmp_path,
+        proposal.source.candidate_id,
+    )
+    assert interaction_revoked.state == "revoked"
+    assert interaction_revoked.binding_current is False
+    assert interaction_revoked.sandbox_execution_eligible is False
+
+
+@pytest.mark.asyncio
+async def test_scenario_binding_store_first_wins_and_detects_tampering(
+    tmp_path: Path,
+) -> None:
+    (
+        proposal,
+        specification_service,
+        harness,
+        specification,
+        artifact_service,
+        artifact,
+        _,
+    ) = await _approved_artifact(tmp_path)
+    service, store, _ = _scenario_binding_service(
+        tmp_path=tmp_path,
+        proposal=proposal,
+        specification_service=specification_service,
+        artifact_service=artifact_service,
+        harness=harness,
+        responses=[_scenario_binding_answer()],
+    )
+    view = await service.advance(tmp_path, candidate_id=proposal.source.candidate_id)
+    assert view.binding is not None
+    interaction = await harness.get_interaction(
+        workspace_root=tmp_path,
+        interaction_id=view.binding.source_interaction_id,
+    )
+    assert interaction is not None
+    competing = build_capability_scenario_binding(
+        specification=specification,
+        artifact=artifact,
+        interaction=interaction.model_copy(update={"interaction_id": (
+            f"ask-evcsbind-{artifact.artifact_id[6:]}-2"
+        )}),
+    )
+    with pytest.raises(CapabilityScenarioBindingError, match="拒绝覆盖"):
+        await EvolutionCapabilityScenarioBindingStore(
+            tmp_path / "evolution.db"
+        ).record(tmp_path, competing)
+
+    with sqlite3.connect(tmp_path / "evolution.db") as db:
+        db.execute(
+            "UPDATE evolution_capability_scenario_bindings SET payload_sha256 = ? "
+            "WHERE artifact_id = ?",
+            ("0" * 64, artifact.artifact_id),
+        )
+        db.commit()
+    with pytest.raises(CapabilityScenarioBindingError, match="持久摘要"):
+        await store.get(tmp_path, artifact.artifact_id)

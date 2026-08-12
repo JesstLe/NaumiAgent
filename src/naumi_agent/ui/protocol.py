@@ -782,14 +782,16 @@ def _normalize_client_payload(
             "capability-spec",
             "capability-govern",
             "capability-artifact",
+            "capability-bind",
         }:
             raise ValueError(
                 "Evolution review action 仅支持 list/priorities/detail/"
-                "capability-spec/capability-govern/capability-artifact。"
+                "capability-spec/capability-govern/capability-artifact/capability-bind。"
             )
         candidate_id = str(payload.get("candidate_id") or "").strip()
         if action in {
-            "detail", "capability-spec", "capability-govern", "capability-artifact"
+            "detail", "capability-spec", "capability-govern", "capability-artifact",
+            "capability-bind",
         } and not re.fullmatch(
             r"evc_[0-9a-f]{24}", candidate_id
         ):
@@ -829,7 +831,8 @@ def _normalize_client_payload(
             "candidate_id": (
                 candidate_id
                 if action in {
-                    "detail", "capability-spec", "capability-govern", "capability-artifact"
+                    "detail", "capability-spec", "capability-govern", "capability-artifact",
+                    "capability-bind",
                 }
                 else ""
             ),
