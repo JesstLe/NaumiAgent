@@ -5778,6 +5778,20 @@ function parseEvolutionReviewCommand(text) {
     if (values.length !== 2 || !/^evc_[0-9a-f]{24}$/.test(values[1])) return null;
     return { action, candidate_id: values[1], query: "", risk: "", source_kind: "", limit: 50 };
   }
+  if (action === "capability-artifact") {
+    if (![2, 4].includes(values.length) || !/^evc_[0-9a-f]{24}$/.test(values[1])) return null;
+    if (values.length === 4 && (!values[2] || !/^[A-Z][A-Za-z0-9]{0,127}$/.test(values[3]))) return null;
+    return {
+      action,
+      candidate_id: values[1],
+      source_path: values[2] || "",
+      class_name: values[3] || "",
+      query: "",
+      risk: "",
+      source_kind: "",
+      limit: 50,
+    };
+  }
   if (action === "enqueue") {
     if (values.length < 6 || !/^evc_[0-9a-f]{24}$/.test(values[1])) return null;
     const request = {

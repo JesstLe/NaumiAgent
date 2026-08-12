@@ -36,7 +36,11 @@
 - [EVO-06.2c](EVO-06-2c-capability-specification-governance.md) Capability Specification Governance
   （已实现）：独立重放五条 Harness 人工答案，形成确定性 Assessment 与 first-terminal-wins 人工决策；
   历史批准随证据变化动态撤权，approved 只允许进入 Sandbox 实现设计，不授予注册、Shadow 或执行权。
-- EVO-06.3 Sandbox registration：临时 registry/namespace，不能覆盖内置 tool。
+- [EVO-06.3a](EVO-06-3a-sealed-capability-artifact-admission-preview.md) Sealed Capability Artifact
+  与 Sandbox 准入预检（已实现）：封存 approved Specification 对应的真实 Python Tool 源码，执行
+  AST/schema/顶层副作用/内置名冲突/临时 namespace 检查；源码或治理变化动态撤权，但不 import、注册或执行。
+- EVO-06.3b Sandbox execution 与临时注册 lease：在 ARC-04/Harness Sandbox 中验证 fixture、结果/错误
+  schema 和权限观察后，才能获得短期、可撤销 Registry lease；不能覆盖内置 Tool。
 - EVO-06.4 Shadow evaluation：观察建议调用但不执行，比较路由准确度和价值。
 - EVO-06.5 Limited activation：低风险、明确 scope、预算和用户可见标识。
 - EVO-06.6 Market/selection：性能、可靠、成本、用户价值，多指标而非 token 竞争。

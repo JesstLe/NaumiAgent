@@ -2904,6 +2904,32 @@ test("evolution capability-govern uses the typed human-governance route", () => 
   }]);
 });
 
+test("evolution capability-artifact uses typed inspect and create requests", () => {
+  const candidateId = `evc_${"e".repeat(24)}`;
+  for (const [command, sourcePath, className] of [
+    [`/evolution capability-artifact ${candidateId}`, "", ""],
+    [`/evolution capability-artifact ${candidateId} sandbox/tool.py SandboxTool`, "sandbox/tool.py", "SandboxTool"],
+  ]) {
+    const state = createInitialState();
+    const sent = [];
+    handleSubmitText(state, command, (type, payload) => sent.push({ type, payload }));
+    assert.equal(state.route.name, "evolution_review");
+    assert.deepEqual(sent, [{
+      type: "evolution/review/request",
+      payload: {
+        action: "capability-artifact",
+        candidate_id: candidateId,
+        source_path: sourcePath,
+        class_name: className,
+        query: "",
+        risk: "",
+        source_kind: "",
+        limit: 50,
+      },
+    }]);
+  }
+});
+
 test("outcome discovery uses slash execution then filters its typed projection", () => {
   const state = createInitialState();
   const sent = [];

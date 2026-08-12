@@ -3058,6 +3058,49 @@ test("evolution review snapshot is strict and drops private fields", () => {
   assert.equal(governed.selected.capability_governance.sandbox_design_eligible, true);
   assert.equal(governed.selected.capability_governance.registration_authorized, false);
   assert.equal(Object.hasOwn(governed.selected.capability_governance, "private_note"), false);
+  const artifactChecks = [
+    "approved_source_binding", "workspace_source", "tool_subclass", "interface_match",
+    "entrypoint_shape", "import_time_safety", "builtin_conflict", "temporary_namespace",
+  ].map((code) => ({ code, passed: true, hard_block: true, detail: `${code} ok` }));
+  const artifactReview = normalizeServerRecord({ type: "evolution/review", payload: {
+    ...governed,
+    selected: {
+      ...governed.selected,
+      capability_artifact: {
+        schema_version: 1,
+        state: "preview_ready",
+        source_current: true,
+        governance_current: true,
+        registration_authorized: false,
+        shadow_authorized: false,
+        executable: false,
+        artifact: {
+          schema_version: 1,
+          policy_version: "evolution-capability-artifact-v1",
+          artifact_id: `evcia_${"9".repeat(24)}`,
+          artifact_sha256: "8".repeat(64),
+          candidate_id: capabilitySource.candidate_id,
+          specification_id: specificationId,
+          specification_sha256: specificationSha256,
+          governance_decision_id: governanceDecision.decision_id,
+          governance_decision_sha256: "7".repeat(64),
+          source_path: "sandbox/tool.py",
+          source_sha256: "6".repeat(64),
+          class_name: "SandboxTool",
+          declared_tool_name: completeSpecification.interface.tool_name,
+          temporary_tool_name: `evolution_sandbox:${specificationId.slice(5, 17)}:${completeSpecification.interface.tool_name}`,
+          admission_ready: true,
+          registry_state: "preview_only",
+          registration_authorized: false,
+          shadow_authorized: false,
+          executable: false,
+          checks: artifactChecks,
+        },
+      },
+    },
+  } }).payload;
+  assert.equal(artifactReview.selected.capability_artifact.state, "preview_ready");
+  assert.equal(artifactReview.selected.capability_artifact.artifact.checks.length, 8);
   assert.throws(() => normalizeServerRecord({ type: "evolution/review", payload: {
     ...governed,
     selected: {

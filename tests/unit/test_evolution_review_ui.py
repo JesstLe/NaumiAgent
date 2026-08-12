@@ -4,6 +4,7 @@ import io
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -15,7 +16,10 @@ from naumi_agent.harness.feedback import FeedbackIntakeService, build_direct_use
 from naumi_agent.runtime.composition import create_agent_engine
 from naumi_agent.tasks.store import TaskStore
 from naumi_agent.ui.bridge import JsonlEngineBridge
-from naumi_agent.ui.evolution_review import evolution_review_payload
+from naumi_agent.ui.evolution_review import (
+    _capability_artifact_payload,
+    evolution_review_payload,
+)
 from naumi_agent.ui.protocol import ClientEventType, normalize_client_record
 from naumi_agent.workbench.models import ProposalSourceKind, RiskLevel
 from naumi_agent.workbench.proposal_governance import ProposalAction
@@ -173,6 +177,24 @@ def test_protocol_normalizes_and_rejects_evolution_review_requests() -> None:
             "type": ClientEventType.EVOLUTION_REVIEW_REQUEST,
             "payload": {"action": "detail", "candidate_id": "../other"},
         })
+
+
+def test_capability_artifact_public_payload_and_protocol() -> None:
+    value = SimpleNamespace(
+        model_dump=lambda **_kwargs: {
+            "schema_version": 1,
+            "artifact": {
+                "artifact_id": f"evcia_{'a' * 24}",
+                "source_text": "private sealed source",
+                "source_sha256": "b" * 64,
+            },
+        }
+    )
+    payload = _capability_artifact_payload(
+        SimpleNamespace(capability_artifact=value)  # type: ignore[arg-type]
+    )
+    assert payload is not None
+    assert "source_text" not in payload["artifact"]
     capability = normalize_client_record({
         "type": ClientEventType.EVOLUTION_REVIEW_REQUEST,
         "payload": {
@@ -191,6 +213,25 @@ def test_protocol_normalizes_and_rejects_evolution_review_requests() -> None:
     })
     assert governance["payload"]["action"] == "capability-govern"
     assert governance["payload"]["candidate_id"] == f"evc_{'b' * 24}"
+    artifact = normalize_client_record({
+        "type": ClientEventType.EVOLUTION_REVIEW_REQUEST,
+        "payload": {
+            "action": "capability-artifact",
+            "candidate_id": f"evc_{'c' * 24}",
+            "source_path": "sandbox/tool.py",
+            "class_name": "SandboxTool",
+        },
+    })
+    assert artifact["payload"]["source_path"] == "sandbox/tool.py"
+    with pytest.raises(ValueError, match="同时提供"):
+        normalize_client_record({
+            "type": ClientEventType.EVOLUTION_REVIEW_REQUEST,
+            "payload": {
+                "action": "capability-artifact",
+                "candidate_id": f"evc_{'c' * 24}",
+                "source_path": "sandbox/tool.py",
+            },
+        })
 
 
 @pytest.mark.asyncio

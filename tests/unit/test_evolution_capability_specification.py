@@ -13,6 +13,13 @@ import pytest
 
 from naumi_agent.cli.slash_router import execute_slash_command
 from naumi_agent.evolution.candidate import build_candidate_draft
+from naumi_agent.evolution.capability_artifact import (
+    CapabilityArtifactError,
+    EvolutionCapabilityArtifactService,
+    EvolutionCapabilityArtifactStore,
+    build_capability_implementation_artifact,
+    render_capability_artifact,
+)
 from naumi_agent.evolution.capability_governance import (
     CapabilityGovernanceError,
     CapabilitySpecificationAssessor,
@@ -42,7 +49,10 @@ from naumi_agent.evolution.prioritization import (
 from naumi_agent.evolution.store import EvolutionCandidateStore
 from naumi_agent.harness.interaction import new_interaction_record
 from naumi_agent.harness.store import HarnessStore
-from naumi_agent.tools.evolution_review import EvolutionCapabilityGovernanceTool
+from naumi_agent.tools.evolution_review import (
+    EvolutionCapabilityArtifactTool,
+    EvolutionCapabilityGovernanceTool,
+)
 from naumi_agent.user_interaction import normalize_interaction_request
 
 NOW = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
@@ -976,3 +986,314 @@ async def test_historical_approval_is_revoked_when_spec_evidence_no_longer_repla
     assert revoked.sandbox_design_eligible is False
     assert revoked.registration_authorized is False
     assert revoked.executable is False
+
+
+def _implementation_source(tool_name: str, schema: dict[str, object]) -> str:
+    return f'''from naumi_agent.tools.base import Tool
+
+
+class BrowserTraceCompareTool(Tool):
+    @property
+    def name(self):
+        return {tool_name!r}
+
+    @property
+    def description(self):
+        return "比较两份真实浏览器轨迹。"
+
+    @property
+    def parameters_schema(self):
+        return {schema!r}
+
+    async def execute(self, **kwargs):
+        return "待 Sandbox Eval 验证"
+'''
+
+
+@pytest.mark.asyncio
+async def test_capability_artifact_seals_real_source_without_registration(
+    tmp_path: Path,
+) -> None:
+    proposal, specification_service, _, harness, _, specification_view = (
+        await _complete_specification(tmp_path)
+    )
+    governance, _, _ = _governance_service(
+        tmp_path=tmp_path,
+        proposal=proposal,
+        specification_service=specification_service,
+        harness_store=harness,
+        responses=[{"kind": "option", "value": "approve"}],
+    )
+    approved = await governance.decide(
+        tmp_path,
+        candidate_id=proposal.source.candidate_id,
+    )
+    specification = specification_view.specification
+    assert specification is not None and specification.interface is not None
+    source_path = tmp_path / "sandbox_tools" / "browser_trace_compare.py"
+    source_path.parent.mkdir()
+    source_path.write_text(
+        _implementation_source(
+            specification.interface.tool_name,
+            specification.interface.parameters_schema,
+        ),
+        encoding="utf-8",
+    )
+
+    artifact = build_capability_implementation_artifact(
+        tmp_path,
+        specification=specification,
+        governance=approved,
+        source_path="sandbox_tools/browser_trace_compare.py",
+        class_name="BrowserTraceCompareTool",
+        registered_tool_names=("bash_run", "default.web_search"),
+        created_at=NOW.isoformat(),
+    )
+
+    assert artifact.admission_ready is True
+    assert artifact.registry_state == "preview_only"
+    assert artifact.registration_authorized is False
+    assert artifact.executable is False
+    assert artifact.source_text == source_path.read_text(encoding="utf-8")
+    assert artifact.temporary_tool_name.startswith("evolution_sandbox:")
+    assert "没有 import、注册或执行" in render_capability_artifact(
+        SimpleNamespace(
+            artifact=artifact,
+            state="preview_ready",
+            source_current=True,
+            governance_current=True,
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_capability_artifact_blocks_builtin_alias_and_import_time_effect(
+    tmp_path: Path,
+) -> None:
+    proposal, specification_service, _, harness, _, specification_view = (
+        await _complete_specification(tmp_path)
+    )
+    governance, _, _ = _governance_service(
+        tmp_path=tmp_path,
+        proposal=proposal,
+        specification_service=specification_service,
+        harness_store=harness,
+        responses=[{"kind": "option", "value": "approve"}],
+    )
+    approved = await governance.decide(
+        tmp_path,
+        candidate_id=proposal.source.candidate_id,
+    )
+    specification = specification_view.specification
+    assert specification is not None and specification.interface is not None
+    source = _implementation_source(
+        specification.interface.tool_name,
+        specification.interface.parameters_schema,
+    ) + "\nprint('must not run')\n"
+    path = tmp_path / "candidate.py"
+    path.write_text(source, encoding="utf-8")
+
+    artifact = build_capability_implementation_artifact(
+        tmp_path,
+        specification=specification,
+        governance=approved,
+        source_path="candidate.py",
+        class_name="BrowserTraceCompareTool",
+        registered_tool_names=(f"default.{specification.interface.tool_name}",),
+        created_at=NOW.isoformat(),
+    )
+
+    assert artifact.admission_ready is False
+    failed = {item.code for item in artifact.checks if not item.passed}
+    assert failed == {"import_time_safety", "builtin_conflict"}
+
+
+@pytest.mark.asyncio
+async def test_capability_artifact_rejects_workspace_escape_and_revoked_governance(
+    tmp_path: Path,
+) -> None:
+    proposal, specification_service, _, harness, _, specification_view = (
+        await _complete_specification(tmp_path)
+    )
+    governance, _, _ = _governance_service(
+        tmp_path=tmp_path,
+        proposal=proposal,
+        specification_service=specification_service,
+        harness_store=harness,
+        responses=[{"kind": "option", "value": "approve"}],
+    )
+    approved = await governance.decide(
+        tmp_path,
+        candidate_id=proposal.source.candidate_id,
+    )
+    specification = specification_view.specification
+    assert specification is not None
+
+    for source_path, message in (
+        (str(tmp_path / "candidate.py"), "绝对路径"),
+        (r"C:\outside\candidate.py", "绝对路径"),
+        ("../candidate.py", "父目录跳转"),
+    ):
+        with pytest.raises(CapabilityArtifactError, match=message):
+            build_capability_implementation_artifact(
+                tmp_path,
+                specification=specification,
+                governance=approved,
+                source_path=source_path,
+                class_name="BrowserTraceCompareTool",
+                registered_tool_names=(),
+                created_at=NOW.isoformat(),
+            )
+
+    target = tmp_path / "target.py"
+    target.write_text("# target\n", encoding="utf-8")
+    (tmp_path / "linked.py").symlink_to(target)
+    with pytest.raises(CapabilityArtifactError, match="符号链接"):
+        build_capability_implementation_artifact(
+            tmp_path,
+            specification=specification,
+            governance=approved,
+            source_path="linked.py",
+            class_name="BrowserTraceCompareTool",
+            registered_tool_names=(),
+            created_at=NOW.isoformat(),
+        )
+
+    revoked = approved.model_copy(
+        update={
+            "state": "revoked",
+            "decision_effective": False,
+            "sandbox_design_eligible": False,
+        }
+    )
+    with pytest.raises(CapabilityArtifactError, match="治理 Decision"):
+        build_capability_implementation_artifact(
+            tmp_path,
+            specification=specification,
+            governance=revoked,
+            source_path="candidate.py",
+            class_name="BrowserTraceCompareTool",
+            registered_tool_names=(),
+            created_at=NOW.isoformat(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_capability_artifact_store_is_idempotent_and_detects_tampering(
+    tmp_path: Path,
+) -> None:
+    proposal, specification_service, _, harness, _, specification_view = (
+        await _complete_specification(tmp_path)
+    )
+    governance, _, _ = _governance_service(
+        tmp_path=tmp_path,
+        proposal=proposal,
+        specification_service=specification_service,
+        harness_store=harness,
+        responses=[{"kind": "option", "value": "approve"}],
+    )
+    approved = await governance.decide(
+        tmp_path,
+        candidate_id=proposal.source.candidate_id,
+    )
+    specification = specification_view.specification
+    assert specification is not None and specification.interface is not None
+    path = tmp_path / "candidate.py"
+    path.write_text(
+        _implementation_source(
+            specification.interface.tool_name,
+            specification.interface.parameters_schema,
+        ),
+        encoding="utf-8",
+    )
+    artifact = build_capability_implementation_artifact(
+        tmp_path,
+        specification=specification,
+        governance=approved,
+        source_path="candidate.py",
+        class_name="BrowserTraceCompareTool",
+        registered_tool_names=(),
+        created_at=NOW.isoformat(),
+    )
+    store = EvolutionCapabilityArtifactStore(tmp_path / "evolution.db")
+    competing_store = EvolutionCapabilityArtifactStore(tmp_path / "evolution.db")
+    first, second = await asyncio.gather(
+        store.record(tmp_path, artifact),
+        competing_store.record(tmp_path, artifact),
+    )
+    assert first.artifact_id == second.artifact_id == artifact.artifact_id
+
+    with sqlite3.connect(tmp_path / "evolution.db") as db:
+        db.execute(
+            "UPDATE evolution_capability_implementation_artifacts "
+            "SET payload_sha256 = ? WHERE artifact_id = ?",
+            ("0" * 64, artifact.artifact_id),
+        )
+        db.commit()
+    with pytest.raises(CapabilityArtifactError, match="持久摘要"):
+        await store.latest(tmp_path, specification.specification_id)
+
+
+@pytest.mark.asyncio
+async def test_capability_artifact_service_revokes_changed_source(
+    tmp_path: Path,
+) -> None:
+    proposal, specification_service, _, harness, _, specification_view = (
+        await _complete_specification(tmp_path)
+    )
+    governance, _, _ = _governance_service(
+        tmp_path=tmp_path,
+        proposal=proposal,
+        specification_service=specification_service,
+        harness_store=harness,
+        responses=[{"kind": "option", "value": "approve"}],
+    )
+    await governance.decide(tmp_path, candidate_id=proposal.source.candidate_id)
+    specification = specification_view.specification
+    assert specification is not None and specification.interface is not None
+    path = tmp_path / "candidate.py"
+    path.write_text(
+        _implementation_source(
+            specification.interface.tool_name,
+            specification.interface.parameters_schema,
+        ),
+        encoding="utf-8",
+    )
+    service = EvolutionCapabilityArtifactService(
+        review_service=_Review(proposal),
+        specification_service=specification_service,
+        governance_service=governance,
+        store=EvolutionCapabilityArtifactStore(tmp_path / "evolution.db"),
+        registered_tool_names=lambda: ("bash_run",),
+        now=lambda: NOW.isoformat(),
+    )
+    created = await service.create(
+        tmp_path,
+        candidate_id=proposal.source.candidate_id,
+        source_path="candidate.py",
+        class_name="BrowserTraceCompareTool",
+    )
+    assert created.state == "preview_ready"
+    engine = SimpleNamespace(
+        workspace_root=tmp_path,
+        evolution_capability_artifact_service=service,
+        evolution_review_service=service.review_service,
+    )
+    tool_output = await EvolutionCapabilityArtifactTool(engine).execute(
+        candidate_id=proposal.source.candidate_id,
+        action="inspect",
+    )
+    slash_output = await execute_slash_command(
+        engine,
+        f"/evolution capability-artifact {proposal.source.candidate_id}",
+    )
+    assert created.artifact is not None
+    assert created.artifact.artifact_id in tool_output
+    assert created.artifact.artifact_id in slash_output
+
+    path.write_text(path.read_text(encoding="utf-8") + "\n# changed\n", encoding="utf-8")
+    revoked = await service.inspect(tmp_path, proposal.source.candidate_id)
+    assert revoked.state == "revoked"
+    assert revoked.source_current is False
+    assert revoked.governance_current is True
+    assert revoked.registration_authorized is False

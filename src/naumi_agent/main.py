@@ -3303,6 +3303,10 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
         EvolutionApprovalSignatureError,
         render_evolution_approval_signature,
     )
+    from naumi_agent.evolution.capability_artifact import (
+        CapabilityArtifactError,
+        render_capability_artifact,
+    )
     from naumi_agent.evolution.capability_governance import (
         CapabilityGovernanceError,
         render_capability_governance,
@@ -4816,6 +4820,25 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             )
             console.print(Markdown(render_capability_governance(view)))
             return
+        if action == "capability-artifact":
+            if len(parts) not in {2, 4}:
+                raise ValueError(
+                    "capability-artifact 需要 Candidate ID；创建时另加 source_path 与 class_name。"
+                )
+            if len(parts) == 2:
+                view = await engine.evolution_capability_artifact_service.inspect(
+                    engine.workspace_root,
+                    parts[1],
+                )
+            else:
+                view = await engine.evolution_capability_artifact_service.create(
+                    engine.workspace_root,
+                    candidate_id=parts[1],
+                    source_path=parts[2],
+                    class_name=parts[3],
+                )
+            console.print(Markdown(render_capability_artifact(view)))
+            return
         if action == "detail":
             if len(parts) != 2:
                 raise ValueError("detail 需要一个 Candidate ID。")
@@ -4841,6 +4864,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
         else:
             raise ValueError(
                 "仅支持 list、priorities、detail、capability-spec、capability-govern、"
+                "capability-artifact、"
                 "experiment-contract、evaluation、"
                 "evaluation-contract、"
                 "evaluation-final、decision-input、mechanical-gate、"
@@ -5028,6 +5052,8 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution detail <candidate-id>；"
             "/evolution capability-spec <candidate-id>；"
             "/evolution capability-govern <candidate-id>；"
+            "/evolution capability-artifact <candidate-id> "
+            "[workspace-relative-source.py ClassName]；"
             "/evolution experiment-contract <contract-id>；"
             "/evolution evaluation <comparison-id>；"
             "/evolution evaluation-contract <workspace-relative-request.json>；"
@@ -5378,6 +5404,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     except CapabilityGovernanceError as exc:
         console.print(
             f"Capability Governance 未完成：{exc}",
+            style="yellow",
+            markup=False,
+        )
+        return
+    except CapabilityArtifactError as exc:
+        console.print(
+            f"Capability 实现制品未就绪：{exc}",
             style="yellow",
             markup=False,
         )

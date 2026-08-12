@@ -6407,6 +6407,14 @@ function normalizeEvolutionItem(value, detail) {
       capabilityProposal,
       capabilitySpecification,
     );
+  const capabilityArtifact = item.capability_artifact == null
+    ? null
+    : normalizeEvolutionCapabilityArtifact(
+      item.capability_artifact,
+      candidateId,
+      capabilitySpecification,
+      capabilityGovernance,
+    );
   if (normalized.review_ready && proposal === null) {
     throw new Error("evolution/review review_ready detail 必须包含 Proposal Preview");
   }
@@ -6457,6 +6465,121 @@ function normalizeEvolutionItem(value, detail) {
     capability_proposal: capabilityProposal,
     capability_specification: capabilitySpecification,
     capability_governance: capabilityGovernance,
+    capability_artifact: capabilityArtifact,
+  };
+}
+
+function normalizeEvolutionCapabilityArtifact(
+  value,
+  candidateId,
+  capabilitySpecification,
+  capabilityGovernance,
+) {
+  const view = harnessObject(value, "evolution/review capability_artifact");
+  const state = harnessChoice(
+    view.state,
+    "evolution/review capability_artifact.state",
+    new Set(["missing", "preview_ready", "blocked", "revoked"]),
+  );
+  const sourceCurrent = harnessBoolean(
+    view.source_current,
+    "evolution/review capability_artifact.source_current",
+  );
+  const governanceCurrent = harnessBoolean(
+    view.governance_current,
+    "evolution/review capability_artifact.governance_current",
+  );
+  if (
+    harnessNonnegativeInteger(view.schema_version, "evolution/review capability_artifact.schema_version") !== 1
+    || harnessBoolean(view.registration_authorized, "evolution/review capability_artifact.registration_authorized")
+    || harnessBoolean(view.shadow_authorized, "evolution/review capability_artifact.shadow_authorized")
+    || harnessBoolean(view.executable, "evolution/review capability_artifact.executable")
+  ) throw new Error("evolution/review Capability Artifact authority 无效");
+  if (view.artifact == null) {
+    if (state !== "missing" || sourceCurrent || governanceCurrent) {
+      throw new Error("evolution/review missing artifact 状态无效");
+    }
+    return {
+      schema_version: 1,
+      artifact: null,
+      state,
+      source_current: false,
+      governance_current: false,
+      registration_authorized: false,
+      shadow_authorized: false,
+      executable: false,
+    };
+  }
+  if (!capabilitySpecification?.specification || !capabilityGovernance?.decision) {
+    throw new Error("evolution/review Capability Artifact 缺少规格或治理来源");
+  }
+  const artifact = harnessObject(view.artifact, "evolution/review capability_artifact.artifact");
+  const checks = harnessObjectArray(
+    artifact.checks,
+    "evolution/review capability_artifact.checks",
+    8,
+  ).map((check) => ({
+    code: harnessText(check.code, "evolution/review capability_artifact.check.code"),
+    passed: harnessBoolean(check.passed, "evolution/review capability_artifact.check.passed"),
+    hard_block: harnessBoolean(check.hard_block, "evolution/review capability_artifact.check.hard_block"),
+    detail: harnessText(check.detail, "evolution/review capability_artifact.check.detail"),
+  }));
+  const expectedCodes = [
+    "approved_source_binding", "workspace_source", "tool_subclass", "interface_match",
+    "entrypoint_shape", "import_time_safety", "builtin_conflict", "temporary_namespace",
+  ];
+  if (checks.length !== 8 || checks.some((check, index) => check.code !== expectedCodes[index] || !check.hard_block)) {
+    throw new Error("evolution/review Capability Artifact checks 无效");
+  }
+  const normalized = {
+    schema_version: harnessNonnegativeInteger(artifact.schema_version, "evolution/review capability_artifact.artifact.schema_version"),
+    policy_version: harnessText(artifact.policy_version, "evolution/review capability_artifact.artifact.policy_version"),
+    artifact_id: harnessText(artifact.artifact_id, "evolution/review capability_artifact.artifact_id"),
+    artifact_sha256: harnessText(artifact.artifact_sha256, "evolution/review capability_artifact.artifact_sha256"),
+    candidate_id: harnessText(artifact.candidate_id, "evolution/review capability_artifact.candidate_id"),
+    specification_id: harnessText(artifact.specification_id, "evolution/review capability_artifact.specification_id"),
+    specification_sha256: harnessText(artifact.specification_sha256, "evolution/review capability_artifact.specification_sha256"),
+    governance_decision_id: harnessText(artifact.governance_decision_id, "evolution/review capability_artifact.governance_decision_id"),
+    governance_decision_sha256: harnessText(artifact.governance_decision_sha256, "evolution/review capability_artifact.governance_decision_sha256"),
+    source_path: harnessText(artifact.source_path, "evolution/review capability_artifact.source_path"),
+    source_sha256: harnessText(artifact.source_sha256, "evolution/review capability_artifact.source_sha256"),
+    class_name: harnessText(artifact.class_name, "evolution/review capability_artifact.class_name"),
+    declared_tool_name: harnessText(artifact.declared_tool_name, "evolution/review capability_artifact.declared_tool_name"),
+    temporary_tool_name: harnessText(artifact.temporary_tool_name, "evolution/review capability_artifact.temporary_tool_name"),
+    admission_ready: harnessBoolean(artifact.admission_ready, "evolution/review capability_artifact.admission_ready"),
+    registry_state: harnessText(artifact.registry_state, "evolution/review capability_artifact.registry_state"),
+    checks,
+  };
+  const shaFields = [
+    normalized.artifact_sha256, normalized.specification_sha256,
+    normalized.governance_decision_sha256, normalized.source_sha256,
+  ];
+  if (
+    normalized.schema_version !== 1
+    || normalized.policy_version !== "evolution-capability-artifact-v1"
+    || normalized.candidate_id !== candidateId
+    || normalized.specification_id !== capabilitySpecification.specification_id
+    || normalized.specification_sha256 !== capabilityGovernance.assessment.specification_sha256
+    || normalized.governance_decision_id !== capabilityGovernance.decision.decision_id
+    || normalized.registry_state !== "preview_only"
+    || !/^evcia_[0-9a-f]{24}$/.test(normalized.artifact_id)
+    || shaFields.some((item) => !/^[0-9a-f]{64}$/.test(item))
+    || normalized.admission_ready !== checks.every((check) => check.passed)
+    || (state === "preview_ready" && (!sourceCurrent || !governanceCurrent || !normalized.admission_ready))
+    || (state === "revoked" && sourceCurrent && governanceCurrent)
+    || harnessBoolean(artifact.registration_authorized, "evolution/review capability_artifact.artifact.registration_authorized")
+    || harnessBoolean(artifact.shadow_authorized, "evolution/review capability_artifact.artifact.shadow_authorized")
+    || harnessBoolean(artifact.executable, "evolution/review capability_artifact.artifact.executable")
+  ) throw new Error("evolution/review Capability Artifact 绑定或状态无效");
+  return {
+    schema_version: 1,
+    artifact: normalized,
+    state,
+    source_current: sourceCurrent,
+    governance_current: governanceCurrent,
+    registration_authorized: false,
+    shadow_authorized: false,
+    executable: false,
   };
 }
 

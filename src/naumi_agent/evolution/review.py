@@ -9,6 +9,7 @@ from typing import Protocol
 
 from naumi_agent.evolution.aggregation import CandidateAggregation, aggregate_candidate
 from naumi_agent.evolution.candidate import EvolutionCandidateDraft
+from naumi_agent.evolution.capability_artifact import CapabilityArtifactView
 from naumi_agent.evolution.capability_governance import CapabilityGovernanceView
 from naumi_agent.evolution.capability_proposal import (
     EvolutionCapabilityProposal,
@@ -89,6 +90,14 @@ class CapabilityGovernanceReader(Protocol):
     ) -> CapabilityGovernanceView | None: ...
 
 
+class CapabilityArtifactReader(Protocol):
+    async def inspect(
+        self,
+        workspace_root: str | Path,
+        candidate_id: str,
+    ) -> CapabilityArtifactView: ...
+
+
 @dataclass(frozen=True, slots=True)
 class EvolutionReviewFilter:
     query: str = ""
@@ -137,6 +146,7 @@ class EvolutionReviewItem:
     capability_proposal: EvolutionCapabilityProposal | None
     capability_specification: CapabilitySpecificationView | None
     capability_governance: CapabilityGovernanceView | None
+    capability_artifact: CapabilityArtifactView | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,12 +170,14 @@ class EvolutionReviewService:
         source_authority_reader: CandidateSourceAuthorityReader | None = None,
         capability_specification_reader: CapabilitySpecificationReader | None = None,
         capability_governance_reader: CapabilityGovernanceReader | None = None,
+        capability_artifact_reader: CapabilityArtifactReader | None = None,
     ) -> None:
         self._store = store
         self._governance_reader = governance_reader
         self._source_authority_reader = source_authority_reader
         self._capability_specification_reader = capability_specification_reader
         self._capability_governance_reader = capability_governance_reader
+        self._capability_artifact_reader = capability_artifact_reader
 
     def bind_governance_reader(self, reader: CandidateGovernanceReader) -> None:
         """Bind the durable read path after runtime services are composed."""
@@ -206,6 +218,17 @@ class EvolutionReviewService:
         ):
             raise RuntimeError("Capability Governance reader 已绑定。")
         self._capability_governance_reader = reader
+
+    def bind_capability_artifact_reader(
+        self,
+        reader: CapabilityArtifactReader,
+    ) -> None:
+        if (
+            self._capability_artifact_reader is not None
+            and self._capability_artifact_reader is not reader
+        ):
+            raise RuntimeError("Capability Artifact reader 已绑定。")
+        self._capability_artifact_reader = reader
 
     async def list_snapshot(
         self,
@@ -318,6 +341,15 @@ class EvolutionReviewService:
                 selected = replace(
                     selected,
                     capability_governance=capability_governance,
+                )
+            if self._capability_artifact_reader is not None:
+                capability_artifact = await self._capability_artifact_reader.inspect(
+                    workspace_root,
+                    selected.candidate_id,
+                )
+                selected = replace(
+                    selected,
+                    capability_artifact=capability_artifact,
                 )
         return EvolutionReviewSnapshot(
             mode="detail",
@@ -652,6 +684,22 @@ def _render_detail(snapshot: EvolutionReviewSnapshot) -> str:
             lines.append(
                 f"- 继续：`/evolution capability-govern {item.candidate_id}`"
             )
+    if item.capability_artifact is not None:
+        artifact_view = item.capability_artifact
+        lines.extend([
+            "",
+            f"## Capability Sandbox 准入预检 · `{artifact_view.state}`",
+            "",
+            "- Registry 注册：否 · Shadow：否 · 可执行：否",
+        ])
+        if artifact_view.artifact is not None:
+            artifact = artifact_view.artifact
+            lines.extend([
+                f"- Artifact：`{artifact.artifact_id}`",
+                f"- 临时名称：`{artifact.temporary_tool_name}`",
+                f"- 源码当前：{'是' if artifact_view.source_current else '否'}",
+                f"- 治理当前：{'是' if artifact_view.governance_current else '否'}",
+            ])
     lines.extend(["", "## Evidence 引用", ""])
     lines.extend(f"- `{_escape(ref)}`" for ref in item.evidence_refs[:20])
     if len(item.evidence_refs) > 20:
@@ -752,6 +800,7 @@ def _review_item(
         ),
         capability_specification=None,
         capability_governance=None,
+        capability_artifact=None,
     )
 
 

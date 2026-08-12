@@ -13,6 +13,7 @@ import re
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from enum import StrEnum
+from pathlib import Path, PureWindowsPath
 from typing import Any
 from uuid import uuid4
 
@@ -780,13 +781,16 @@ def _normalize_client_payload(
             "detail",
             "capability-spec",
             "capability-govern",
+            "capability-artifact",
         }:
             raise ValueError(
                 "Evolution review action 仅支持 list/priorities/detail/"
-                "capability-spec/capability-govern。"
+                "capability-spec/capability-govern/capability-artifact。"
             )
         candidate_id = str(payload.get("candidate_id") or "").strip()
-        if action in {"detail", "capability-spec", "capability-govern"} and not re.fullmatch(
+        if action in {
+            "detail", "capability-spec", "capability-govern", "capability-artifact"
+        } and not re.fullmatch(
             r"evc_[0-9a-f]{24}", candidate_id
         ):
             raise ValueError("Evolution candidate_id 格式无效。")
@@ -804,11 +808,29 @@ def _normalize_client_payload(
             "rollback_outcome", "promoted_outcome",
         }:
             raise ValueError("Evolution source_kind 格式无效。")
-        return {
+        source_path = str(payload.get("source_path") or "").strip()
+        class_name = str(payload.get("class_name") or "").strip()
+        if action == "capability-artifact":
+            if bool(source_path) != bool(class_name):
+                raise ValueError("Capability artifact 创建必须同时提供源码路径和类名。")
+            if source_path and (
+                len(source_path) > 1024
+                or "\x00" in source_path
+                or Path(source_path).is_absolute()
+                or PureWindowsPath(source_path).is_absolute()
+            ):
+                raise ValueError("Capability artifact source_path 格式无效。")
+            if class_name and not re.fullmatch(r"[A-Z][A-Za-z0-9]{0,127}", class_name):
+                raise ValueError("Capability artifact class_name 格式无效。")
+        elif source_path or class_name:
+            raise ValueError("非 capability-artifact action 不接受源码参数。")
+        normalized = {
             "action": action,
             "candidate_id": (
                 candidate_id
-                if action in {"detail", "capability-spec", "capability-govern"}
+                if action in {
+                    "detail", "capability-spec", "capability-govern", "capability-artifact"
+                }
                 else ""
             ),
             "query": query,
@@ -816,6 +838,10 @@ def _normalize_client_payload(
             "source_kind": source_kind,
             "limit": _bounded_int(payload.get("limit"), 50, lower=1, upper=100),
         }
+        if action == "capability-artifact":
+            normalized["source_path"] = source_path
+            normalized["class_name"] = class_name
+        return normalized
 
     if event_type == ClientEventType.EVOLUTION_EVALUATION_LANE_REQUEST:
         comparison_id = str(payload.get("comparison_id") or "").strip().lower()
