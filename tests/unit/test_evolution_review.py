@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -7,15 +8,17 @@ from types import SimpleNamespace
 import pytest
 
 from naumi_agent.cli.slash_router import execute_slash_command
+from naumi_agent.evolution.candidate import build_candidate_draft
 from naumi_agent.evolution.queue import EvolutionProposalQueueResult
 from naumi_agent.evolution.review import (
     EvolutionReviewFilter,
     EvolutionReviewService,
     render_evolution_review,
 )
-from naumi_agent.evolution.store import EvolutionCandidateStore
+from naumi_agent.evolution.store import EvolutionCandidateStore, EvolutionStoredCandidate
 from naumi_agent.harness.feedback import (
     FeedbackIntakeService,
+    adapt_feedback_evidence,
     build_direct_user_feedback,
 )
 from naumi_agent.tools.evolution_review import (
@@ -100,8 +103,49 @@ from naumi_agent.tools.evolution_review import (
     EvolutionToolCatalogMissOpportunityTool,
     create_evolution_review_tools,
 )
+from naumi_agent.workbench.proposal_governance import ProposalCooldownDecision
 
 NOW = datetime(2026, 7, 18, 10, 0, tzinfo=UTC)
+
+
+class _RejectAuthorityReader:
+    async def validate_candidate_sources(self, _candidate) -> bool:
+        return False
+
+
+class _AllowGovernanceReader:
+    async def evaluate_source_cooldowns(self, sources):
+        return {
+            candidate_id: (
+                None,
+                ProposalCooldownDecision(
+                    allowed=True,
+                    reason="no_active_cooldown",
+                ),
+            )
+            for candidate_id, _revision, _count, _risk in sources
+        }
+
+
+class _ConcurrencyAuthorityReader:
+    def __init__(self) -> None:
+        self.active = 0
+        self.maximum = 0
+
+    async def validate_candidate_sources(self, _candidate) -> bool:
+        self.active += 1
+        self.maximum = max(self.maximum, self.active)
+        await asyncio.sleep(0.005)
+        self.active -= 1
+        return True
+
+
+class _MemoryCandidateStore:
+    def __init__(self, candidates: tuple[EvolutionStoredCandidate, ...]) -> None:
+        self._candidates = candidates
+
+    async def list_candidates(self, _workspace_root, *, limit: int = 100):
+        return self._candidates[:limit]
 
 
 async def _seed(
@@ -157,7 +201,7 @@ async def _seed(
 @pytest.mark.asyncio
 async def test_review_list_empty_and_filtered_state(tmp_path: Path) -> None:
     store = EvolutionCandidateStore(tmp_path / "evolution.db")
-    service = EvolutionReviewService(store)
+    service = EvolutionReviewService(store, governance_reader=_AllowGovernanceReader())
     empty = await service.list_snapshot(tmp_path)
     assert "没有 Candidate" in render_evolution_review(empty)
 
@@ -178,9 +222,35 @@ async def test_review_list_empty_and_filtered_state(tmp_path: Path) -> None:
     assert item.providers == ("openai",)
     assert item.models == ("openai/kimi-for-coding",)
     assert item.platforms == ("darwin",)
+    assert item.priority is not None
+    assert item.priority.rank == 1
+    assert snapshot.portfolio is not None
+    assert snapshot.portfolio.considered_count == 2
+    assert snapshot.portfolio.ranked_count == 1
     rendered = render_evolution_review(snapshot)
     assert "ui:footer" in rendered
     assert "secret-never-render" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_review_applies_display_limit_after_authoritative_priority(
+    tmp_path: Path,
+) -> None:
+    store = EvolutionCandidateStore(tmp_path / "evolution.db")
+    footer_id, task_id = await _seed(tmp_path, store)
+    service = EvolutionReviewService(store, governance_reader=_AllowGovernanceReader())
+
+    snapshot = await service.list_snapshot(
+        tmp_path,
+        filters=EvolutionReviewFilter(limit=1),
+    )
+
+    assert [item.candidate_id for item in snapshot.items] == [footer_id]
+    assert task_id != footer_id
+    assert snapshot.portfolio is not None
+    assert snapshot.portfolio.considered_count == 2
+    assert snapshot.portfolio.ranked_count == 1
+    assert snapshot.portfolio.excluded_count == 1
 
 
 @pytest.mark.asyncio
@@ -189,7 +259,7 @@ async def test_review_detail_contains_verified_evidence_and_audit_chain(
 ) -> None:
     store = EvolutionCandidateStore(tmp_path / "evolution.db")
     footer_id, _task_id = await _seed(tmp_path, store)
-    service = EvolutionReviewService(store)
+    service = EvolutionReviewService(store, governance_reader=_AllowGovernanceReader())
 
     snapshot = await service.detail_snapshot(tmp_path, footer_id)
     rendered = render_evolution_review(snapshot)
@@ -205,6 +275,8 @@ async def test_review_detail_contains_verified_evidence_and_audit_chain(
     assert "review_ready" in rendered
     assert "cooldown_gate" in rendered
     assert snapshot.selected.proposal is not None
+    assert snapshot.selected.priority is not None
+    assert snapshot.selected.priority.rank == 1
     assert snapshot.selected.proposal.proposal_kind == "code"
     assert "Proposal Preview" in rendered
     assert "不可执行：否" not in rendered
@@ -218,6 +290,66 @@ async def test_review_detail_contains_verified_evidence_and_audit_chain(
 
     missing = await service.detail_snapshot(tmp_path, "evc_" + "0" * 24)
     assert "不存在" in render_evolution_review(missing)
+
+
+@pytest.mark.asyncio
+async def test_review_priority_fails_closed_when_source_authority_is_revoked(
+    tmp_path: Path,
+) -> None:
+    store = EvolutionCandidateStore(tmp_path / "evolution.db")
+    footer_id, _task_id = await _seed(tmp_path, store)
+    service = EvolutionReviewService(
+        store,
+        governance_reader=_AllowGovernanceReader(),
+        source_authority_reader=_RejectAuthorityReader(),
+    )
+
+    snapshot = await service.list_snapshot(
+        tmp_path,
+        filters=EvolutionReviewFilter(query="footer"),
+    )
+
+    assert snapshot.items[0].candidate_id == footer_id
+    assert snapshot.items[0].priority is not None
+    assert snapshot.items[0].priority.rankable is False
+    assert snapshot.items[0].priority.score == 0
+    assert "source_authority_invalid" in snapshot.items[0].priority.exclusion_reasons
+    assert snapshot.portfolio is not None
+    assert snapshot.portfolio.ranked_count == 0
+
+
+@pytest.mark.asyncio
+async def test_review_bounds_parallel_source_authority_validation(tmp_path: Path) -> None:
+    stored: list[EvolutionStoredCandidate] = []
+    for index in range(40):
+        evidence = adapt_feedback_evidence(build_direct_user_feedback(
+            session_id="concurrency",
+            category="defect",
+            scope=f"ui:parallel-{index}",
+            topic="authority",
+            summary="并发重验",
+            now=NOW + timedelta(minutes=index),
+        ))
+        draft = build_candidate_draft((evidence,))
+        stored.append(EvolutionStoredCandidate(
+            workspace_root=str(tmp_path),
+            draft=draft,
+            revision=1,
+            draft_sha256="a" * 64,
+            created_at=NOW.isoformat(),
+            updated_at=NOW.isoformat(),
+        ))
+    authority = _ConcurrencyAuthorityReader()
+    service = EvolutionReviewService(
+        _MemoryCandidateStore(tuple(stored)),  # type: ignore[arg-type]
+        governance_reader=_AllowGovernanceReader(),
+        source_authority_reader=authority,
+    )
+
+    snapshot = await service.list_snapshot(tmp_path)
+
+    assert len(snapshot.items) == 40
+    assert 1 < authority.maximum <= 16
 
 
 def test_review_filter_rejects_unbounded_or_unknown_values() -> None:
@@ -498,15 +630,20 @@ class _FakeApprovalRequirementExecutor:
 async def test_tool_and_slash_share_review_service(tmp_path: Path) -> None:
     store = EvolutionCandidateStore(tmp_path / "evolution.db")
     footer_id, _task_id = await _seed(tmp_path, store)
-    service = EvolutionReviewService(store)
+    service = EvolutionReviewService(store, governance_reader=_AllowGovernanceReader())
     engine = _FakeEngine(tmp_path, service)
     tool = EvolutionCandidatesTool(engine, service)
 
     tool_list = await tool.execute(action="list", query="footer")
+    tool_priorities = await tool.execute(action="priorities", query="footer")
     tool_detail = await tool.execute(action="detail", candidate_id=footer_id)
     slash_list = await execute_slash_command(
         engine,
         "/evolution list --source user_feedback --limit 10",
+    )
+    slash_priorities = await execute_slash_command(
+        engine,
+        "/evolution priorities --source user_feedback --limit 10",
     )
     slash_detail = await execute_slash_command(
         engine,
@@ -514,8 +651,11 @@ async def test_tool_and_slash_share_review_service(tmp_path: Path) -> None:
     )
 
     assert footer_id in tool_list
+    assert footer_id in tool_priorities
+    assert "优先级 `evolution-priority-v1`" in tool_priorities
     assert footer_id in tool_detail
     assert footer_id in slash_list
+    assert "evolution-priority-v1" in slash_priorities
     assert "审计链" in slash_detail
     assert "Proposal Preview" in tool_detail
     assert "Proposal Preview" in slash_detail

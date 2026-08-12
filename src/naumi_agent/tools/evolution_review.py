@@ -368,8 +368,9 @@ class EvolutionCandidatesTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "只读列出或查看当前工作区的 Evolution Candidate。"
-            "显示来源、风险、频次、机械指标和审计链，不批准实验或修改代码。"
+            "只读列出、排序或查看当前工作区的 Evolution Candidate。"
+            "显示来源、可解释优先级、风险、频次、机械指标和审计链，"
+            "不批准实验或修改代码。"
         )
 
     @property
@@ -379,7 +380,7 @@ class EvolutionCandidatesTool(Tool):
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["list", "detail"],
+                    "enum": ["list", "priorities", "detail"],
                     "default": "list",
                 },
                 "candidate_id": {"type": "string"},
@@ -393,6 +394,9 @@ class EvolutionCandidatesTool(Tool):
                         "self_review_static",
                         "user_feedback",
                         "agent_interpreted_feedback",
+                        "eval_metric_regression",
+                        "goal_need",
+                        "tool_catalog_miss",
                         "rollback_outcome",
                         "promoted_outcome",
                     ],
@@ -428,7 +432,7 @@ class EvolutionCandidatesTool(Tool):
                     self._engine.workspace_root,
                     candidate_id.strip(),
                 )
-            elif action == "list":
+            elif action in {"list", "priorities"}:
                 snapshot = await self._service.list_snapshot(
                     self._engine.workspace_root,
                     filters=EvolutionReviewFilter(
@@ -439,7 +443,7 @@ class EvolutionCandidatesTool(Tool):
                     ),
                 )
             else:
-                return "action 仅支持 list 或 detail。"
+                return "action 仅支持 list、priorities 或 detail。"
         except (EvolutionStoreError, OSError, ValueError):
             return "Evolution Candidate 状态库不可读，或过滤条件无效。请运行 /doctor。"
         return render_evolution_review(snapshot)

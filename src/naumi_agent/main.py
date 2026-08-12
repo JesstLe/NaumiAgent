@@ -2968,7 +2968,7 @@ def _print_help() -> None:
             "记录隐私安全的反馈候选；偏好、取消和赞扬不会计入缺陷",
         ),
         (
-            "/evolution [list|detail|experiment-contract|evaluation|"
+            "/evolution [list|priorities|detail|experiment-contract|evaluation|"
             "stable-population-preview|stable-population-completion|"
             "stable-rollback-readiness|"
             "installation-key|"
@@ -4803,7 +4803,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             )
             console.print(Markdown(render_queue_result(result)))
             return
-        elif action == "list":
+        elif action in {"list", "priorities"}:
             options = _parse_evolution_list_options(parts[1:])
             snapshot = await service.list_snapshot(
                 engine.workspace_root,
@@ -4811,7 +4811,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             )
         else:
             raise ValueError(
-                "仅支持 list、detail、experiment-contract、evaluation、"
+                "仅支持 list、priorities、detail、experiment-contract、evaluation、"
                 "evaluation-contract、"
                 "evaluation-final、decision-input、mechanical-gate、"
                 "independent-review、counterfactual、reward-hacking、"
@@ -4993,7 +4993,8 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             )
             return
         console.print(
-            "用法：/evolution list [--query 词 --risk level --source kind --limit N]；"
+            "用法：/evolution list|priorities "
+            "[--query 词 --risk level --source kind --limit N]；"
             "/evolution detail <candidate-id>；"
             "/evolution experiment-contract <contract-id>；"
             "/evolution evaluation <comparison-id>；"

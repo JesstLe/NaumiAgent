@@ -17,6 +17,12 @@ from naumi_agent.evolution.eligibility import (
 from naumi_agent.evolution.evidence import (
     EVOLUTION_DYNAMIC_EVIDENCE_SOURCE_KINDS,
 )
+from naumi_agent.evolution.prioritization import (
+    CandidatePriority,
+    CandidatePrioritySubject,
+    OpportunityPortfolio,
+    prioritize_candidates,
+)
 from naumi_agent.evolution.proposal import (
     EvolutionProposalPreview,
     generate_proposal_preview,
@@ -102,6 +108,7 @@ class EvolutionReviewItem:
     evidence_refs: tuple[str, ...]
     eligibility: CandidateEligibilityAssessment
     governance: CandidateGovernanceContext | None
+    priority: CandidatePriority | None
     aggregation: CandidateAggregation | None
     proposal: EvolutionProposalPreview | None
 
@@ -113,6 +120,7 @@ class EvolutionReviewSnapshot:
     selected: EvolutionReviewItem | None = None
     events: tuple[EvolutionCandidateEvent, ...] = ()
     filters: EvolutionReviewFilter = EvolutionReviewFilter()
+    portfolio: OpportunityPortfolio | None = None
 
 
 class EvolutionReviewService:
@@ -154,12 +162,25 @@ class EvolutionReviewService:
         filters: EvolutionReviewFilter | None = None,
     ) -> EvolutionReviewSnapshot:
         active = filters or EvolutionReviewFilter()
-        candidates = await self._store.list_candidates(workspace_root, limit=500)
-        selected = [candidate for candidate in candidates if _matches(candidate, active)][
-            : active.limit
-        ]
-        governance = await self._governance_contexts(selected)
-        source_authority = await self._source_authority_contexts(selected)
+        candidates = list(await self._store.list_candidates(workspace_root, limit=500))
+        governance = await self._governance_contexts(candidates)
+        source_authority = await self._source_authority_contexts(candidates)
+        assessments = _eligibility_contexts(candidates, governance, source_authority)
+        portfolio = prioritize_candidates(
+            CandidatePrioritySubject(
+                candidate=item.draft,
+                eligibility=assessments[item.draft.candidate_id],
+            )
+            for item in candidates
+        )
+        priorities = {item.candidate_id: item for item in portfolio.priorities}
+        selected = [candidate for candidate in candidates if _matches(candidate, active)]
+        recency = {item.draft.candidate_id: index for index, item in enumerate(candidates)}
+        selected.sort(key=lambda item: _review_sort_key(
+            priorities[item.draft.candidate_id],
+            recency[item.draft.candidate_id],
+        ))
+        visible = selected[: active.limit]
         items = tuple(
             _review_item(
                 candidate,
@@ -169,10 +190,17 @@ class EvolutionReviewService:
                     candidate.draft.candidate_id,
                     False,
                 ),
+                eligibility=assessments[candidate.draft.candidate_id],
+                priority=priorities[candidate.draft.candidate_id],
             )
-            for candidate in selected
+            for candidate in visible
         )
-        return EvolutionReviewSnapshot(mode="list", items=items, filters=active)
+        return EvolutionReviewSnapshot(
+            mode="list",
+            items=items,
+            filters=active,
+            portfolio=portfolio,
+        )
 
     async def detail_snapshot(
         self,
@@ -183,8 +211,24 @@ class EvolutionReviewService:
         if stored is None:
             return EvolutionReviewSnapshot(mode="detail")
         events = await self._store.list_events(workspace_root, candidate_id)
-        governance = await self._governance_contexts([stored])
-        source_authority = await self._source_authority_contexts([stored])
+        candidates = list(await self._store.list_candidates(workspace_root, limit=500))
+        bounded = any(item.draft.candidate_id == candidate_id for item in candidates)
+        context_candidates = candidates if bounded else [*candidates, stored]
+        governance = await self._governance_contexts(context_candidates)
+        source_authority = await self._source_authority_contexts(context_candidates)
+        assessments = _eligibility_contexts(
+            context_candidates,
+            governance,
+            source_authority,
+        )
+        portfolio = prioritize_candidates(
+            CandidatePrioritySubject(
+                candidate=item.draft,
+                eligibility=assessments[item.draft.candidate_id],
+            )
+            for item in candidates
+        )
+        priorities = {item.candidate_id: item for item in portfolio.priorities}
         return EvolutionReviewSnapshot(
             mode="detail",
             selected=_review_item(
@@ -192,8 +236,11 @@ class EvolutionReviewService:
                 include_refs=True,
                 governance=governance.get(candidate_id),
                 source_authority_valid=source_authority.get(candidate_id, False),
+                eligibility=assessments[candidate_id],
+                priority=priorities.get(candidate_id),
             ),
             events=events[-100:],
+            portfolio=portfolio,
         )
 
     async def _governance_contexts(
@@ -243,12 +290,14 @@ class EvolutionReviewService:
             }
 
         async def validate(item: EvolutionStoredCandidate) -> tuple[str, bool]:
-            try:
-                valid = await reader.validate_candidate_sources(item.draft)
-            except (OSError, RuntimeError, TypeError, ValueError):
-                valid = False
+            async with semaphore:
+                try:
+                    valid = await reader.validate_candidate_sources(item.draft)
+                except (OSError, RuntimeError, TypeError, ValueError):
+                    valid = False
             return item.draft.candidate_id, bool(valid)
 
+        semaphore = asyncio.Semaphore(16)
         return dict(await asyncio.gather(*(validate(item) for item in candidates)))
 
 
@@ -256,21 +305,39 @@ def render_evolution_review(snapshot: EvolutionReviewSnapshot) -> str:
     if snapshot.mode == "detail":
         return _render_detail(snapshot)
     lines = ["# Evolution Candidate 审查", ""]
-    if not snapshot.items:
+    if snapshot.portfolio is not None:
+        portfolio = snapshot.portfolio
         lines.extend([
-            "当前过滤条件下没有 Candidate。",
+            (
+                f"优先级 `{portfolio.policy_version}` · 全局 30 天："
+                f"{portfolio.ranked_count} 已排序 / {portfolio.excluded_count} 未排序 · "
+                f"机会簇 {len(portfolio.clusters)}"
+            ),
             "",
-            "下一步：运行 `/self-review`、Harness 检查或 `/feedback` 产生真实证据。",
         ])
+    if not snapshot.items:
+        lines.append("当前过滤条件下没有 Candidate。")
+        lines.append("")
+        if snapshot.portfolio is not None and snapshot.portfolio.considered_count:
+            lines.append("下一步：调整 query/risk/source 过滤条件；全局 Portfolio 保持不变。")
+        else:
+            lines.append(
+                "下一步：运行 `/self-review`、Harness 检查或 `/feedback` 产生真实证据。"
+            )
         return "\n".join(lines)
     lines.append(f"共显示 {len(snapshot.items)} 个不可执行候选：")
     lines.append("")
     for item in snapshot.items:
         sources = ", ".join(item.source_kinds)
+        priority = (
+            f"P{item.priority.rank} / {item.priority.score:g}"
+            if item.priority is not None and item.priority.rankable
+            else "未参与排序"
+        )
         lines.extend([
-            f"- `{item.candidate_id}` · **{item.risk}** · {item.finding_code}",
+            f"- `{item.candidate_id}` · **{priority}** · {item.finding_code}",
             (
-                f"  - Scope：`{_escape(item.scope)}` · "
+                f"  - 风险：`{item.risk}` · Scope：`{_escape(item.scope)}` · "
                 f"证据：{item.occurrence_count} · Revision：{item.revision}"
             ),
             f"  - 来源：`{_escape(sources)}` · 最近：`{_escape(item.last_observed_at)}`",
@@ -311,6 +378,36 @@ def _render_detail(snapshot: EvolutionReviewSnapshot) -> str:
             f"{item.governance.proposal_revision or '-'}",
             f"- 冷却截止：`{_escape(item.governance.cooldown_until or '-')}`",
         ])
+    if item.priority is not None:
+        priority = item.priority
+        priority_conclusion = (
+            f"P{priority.rank}" if priority.rankable else "未参与排序"
+        )
+        lines.extend([
+            "",
+            f"## 可解释优先级 · `{priority.policy_version}`",
+            "",
+            (
+                f"- 结论：{priority_conclusion} · 分数 `{priority.score:g}` · "
+                f"机会域 `{priority.domain}`"
+            ),
+            f"- 公式：`{priority.formula}`",
+            (
+                f"- 因子：严重度 {priority.severity} × 频次 {priority.frequency} × "
+                f"置信度 {priority.confidence}% ÷ 实现成本 {priority.implementation_cost} "
+                f"÷ 变更风险 {priority.change_risk}"
+            ),
+            (
+                f"- 有效观测：{priority.qualifying_observations} · 权威通道："
+                f"`{_escape(', '.join(priority.confidence_lanes) or '-')}`"
+            ),
+        ])
+        if priority.exclusion_reasons:
+            lines.append(
+                "- 排除原因：" + ", ".join(
+                    f"`{_escape(reason)}`" for reason in priority.exclusion_reasons
+                )
+            )
     lines.extend([
         "",
         "## 假设",
@@ -413,6 +510,8 @@ def _review_item(
     include_refs: bool,
     governance: CandidateGovernanceContext | None,
     source_authority_valid: bool,
+    eligibility: CandidateEligibilityAssessment | None = None,
+    priority: CandidatePriority | None = None,
 ) -> EvolutionReviewItem:
     draft = stored.draft
     evidence = draft.evidence
@@ -449,12 +548,13 @@ def _review_item(
             if include_refs
             else ()
         ),
-        eligibility=assess_candidate_eligibility(
+        eligibility=eligibility or assess_candidate_eligibility(
             draft,
             governance=governance,
             source_authority_valid=source_authority_valid,
         ),
         governance=governance,
+        priority=priority,
         aggregation=aggregate_candidate(draft) if include_refs else None,
         proposal=(
             generate_proposal_preview(
@@ -466,6 +566,27 @@ def _review_item(
             else None
         ),
     )
+
+
+def _eligibility_contexts(
+    candidates: list[EvolutionStoredCandidate],
+    governance: dict[str, CandidateGovernanceContext],
+    source_authority: dict[str, bool],
+) -> dict[str, CandidateEligibilityAssessment]:
+    return {
+        item.draft.candidate_id: assess_candidate_eligibility(
+            item.draft,
+            governance=governance.get(item.draft.candidate_id),
+            source_authority_valid=source_authority.get(item.draft.candidate_id, False),
+        )
+        for item in candidates
+    }
+
+
+def _review_sort_key(priority: CandidatePriority, recency_index: int) -> tuple[int, int, int]:
+    if priority.rankable:
+        return (0, priority.rank or 501, recency_index)
+    return (1, recency_index, 0)
 
 
 def _matches(candidate: EvolutionStoredCandidate, filters: EvolutionReviewFilter) -> bool:

@@ -92,11 +92,11 @@ def test_protocol_exposes_typed_harness_receipt_event() -> None:
 def test_evolution_review_accepts_outcome_filters(source_kind: str) -> None:
     record = normalize_client_record({
         "type": ClientEventType.EVOLUTION_REVIEW_REQUEST,
-        "payload": {"action": "list", "source_kind": source_kind, "limit": 20},
+        "payload": {"action": "priorities", "source_kind": source_kind, "limit": 20},
     })
 
     assert record["payload"] == {
-        "action": "list",
+        "action": "priorities",
         "candidate_id": "",
         "query": "",
         "risk": "",

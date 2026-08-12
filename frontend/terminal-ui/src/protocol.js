@@ -6332,11 +6332,17 @@ function normalizeEvolutionReview(payload) {
   const limit = harnessNonnegativeInteger(filters.limit, "evolution/review filters.limit");
   const items = harnessObjectArray(payload.items, "evolution/review items", 100)
     .map((item) => normalizeEvolutionItem(item, false));
+  const portfolio = normalizeEvolutionPortfolio(payload.portfolio);
   const readOnly = harnessBoolean(payload.read_only, "evolution/review read_only");
   if (limit < 1 || limit > 100) throw new Error("evolution/review filters.limit 必须在 1..100");
   if (!readOnly) throw new Error("evolution/review 必须保持只读");
   if (mode === "list" && selected !== null) throw new Error("evolution/review list 不得携带 selected");
   if (mode === "detail" && items.length) throw new Error("evolution/review detail 不得携带 items");
+  for (const item of [...items, ...(selected ? [selected] : [])]) {
+    if (item.priority?.rankable && (!portfolio || item.priority.rank > portfolio.ranked_count)) {
+      throw new Error("evolution/review priority 与 portfolio 排名不一致");
+    }
+  }
   return {
     schema_version: 1,
     mode,
@@ -6354,6 +6360,7 @@ function normalizeEvolutionReview(payload) {
       added_evidence_count: harnessNonnegativeInteger(event.added_evidence_count, "evolution/review event.added_evidence_count"),
       occurred_at: harnessText(event.occurred_at, "evolution/review event.occurred_at"),
     })),
+    portfolio,
     read_only: readOnly,
   };
 }
@@ -6365,7 +6372,7 @@ function normalizeEvolutionItem(value, detail) {
   const normalized = {
     candidate_id: candidateId,
     finding_code: harnessText(item.finding_code, "evolution/review item.finding_code"),
-    kind: harnessChoice(item.kind, "evolution/review item.kind", new Set(["correctness", "maintainability", "reliability", "safety"])),
+    kind: harnessChoice(item.kind, "evolution/review item.kind", new Set(["capability", "correctness", "maintainability", "reliability", "safety"])),
     scope: harnessText(item.scope, "evolution/review item.scope"),
     risk: harnessChoice(item.risk, "evolution/review item.risk", new Set(["low", "medium", "high", "critical"])),
     occurrence_count: harnessNonnegativeInteger(item.occurrence_count, "evolution/review item.occurrence_count"),
@@ -6376,6 +6383,7 @@ function normalizeEvolutionItem(value, detail) {
     review_ready: harnessBoolean(item.review_ready, "evolution/review item.review_ready"),
     human_review_required: harnessBoolean(item.human_review_required, "evolution/review item.human_review_required"),
     experiment_eligible: harnessBoolean(item.experiment_eligible, "evolution/review item.experiment_eligible"),
+    priority: normalizeEvolutionPriority(item.priority),
   };
   if (normalized.experiment_eligible) {
     throw new Error("evolution/review item 不得授予实验资格");
@@ -6417,6 +6425,182 @@ function normalizeEvolutionItem(value, detail) {
     governance: normalizeEvolutionGovernance(item.governance),
     aggregation: normalizeEvolutionAggregation(item.aggregation),
     proposal,
+  };
+}
+
+function normalizeEvolutionPriority(value) {
+  if (value == null) return null;
+  const item = harnessObject(value, "evolution/review priority");
+  const rankable = harnessBoolean(item.rankable, "evolution/review priority.rankable");
+  const rank = item.rank == null
+    ? null
+    : harnessNonnegativeInteger(item.rank, "evolution/review priority.rank");
+  const score = harnessNonnegativeFiniteNumber(item.score, "evolution/review priority.score");
+  const severity = harnessNonnegativeInteger(item.severity, "evolution/review priority.severity");
+  const frequency = harnessNonnegativeInteger(item.frequency, "evolution/review priority.frequency");
+  const confidence = harnessNonnegativeInteger(item.confidence, "evolution/review priority.confidence");
+  const implementationCost = harnessNonnegativeInteger(
+    item.implementation_cost,
+    "evolution/review priority.implementation_cost",
+  );
+  const changeRisk = harnessNonnegativeInteger(
+    item.change_risk,
+    "evolution/review priority.change_risk",
+  );
+  if (score > 100 || severity < 1 || severity > 5 || frequency > 4
+    || confidence > 100 || implementationCost < 1 || implementationCost > 5
+    || changeRisk < 1 || changeRisk > 4) {
+    throw new Error("evolution/review priority 因子越界");
+  }
+  if ((rankable && (!rank || score <= 0)) || (!rankable && (rank !== null || score !== 0))) {
+    throw new Error("evolution/review priority 排名状态不一致");
+  }
+  const exclusionReasons = harnessTextArray(
+    item.exclusion_reasons,
+    "evolution/review priority.exclusion_reasons",
+    8,
+  );
+  if ((rankable && exclusionReasons.length) || (!rankable && !exclusionReasons.length)) {
+    throw new Error("evolution/review priority 排除原因与排名状态不一致");
+  }
+  const policyVersion = harnessText(
+    item.policy_version,
+    "evolution/review priority.policy_version",
+  );
+  const formula = harnessText(item.formula, "evolution/review priority.formula");
+  if (policyVersion !== "evolution-priority-v1"
+    || formula !== "severity*frequency*confidence*5/(cost*change_risk)") {
+    throw new Error("evolution/review priority policy 不兼容");
+  }
+  return {
+    policy_version: policyVersion,
+    formula,
+    domain: harnessChoice(item.domain, "evolution/review priority.domain", new Set([
+      "capability", "correctness", "maintainability", "performance", "reliability", "safety",
+    ])),
+    rankable,
+    rank,
+    score,
+    severity,
+    frequency,
+    qualifying_observations: harnessNonnegativeInteger(
+      item.qualifying_observations,
+      "evolution/review priority.qualifying_observations",
+    ),
+    confidence,
+    confidence_lanes: harnessTextArray(
+      item.confidence_lanes,
+      "evolution/review priority.confidence_lanes",
+      8,
+    ),
+    implementation_cost: implementationCost,
+    change_risk: changeRisk,
+    exclusion_reasons: exclusionReasons,
+  };
+}
+
+function normalizeEvolutionPortfolio(value) {
+  if (value == null) return null;
+  const item = harnessObject(value, "evolution/review portfolio");
+  const considered = harnessNonnegativeInteger(
+    item.considered_count,
+    "evolution/review portfolio.considered_count",
+  );
+  const ranked = harnessNonnegativeInteger(
+    item.ranked_count,
+    "evolution/review portfolio.ranked_count",
+  );
+  const excluded = harnessNonnegativeInteger(
+    item.excluded_count,
+    "evolution/review portfolio.excluded_count",
+  );
+  if (considered > 500 || ranked + excluded !== considered) {
+    throw new Error("evolution/review portfolio 计数不一致");
+  }
+  const clusters = harnessObjectArray(
+    item.clusters,
+    "evolution/review portfolio.clusters",
+    20,
+  ).map((cluster) => {
+    const impact = harnessObject(cluster.impact, "evolution/review cluster.impact");
+    const candidateIds = harnessTextArray(
+      cluster.candidate_ids,
+      "evolution/review cluster.candidate_ids",
+      500,
+    );
+    const score = harnessNonnegativeFiniteNumber(
+      cluster.score,
+      "evolution/review cluster.score",
+    );
+    const rank = harnessNonnegativeInteger(cluster.rank, "evolution/review cluster.rank");
+    const clusterId = harnessText(cluster.cluster_id, "evolution/review cluster.cluster_id");
+    const primaryCandidateId = harnessText(
+      cluster.primary_candidate_id,
+      "evolution/review cluster.primary_candidate_id",
+    );
+    const sourceKinds = harnessTextArray(
+      cluster.source_kinds,
+      "evolution/review cluster.source_kinds",
+      16,
+    );
+    if (score > 100 || !candidateIds.length || !rank
+      || !/^eoc_[0-9a-f]{24}$/.test(clusterId)
+      || !/^evc_[0-9a-f]{24}$/.test(primaryCandidateId)
+      || !candidateIds.includes(primaryCandidateId)
+      || new Set(candidateIds).size !== candidateIds.length) {
+      throw new Error("evolution/review cluster 内容无效");
+    }
+    const normalizedImpact = Object.fromEntries([
+      "candidate_count", "source_kind_count", "scope_count", "provider_count",
+      "model_count", "platform_count",
+    ].map((field) => [field, harnessNonnegativeInteger(
+      impact[field],
+      `evolution/review cluster.impact.${field}`,
+    )]));
+    if (normalizedImpact.candidate_count !== candidateIds.length
+      || normalizedImpact.source_kind_count !== new Set(sourceKinds).size) {
+      throw new Error("evolution/review cluster impact 计数不一致");
+    }
+    return {
+      cluster_id: clusterId,
+      rank,
+      domain: harnessChoice(cluster.domain, "evolution/review cluster.domain", new Set([
+        "capability", "correctness", "maintainability", "performance", "reliability", "safety",
+      ])),
+      score,
+      primary_candidate_id: primaryCandidateId,
+      candidate_ids: candidateIds,
+      source_kinds: sourceKinds,
+      impact: normalizedImpact,
+    };
+  });
+  const policyVersion = harnessText(
+    item.policy_version,
+    "evolution/review portfolio.policy_version",
+  );
+  const formula = harnessText(item.formula, "evolution/review portfolio.formula");
+  const windowDays = harnessNonnegativeInteger(
+    item.window_days,
+    "evolution/review portfolio.window_days",
+  );
+  if (policyVersion !== "evolution-priority-v1"
+    || formula !== "severity*frequency*confidence*5/(cost*change_risk)"
+    || windowDays !== 30) {
+    throw new Error("evolution/review portfolio policy 不兼容");
+  }
+  return {
+    policy_version: policyVersion,
+    formula,
+    anchor_at: harnessText(item.anchor_at, "evolution/review portfolio.anchor_at"),
+    window_start_at: harnessText(
+      item.window_start_at,
+      "evolution/review portfolio.window_start_at",
+    ),
+    window_days: windowDays,
+    considered_count: considered,
+    ranked_count: ranked,
+    excluded_count: excluded,
+    clusters,
   };
 }
 

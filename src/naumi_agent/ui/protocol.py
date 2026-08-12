@@ -774,8 +774,8 @@ def _normalize_client_payload(
 
     if event_type == ClientEventType.EVOLUTION_REVIEW_REQUEST:
         action = str(payload.get("action") or "list").strip().lower()
-        if action not in {"list", "detail"}:
-            raise ValueError("Evolution review action 仅支持 list/detail。")
+        if action not in {"list", "priorities", "detail"}:
+            raise ValueError("Evolution review action 仅支持 list/priorities/detail。")
         candidate_id = str(payload.get("candidate_id") or "").strip()
         if action == "detail" and not re.fullmatch(r"evc_[0-9a-f]{24}", candidate_id):
             raise ValueError("Evolution detail candidate_id 格式无效。")

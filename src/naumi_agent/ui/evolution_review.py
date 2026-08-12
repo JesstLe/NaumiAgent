@@ -33,6 +33,7 @@ def evolution_review_payload(snapshot: EvolutionReviewSnapshot) -> dict[str, Any
             }
             for event in snapshot.events[-100:]
         ],
+        "portfolio": _portfolio_payload(snapshot),
         "read_only": True,
     }
 
@@ -52,6 +53,7 @@ def _item_payload(item: EvolutionReviewItem, *, detail: bool) -> dict[str, Any]:
         "review_ready": item.eligibility.review_ready,
         "human_review_required": item.eligibility.human_review_required,
         "experiment_eligible": False,
+        "priority": _priority_payload(item),
     }
     if detail:
         payload.update({
@@ -78,6 +80,64 @@ def _item_payload(item: EvolutionReviewItem, *, detail: bool) -> dict[str, Any]:
             "proposal": _proposal_payload(item),
         })
     return payload
+
+
+def _priority_payload(item: EvolutionReviewItem) -> dict[str, Any] | None:
+    value = item.priority
+    if value is None:
+        return None
+    return {
+        "policy_version": value.policy_version,
+        "formula": value.formula,
+        "domain": value.domain,
+        "rankable": value.rankable,
+        "rank": value.rank,
+        "score": value.score,
+        "severity": value.severity,
+        "frequency": value.frequency,
+        "qualifying_observations": value.qualifying_observations,
+        "confidence": value.confidence,
+        "confidence_lanes": list(value.confidence_lanes),
+        "implementation_cost": value.implementation_cost,
+        "change_risk": value.change_risk,
+        "exclusion_reasons": list(value.exclusion_reasons),
+    }
+
+
+def _portfolio_payload(snapshot: EvolutionReviewSnapshot) -> dict[str, Any] | None:
+    value = snapshot.portfolio
+    if value is None:
+        return None
+    return {
+        "policy_version": value.policy_version,
+        "formula": value.formula,
+        "anchor_at": value.anchor_at,
+        "window_start_at": value.window_start_at,
+        "window_days": value.window_days,
+        "considered_count": value.considered_count,
+        "ranked_count": value.ranked_count,
+        "excluded_count": value.excluded_count,
+        "clusters": [
+            {
+                "cluster_id": cluster.cluster_id,
+                "rank": cluster.rank,
+                "domain": cluster.domain,
+                "score": cluster.score,
+                "primary_candidate_id": cluster.primary_candidate_id,
+                "candidate_ids": list(cluster.candidate_ids),
+                "source_kinds": list(cluster.source_kinds),
+                "impact": {
+                    "candidate_count": cluster.impact.candidate_count,
+                    "source_kind_count": cluster.impact.source_kind_count,
+                    "scope_count": cluster.impact.scope_count,
+                    "provider_count": cluster.impact.provider_count,
+                    "model_count": cluster.impact.model_count,
+                    "platform_count": cluster.impact.platform_count,
+                },
+            }
+            for cluster in value.clusters[:20]
+        ],
+    }
 
 
 def _governance_payload(item: EvolutionReviewItem) -> dict[str, Any] | None:

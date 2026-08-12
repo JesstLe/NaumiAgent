@@ -12,7 +12,13 @@ export function renderEvolutionReviewPage(view, width, height) {
   if (value.loading && !snapshot) logical.push(color(ANSI.cyan, "正在加载 Candidate 权威快照…"));
   else if (!snapshot) logical.push(color(ANSI.yellow, compactText(value.error || "Candidate 快照暂不可用。", 500)));
   else if (snapshot.mode === "detail") logical.push(...detailLines(snapshot.selected, snapshot.events));
-  else logical.push(...listLines(snapshot.items, value.selectedIndex, snapshot.filters));
+  else logical.push(...listLines(
+    snapshot.items,
+    value.selectedIndex,
+    snapshot.filters,
+    snapshot.portfolio,
+    safeHeight,
+  ));
   const wrapped = logical.flatMap((line) => wrapAnsiLine(line, safeWidth));
   const offset = snapshot?.mode === "detail"
     ? Math.min(Math.max(0, Number(value.scrollOffset) || 0), Math.max(0, wrapped.length - 1))
@@ -22,17 +28,42 @@ export function renderEvolutionReviewPage(view, width, height) {
   return lines.slice(0, safeHeight).map((line) => padRight(fit(line, safeWidth), safeWidth));
 }
 
-function listLines(rawItems, selectedIndex, filters) {
+function listLines(rawItems, selectedIndex, filters, portfolio, height) {
   const items = Array.isArray(rawItems) ? rawItems : [];
   const filterText = [filters?.query && `query=${filters.query}`, filters?.risk && `risk=${filters.risk}`, filters?.source_kind && `source=${filters.source_kind}`].filter(Boolean).join(" · ");
-  const lines = [color(ANSI.dim, filterText || "过滤 · 无"), `候选 · ${items.length} · 只读`];
-  if (!items.length) return [...lines, color(ANSI.dim, "当前过滤条件下没有 Candidate。可运行 /feedback 或 /self-review 产生证据。")];
+  const lines = [color(ANSI.dim, filterText || "过滤 · 无")];
+  if (portfolio) {
+    lines.push(
+      color(ANSI.cyan, `全局 30d 优先级 · ${portfolio.ranked_count} 已排序 / ${portfolio.excluded_count} 未排序 · ${portfolio.clusters.length} 个机会簇`),
+    );
+    for (const cluster of portfolio.clusters.slice(0, 3)) {
+      lines.push(color(
+        ANSI.dim,
+        compactText(`C${cluster.rank} ${cluster.domain} · ${cluster.score} · 候选 ${cluster.impact.candidate_count} · 来源 ${cluster.impact.source_kind_count} · Scope ${cluster.impact.scope_count}`, 1000),
+      ));
+    }
+  }
+  lines.push(`候选 · ${items.length} · 只读`);
+  if (!items.length) {
+    const next = portfolio?.considered_count
+      ? "当前过滤条件下没有 Candidate。请调整 query/risk/source；全局 Portfolio 保持不变。"
+      : "当前还没有 Candidate。可运行 /feedback 或 /self-review 产生真实证据。";
+    return [...lines, color(ANSI.dim, next)];
+  }
   const selected = Math.min(Math.max(0, Number(selectedIndex) || 0), items.length - 1);
-  const start = Math.max(0, Math.min(selected - 6, Math.max(0, items.length - 14)));
-  for (let index = start; index < Math.min(items.length, start + 14); index += 1) {
+  const pageSize = Math.max(1, Math.min(
+    14,
+    Math.floor((Math.max(1, Number(height) || 1) - 2 - lines.length) / 2),
+  ));
+  const start = Math.max(
+    0,
+    Math.min(selected - Math.floor(pageSize / 2), Math.max(0, items.length - pageSize)),
+  );
+  for (let index = start; index < Math.min(items.length, start + pageSize); index += 1) {
     const item = items[index];
     const marker = index === selected ? "›" : " ";
-    const primary = `${marker} ${item.candidate_id} · ${item.finding_code} · ${item.risk} · ${decisionLabel(item.decision)}`;
+    const priority = item.priority?.rankable ? `P${item.priority.rank} ${item.priority.score}` : "未排序";
+    const primary = `${marker} ${priority} · ${item.candidate_id} · ${item.finding_code} · ${item.risk} · ${decisionLabel(item.decision)}`;
     lines.push(color(index === selected ? ANSI.cyan : riskStyle(item.risk), compactText(primary, 1000)));
     lines.push(color(ANSI.dim, compactText(`  ${item.scope} · 证据 ${item.occurrence_count} · r${item.revision} · ${item.source_kinds.join(", ")}`, 1000)));
   }
@@ -57,6 +88,20 @@ function detailLines(item, rawEvents) {
       color(governance.allowed ? ANSI.green : ANSI.yellow, `${governance.allowed ? "可重新审阅" : "冷却阻断"} · ${governance.reason}`),
       color(ANSI.dim, `最近 Proposal · ${governance.proposal_state || "-"} / r${governance.proposal_revision || "-"} · 冷却截止 ${governance.cooldown_until || "-"}`),
     );
+  }
+  if (item.priority) {
+    const priority = item.priority;
+    lines.push(
+      color(ANSI.cyan, `── 可解释优先级 · ${priority.policy_version}`),
+      color(priority.rankable ? ANSI.green : ANSI.yellow, priority.rankable ? `P${priority.rank} · 分数 ${priority.score} · 机会域 ${priority.domain}` : `未参与排序 · 机会域 ${priority.domain}`),
+      color(ANSI.dim, `严重度 ${priority.severity} × 频次 ${priority.frequency} × 置信度 ${priority.confidence}% ÷ 实现成本 ${priority.implementation_cost} ÷ 变更风险 ${priority.change_risk}`),
+      color(ANSI.dim, `有效观测 ${priority.qualifying_observations} · 权威通道 ${priority.confidence_lanes.join(", ") || "-"}`),
+    );
+    if (priority.exclusion_reasons.length) {
+      lines.push(color(ANSI.yellow, `排除原因 · ${priority.exclusion_reasons.join(", ")}`));
+    }
+  } else {
+    lines.push(color(ANSI.dim, "── 可解释优先级 · 不在当前 500 条有界快照中"));
   }
   if (item.proposal) {
     const proposal = item.proposal;

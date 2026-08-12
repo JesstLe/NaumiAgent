@@ -107,5 +107,7 @@ schema、权限、真实调用链和用户验收前，不签发自动 Experiment
 本切片只证明“当前精确工具目录中不存在该工具标识符”，不证明用户真正需要该能力，也不证明未来同名
 实现满足语义。它必须与 durable Goal、反馈或长期 Outcome 在后续聚类/优先级阶段组合，不能单独自动造工具。
 
-下一步是 EVO-06.1c4：跨 `rollback_outcome`、`promoted_outcome`、`eval_metric_regression`、`goal_need` 和
-`tool_catalog_miss` 的有界时间窗聚类与可解释优先级；随后才进入 EVO-06.2 Capability Proposal。
+[EVO-06.1c4](EVO-06-1c4-cross-source-opportunity-prioritization.md) 已随后交付跨
+`rollback_outcome`、`promoted_outcome`、`eval_metric_regression`、`goal_need` 和 `tool_catalog_miss`
+的有界 domain 聚类与可解释优先级。下一步进入 EVO-06.2 Capability Proposal；更细粒度语义同根聚类仍需
+结构化 capability taxonomy，不能由模型猜测代替 authority。
