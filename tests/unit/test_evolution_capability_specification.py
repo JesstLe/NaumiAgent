@@ -4,6 +4,8 @@ import asyncio
 import hashlib
 import json
 import sqlite3
+import subprocess
+import sys
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -28,6 +30,13 @@ from naumi_agent.evolution.capability_governance import (
     render_capability_governance,
 )
 from naumi_agent.evolution.capability_proposal import generate_capability_proposal
+from naumi_agent.evolution.capability_sandbox_request import (
+    CapabilitySandboxRequestError,
+    EvolutionCapabilitySandboxRequestService,
+    EvolutionCapabilitySandboxRequestStore,
+    build_capability_sandbox_execution_request,
+    render_capability_sandbox_request,
+)
 from naumi_agent.evolution.capability_scenario_binding import (
     CapabilityScenarioBindingError,
     EvolutionCapabilityScenarioBindingService,
@@ -55,10 +64,12 @@ from naumi_agent.evolution.prioritization import (
 )
 from naumi_agent.evolution.store import EvolutionCandidateStore
 from naumi_agent.harness.interaction import new_interaction_record
+from naumi_agent.harness.sandbox_request import capture_clean_revision
 from naumi_agent.harness.store import HarnessStore
 from naumi_agent.tools.evolution_review import (
     EvolutionCapabilityArtifactTool,
     EvolutionCapabilityGovernanceTool,
+    EvolutionCapabilitySandboxRequestTool,
     EvolutionCapabilityScenarioBindingTool,
 )
 from naumi_agent.user_interaction import normalize_interaction_request
@@ -1668,3 +1679,333 @@ async def test_scenario_binding_store_first_wins_and_detects_tampering(
         db.commit()
     with pytest.raises(CapabilityScenarioBindingError, match="持久摘要"):
         await store.get(tmp_path, artifact.artifact_id)
+
+
+def _successful_implementation_source(
+    tool_name: str,
+    schema: dict[str, object],
+) -> str:
+    return f'''import json
+
+from naumi_agent.tools.base import Tool
+
+
+class BrowserTraceCompareTool(Tool):
+    @property
+    def name(self):
+        return {tool_name!r}
+
+    @property
+    def description(self):
+        return "比较两份真实浏览器轨迹。"
+
+    @property
+    def parameters_schema(self):
+        return {schema!r}
+
+    async def execute(self, **kwargs):
+        return json.dumps({{"differences": []}}, ensure_ascii=False)
+'''
+
+
+async def _ready_sandbox_request_fixture(tmp_path: Path):
+    (
+        proposal,
+        specification_service,
+        harness,
+        specification,
+        artifact_service,
+        _,
+        source_path,
+    ) = await _approved_artifact(tmp_path)
+    assert specification.interface is not None
+    source_path.write_text(
+        _successful_implementation_source(
+            specification.interface.tool_name,
+            specification.interface.parameters_schema,
+        ),
+        encoding="utf-8",
+    )
+    artifact_view = await artifact_service.create(
+        tmp_path,
+        candidate_id=proposal.source.candidate_id,
+        source_path="candidate.py",
+        class_name="BrowserTraceCompareTool",
+    )
+    assert artifact_view.artifact is not None
+    binding_service, _, _ = _scenario_binding_service(
+        tmp_path=tmp_path,
+        proposal=proposal,
+        specification_service=specification_service,
+        artifact_service=artifact_service,
+        harness=harness,
+        responses=[_scenario_binding_answer()],
+    )
+    binding_view = await binding_service.advance(
+        tmp_path,
+        candidate_id=proposal.source.candidate_id,
+    )
+    assert binding_view.state == "ready" and binding_view.binding is not None
+    return (
+        proposal,
+        specification_service,
+        specification,
+        artifact_service,
+        artifact_view.artifact,
+        binding_service,
+        binding_view,
+    )
+
+
+def _commit_sandbox_request_fixture(workspace: Path) -> tuple[str, str]:
+    (workspace / ".gitignore").write_text(
+        "evolution.db\nharness.db\n.naumi/\n__pycache__/\n",
+        encoding="utf-8",
+    )
+    commands = (
+        ("init",),
+        ("config", "user.email", "sandbox-request@example.invalid"),
+        ("config", "user.name", "Sandbox Request Test"),
+        ("add", "."),
+        ("commit", "-m", "fixture"),
+    )
+    for args in commands:
+        subprocess.run(
+            ["git", *args],
+            cwd=workspace,
+            check=True,
+            capture_output=True,
+        )
+    _, revision, tree_sha256 = capture_clean_revision(workspace)
+    return revision, tree_sha256
+
+
+@pytest.mark.asyncio
+async def test_sandbox_execution_request_seals_real_driver_and_scenario(
+    tmp_path: Path,
+) -> None:
+    (
+        _,
+        _,
+        specification,
+        _,
+        artifact,
+        _,
+        binding_view,
+    ) = await _ready_sandbox_request_fixture(tmp_path)
+    revision, tree_sha256 = _commit_sandbox_request_fixture(tmp_path)
+
+    request = build_capability_sandbox_execution_request(
+        specification=specification,
+        binding_view=binding_view,
+        artifact=artifact,
+        source_revision=revision,
+        source_tree_sha256=tree_sha256,
+        python_executable=str(Path(sys.executable).resolve(strict=True)),
+        created_at=NOW.isoformat(),
+    )
+
+    assert request.request_ready is True
+    assert request.sandbox_execution_authorized is False
+    assert request.registration_authorized is False
+    assert request.source_revision == revision
+    assert [item.kind for item in request.overlays] == [
+        "candidate",
+        "driver",
+        "scenario_input",
+    ]
+    assert request.checks[0].timeout_ms == 1500
+    assert request.checks[0].timeout_seconds == 2
+    assert request.permissions[0].family == "workspace_read"
+    assert request.permissions[0].scopes == ("data/traces/**",)
+
+    for overlay in request.overlays:
+        target = tmp_path / overlay.path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(overlay.content_utf8, encoding="utf-8")
+    completed = subprocess.run(
+        list(request.checks[0].argv),
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert json.loads(completed.stdout) == {
+        "kind": "result",
+        "value": {"differences": []},
+    }
+
+    candidate = next(item for item in request.overlays if item.kind == "candidate")
+    (tmp_path / candidate.path).write_text(
+        artifact.source_text.replace(
+            'return json.dumps({"differences": []}, ensure_ascii=False)',
+            (
+                'from naumi_agent.tools.base import ToolExecutionError\n'
+                '        raise ToolExecutionError('
+                '"trace_missing", "轨迹不存在", retryable=False)'
+            ),
+        ),
+        encoding="utf-8",
+    )
+    declared_failure = subprocess.run(
+        list(request.checks[0].argv),
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert json.loads(declared_failure.stdout) == {
+        "kind": "error",
+        "error_code": "trace_missing",
+        "retryable": False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_sandbox_execution_request_service_persists_and_revokes_on_git_drift(
+    tmp_path: Path,
+) -> None:
+    (
+        proposal,
+        specification_service,
+        _,
+        _,
+        _,
+        binding_service,
+        _,
+    ) = await _ready_sandbox_request_fixture(tmp_path)
+    _commit_sandbox_request_fixture(tmp_path)
+    store = EvolutionCapabilitySandboxRequestStore(tmp_path / "evolution.db")
+    service = EvolutionCapabilitySandboxRequestService(
+        binding_service=binding_service,
+        specification_store=specification_service.store,
+        store=store,
+        now=lambda: NOW.isoformat(),
+    )
+
+    prepared = await service.prepare(
+        tmp_path,
+        candidate_id=proposal.source.candidate_id,
+    )
+    repeated = await service.prepare(
+        tmp_path,
+        candidate_id=proposal.source.candidate_id,
+    )
+    assert prepared.state == repeated.state == "ready"
+    assert prepared.request == repeated.request
+    assert prepared.request is not None
+    assert "尚未签发 Run Grant" in render_capability_sandbox_request(prepared)
+    engine = SimpleNamespace(
+        workspace_root=tmp_path,
+        evolution_capability_sandbox_request_service=service,
+        evolution_review_service=binding_service.review_service,
+    )
+    tool_output = await EvolutionCapabilitySandboxRequestTool(engine).execute(
+        candidate_id=proposal.source.candidate_id,
+        action="inspect",
+    )
+    slash_output = await execute_slash_command(
+        engine,
+        f"/evolution capability-sandbox {proposal.source.candidate_id}",
+    )
+    assert prepared.request.request_id in tool_output
+    assert prepared.request.request_id in slash_output
+
+    (tmp_path / "README.md").write_text("drift\n", encoding="utf-8")
+    revoked = await service.inspect(tmp_path, proposal.source.candidate_id)
+    assert revoked.state == "revoked"
+    assert revoked.binding_current is True
+    assert revoked.source_current is False
+    assert revoked.sandbox_execution_authorized is False
+
+
+@pytest.mark.asyncio
+async def test_sandbox_execution_request_store_detects_payload_tampering(
+    tmp_path: Path,
+) -> None:
+    (
+        proposal,
+        specification_service,
+        _,
+        _,
+        _,
+        binding_service,
+        binding_view,
+    ) = await _ready_sandbox_request_fixture(tmp_path)
+    _commit_sandbox_request_fixture(tmp_path)
+    store = EvolutionCapabilitySandboxRequestStore(tmp_path / "evolution.db")
+    service = EvolutionCapabilitySandboxRequestService(
+        binding_service=binding_service,
+        specification_store=specification_service.store,
+        store=store,
+        now=lambda: NOW.isoformat(),
+    )
+    prepared = await service.prepare(
+        tmp_path,
+        candidate_id=proposal.source.candidate_id,
+    )
+    assert prepared.request is not None and binding_view.binding is not None
+
+    with sqlite3.connect(tmp_path / "evolution.db") as db:
+        db.execute(
+            "UPDATE evolution_capability_sandbox_requests SET payload_sha256 = ? "
+            "WHERE request_id = ?",
+            ("0" * 64, prepared.request.request_id),
+        )
+        db.commit()
+    with pytest.raises(CapabilitySandboxRequestError, match="持久摘要"):
+        await store.latest(tmp_path, binding_view.binding.binding_id)
+
+
+@pytest.mark.asyncio
+async def test_sandbox_execution_request_store_is_first_wins_under_race(
+    tmp_path: Path,
+) -> None:
+    (
+        _,
+        _,
+        specification,
+        _,
+        artifact,
+        _,
+        binding_view,
+    ) = await _ready_sandbox_request_fixture(tmp_path)
+    revision, tree_sha256 = _commit_sandbox_request_fixture(tmp_path)
+    assert binding_view.binding is not None
+    request_a = build_capability_sandbox_execution_request(
+        specification=specification,
+        binding_view=binding_view,
+        artifact=artifact,
+        source_revision=revision,
+        source_tree_sha256=tree_sha256,
+        python_executable=str(Path(sys.executable).resolve(strict=True)),
+        created_at=NOW.isoformat(),
+    )
+    request_b = build_capability_sandbox_execution_request(
+        specification=specification,
+        binding_view=binding_view,
+        artifact=artifact,
+        source_revision=revision,
+        source_tree_sha256=tree_sha256,
+        python_executable=str(Path(sys.executable).resolve(strict=True)),
+        created_at=(NOW + timedelta(seconds=1)).isoformat(),
+    )
+    assert request_a.request_id != request_b.request_id
+    store_a = EvolutionCapabilitySandboxRequestStore(tmp_path / "evolution.db")
+    store_b = EvolutionCapabilitySandboxRequestStore(tmp_path / "evolution.db")
+
+    stored_a, stored_b = await asyncio.gather(
+        store_a.record(tmp_path, request_a),
+        store_b.record(tmp_path, request_b),
+    )
+
+    assert stored_a.request_id == stored_b.request_id
+    with sqlite3.connect(tmp_path / "evolution.db") as db:
+        count = db.execute(
+            "SELECT COUNT(*) FROM evolution_capability_sandbox_requests "
+            "WHERE workspace_root = ? AND binding_id = ? AND source_revision = ?",
+            (str(tmp_path.resolve()), binding_view.binding.binding_id, revision),
+        ).fetchone()
+    assert count == (1,)

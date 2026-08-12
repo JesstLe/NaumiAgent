@@ -209,7 +209,7 @@ class HarnessSandboxEvalRequestBuilder:
 
         if not isinstance(workspace_root, (str, Path)):
             raise TypeError("workspace_root 必须是字符串或 Path。")
-        workspace, revision, tree_sha256 = _capture_clean_revision(workspace_root)
+        workspace, revision, tree_sha256 = capture_clean_revision(workspace_root)
         suite_id = _suite_id(
             checks,
             max_total_duration_seconds=max_total_duration,
@@ -310,7 +310,7 @@ def _suite_id(
     return f"harness_sandbox_{digest[:24]}"
 
 
-def _capture_clean_revision(
+def capture_clean_revision(
     workspace_root: str | Path,
 ) -> tuple[Path, str, str]:
     try:
@@ -443,5 +443,6 @@ __all__ = [
     "HarnessSandboxEvalRequestCheck",
     "HarnessSandboxEvalRequestError",
     "SANDBOX_EVAL_REQUEST_POLICY",
+    "capture_clean_revision",
     "validate_request_checks",
 ]
