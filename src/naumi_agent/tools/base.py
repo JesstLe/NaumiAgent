@@ -192,12 +192,18 @@ class ToolRegistry:
 
     def __init__(self) -> None:
         self._tools: dict[str, Tool] = {}
+        self._reservations: dict[str, str] = {}
         self._lock = threading.RLock()
 
     def register(self, tool: Tool) -> None:
         """Register a trusted built-in, preserving the legacy replace behavior."""
         name = _validated_tool_registration_name(tool)
         with self._lock:
+            reserved = self._reservation_conflicts_locked(name)
+            if reserved:
+                raise ToolRegistryConflictError(
+                    f"工具 `{name}` 已被动态 lease 保留，未修改注册表。"
+                )
             self._tools[name] = tool
 
     def register_unique(self, tool: Tool) -> None:
@@ -211,6 +217,37 @@ class ToolRegistry:
                     f"工具 `{name}` 与现有注册项 {joined} 冲突，未修改注册表。"
                 )
             self._tools[name] = tool
+
+    def reserve_unique(self, name: str, owner_id: str) -> None:
+        """Reserve a catalog-only name without making a Tool resolvable or visible."""
+        normalized = _validate_tool_name(name)
+        owner = _validate_registry_owner(owner_id)
+        with self._lock:
+            current_owner = self._reservations.get(normalized)
+            if current_owner == owner:
+                return
+            conflicts = self._conflicts_locked(normalized)
+            if conflicts:
+                joined = "、".join(f"`{item}`" for item in conflicts)
+                raise ToolRegistryConflictError(
+                    f"工具名称 `{normalized}` 与现有注册或保留项 {joined} 冲突。"
+                )
+            self._reservations[normalized] = owner
+
+    def release_reservation_if_owned(self, name: str, owner_id: str) -> bool:
+        """Release only the exact catalog reservation held by owner_id."""
+        normalized = _validate_tool_name(name)
+        owner = _validate_registry_owner(owner_id)
+        with self._lock:
+            if self._reservations.get(normalized) != owner:
+                return False
+            del self._reservations[normalized]
+            return True
+
+    def reservation_owner(self, name: str) -> str | None:
+        normalized = _validate_tool_name(name)
+        with self._lock:
+            return self._reservations.get(normalized)
 
     def unregister_if_same(self, name: str, expected_tool: Tool) -> bool:
         """Remove only the exact instance installed by the caller."""
@@ -239,13 +276,22 @@ class ToolRegistry:
 
     def _conflicts_locked(self, name: str) -> tuple[str, ...]:
         alias = _legacy_tool_alias(name)
-        conflicts = [
+        conflicts = {
             registered
             for registered in self._tools
             if registered == name
             or _legacy_tool_alias(registered) == alias
-        ]
+        }
+        conflicts.update(self._reservation_conflicts_locked(name))
         return tuple(sorted(conflicts))
+
+    def _reservation_conflicts_locked(self, name: str) -> tuple[str, ...]:
+        alias = _legacy_tool_alias(name)
+        return tuple(sorted(
+            reserved
+            for reserved in self._reservations
+            if reserved == name or _legacy_tool_alias(reserved) == alias
+        ))
 
     def get(self, name: str) -> Tool | None:
         with self._lock:
@@ -293,6 +339,18 @@ def _validate_tool_name(name: str) -> str:
     ):
         raise ValueError("工具名必须是 1..128 字符且不含空白或控制字符")
     return name
+
+
+def _validate_registry_owner(owner_id: str) -> str:
+    if (
+        not isinstance(owner_id, str)
+        or not owner_id
+        or owner_id != owner_id.strip()
+        or len(owner_id) > 128
+        or any(ord(character) < 33 or ord(character) == 127 for character in owner_id)
+    ):
+        raise ValueError("Registry reservation owner 必须是 1..128 字符安全标识")
+    return owner_id
 
 
 def _legacy_tool_alias(name: str) -> str:

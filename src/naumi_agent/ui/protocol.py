@@ -785,11 +785,15 @@ def _normalize_client_payload(
             "capability-bind",
             "capability-sandbox",
             "capability-run",
+            "capability-lease",
+            "capability-register",
+            "capability-unregister",
         }:
             raise ValueError(
                 "Evolution review action 仅支持 list/priorities/detail/"
                 "capability-spec/capability-govern/capability-artifact/"
-                "capability-bind/capability-sandbox/capability-run。"
+                "capability-bind/capability-sandbox/capability-run/"
+                "capability-lease/capability-register/capability-unregister。"
             )
         candidate_id = str(payload.get("candidate_id") or "").strip()
         if action in {
@@ -797,6 +801,9 @@ def _normalize_client_payload(
             "capability-bind",
             "capability-sandbox",
             "capability-run",
+            "capability-lease",
+            "capability-register",
+            "capability-unregister",
         } and not re.fullmatch(
             r"evc_[0-9a-f]{24}", candidate_id
         ):
@@ -831,6 +838,18 @@ def _normalize_client_payload(
                 raise ValueError("Capability artifact class_name 格式无效。")
         elif source_path or class_name:
             raise ValueError("非 capability-artifact action 不接受源码参数。")
+        duration_seconds = 300
+        if action == "capability-register":
+            raw_duration = payload.get("duration_seconds", 300)
+            if (
+                isinstance(raw_duration, bool)
+                or not isinstance(raw_duration, int)
+                or not 30 <= raw_duration <= 900
+            ):
+                raise ValueError("Capability Registry lease 租期必须是 30..900 整数秒。")
+            duration_seconds = raw_duration
+        elif "duration_seconds" in payload:
+            raise ValueError("只有 capability-register 接受 duration_seconds。")
         normalized = {
             "action": action,
             "candidate_id": (
@@ -840,6 +859,9 @@ def _normalize_client_payload(
                     "capability-bind",
                     "capability-sandbox",
                     "capability-run",
+                    "capability-lease",
+                    "capability-register",
+                    "capability-unregister",
                 }
                 else ""
             ),
@@ -851,6 +873,8 @@ def _normalize_client_payload(
         if action == "capability-artifact":
             normalized["source_path"] = source_path
             normalized["class_name"] = class_name
+        if action == "capability-register":
+            normalized["duration_seconds"] = duration_seconds
         return normalized
 
     if event_type == ClientEventType.EVOLUTION_EVALUATION_LANE_REQUEST:

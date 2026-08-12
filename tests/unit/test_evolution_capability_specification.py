@@ -40,6 +40,11 @@ from naumi_agent.evolution.capability_governance import (
     render_capability_governance,
 )
 from naumi_agent.evolution.capability_proposal import generate_capability_proposal
+from naumi_agent.evolution.capability_registry_leases import (
+    CapabilityRegistryLeaseError,
+    EvolutionCapabilityRegistryLeaseService,
+    EvolutionCapabilityRegistryLeaseStore,
+)
 from naumi_agent.evolution.capability_sandbox_execution import (
     CapabilitySandboxExecutionError,
     EvolutionCapabilitySandboxExecutionService,
@@ -89,6 +94,7 @@ from naumi_agent.harness.sandbox_request import capture_clean_revision
 from naumi_agent.harness.store import HarnessStore
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.safety.permissions import PermissionMode
+from naumi_agent.tools.base import ToolCall, ToolRegistry
 from naumi_agent.tools.evolution_review import (
     EvolutionCapabilityArtifactTool,
     EvolutionCapabilityGovernanceTool,
@@ -2012,7 +2018,7 @@ async def test_sandbox_execution_request_service_persists_and_revokes_on_git_dri
         proposal,
         specification_service,
         _,
-        _,
+        artifact_service,
         _,
         binding_service,
         _,
@@ -2164,7 +2170,7 @@ async def test_capability_sandbox_executes_real_arc04_worker_and_seals_receipt(
         proposal,
         specification_service,
         _,
-        _,
+        artifact_service,
         _,
         binding_service,
         _,
@@ -2213,6 +2219,16 @@ async def test_capability_sandbox_executes_real_arc04_worker_and_seals_receipt(
         run_grant_authority=engine.run_delegation_grant_authority,
         execution_kernel=engine.harness_sandbox_eval_kernel,
     )
+    registry_clock = [datetime.now(UTC)]
+    registry_service = EvolutionCapabilityRegistryLeaseService(
+        workspace_root=tmp_path,
+        artifact_service=artifact_service,
+        execution_service=service,
+        store=EvolutionCapabilityRegistryLeaseStore(tmp_path / "evolution.db"),
+        tool_registry=engine.tool_registry,
+        runtime_instance_id="evcruntime_" + "a" * 24,
+        now=lambda: registry_clock[0].isoformat(),
+    )
     decided_at = datetime.now(UTC).isoformat()
     parent = await engine._resources.permission_decision_store.issue(
         request_id="capability-sandbox-request",
@@ -2245,6 +2261,171 @@ async def test_capability_sandbox_executes_real_arc04_worker_and_seals_receipt(
             run_id="capability-sandbox-run",
             parent_permission=parent,
         )
+        registry_parent = await engine._resources.permission_decision_store.issue(
+            request_id="capability-registry-request",
+            session_id="capability-sandbox-session",
+            run_id="capability-registry-run",
+            call_id="capability-registry-call",
+            agent_name="test-agent",
+            tool_name="evolution_capability_registry_lease",
+            tool_family="evolution",
+            arguments={
+                "action": "acquire",
+                "candidate_id": proposal.source.candidate_id,
+                "duration_seconds": 30,
+                "run_id": "capability-registry-run",
+            },
+            outcome=PermissionDecisionOutcome.POLICY_ALLOWED,
+            actor=PermissionDecisionActor.RUNTIME,
+            source=PermissionDecisionSource.POLICY,
+            permission_mode=PermissionMode.MODERATE,
+            risk_level="medium",
+            decided_at=registry_clock[0].isoformat(),
+        )
+        registry_view = await registry_service.acquire(
+            candidate_id=proposal.source.candidate_id,
+            run_id="capability-registry-run",
+            duration_seconds=30,
+            parent_permission=registry_parent,
+        )
+        release_parent = await engine._resources.permission_decision_store.issue(
+            request_id="capability-registry-release-request",
+            session_id="capability-sandbox-session",
+            run_id="capability-registry-release-run",
+            call_id="capability-registry-release-call",
+            agent_name="test-agent",
+            tool_name="evolution_capability_registry_lease",
+            tool_family="evolution",
+            arguments={
+                "action": "release",
+                "candidate_id": proposal.source.candidate_id,
+                "duration_seconds": 0,
+                "run_id": "capability-registry-release-run",
+            },
+            outcome=PermissionDecisionOutcome.POLICY_ALLOWED,
+            actor=PermissionDecisionActor.RUNTIME,
+            source=PermissionDecisionSource.POLICY,
+            permission_mode=PermissionMode.MODERATE,
+            risk_level="medium",
+            decided_at=registry_clock[0].isoformat(),
+        )
+        released = await registry_service.release(
+            candidate_id=proposal.source.candidate_id,
+            run_id="capability-registry-release-run",
+            parent_permission=release_parent,
+        )
+        assert released.state == "released"
+        assert released.state_receipt is not None
+        assert released.state_receipt.registry_reservation_release_confirmed
+        reacquire_parent = await engine._resources.permission_decision_store.issue(
+            request_id="capability-registry-reacquire-request",
+            session_id="capability-sandbox-session",
+            run_id="capability-registry-reacquire-run",
+            call_id="capability-registry-reacquire-call",
+            agent_name="test-agent",
+            tool_name="evolution_capability_registry_lease",
+            tool_family="evolution",
+            arguments={
+                "action": "acquire",
+                "candidate_id": proposal.source.candidate_id,
+                "duration_seconds": 30,
+                "run_id": "capability-registry-reacquire-run",
+            },
+            outcome=PermissionDecisionOutcome.POLICY_ALLOWED,
+            actor=PermissionDecisionActor.RUNTIME,
+            source=PermissionDecisionSource.POLICY,
+            permission_mode=PermissionMode.MODERATE,
+            risk_level="medium",
+            decided_at=registry_clock[0].isoformat(),
+        )
+        registry_view = await registry_service.acquire(
+            candidate_id=proposal.source.candidate_id,
+            run_id="capability-registry-reacquire-run",
+            duration_seconds=30,
+            parent_permission=reacquire_parent,
+        )
+        candidate_source = tmp_path / "candidate.py"
+        sealed_source = candidate_source.read_text(encoding="utf-8")
+        candidate_source.write_text(
+            sealed_source + "\n# post-receipt drift\n",
+            encoding="utf-8",
+        )
+        revoked = await registry_service.inspect(proposal.source.candidate_id)
+        assert revoked.state == "revoked"
+        assert revoked.state_receipt is not None
+        assert revoked.state_receipt.reason in {
+            "request_revoked",
+            "artifact_revoked",
+            "execution_receipt_revoked",
+        }
+        assert revoked.state_receipt.registry_reservation_release_confirmed
+        candidate_source.write_text(sealed_source, encoding="utf-8")
+        final_parent = await engine._resources.permission_decision_store.issue(
+            request_id="capability-registry-final-request",
+            session_id="capability-sandbox-session",
+            run_id="capability-registry-final-run",
+            call_id="capability-registry-final-call",
+            agent_name="test-agent",
+            tool_name="evolution_capability_registry_lease",
+            tool_family="evolution",
+            arguments={
+                "action": "acquire",
+                "candidate_id": proposal.source.candidate_id,
+                "duration_seconds": 30,
+                "run_id": "capability-registry-final-run",
+            },
+            outcome=PermissionDecisionOutcome.POLICY_ALLOWED,
+            actor=PermissionDecisionActor.RUNTIME,
+            source=PermissionDecisionSource.POLICY,
+            permission_mode=PermissionMode.MODERATE,
+            risk_level="medium",
+            decided_at=registry_clock[0].isoformat(),
+        )
+        registry_view = await registry_service.acquire(
+            candidate_id=proposal.source.candidate_id,
+            run_id="capability-registry-final-run",
+            duration_seconds=30,
+            parent_permission=final_parent,
+        )
+        engine.evolution_capability_registry_lease_service = registry_service
+        registry_slash_output = await execute_slash_command(
+            engine,
+            f"/evolution capability-register {proposal.source.candidate_id} 30",
+        )
+        assert registry_view.lease is not None
+        assert registry_view.lease.lease_id in registry_slash_output
+        invalid_lease = await engine.execute_tool(
+            ToolCall(
+                id="capability-registry-invalid-duration",
+                name="evolution_capability_registry_lease",
+                arguments=json.dumps({
+                    "action": "acquire",
+                    "candidate_id": proposal.source.candidate_id,
+                    "duration_seconds": 29,
+                    "run_id": "capability-registry-invalid-duration",
+                }),
+            ),
+            agent_name="test-agent",
+        )
+        assert invalid_lease.status == "error"
+        assert invalid_lease.error_code == "capability_duration_invalid"
+        detached_service = EvolutionCapabilityRegistryLeaseService(
+            workspace_root=tmp_path,
+            artifact_service=artifact_service,
+            execution_service=service,
+            store=EvolutionCapabilityRegistryLeaseStore(tmp_path / "evolution.db"),
+            tool_registry=ToolRegistry(),
+            runtime_instance_id="evcruntime_" + "b" * 24,
+            now=lambda: registry_clock[0].isoformat(),
+        )
+        detached = await detached_service.inspect(proposal.source.candidate_id)
+        with pytest.raises(CapabilityRegistryLeaseError, match="其他 Runtime"):
+            await detached_service.acquire(
+                candidate_id=proposal.source.candidate_id,
+                run_id="capability-registry-run",
+                duration_seconds=30,
+                parent_permission=registry_parent,
+            )
         engine.evolution_capability_sandbox_execution_service = service
         slash_output = await execute_slash_command(
             engine,
@@ -2260,6 +2441,17 @@ async def test_capability_sandbox_executes_real_arc04_worker_and_seals_receipt(
                 "capability-sandbox-session",
             )
         )
+        assert engine.tool_registry.reservation_owner(
+            registry_view.lease.temporary_tool_name
+        ) == registry_view.lease.lease_id
+        assert engine.tool_registry.get(registry_view.lease.temporary_tool_name) is None
+        assert registry_view.lease.temporary_tool_name not in engine.tool_registry.names
+        registry_clock[0] += timedelta(seconds=31)
+        expired = await registry_service.inspect(proposal.source.candidate_id)
+        assert expired.state == "expired"
+        assert engine.tool_registry.reservation_owner(
+            registry_view.lease.temporary_tool_name
+        ) is None
     finally:
         await engine.shutdown()
 
@@ -2276,12 +2468,22 @@ async def test_capability_sandbox_executes_real_arc04_worker_and_seals_receipt(
     assert view.receipt.registry_authorized is False
     assert view.receipt.run_grant_revoked is True
     assert view.receipt.runtime_lease_released is True
+    assert registry_view.state == "active"
+    assert registry_view.lease is not None
+    assert registry_view.lease.model_visible is False
+    assert registry_view.lease.executable is False
+    assert engine.tool_registry.get("evolution_capability_registry_lease") is not None
+    assert detached.state == "detached"
     assert lease is not None and lease.state is HarnessRunLeaseState.RELEASED
     child = next(item for item in permission_receipts if item.tool_name == "bash_run")
     assert child.parent_receipt_id == parent.receipt_id
     assert list(engine._paths.shell_worker_sandbox_dir.iterdir()) == []
 
     with sqlite3.connect(tmp_path / "evolution.db") as db:
+        state_receipts = db.execute(
+            "SELECT COUNT(*) FROM evolution_capability_registry_lease_state_receipts"
+        ).fetchone()
+        assert state_receipts == (6,)
         claim_state = db.execute(
             "SELECT state, epoch FROM evolution_capability_sandbox_execution_claims "
             "WHERE request_id = ?",
@@ -2293,6 +2495,23 @@ async def test_capability_sandbox_executes_real_arc04_worker_and_seals_receipt(
             "SET payload_sha256 = ? WHERE request_id = ?",
             ("0" * 64, prepared.request.request_id),
         )
+        db.execute(
+            "UPDATE evolution_capability_registry_leases "
+            "SET current_state = 'released' WHERE lease_id = ?",
+            (registry_view.lease.lease_id,),
+        )
+        db.commit()
+    with pytest.raises(CapabilityRegistryLeaseError, match="持久内容"):
+        await registry_service.store.latest(tmp_path, proposal.source.candidate_id)
+    with sqlite3.connect(tmp_path / "evolution.db") as db:
+        db.execute(
+            "UPDATE evolution_capability_registry_leases "
+            "SET current_state = 'expired', state_payload_sha256 = ? "
+            "WHERE lease_id = ?",
+            ("0" * 64, registry_view.lease.lease_id),
+        )
         db.commit()
     with pytest.raises(CapabilitySandboxExecutionError, match="持久摘要"):
         await service.store.get(tmp_path, prepared.request.request_id)
+    with pytest.raises(CapabilityRegistryLeaseError, match="持久摘要"):
+        await registry_service.store.latest(tmp_path, proposal.source.candidate_id)

@@ -3022,6 +3022,63 @@ test("evolution capability-run uses the typed sandbox-execution route", () => {
   }]);
 });
 
+test("evolution capability-register validates and sends a bounded catalog lease", () => {
+  const state = createInitialState();
+  const sent = [];
+  const candidateId = `evc_${"c".repeat(24)}`;
+  handleSubmitText(
+    state,
+    `/evolution capability-register ${candidateId} 45`,
+    (type, payload) => sent.push({ type, payload }),
+  );
+  assert.deepEqual(sent, [{
+    type: "evolution/review/request",
+    payload: {
+      action: "capability-register",
+      candidate_id: candidateId,
+      duration_seconds: 45,
+      query: "",
+      risk: "",
+      source_kind: "",
+      limit: 50,
+    },
+  }]);
+});
+
+test("evolution capability-register rejects an unsafe lease duration", () => {
+  const state = createInitialState();
+  const sent = [];
+  const candidateId = `evc_${"d".repeat(24)}`;
+  handleSubmitText(
+    state,
+    `/evolution capability-register ${candidateId} 901`,
+    (type, payload) => sent.push({ type, payload }),
+  );
+  assert.deepEqual(sent, []);
+});
+
+test("evolution capability-unregister uses the typed catalog release route", () => {
+  const state = createInitialState();
+  const sent = [];
+  const candidateId = `evc_${"e".repeat(24)}`;
+  handleSubmitText(
+    state,
+    `/evolution capability-unregister ${candidateId}`,
+    (type, payload) => sent.push({ type, payload }),
+  );
+  assert.deepEqual(sent, [{
+    type: "evolution/review/request",
+    payload: {
+      action: "capability-unregister",
+      candidate_id: candidateId,
+      query: "",
+      risk: "",
+      source_kind: "",
+      limit: 50,
+    },
+  }]);
+});
+
 test("outcome discovery uses slash execution then filters its typed projection", () => {
   const state = createInitialState();
   const sent = [];
