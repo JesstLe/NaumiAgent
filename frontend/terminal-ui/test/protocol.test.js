@@ -713,6 +713,8 @@ test("protocol contract drives client and server event validation", () => {
   assert(PROTOCOL_CONTRACT.client_events.includes("task_panel"));
   assert(PROTOCOL_CONTRACT.client_events.includes("run_cancel"));
   assert(PROTOCOL_CONTRACT.client_events.includes("receipt/request"));
+  assert(PROTOCOL_CONTRACT.ui_messages.tool_result.fields.includes("error_code"));
+  assert(PROTOCOL_CONTRACT.ui_messages.tool_result.fields.includes("retryable"));
   assert(PROTOCOL_CONTRACT.client_events.includes("harness/explain/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("harness/replay/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("harness/eval-baseline/request"));

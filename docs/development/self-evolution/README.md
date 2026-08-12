@@ -256,7 +256,9 @@ first-terminal-wins 人工决策和动态撤权关闭治理缺口；
 完成 AST/schema/顶层副作用/内置名冲突与临时 namespace 准入预检。真实 Sandbox fixture execution、
 [EVO-06.3b1](EVO-06-3b1-executable-scenario-binding.md) 已将 prose verification 绑定为 Harness 人工提交、
 JSON Schema 可校验且动态可撤权的精确 arguments/result-or-error oracle/timeout；真实 Sandbox execution、
-临时 Registry lease、Shadow/Activation 与 learning authority 仍未完成。
+临时 Registry lease、Shadow/Activation 与 learning authority 仍未完成。其错误场景执行所需的最小运行时前置
+[ARC-01.3d1](../architecture/ARC-01-3d1-structured-tool-failure-contract.md) 已交付：声明式 error code、用户安全
+message 与 retryable 可贯通 Engine、事件、typed UI 和 Agent Worker RPC，但不执行候选 Artifact。
 [EVO-01.4b](EVO-01-4b-composite-source-authority-router.md) 已为下一步 runtime metric/Eval Evidence
 补齐 fail-closed 多来源 authority router：所有动态 kind 必须完整注册，不同 reader 并发重验，且 Review
 绑定不能被后续 reader 静默覆盖。

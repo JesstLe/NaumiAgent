@@ -301,7 +301,7 @@ def encode_tool_result_batch(batch: AgentWorkerToolResultBatch) -> bytes:
             "execution_id": batch.execution_id,
             "turn": batch.turn,
             "call_batch_sha256": batch.call_batch_sha256,
-            "results": [asdict(result) for result in batch.results],
+            "results": [_tool_result_payload(result) for result in batch.results],
             "batch_sha256": batch.batch_sha256,
         },
         maximum=MAX_AGENT_TOOL_RESULT_BATCH_BYTES,
@@ -444,6 +444,17 @@ def _validate_tool_result(result: ToolResult) -> None:
         minimum=0,
         maximum=7 * 24 * 60 * 60 * 1000,
     )
+    if (
+        result.error_code
+        and re.fullmatch(r"[a-z][a-z0-9_]{0,63}", result.error_code) is None
+    ):
+        raise ValueError("Agent Worker tool result error_code 无效。")
+    if not isinstance(result.retryable, bool):
+        raise TypeError("Agent Worker tool result retryable 必须是布尔值。")
+    if result.status != "error" and (result.error_code or result.retryable):
+        raise ValueError("非错误 Tool result 不得携带结构化错误字段。")
+    if result.retryable and not result.error_code:
+        raise ValueError("可重试 Tool result 必须携带 error_code。")
 
 
 def _validate_tool_scope(tool_scope: tuple[str, ...]) -> None:
@@ -497,9 +508,23 @@ def _tool_result_batch_digest(
             "execution_id": execution_id,
             "turn": turn,
             "call_batch_sha256": call_batch_sha256,
-            "results": [asdict(result) for result in results],
+            "results": [_tool_result_payload(result) for result in results],
         }
     )
+
+
+def _tool_result_payload(result: ToolResult) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "call_id": result.call_id,
+        "status": result.status,
+        "content": result.content,
+        "duration_ms": result.duration_ms,
+    }
+    if result.error_code:
+        payload["error_code"] = result.error_code
+    if result.retryable:
+        payload["retryable"] = True
+    return payload
 
 
 def _digest(value: Any) -> str:

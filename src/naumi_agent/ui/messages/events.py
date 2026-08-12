@@ -130,6 +130,8 @@ class ToolResultMessage(UIMessage):
     tool_call_id: str = ""
     status: str = ""  # "success" | "error" | "skipped" | "aborted" | "failed"
     duration_ms: int = 0
+    error_code: str = ""
+    retryable: bool = False
     content_preview: str = ""  # truncated output for display
     content_length: int = 0  # full output length
     content_bytes: int = 0

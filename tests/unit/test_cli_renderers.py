@@ -129,10 +129,14 @@ class TestToolCardRendering:
             "name": "bash_run",
             "status": "error",
             "duration_ms": 5,
+            "error_code": "source_unavailable",
+            "retryable": True,
         })
         text = renderer.render(msg)
         assert text is not None
         assert "error" in text
+        assert "source_unavailable" in text
+        assert "可重试" in text
 
 
 class TestPermissionRendering:

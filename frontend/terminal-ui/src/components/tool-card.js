@@ -13,8 +13,18 @@ export function ToolCard({ tool }) {
 
 export function renderToolCard(tool, width, ctx = { width }) {
   const title = `${tool.name}${tool.primary ? ` ${tool.primary}` : ""}`;
-  const statusStyle = tool.status === "success" ? ANSI.green : tool.status === "running" ? ANSI.cyan : ANSI.red;
-  const titleLine = `${color(statusStyle, tool.status === "running" ? "running" : tool.status)} ${title}`;
+  const statusStyle = tool.status === "success"
+    ? ANSI.green
+    : tool.status === "running"
+      ? ANSI.cyan
+      : tool.retryable
+        ? ANSI.yellow
+        : ANSI.red;
+  const statusLabel = tool.status === "running" ? "running" : tool.status;
+  const errorLabel = tool.errorCode
+    ? ` · ${tool.errorCode}${tool.retryable ? " · 可重试" : ""}`
+    : "";
+  const titleLine = `${color(statusStyle, statusLabel)} ${title}${color(statusStyle, errorLabel)}`;
   const output = tool.output
     ? ToolOutput({
       text: tool.output,

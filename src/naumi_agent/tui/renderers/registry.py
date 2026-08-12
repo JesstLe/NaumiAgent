@@ -140,6 +140,11 @@ def _render_tool_result(
 
     label = _tool_label(msg.tool_name)
     preview = _highlightable_tool_preview(msg)
+    if msg.error_code:
+        failure = f"错误码：{msg.error_code}"
+        if msg.retryable:
+            failure += "（可重试）"
+        preview = f"{failure}\n{preview}".strip()
     if msg.output_artifact_id:
         preview = (
             f"{preview}\n\n完整输出：`/tool-output {msg.output_artifact_id} 1` "

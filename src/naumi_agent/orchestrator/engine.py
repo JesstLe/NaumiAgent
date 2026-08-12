@@ -806,7 +806,12 @@ from naumi_agent.tasks.reconciliation import (
     TodoReconciliationAction,
     reconcile_todos,
 )
-from naumi_agent.tools.base import ToolCall, ToolRegistry, ToolResult
+from naumi_agent.tools.base import (
+    ToolCall,
+    ToolExecutionError,
+    ToolRegistry,
+    ToolResult,
+)
 from naumi_agent.tools.browser.runtime.browser_runtime import BrowserRuntime
 from naumi_agent.tools.browser.tools import create_browser_tools
 from naumi_agent.tools.browser_daemon import BrowserDaemonClient, create_browser_daemon_tools
@@ -7544,6 +7549,8 @@ class AgentEngine:
                     "content_bytes": len(
                         result.content.encode("utf-8", errors="replace")
                     ),
+                    "error_code": result.error_code,
+                    "retryable": result.retryable,
                     "read_only": bool(
                         registered_tool is not None and registered_tool.is_read_only
                     ),
@@ -7637,6 +7644,8 @@ class AgentEngine:
                 "content_bytes": len(
                     result.content.encode("utf-8", errors="replace")
                 ),
+                "error_code": result.error_code,
+                "retryable": result.retryable,
                 "read_only": start_payload["read_only"],
                 "destructive": start_payload["destructive"],
                 **output_fields,
@@ -8721,6 +8730,33 @@ class AgentEngine:
                 status="success",
                 content=output,
                 duration_ms=duration,
+            )
+        except ToolExecutionError as error:
+            try:
+                safe_error = ToolExecutionError(
+                    error.code,
+                    str(error),
+                    retryable=error.retryable,
+                )
+            except (TypeError, ValueError):
+                logger.warning("Tool %s returned an invalid declared failure", tc.name)
+                return ToolResult(
+                    call_id=tc.id,
+                    status="error",
+                    content="工具返回了无效的结构化错误，已安全终止。",
+                    error_code="tool_failure_contract_invalid",
+                )
+            logger.info(
+                "Tool %s returned declared failure %s",
+                tc.name,
+                safe_error.code,
+            )
+            return ToolResult(
+                call_id=tc.id,
+                status="error",
+                content=str(safe_error),
+                error_code=safe_error.code,
+                retryable=safe_error.retryable,
             )
         except Exception as e:
             logger.warning("Tool %s failed: %s", tc.name, e)

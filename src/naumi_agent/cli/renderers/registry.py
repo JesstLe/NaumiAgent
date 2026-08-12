@@ -136,6 +136,9 @@ def _render_tool_result(msg: ToolResultMessage) -> str | None:
     label = _tool_label(msg.tool_name)
     card_status = "success" if msg.status == "success" else msg.status or "error"
     parts = [_tool_card_ansi(label, status=card_status, duration_ms=msg.duration_ms)]
+    if msg.error_code:
+        retry = " · 可重试" if msg.retryable else ""
+        parts.append(f"\033[33m  错误码: {msg.error_code}{retry}\033[0m\n")
     if msg.content_preview:
         # Reuse the existing diff/code highlighting (uses module-level console
         # that _capture can intercept).
