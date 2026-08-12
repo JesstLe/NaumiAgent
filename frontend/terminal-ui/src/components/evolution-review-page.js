@@ -177,6 +177,26 @@ function detailLines(item, rawEvents) {
       lines.push(color(ANSI.cyan, `治理 · /evolution capability-govern ${item.candidate_id}`));
     }
   }
+  if (item.capability_artifact) {
+    const view = item.capability_artifact;
+    const artifact = view.artifact;
+    lines.push(
+      color(ANSI.cyan, `── Capability Sandbox 准入预检 · ${view.state}`),
+      color(ANSI.red, "Registry 注册 否 · Shadow 否 · 可执行 否"),
+    );
+    if (artifact) {
+      lines.push(
+        `${artifact.artifact_id} · ${artifact.temporary_tool_name}`,
+        color(view.source_current ? ANSI.green : ANSI.red, `源码当前 · ${view.source_current ? "是" : "否"}`),
+        color(view.governance_current ? ANSI.green : ANSI.red, `治理当前 · ${view.governance_current ? "是" : "否"}`),
+      );
+      for (const check of artifact.checks) {
+        lines.push(color(check.passed ? ANSI.green : ANSI.red, `${check.passed ? "通过" : "阻断"} · ${check.code}`));
+      }
+    } else {
+      lines.push(color(ANSI.dim, `创建 · /evolution capability-artifact ${item.candidate_id} <source.py> <ClassName>`));
+    }
+  }
   const aggregation = item.aggregation;
   if (aggregation) {
     lines.push(

@@ -96,6 +96,10 @@ from naumi_agent.evolution.approval_signatures import (
     EvolutionApprovalSignatureService,
     EvolutionApprovalSignatureStore,
 )
+from naumi_agent.evolution.capability_artifact import (
+    EvolutionCapabilityArtifactService,
+    EvolutionCapabilityArtifactStore,
+)
 from naumi_agent.evolution.capability_governance import (
     CapabilitySpecificationAssessor,
     EvolutionCapabilityGovernanceService,
@@ -1508,6 +1512,20 @@ class AgentEngine:
         )
         self.evolution_review_service.bind_capability_governance_reader(
             self.evolution_capability_governance_service
+        )
+        self.evolution_capability_artifact_store = EvolutionCapabilityArtifactStore(
+            self.evolution_candidate_store.db_path,
+        )
+        self.evolution_capability_artifact_service = EvolutionCapabilityArtifactService(
+            review_service=self.evolution_review_service,
+            specification_service=self.evolution_capability_specification_service,
+            governance_service=self.evolution_capability_governance_service,
+            store=self.evolution_capability_artifact_store,
+            registered_tool_names=lambda: tuple(self._tool_registry.names),
+            now=lambda: datetime.now(UTC).isoformat(),
+        )
+        self.evolution_review_service.bind_capability_artifact_reader(
+            self.evolution_capability_artifact_service
         )
         self.evolution_experiment_contract_store = EvolutionExperimentContractStore(
             config.memory.session_db_path

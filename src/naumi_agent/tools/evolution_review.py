@@ -30,6 +30,10 @@ from naumi_agent.evolution.approval_signatures import (
     EvolutionApprovalSignatureError,
     render_evolution_approval_signature,
 )
+from naumi_agent.evolution.capability_artifact import (
+    CapabilityArtifactError,
+    render_capability_artifact,
+)
 from naumi_agent.evolution.capability_governance import (
     CapabilityGovernanceError,
     render_capability_governance,
@@ -607,6 +611,85 @@ class EvolutionCapabilityGovernanceTool(Tool):
             ValueError,
         ) as exc:
             return f"Capability Governance 未完成：{exc}"
+
+
+class EvolutionCapabilityArtifactTool(Tool):
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_capability_artifact"
+
+    @property
+    def description(self) -> str:
+        return (
+            "查看或封存一个已批准 Capability 的真实 Python Tool 源码，并执行 AST、"
+            "Schema、内置名冲突与临时 namespace 准入预检；不会 import、注册或执行源码。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["inspect", "create"],
+                    "default": "inspect",
+                },
+                "candidate_id": {
+                    "type": "string",
+                    "pattern": "^evc_[0-9a-f]{24}$",
+                },
+                "source_path": {"type": "string", "maxLength": 1024},
+                "class_name": {
+                    "type": "string",
+                    "pattern": "^[A-Z][A-Za-z0-9]{0,127}$",
+                },
+            },
+            "required": ["candidate_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=False,
+            path_argument_names=("source_path",),
+            user_facing_name="能力实现制品准入预检",
+            search_hint="evolution capability implementation artifact sandbox registry preview",
+        )
+
+    async def execute(
+        self,
+        candidate_id: str,
+        action: str = "inspect",
+        source_path: str = "",
+        class_name: str = "",
+    ) -> str:
+        try:
+            service = self._engine.evolution_capability_artifact_service
+            if action == "inspect":
+                view = await service.inspect(
+                    self._engine.workspace_root,
+                    candidate_id.strip(),
+                )
+            elif action == "create":
+                if not source_path.strip() or not class_name.strip():
+                    return "create 需要 source_path 与 class_name。"
+                view = await service.create(
+                    self._engine.workspace_root,
+                    candidate_id=candidate_id.strip(),
+                    source_path=source_path.strip(),
+                    class_name=class_name.strip(),
+                )
+            else:
+                return "action 仅支持 inspect 或 create。"
+            return render_capability_artifact(view)
+        except (CapabilityArtifactError, OSError, TypeError, ValueError) as exc:
+            return f"Capability 实现制品未就绪：{exc}"
 
 
 class EvolutionOutcomeOpportunityTool(Tool):
@@ -6772,6 +6855,7 @@ def create_evolution_review_tools(
         EvolutionCandidatesTool(engine, service),
         EvolutionCapabilitySpecificationTool(engine),
         EvolutionCapabilityGovernanceTool(engine),
+        EvolutionCapabilityArtifactTool(engine),
         EvolutionExperimentContractAuthorityTool(engine),
         EvolutionExperimentContractIssueTool(engine),
         EvolutionEvaluationReceiptTool(engine),
@@ -6862,6 +6946,7 @@ __all__ = [
     "EvolutionCandidatesTool",
     "EvolutionCapabilitySpecificationTool",
     "EvolutionCapabilityGovernanceTool",
+    "EvolutionCapabilityArtifactTool",
     "EvolutionEvalMetricOpportunityTool",
     "EvolutionGoalNeedOpportunityTool",
     "EvolutionToolCatalogMissOpportunityTool",

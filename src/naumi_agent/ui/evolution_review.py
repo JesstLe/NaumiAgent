@@ -81,6 +81,7 @@ def _item_payload(item: EvolutionReviewItem, *, detail: bool) -> dict[str, Any]:
             "capability_proposal": _capability_proposal_payload(item),
             "capability_specification": _capability_specification_payload(item),
             "capability_governance": _capability_governance_payload(item),
+            "capability_artifact": _capability_artifact_payload(item),
         })
     return payload
 
@@ -246,6 +247,17 @@ def _capability_governance_payload(item: EvolutionReviewItem) -> dict[str, Any] 
     if value is None:
         return None
     return value.model_dump(mode="json")
+
+
+def _capability_artifact_payload(item: EvolutionReviewItem) -> dict[str, Any] | None:
+    value = item.capability_artifact
+    if value is None:
+        return None
+    payload = value.model_dump(mode="json")
+    artifact = payload.get("artifact")
+    if isinstance(artifact, dict):
+        artifact.pop("source_text", None)
+    return payload
 
 
 __all__ = ["evolution_review_payload"]
