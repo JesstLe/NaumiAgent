@@ -840,14 +840,14 @@ def _load(candidate_path: Path, class_name: str):
 
 
 async def _run(input_path: Path, candidate_path: Path, class_name: str) -> dict[str, object]:
-    from naumi_agent.tools.base import Tool, ToolExecutionError
-
     payload = json.loads(input_path.read_text(encoding="utf-8"))
     if set(payload) != {"schema_version", "scenario_index", "arguments", "timeout_ms"}:
         raise RuntimeError("scenario_input_invalid")
     if payload["schema_version"] != 1 or not isinstance(payload["arguments"], dict):
         raise RuntimeError("scenario_input_invalid")
     tool = _load(candidate_path, class_name)
+    from naumi_agent.tools.base import Tool, ToolExecutionError
+
     if not isinstance(tool, Tool):
         raise RuntimeError("candidate_tool_invalid")
     permission_payload = json.loads(
@@ -911,7 +911,10 @@ def main() -> int:
     try:
         result = asyncio.run(_run(Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]))
     except Exception:
-        result = {"kind": "infrastructure_error", "error_code": "candidate_execution_failed"}
+        result = {
+            "kind": "infrastructure_error",
+            "error_code": "candidate_setup_failed",
+        }
     print(json.dumps(
         result,
         ensure_ascii=False,

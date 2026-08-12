@@ -105,6 +105,10 @@ from naumi_agent.evolution.capability_governance import (
     EvolutionCapabilityGovernanceService,
     EvolutionCapabilityGovernanceStore,
 )
+from naumi_agent.evolution.capability_sandbox_execution import (
+    EvolutionCapabilitySandboxExecutionService,
+    EvolutionCapabilitySandboxExecutionStore,
+)
 from naumi_agent.evolution.capability_sandbox_request import (
     EvolutionCapabilitySandboxRequestService,
     EvolutionCapabilitySandboxRequestStore,
@@ -1568,6 +1572,23 @@ class AgentEngine:
                 binding_service=self.evolution_capability_scenario_binding_service,
                 specification_store=self.evolution_capability_specification_store,
                 store=self.evolution_capability_sandbox_request_store,
+                now=lambda: datetime.now(UTC).isoformat(),
+            )
+        )
+        self.evolution_capability_sandbox_execution_store = (
+            EvolutionCapabilitySandboxExecutionStore(
+                self.evolution_candidate_store.db_path,
+            )
+        )
+        self.evolution_capability_sandbox_execution_service = (
+            EvolutionCapabilitySandboxExecutionService(
+                workspace_root=self.workspace_root,
+                request_service=self.evolution_capability_sandbox_request_service,
+                store=self.evolution_capability_sandbox_execution_store,
+                harness_store=self._harness_store,
+                permission_store=resources.permission_decision_store,
+                run_grant_authority=self.run_delegation_grant_authority,
+                execution_kernel=self.harness_sandbox_eval_kernel,
                 now=lambda: datetime.now(UTC).isoformat(),
             )
         )

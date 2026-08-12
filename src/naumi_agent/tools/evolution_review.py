@@ -38,6 +38,10 @@ from naumi_agent.evolution.capability_governance import (
     CapabilityGovernanceError,
     render_capability_governance,
 )
+from naumi_agent.evolution.capability_sandbox_execution import (
+    CapabilitySandboxExecutionError,
+    render_capability_sandbox_execution,
+)
 from naumi_agent.evolution.capability_sandbox_request import (
     CapabilitySandboxRequestError,
     render_capability_sandbox_request,
@@ -834,6 +838,70 @@ class EvolutionCapabilitySandboxRequestTool(Tool):
             return render_capability_sandbox_request(view)
         except (CapabilitySandboxRequestError, OSError, TypeError, ValueError) as exc:
             return f"Capability Sandbox Request 未就绪：{exc}"
+
+
+class EvolutionCapabilitySandboxExecuteTool(Tool):
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_capability_sandbox_execute"
+
+    @property
+    def description(self) -> str:
+        return (
+            "通过 exact Run Grant 和 ARC-04 独立 Shell Worker 执行 sealed Capability "
+            "场景，验证 oracle 与权限观察并形成不可变 Receipt；不注册候选 Tool。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "candidate_id": {
+                    "type": "string",
+                    "pattern": "^evc_[0-9a-f]{24}$",
+                },
+                "run_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "description": "当前 Runtime/会话的稳定运行标识",
+                },
+            },
+            "required": ["candidate_id", "run_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=False,
+            requires_confirmation=False,
+            command_argument_names=(),
+            user_facing_name="执行 Capability Sandbox 场景",
+            search_hint="evolution capability sandbox execute arc04 receipt oracle",
+            delegated_tool_names=("bash_run",),
+        )
+
+    async def execute(self, candidate_id: str, run_id: str) -> str:
+        permission = current_permission_receipt()
+        if permission is None:
+            return "Capability Sandbox 未执行：缺少当前工具调用的持久权限回执。"
+        try:
+            view = await self._engine.evolution_capability_sandbox_execution_service.execute(
+                candidate_id=candidate_id.strip(),
+                run_id=run_id.strip(),
+                parent_permission=permission,
+            )
+            return render_capability_sandbox_execution(view)
+        except (CapabilitySandboxExecutionError, OSError, TypeError, ValueError) as exc:
+            code = getattr(exc, "code", "capability_sandbox_execution_failed")
+            return f"Capability Sandbox 未完成（`{code}`）：{exc}"
 
 
 class EvolutionOutcomeOpportunityTool(Tool):
@@ -7002,6 +7070,7 @@ def create_evolution_review_tools(
         EvolutionCapabilityArtifactTool(engine),
         EvolutionCapabilityScenarioBindingTool(engine),
         EvolutionCapabilitySandboxRequestTool(engine),
+        EvolutionCapabilitySandboxExecuteTool(engine),
         EvolutionExperimentContractAuthorityTool(engine),
         EvolutionExperimentContractIssueTool(engine),
         EvolutionEvaluationReceiptTool(engine),
@@ -7095,6 +7164,7 @@ __all__ = [
     "EvolutionCapabilityArtifactTool",
     "EvolutionCapabilityScenarioBindingTool",
     "EvolutionCapabilitySandboxRequestTool",
+    "EvolutionCapabilitySandboxExecuteTool",
     "EvolutionEvalMetricOpportunityTool",
     "EvolutionGoalNeedOpportunityTool",
     "EvolutionToolCatalogMissOpportunityTool",

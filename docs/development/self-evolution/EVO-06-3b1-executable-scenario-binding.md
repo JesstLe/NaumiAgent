@@ -78,8 +78,9 @@ Store 对每个 Artifact 只接受首份 Binding；同一交互重复写入幂�
 本切片证明测试输入与 oracle 可机械解释，但尚未证明候选行为正确。
 [EVO-06.3b2a](EVO-06-3b2a-content-addressed-sandbox-execution-request.md) 已先把 sealed Artifact、Binding、
 exact Git source、overlays、argv、timeout、oracle digest 与 permission requirements 编译为不可变 Request，
-且未签发执行权。EVO-06.3b2b 必须在 ARC-04/Harness Sandbox 中从该 Request materialize 临时模块，以隔离进程逐场景调用 `Tool.execute()`；对返回
+且未签发执行权。[EVO-06.3b2b](EVO-06-3b2b-arc04-sandbox-execution-receipt.md) 已进一步在
+ARC-04/Harness Sandbox 中从该 Request materialize 临时模块，以隔离进程逐场景调用 `Tool.execute()`；对返回
 字符串执行 JSON decode 后验证 result schema，或捕获
 [ARC-01.3d1](../architecture/ARC-01-3d1-structured-tool-failure-contract.md) 结构化声明错误码，同时记录 timeout、资源、网络/文件
-permission observation 与完整执行 Receipt。只有全部场景通过且来源仍 current，才能考虑短期、可撤销的临时
+permission observation 与完整执行 Receipt。只有全部场景通过且来源仍 current，后续才能考虑短期、可撤销的临时
 Registry lease；仍不得进入 Shadow 或 Limited Activation。

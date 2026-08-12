@@ -4865,6 +4865,27 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             )
             console.print(Markdown(render_capability_sandbox_request(view)))
             return
+        if action == "capability-run":
+            if len(parts) != 2:
+                raise ValueError("capability-run 需要一个 Candidate ID。")
+            from naumi_agent.tools.base import ToolCall
+
+            result = await engine.execute_tool(
+                ToolCall(
+                    id=f"slash-capability-sandbox-{uuid.uuid4()}",
+                    name="evolution_capability_sandbox_execute",
+                    arguments=json.dumps(
+                        {
+                            "candidate_id": parts[1],
+                            "run_id": f"evcaprun-{uuid.uuid4().hex}",
+                        },
+                        ensure_ascii=False,
+                    ),
+                ),
+                agent_name="cli",
+            )
+            console.print(Markdown(result.content))
+            return
         if action == "detail":
             if len(parts) != 2:
                 raise ValueError("detail 需要一个 Candidate ID。")
@@ -4893,6 +4914,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "capability-artifact、"
                 "capability-bind、"
                 "capability-sandbox、"
+                "capability-run、"
                 "experiment-contract、evaluation、"
                 "evaluation-contract、"
                 "evaluation-final、decision-input、mechanical-gate、"
@@ -5084,6 +5106,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "[workspace-relative-source.py ClassName]；"
             "/evolution capability-bind <candidate-id>；"
             "/evolution capability-sandbox <candidate-id>；"
+            "/evolution capability-run <candidate-id>；"
             "/evolution experiment-contract <contract-id>；"
             "/evolution evaluation <comparison-id>；"
             "/evolution evaluation-contract <workspace-relative-request.json>；"

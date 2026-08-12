@@ -60,4 +60,5 @@ Agent Worker result batch 保持 schema version 1 的 additive compatibility：�
 [EVO-06.3b2a](../self-evolution/EVO-06-3b2a-content-addressed-sandbox-execution-request.md) 已建立
 content-addressed Sandbox Execution Request，把 sealed Artifact、Scenario Binding、exact source revision、
 permission profile、overlays 与 checks 封存，但明确未签发 Run Grant。EVO-06.3b2b 再由 ARC-04 隔离 Worker
-逐场景执行并签发可撤权 Receipt。
+逐场景执行并签发可撤权 Receipt；该执行切片现已交付，见
+[EVO-06.3b2b](../self-evolution/EVO-06-3b2b-arc04-sandbox-execution-receipt.md)。
