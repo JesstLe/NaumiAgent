@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import StrEnum
@@ -182,39 +183,122 @@ class Tool(ABC):
         return parsed
 
 
+class ToolRegistryConflictError(RuntimeError):
+    """Raised when a guarded registry mutation would replace another Tool."""
+
+
 class ToolRegistry:
     """工具注册表."""
 
     def __init__(self) -> None:
         self._tools: dict[str, Tool] = {}
+        self._lock = threading.RLock()
 
     def register(self, tool: Tool) -> None:
-        self._tools[tool.name] = tool
+        """Register a trusted built-in, preserving the legacy replace behavior."""
+        name = _validated_tool_registration_name(tool)
+        with self._lock:
+            self._tools[name] = tool
+
+    def register_unique(self, tool: Tool) -> None:
+        """Register one untrusted/dynamic Tool without any exact or alias overwrite."""
+        name = _validated_tool_registration_name(tool)
+        with self._lock:
+            conflicts = self._conflicts_locked(name)
+            if conflicts:
+                joined = "、".join(f"`{name}`" for name in conflicts)
+                raise ToolRegistryConflictError(
+                    f"工具 `{name}` 与现有注册项 {joined} 冲突，未修改注册表。"
+                )
+            self._tools[name] = tool
+
+    def unregister_if_same(self, name: str, expected_tool: Tool) -> bool:
+        """Remove only the exact instance installed by the caller."""
+        normalized = _validate_tool_name(name)
+        if not isinstance(expected_tool, Tool):
+            raise TypeError("expected_tool 必须是 Tool 实例")
+        with self._lock:
+            current = self._tools.get(normalized)
+            if current is not expected_tool:
+                return False
+            del self._tools[normalized]
+            return True
+
+    def get_exact(self, name: str) -> Tool | None:
+        """Resolve an exact public name without legacy namespace fallback."""
+        if not isinstance(name, str):
+            return None
+        with self._lock:
+            return self._tools.get(name)
+
+    def conflicts_for(self, name: str) -> tuple[str, ...]:
+        """Return stable exact/legacy-alias conflicts without mutation."""
+        normalized = _validate_tool_name(name)
+        with self._lock:
+            return self._conflicts_locked(normalized)
+
+    def _conflicts_locked(self, name: str) -> tuple[str, ...]:
+        alias = _legacy_tool_alias(name)
+        conflicts = [
+            registered
+            for registered in self._tools
+            if registered == name
+            or _legacy_tool_alias(registered) == alias
+        ]
+        return tuple(sorted(conflicts))
 
     def get(self, name: str) -> Tool | None:
-        if name in self._tools:
-            return self._tools[name]
-        # 某些 API（如 Kimi）返回的工具名可能带 namespace 前缀，
-        # 例如 "default.web_search" 或 "default__web_search"
-        normalized = name
-        if "." in normalized:
-            normalized = normalized.split(".")[-1]
-        elif "__" in normalized:
-            normalized = normalized.split("__")[-1]
-        return self._tools.get(normalized)
+        with self._lock:
+            if name in self._tools:
+                return self._tools[name]
+            # 某些 API（如 Kimi）返回的工具名可能带 namespace 前缀，
+            # 例如 "default.web_search" 或 "default__web_search"
+            normalized = _legacy_tool_alias(name)
+            return self._tools.get(normalized)
 
     def all(self) -> list[Tool]:
-        return list(self._tools.values())
+        with self._lock:
+            return list(self._tools.values())
 
     def get_openai_tools(self) -> list[dict[str, Any]]:
-        return [t.to_openai_tool() for t in self._tools.values()]
+        return [tool.to_openai_tool() for tool in self.all()]
 
     @property
     def names(self) -> list[str]:
-        return list(self._tools.keys())
+        with self._lock:
+            return list(self._tools.keys())
 
     def __contains__(self, name: str) -> bool:
-        return name in self._tools
+        with self._lock:
+            return name in self._tools
 
     def __len__(self) -> int:
-        return len(self._tools)
+        with self._lock:
+            return len(self._tools)
+
+
+def _validated_tool_registration_name(tool: Tool) -> str:
+    if not isinstance(tool, Tool):
+        raise TypeError("只能注册 Tool 实例")
+    return _validate_tool_name(tool.name)
+
+
+def _validate_tool_name(name: str) -> str:
+    if (
+        not isinstance(name, str)
+        or not name
+        or name != name.strip()
+        or len(name) > 128
+        or any(ord(character) < 33 or ord(character) == 127 for character in name)
+    ):
+        raise ValueError("工具名必须是 1..128 字符且不含空白或控制字符")
+    return name
+
+
+def _legacy_tool_alias(name: str) -> str:
+    normalized = name
+    if "." in normalized:
+        normalized = normalized.split(".")[-1]
+    elif "__" in normalized:
+        normalized = normalized.split("__")[-1]
+    return normalized

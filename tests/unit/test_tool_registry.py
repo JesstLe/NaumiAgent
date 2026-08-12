@@ -2,11 +2,12 @@
 
 import shlex
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 
-from naumi_agent.tools.base import ToolRegistry
+from naumi_agent.tools.base import Tool, ToolRegistry, ToolRegistryConflictError
 from naumi_agent.tools.builtin import (
     BashRunTool,
     FileEditTool,
@@ -28,6 +29,26 @@ def registry() -> ToolRegistry:
     return reg
 
 
+class _NamedTool(Tool):
+    def __init__(self, name: str) -> None:
+        self._name = name
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def description(self) -> str:
+        return "用于 ToolRegistry authority 测试。"
+
+    @property
+    def parameters_schema(self) -> dict[str, object]:
+        return {"type": "object", "properties": {}, "additionalProperties": False}
+
+    async def execute(self, **kwargs: object) -> str:
+        return "ok"
+
+
 class TestToolRegistry:
     def test_register_and_get(self, registry: ToolRegistry) -> None:
         assert "glob" in registry
@@ -41,6 +62,52 @@ class TestToolRegistry:
 
     def test_get_nonexistent(self, registry: ToolRegistry) -> None:
         assert registry.get("nonexistent") is None
+
+    def test_unique_registration_rejects_exact_and_legacy_alias_conflicts(
+        self,
+        registry: ToolRegistry,
+    ) -> None:
+        original = registry.get_exact("bash_run")
+        assert original is not None
+
+        for name in ("bash_run", "default.bash_run", "default__bash_run"):
+            with pytest.raises(ToolRegistryConflictError, match="未修改注册表"):
+                registry.register_unique(_NamedTool(name))
+
+        assert registry.conflicts_for("default.bash_run") == ("bash_run",)
+        assert registry.get_exact("bash_run") is original
+        assert registry.get_exact("default.bash_run") is None
+
+    def test_compare_and_remove_cannot_delete_replacement(self) -> None:
+        registry = ToolRegistry()
+        leased = _NamedTool("evolution_sandbox:abc:compare")
+        replacement = _NamedTool("evolution_sandbox:abc:compare")
+        registry.register_unique(leased)
+        registry.register(replacement)
+
+        assert registry.unregister_if_same(leased.name, leased) is False
+        assert registry.get_exact(leased.name) is replacement
+        assert registry.unregister_if_same(replacement.name, replacement) is True
+        assert registry.get_exact(leased.name) is None
+
+    def test_concurrent_unique_registration_has_one_winner(self) -> None:
+        registry = ToolRegistry()
+        tools = tuple(_NamedTool("evolution_sandbox:abc:compare") for _ in range(8))
+
+        def register(tool: Tool) -> bool:
+            try:
+                registry.register_unique(tool)
+            except ToolRegistryConflictError:
+                return False
+            return True
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            outcomes = tuple(pool.map(register, tools))
+
+        assert outcomes.count(True) == 1
+        assert len(registry) == 1
+        winner = tools[outcomes.index(True)]
+        assert registry.get_exact(winner.name) is winner
 
     def test_openai_tools_format(self, registry: ToolRegistry) -> None:
         tools = registry.get_openai_tools()
