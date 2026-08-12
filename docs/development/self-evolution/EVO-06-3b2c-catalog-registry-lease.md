@@ -80,5 +80,5 @@ SQLite 的 `current_state` 并非可信缓存：恢复时必须与签名式 stat
 ## 非目标与下一步
 
 本切片没有加载候选类、构造 Tool 实例、发送模型 schema、记录 shadow recommendation 或产生副作用。
-EVO-06.4 下一切片应消费 active catalog lease，构造不可执行的 Shadow descriptor，只观察“模型本来会不会
-选择该能力”并记录路由价值；不得直接进入 Limited Activation。
+[EVO-06.4a](EVO-06-4a-sealed-shadow-descriptor.md) 已消费 active catalog lease 构造不可执行、永久未授权的
+Shadow descriptor。下一步是 4b isolated observation contract；不得直接进入 Limited Activation。

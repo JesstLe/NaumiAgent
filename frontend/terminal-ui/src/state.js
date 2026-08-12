@@ -5787,6 +5787,8 @@ function parseEvolutionReviewCommand(text) {
     "capability-run",
     "capability-lease",
     "capability-unregister",
+    "capability-shadow",
+    "capability-shadow-status",
   ].includes(action)) {
     if (values.length !== 2 || !/^evc_[0-9a-f]{24}$/.test(values[1])) return null;
     return { action, candidate_id: values[1], query: "", risk: "", source_kind: "", limit: 50 };

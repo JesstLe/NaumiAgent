@@ -6117,6 +6117,10 @@ class JsonlEngineBridge:
             CapabilityScenarioBindingError,
             render_capability_scenario_binding,
         )
+        from naumi_agent.evolution.capability_shadow_descriptors import (
+            CapabilityShadowDescriptorError,
+            render_capability_shadow_descriptor,
+        )
         from naumi_agent.evolution.capability_specification import (
             CapabilitySpecificationStoreError,
             render_capability_specification,
@@ -6297,6 +6301,39 @@ class JsonlEngineBridge:
                     self.engine.workspace_root,
                     candidate_id,
                 )
+            elif action in {"capability-shadow", "capability-shadow-status"}:
+                from naumi_agent.tools.base import ToolCall
+
+                candidate_id = str(payload.get("candidate_id") or "")
+                if action == "capability-shadow":
+                    result = await self.engine.execute_tool(
+                        ToolCall(
+                            id=f"ui-capability-shadow-{uuid4()}",
+                            name="evolution_capability_shadow_descriptor",
+                            arguments=json.dumps(
+                                {"action": "compile", "candidate_id": candidate_id},
+                                ensure_ascii=False,
+                            ),
+                        ),
+                        agent_name="new-ui",
+                    )
+                    content = result.content
+                else:
+                    view = (
+                        await self.engine.evolution_capability_shadow_descriptor_service.inspect(
+                            candidate_id,
+                        )
+                    )
+                    content = render_capability_shadow_descriptor(view)
+                await self._emit_system_notice(
+                    "Capability Shadow Descriptor",
+                    content,
+                    request_id=request_id,
+                )
+                snapshot = await service.detail_snapshot(
+                    self.engine.workspace_root,
+                    candidate_id,
+                )
             elif action == "enqueue":
                 session = getattr(self.engine, "_session", None)
                 if session is None:
@@ -6342,77 +6379,68 @@ class JsonlEngineBridge:
             CapabilityScenarioBindingError,
             CapabilitySandboxRequestError,
             CapabilityRegistryLeaseError,
+            CapabilityShadowDescriptorError,
             EvolutionStoreError,
             OSError,
             ValueError,
         ):
-            if action in {
-                "capability-spec", "capability-govern", "capability-artifact",
-                "capability-bind",
-                "capability-sandbox",
-                "capability-run",
-                "capability-lease",
-                "capability-register",
-                "capability-unregister",
-            }:
-                registry_action = action in {
-                    "capability-lease",
-                    "capability-register",
-                    "capability-unregister",
-                }
+            capability_errors = {
+                "capability-spec": (
+                    "Capability Specification/Governance 未推进；"
+                    "来源失效、答案无效或交互仍待处理。",
+                    "evolution_capability_specification_failed",
+                ),
+                "capability-govern": (
+                    "Capability Specification/Governance 未推进；"
+                    "来源失效、答案无效或交互仍待处理。",
+                    "evolution_capability_governance_failed",
+                ),
+                "capability-artifact": (
+                    "Capability 实现制品未就绪；源码、规格或治理来源已失效。",
+                    "evolution_capability_artifact_failed",
+                ),
+                "capability-bind": (
+                    "Capability 场景未绑定；Artifact、人工答案或 JSON Schema 已失效。",
+                    "evolution_capability_scenario_binding_failed",
+                ),
+                "capability-sandbox": (
+                    "Capability Sandbox Request 未形成；Binding 或 Git source 已失效。",
+                    "evolution_capability_sandbox_request_failed",
+                ),
+                "capability-run": (
+                    "Capability Sandbox Execution 未完成；"
+                    "Request、Run Grant 或 ARC-04 Worker 已失效。",
+                    "evolution_capability_sandbox_execution_failed",
+                ),
+                "capability-lease": (
+                    "Capability Registry lease 未完成；"
+                    "passed Receipt、租期或 Runtime ownership 已失效。",
+                    "evolution_capability_registry_lease_failed",
+                ),
+                "capability-register": (
+                    "Capability Registry lease 未完成；"
+                    "passed Receipt、租期或 Runtime ownership 已失效。",
+                    "evolution_capability_registry_lease_failed",
+                ),
+                "capability-unregister": (
+                    "Capability Registry lease 未完成；"
+                    "passed Receipt、租期或 Runtime ownership 已失效。",
+                    "evolution_capability_registry_lease_failed",
+                ),
+                "capability-shadow": (
+                    "Capability Shadow descriptor 未形成；Registry lease 或来源已失效。",
+                    "evolution_capability_shadow_descriptor_failed",
+                ),
+                "capability-shadow-status": (
+                    "Capability Shadow descriptor 不可读取；持久记录或来源已失效。",
+                    "evolution_capability_shadow_descriptor_failed",
+                ),
+            }
+            if action in capability_errors:
+                message, code = capability_errors[action]
                 await self.emit_error(
-                    (
-                        "Capability 实现制品未就绪；源码、规格或治理来源已失效。"
-                        if action == "capability-artifact"
-                        else (
-                            "Capability 场景未绑定；Artifact、人工答案或 JSON Schema 已失效。"
-                            if action == "capability-bind"
-                            else (
-                                "Capability Registry lease 未完成；"
-                                "passed Receipt、租期或 Runtime ownership 已失效。"
-                                if registry_action
-                                else (
-                                "Capability Sandbox Execution 未完成；"
-                                "Request、Run Grant 或 ARC-04 Worker 已失效。"
-                                if action == "capability-run"
-                                else (
-                                    "Capability Sandbox Request 未形成；"
-                                    "Binding 或 Git source 已失效。"
-                                    if action == "capability-sandbox"
-                                    else (
-                                        "Capability Specification/Governance 未推进；"
-                                        "来源失效、答案无效或交互仍待处理。"
-                                    )
-                                )
-                                )
-                            )
-                        )
-                    ),
-                    code=(
-                        "evolution_capability_artifact_failed"
-                        if action == "capability-artifact"
-                        else (
-                            "evolution_capability_scenario_binding_failed"
-                            if action == "capability-bind"
-                            else (
-                                "evolution_capability_registry_lease_failed"
-                                if registry_action
-                                else (
-                                "evolution_capability_sandbox_execution_failed"
-                                if action == "capability-run"
-                                else (
-                                    "evolution_capability_sandbox_request_failed"
-                                    if action == "capability-sandbox"
-                                    else (
-                                        "evolution_capability_governance_failed"
-                                        if action == "capability-govern"
-                                        else "evolution_capability_specification_failed"
-                                    )
-                                )
-                                )
-                            )
-                        )
-                    ),
+                    message,
+                    code=code,
                     request_id=request_id,
                 )
                 return

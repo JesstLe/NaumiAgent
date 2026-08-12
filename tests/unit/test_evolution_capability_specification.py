@@ -65,6 +65,11 @@ from naumi_agent.evolution.capability_scenario_binding import (
     build_capability_scenario_binding,
     render_capability_scenario_binding,
 )
+from naumi_agent.evolution.capability_shadow_descriptors import (
+    CapabilityShadowDescriptorError,
+    EvolutionCapabilityShadowDescriptorService,
+    EvolutionCapabilityShadowDescriptorStore,
+)
 from naumi_agent.evolution.capability_specification import (
     CapabilityDataSpecification,
     CapabilityInterfaceSpecification,
@@ -226,7 +231,10 @@ class _Review:
         selected = (
             None
             if self.proposal is None
-            else SimpleNamespace(capability_proposal=self.proposal)
+            else SimpleNamespace(
+                capability_proposal=self.proposal,
+                hypothesis="补齐 browser_trace_compare 工具以比较浏览器轨迹差异。",
+            )
         )
         return SimpleNamespace(selected=selected)
 
@@ -2229,6 +2237,15 @@ async def test_capability_sandbox_executes_real_arc04_worker_and_seals_receipt(
         runtime_instance_id="evcruntime_" + "a" * 24,
         now=lambda: registry_clock[0].isoformat(),
     )
+    shadow_service = EvolutionCapabilityShadowDescriptorService(
+        workspace_root=tmp_path,
+        review_service=specification_service.review_service,
+        specification_service=specification_service,
+        artifact_service=artifact_service,
+        registry_lease_service=registry_service,
+        store=EvolutionCapabilityShadowDescriptorStore(tmp_path / "evolution.db"),
+        now=lambda: registry_clock[0].isoformat(),
+    )
     decided_at = datetime.now(UTC).isoformat()
     parent = await engine._resources.permission_decision_store.issue(
         request_id="capability-sandbox-request",
@@ -2344,6 +2361,33 @@ async def test_capability_sandbox_executes_real_arc04_worker_and_seals_receipt(
             duration_seconds=30,
             parent_permission=reacquire_parent,
         )
+        competing_shadow_service = EvolutionCapabilityShadowDescriptorService(
+            workspace_root=tmp_path,
+            review_service=specification_service.review_service,
+            specification_service=specification_service,
+            artifact_service=artifact_service,
+            registry_lease_service=registry_service,
+            store=EvolutionCapabilityShadowDescriptorStore(tmp_path / "evolution.db"),
+            now=lambda: registry_clock[0].isoformat(),
+        )
+        shadow_view, competing_shadow = await asyncio.gather(
+            shadow_service.compile(proposal.source.candidate_id),
+            competing_shadow_service.compile(proposal.source.candidate_id),
+        )
+        assert shadow_view.state == "ready"
+        assert shadow_view.descriptor is not None
+        assert competing_shadow.descriptor == shadow_view.descriptor
+        assert shadow_view.descriptor.production_model_visible is False
+        assert shadow_view.descriptor.registry_resolvable is False
+        assert shadow_view.descriptor.execution_authorized is False
+        assert "source_text" not in shadow_view.descriptor.canonical_json()
+        assert shadow_view.descriptor.evaluation_tool_name.startswith("shadow_")
+        engine.evolution_capability_shadow_descriptor_service = shadow_service
+        shadow_slash_output = await execute_slash_command(
+            engine,
+            f"/evolution capability-shadow {proposal.source.candidate_id}",
+        )
+        assert shadow_view.descriptor.descriptor_id in shadow_slash_output
         candidate_source = tmp_path / "candidate.py"
         sealed_source = candidate_source.read_text(encoding="utf-8")
         candidate_source.write_text(
@@ -2359,6 +2403,9 @@ async def test_capability_sandbox_executes_real_arc04_worker_and_seals_receipt(
             "execution_receipt_revoked",
         }
         assert revoked.state_receipt.registry_reservation_release_confirmed
+        revoked_shadow = await shadow_service.inspect(proposal.source.candidate_id)
+        assert revoked_shadow.state == "revoked"
+        assert revoked_shadow.offline_shadow_input_eligible is False
         candidate_source.write_text(sealed_source, encoding="utf-8")
         final_parent = await engine._resources.permission_decision_store.issue(
             request_id="capability-registry-final-request",
@@ -2387,6 +2434,10 @@ async def test_capability_sandbox_executes_real_arc04_worker_and_seals_receipt(
             duration_seconds=30,
             parent_permission=final_parent,
         )
+        final_shadow = await shadow_service.compile(proposal.source.candidate_id)
+        assert final_shadow.state == "ready"
+        assert final_shadow.descriptor is not None
+        assert final_shadow.descriptor.lease_id == registry_view.lease.lease_id
         engine.evolution_capability_registry_lease_service = registry_service
         registry_slash_output = await execute_slash_command(
             engine,
@@ -2419,6 +2470,19 @@ async def test_capability_sandbox_executes_real_arc04_worker_and_seals_receipt(
             now=lambda: registry_clock[0].isoformat(),
         )
         detached = await detached_service.inspect(proposal.source.candidate_id)
+        detached_shadow_service = EvolutionCapabilityShadowDescriptorService(
+            workspace_root=tmp_path,
+            review_service=specification_service.review_service,
+            specification_service=specification_service,
+            artifact_service=artifact_service,
+            registry_lease_service=detached_service,
+            store=EvolutionCapabilityShadowDescriptorStore(tmp_path / "evolution.db"),
+            now=lambda: registry_clock[0].isoformat(),
+        )
+        detached_shadow = await detached_shadow_service.inspect(
+            proposal.source.candidate_id
+        )
+        assert detached_shadow.state == "detached"
         with pytest.raises(CapabilityRegistryLeaseError, match="其他 Runtime"):
             await detached_service.acquire(
                 candidate_id=proposal.source.candidate_id,
@@ -2449,6 +2513,8 @@ async def test_capability_sandbox_executes_real_arc04_worker_and_seals_receipt(
         registry_clock[0] += timedelta(seconds=31)
         expired = await registry_service.inspect(proposal.source.candidate_id)
         assert expired.state == "expired"
+        expired_shadow = await shadow_service.inspect(proposal.source.candidate_id)
+        assert expired_shadow.state == "expired"
         assert engine.tool_registry.reservation_owner(
             registry_view.lease.temporary_tool_name
         ) is None
@@ -2480,6 +2546,46 @@ async def test_capability_sandbox_executes_real_arc04_worker_and_seals_receipt(
     assert list(engine._paths.shell_worker_sandbox_dir.iterdir()) == []
 
     with sqlite3.connect(tmp_path / "evolution.db") as db:
+        shadow_payload = db.execute(
+            "SELECT payload_json FROM evolution_capability_shadow_descriptors "
+            "WHERE descriptor_id = ?",
+            (final_shadow.descriptor.descriptor_id,),
+        ).fetchone()
+        assert shadow_payload is not None
+        original_shadow_json = str(shadow_payload[0])
+        altered_shadow = json.loads(original_shadow_json)
+        altered_shadow["evaluation_tool_name"] = "shadow_tampered"
+        altered_shadow_json = json.dumps(
+            altered_shadow,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        db.execute(
+            "UPDATE evolution_capability_shadow_descriptors "
+            "SET payload_json = ?, payload_sha256 = ? WHERE descriptor_id = ?",
+            (
+                altered_shadow_json,
+                hashlib.sha256(altered_shadow_json.encode()).hexdigest(),
+                final_shadow.descriptor.descriptor_id,
+            ),
+        )
+        db.commit()
+    with pytest.raises(CapabilityShadowDescriptorError, match="持久内容"):
+        await shadow_service.store.latest(tmp_path, proposal.source.candidate_id)
+    with sqlite3.connect(tmp_path / "evolution.db") as db:
+        db.execute(
+            "UPDATE evolution_capability_shadow_descriptors "
+            "SET payload_json = ?, payload_sha256 = ? WHERE descriptor_id = ?",
+            (
+                original_shadow_json,
+                hashlib.sha256(original_shadow_json.encode()).hexdigest(),
+                final_shadow.descriptor.descriptor_id,
+            ),
+        )
+        db.commit()
+
+    with sqlite3.connect(tmp_path / "evolution.db") as db:
         state_receipts = db.execute(
             "SELECT COUNT(*) FROM evolution_capability_registry_lease_state_receipts"
         ).fetchone()
@@ -2500,6 +2606,11 @@ async def test_capability_sandbox_executes_real_arc04_worker_and_seals_receipt(
             "SET current_state = 'released' WHERE lease_id = ?",
             (registry_view.lease.lease_id,),
         )
+        db.execute(
+            "UPDATE evolution_capability_shadow_descriptors "
+            "SET payload_sha256 = ? WHERE descriptor_id = ?",
+            ("0" * 64, final_shadow.descriptor.descriptor_id),
+        )
         db.commit()
     with pytest.raises(CapabilityRegistryLeaseError, match="持久内容"):
         await registry_service.store.latest(tmp_path, proposal.source.candidate_id)
@@ -2515,3 +2626,5 @@ async def test_capability_sandbox_executes_real_arc04_worker_and_seals_receipt(
         await service.store.get(tmp_path, prepared.request.request_id)
     with pytest.raises(CapabilityRegistryLeaseError, match="持久摘要"):
         await registry_service.store.latest(tmp_path, proposal.source.candidate_id)
+    with pytest.raises(CapabilityShadowDescriptorError, match="持久摘要"):
+        await shadow_service.store.latest(tmp_path, proposal.source.candidate_id)

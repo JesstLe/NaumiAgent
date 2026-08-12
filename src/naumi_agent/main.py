@@ -3323,6 +3323,10 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
         CapabilityScenarioBindingError,
         render_capability_scenario_binding,
     )
+    from naumi_agent.evolution.capability_shadow_descriptors import (
+        CapabilityShadowDescriptorError,
+        render_capability_shadow_descriptor,
+    )
     from naumi_agent.evolution.capability_specification import (
         CapabilitySpecificationStoreError,
         render_capability_specification,
@@ -4934,6 +4938,32 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             )
             console.print(Markdown(result.content))
             return
+        if action == "capability-shadow-status":
+            if len(parts) != 2:
+                raise ValueError("capability-shadow-status 需要一个 Candidate ID。")
+            view = await engine.evolution_capability_shadow_descriptor_service.inspect(
+                parts[1],
+            )
+            console.print(Markdown(render_capability_shadow_descriptor(view)))
+            return
+        if action == "capability-shadow":
+            if len(parts) != 2:
+                raise ValueError("capability-shadow 需要一个 Candidate ID。")
+            from naumi_agent.tools.base import ToolCall
+
+            result = await engine.execute_tool(
+                ToolCall(
+                    id=f"slash-capability-shadow-{uuid.uuid4()}",
+                    name="evolution_capability_shadow_descriptor",
+                    arguments=json.dumps(
+                        {"action": "compile", "candidate_id": parts[1]},
+                        ensure_ascii=False,
+                    ),
+                ),
+                agent_name="cli",
+            )
+            console.print(Markdown(result.content))
+            return
         if action == "detail":
             if len(parts) != 2:
                 raise ValueError("detail 需要一个 Candidate ID。")
@@ -4966,6 +4996,8 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "capability-lease、"
                 "capability-register、"
                 "capability-unregister、"
+                "capability-shadow、"
+                "capability-shadow-status、"
                 "experiment-contract、evaluation、"
                 "evaluation-contract、"
                 "evaluation-final、decision-input、mechanical-gate、"
@@ -5161,6 +5193,8 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution capability-lease <candidate-id>；"
             "/evolution capability-register <candidate-id> [30..900秒]；"
             "/evolution capability-unregister <candidate-id>；"
+            "/evolution capability-shadow <candidate-id>；"
+            "/evolution capability-shadow-status <candidate-id>；"
             "/evolution experiment-contract <contract-id>；"
             "/evolution evaluation <comparison-id>；"
             "/evolution evaluation-contract <workspace-relative-request.json>；"
@@ -5539,6 +5573,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     except CapabilityRegistryLeaseError as exc:
         console.print(
             f"Capability Registry lease 未完成：{exc}",
+            style="yellow",
+            markup=False,
+        )
+        return
+    except CapabilityShadowDescriptorError as exc:
+        console.print(
+            f"Capability Shadow descriptor 未完成：{exc}",
             style="yellow",
             markup=False,
         )

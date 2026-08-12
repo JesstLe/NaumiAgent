@@ -54,6 +54,10 @@ from naumi_agent.evolution.capability_scenario_binding import (
     CapabilityScenarioBindingError,
     render_capability_scenario_binding,
 )
+from naumi_agent.evolution.capability_shadow_descriptors import (
+    CapabilityShadowDescriptorError,
+    render_capability_shadow_descriptor,
+)
 from naumi_agent.evolution.capability_specification import (
     CapabilitySpecificationStoreError,
     render_capability_specification,
@@ -1010,6 +1014,71 @@ class EvolutionCapabilityRegistryLeaseTool(Tool):
             raise ToolExecutionError(
                 code,
                 f"Capability Registry lease 未完成：{exc}",
+            ) from exc
+
+
+class EvolutionCapabilityShadowDescriptorTool(Tool):
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_capability_shadow_descriptor"
+
+    @property
+    def description(self) -> str:
+        return (
+            "查看或编译 Capability 的不可执行 Shadow descriptor。"
+            "它只冻结脱敏路由描述与公开 schema，绝不加载源码、注册 Tool 或调用生产模型。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["inspect", "compile"],
+                    "default": "inspect",
+                },
+                "candidate_id": {
+                    "type": "string",
+                    "pattern": "^evc_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["action", "candidate_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=False,
+            requires_confirmation=False,
+            command_argument_names=(),
+            user_facing_name="Capability Shadow 描述符",
+            search_hint="evolution capability shadow descriptor offline routing",
+        )
+
+    async def execute(self, action: str, candidate_id: str) -> str:
+        service = self._engine.evolution_capability_shadow_descriptor_service
+        normalized = action.strip().lower()
+        try:
+            if normalized == "inspect":
+                view = await service.inspect(candidate_id.strip())
+            elif normalized == "compile":
+                view = await service.compile(candidate_id.strip())
+            else:
+                raise ValueError("action 仅支持 inspect 或 compile。")
+            return render_capability_shadow_descriptor(view)
+        except (CapabilityShadowDescriptorError, OSError, TypeError, ValueError) as exc:
+            code = getattr(exc, "code", "capability_shadow_descriptor_failed")
+            raise ToolExecutionError(
+                code,
+                f"Capability Shadow descriptor 未完成：{exc}",
             ) from exc
 
 
@@ -7181,6 +7250,7 @@ def create_evolution_review_tools(
         EvolutionCapabilitySandboxRequestTool(engine),
         EvolutionCapabilitySandboxExecuteTool(engine),
         EvolutionCapabilityRegistryLeaseTool(engine),
+        EvolutionCapabilityShadowDescriptorTool(engine),
         EvolutionExperimentContractAuthorityTool(engine),
         EvolutionExperimentContractIssueTool(engine),
         EvolutionEvaluationReceiptTool(engine),
@@ -7276,6 +7346,7 @@ __all__ = [
     "EvolutionCapabilitySandboxRequestTool",
     "EvolutionCapabilitySandboxExecuteTool",
     "EvolutionCapabilityRegistryLeaseTool",
+    "EvolutionCapabilityShadowDescriptorTool",
     "EvolutionEvalMetricOpportunityTool",
     "EvolutionGoalNeedOpportunityTool",
     "EvolutionToolCatalogMissOpportunityTool",

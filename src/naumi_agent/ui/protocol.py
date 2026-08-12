@@ -788,12 +788,15 @@ def _normalize_client_payload(
             "capability-lease",
             "capability-register",
             "capability-unregister",
+            "capability-shadow",
+            "capability-shadow-status",
         }:
             raise ValueError(
                 "Evolution review action 仅支持 list/priorities/detail/"
                 "capability-spec/capability-govern/capability-artifact/"
                 "capability-bind/capability-sandbox/capability-run/"
-                "capability-lease/capability-register/capability-unregister。"
+                "capability-lease/capability-register/capability-unregister/"
+                "capability-shadow/capability-shadow-status。"
             )
         candidate_id = str(payload.get("candidate_id") or "").strip()
         if action in {
@@ -804,6 +807,8 @@ def _normalize_client_payload(
             "capability-lease",
             "capability-register",
             "capability-unregister",
+            "capability-shadow",
+            "capability-shadow-status",
         } and not re.fullmatch(
             r"evc_[0-9a-f]{24}", candidate_id
         ):
@@ -862,6 +867,8 @@ def _normalize_client_payload(
                     "capability-lease",
                     "capability-register",
                     "capability-unregister",
+                    "capability-shadow",
+                    "capability-shadow-status",
                 }
                 else ""
             ),
