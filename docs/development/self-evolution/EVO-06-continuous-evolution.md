@@ -60,7 +60,9 @@
 - [EVO-06.4b](EVO-06-4b-shadow-observation-contract.md) Shadow Observation Contract（已实现）：绑定
   current 4a View、完整生产 Tool baseline、interaction-backed 正样本、真实 baseline 负控制、非 fallback 模型
   能力/reasoning 与 token/时间/成本预算；Provider call、Observation、候选执行和激活仍永久未授权。
-  4c Observation Runner 与评价聚合仍待实现。
+- [EVO-06.4c1a](EVO-06-4c1a-shadow-run-admission.md) Shadow Run Admission（已实现）：以精确父权限回执、
+  Harness Runtime lease 和可撤销 Run Grant 为 current 4b Contract 保留一次有界 Provider-call scope；动态 View
+  才授予 Runner 输入资格，尚未发送 Provider 请求或形成 Observation。4c1b Runner 与 4c2 聚合仍待实现。
 - EVO-06.5 Limited activation：低风险、明确 scope、预算和用户可见标识。
 - EVO-06.6 Market/selection：性能、可靠、成本、用户价值，多指标而非 token 竞争。
 - EVO-06.7 Retirement：低价值/高风险能力禁用、迁移、历史 replay 兼容。
@@ -81,7 +83,7 @@ EVO-06 不得从“LLM 生成了改进建议”直接开始。每次循环必须
 RED/GREEN H5a、H5c comparison、失败归因、签名 Decision、staged rollout、运行监控、rollback/accept Outcome 缺一不可。Outcome 必须回注
 opportunity discovery，并以新 Candidate ID 开启下一轮；不得原地改写上一轮证据或把未执行建议计为能力提升。
 
-当前 `EVO-06.1a/1b/1c1/1c2/1c3/1c4/2a/2b/2c/3a/3b1/3b2a/3b2b/3b2c/4a/4b` 已分别关闭 rolled_back、stable promoted Outcome、H5c 定量回归、
+当前 `EVO-06.1a/1b/1c1/1c2/1c3/1c4/2a/2b/2c/3a/3b1/3b2a/3b2b/3b2c/4a/4b/4c1a` 已分别关闭 rolled_back、stable promoted Outcome、H5c 定量回归、
 durable Goal 明确需求与 exact Tool Catalog miss 的发现断点，但不代表 EVO-06 完成：自然语言缺失意图、
 更细粒度可验证语义聚类、Shadow Observation Runner/aggregation、Limited Activation、选择、退休和
 Meta-governance 仍待实现。

@@ -129,6 +129,10 @@ from naumi_agent.evolution.capability_shadow_observation_contracts import (
     EvolutionCapabilityShadowObservationContractService,
     EvolutionCapabilityShadowObservationContractStore,
 )
+from naumi_agent.evolution.capability_shadow_run_admissions import (
+    EvolutionCapabilityShadowRunAdmissionService,
+    EvolutionCapabilityShadowRunAdmissionStore,
+)
 from naumi_agent.evolution.capability_specification import (
     EvolutionCapabilitySpecificationService,
     EvolutionCapabilitySpecificationStore,
@@ -1649,6 +1653,25 @@ class AgentEngine:
                 tool_registry=self._tool_registry,
                 model_port=self._model_port,
                 store=self.evolution_capability_shadow_observation_contract_store,
+                now=lambda: datetime.now(UTC).isoformat(),
+            )
+        )
+        self.evolution_capability_shadow_run_admission_store = (
+            EvolutionCapabilityShadowRunAdmissionStore(
+                self.evolution_candidate_store.db_path,
+            )
+        )
+        self.evolution_capability_shadow_run_admission_service = (
+            EvolutionCapabilityShadowRunAdmissionService(
+                workspace_root=self.workspace_root,
+                observation_contract_service=(
+                    self.evolution_capability_shadow_observation_contract_service
+                ),
+                store=self.evolution_capability_shadow_run_admission_store,
+                harness_store=self._harness_store,
+                permission_store=self._permission_decision_store,
+                run_grant_authority=self.run_delegation_grant_authority,
+                runtime_instance_id=f"evcsrart_{uuid.uuid4().hex[:24]}",
                 now=lambda: datetime.now(UTC).isoformat(),
             )
         )

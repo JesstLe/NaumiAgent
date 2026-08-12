@@ -131,7 +131,8 @@ first-wins 返回前还会逐项对账 `contract_id/candidate_id/descriptor_id/b
 
 ## 下一步
 
-EVO-06.4c1 应实现 bounded Shadow Observation Runner：消费实时 `ready` Contract，取得独立 provider-call
-permission 与预算 reservation，逐样本调用但绝不执行返回的 tool call，只接受上述 structured schema，并形成
-usage/provider evidence 可撤权 Observation Receipt。EVO-06.4c2 再聚合 precision/recall、false-positive、
-indeterminate、成本与重复稳定性；任何门槛缺失都不得进入 EVO-06.5 Limited Activation。
+[EVO-06.4c1a](EVO-06-4c1a-shadow-run-admission.md) 已先实现 bounded Run Admission：消费实时 `ready`
+Contract，以父权限、Harness lease 和 Run Grant 保留独立 provider-call scope，但不发送请求。EVO-06.4c1b 再逐
+样本调用、剥离 expected label、拒绝 Tool execution，只接受上述 structured schema，并形成 usage/provider evidence
+可撤权 Observation Receipt。EVO-06.4c2 再聚合 precision/recall、false-positive、indeterminate、成本与重复
+稳定性；任何门槛缺失都不得进入 EVO-06.5 Limited Activation。

@@ -3124,6 +3124,34 @@ test("evolution capability-shadow-observation uses the typed contract route", ()
   }]);
 });
 
+test("evolution capability-shadow-run uses typed admission routes", () => {
+  const candidateId = `evc_${"d".repeat(24)}`;
+  for (const action of [
+    "capability-shadow-run",
+    "capability-shadow-run-status",
+    "capability-shadow-run-revoke",
+  ]) {
+    const state = createInitialState();
+    const sent = [];
+    handleSubmitText(
+      state,
+      `/evolution ${action} ${candidateId}`,
+      (type, payload) => sent.push({ type, payload }),
+    );
+    assert.deepEqual(sent, [{
+      type: "evolution/review/request",
+      payload: {
+        action,
+        candidate_id: candidateId,
+        query: "",
+        risk: "",
+        source_kind: "",
+        limit: 50,
+      },
+    }]);
+  }
+});
+
 test("outcome discovery uses slash execution then filters its typed projection", () => {
   const state = createInitialState();
   const sent = [];

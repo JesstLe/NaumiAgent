@@ -3331,6 +3331,10 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
         CapabilityShadowObservationContractError,
         render_capability_shadow_observation_contract,
     )
+    from naumi_agent.evolution.capability_shadow_run_admissions import (
+        CapabilityShadowRunAdmissionError,
+        render_capability_shadow_run_admission,
+    )
     from naumi_agent.evolution.capability_specification import (
         CapabilitySpecificationStoreError,
         render_capability_specification,
@@ -5004,6 +5008,49 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             )
             console.print(Markdown(result.content))
             return
+        if action == "capability-shadow-run-status":
+            if len(parts) != 2:
+                raise ValueError("capability-shadow-run-status 需要一个 Candidate ID。")
+            view = await engine.evolution_capability_shadow_run_admission_service.inspect(
+                parts[1],
+            )
+            console.print(Markdown(render_capability_shadow_run_admission(view)))
+            return
+        if action in {"capability-shadow-run", "capability-shadow-run-revoke"}:
+            if len(parts) != 2:
+                raise ValueError(f"{action} 需要一个 Candidate ID。")
+            from naumi_agent.tools.base import ToolCall
+
+            if action == "capability-shadow-run":
+                admission_action = "issue"
+                run_id = f"clicapshadow-{uuid.uuid4().hex}"
+            else:
+                admission_action = "revoke"
+                current = (
+                    await engine.evolution_capability_shadow_run_admission_service.inspect(
+                        parts[1],
+                    )
+                )
+                if current.admission is None:
+                    raise ValueError("Candidate 尚无可撤销的 Shadow Run Admission。")
+                run_id = current.admission.run_id
+            result = await engine.execute_tool(
+                ToolCall(
+                    id=f"slash-capability-shadow-run-{uuid.uuid4()}",
+                    name="evolution_capability_shadow_run_admission",
+                    arguments=json.dumps(
+                        {
+                            "action": admission_action,
+                            "candidate_id": parts[1],
+                            "run_id": run_id,
+                        },
+                        ensure_ascii=False,
+                    ),
+                ),
+                agent_name="cli",
+            )
+            console.print(Markdown(result.content))
+            return
         if action == "detail":
             if len(parts) != 2:
                 raise ValueError("detail 需要一个 Candidate ID。")
@@ -5040,6 +5087,9 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "capability-shadow-status、"
                 "capability-shadow-observation、"
                 "capability-shadow-observation-status、"
+                "capability-shadow-run、"
+                "capability-shadow-run-status、"
+                "capability-shadow-run-revoke、"
                 "experiment-contract、evaluation、"
                 "evaluation-contract、"
                 "evaluation-final、decision-input、mechanical-gate、"
@@ -5239,6 +5289,9 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution capability-shadow-status <candidate-id>；"
             "/evolution capability-shadow-observation <candidate-id> [model]；"
             "/evolution capability-shadow-observation-status <candidate-id>；"
+            "/evolution capability-shadow-run <candidate-id>；"
+            "/evolution capability-shadow-run-status <candidate-id>；"
+            "/evolution capability-shadow-run-revoke <candidate-id>；"
             "/evolution experiment-contract <contract-id>；"
             "/evolution evaluation <comparison-id>；"
             "/evolution evaluation-contract <workspace-relative-request.json>；"
@@ -5631,6 +5684,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     except CapabilityShadowObservationContractError as exc:
         console.print(
             f"Capability Shadow observation contract 未完成：{exc}",
+            style="yellow",
+            markup=False,
+        )
+        return
+    except CapabilityShadowRunAdmissionError as exc:
+        console.print(
+            f"Capability Shadow Run Admission 未完成：{exc}",
             style="yellow",
             markup=False,
         )

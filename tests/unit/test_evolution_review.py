@@ -393,6 +393,7 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
         "evolution_capability_registry_lease",
         "evolution_capability_shadow_descriptor",
         "evolution_capability_shadow_observation_contract",
+        "evolution_capability_shadow_run_admission",
         "evolution_experiment_contract_authority",
         "evolution_issue_experiment_contract",
         "evolution_evaluation_receipt",
@@ -474,7 +475,7 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
     ]
     assert isinstance(tools[1], EvolutionCapabilitySpecificationTool)
     assert isinstance(tools[2], EvolutionCapabilityGovernanceTool)
-    tools = [tools[0], *tools[10:]]
+    tools = [tools[0], *tools[11:]]
     assert {tool.name for tool in tools if tool.metadata.read_only} == {
         "evolution_candidates",
         "evolution_experiment_contract_authority",

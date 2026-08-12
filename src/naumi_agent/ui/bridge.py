@@ -6125,6 +6125,10 @@ class JsonlEngineBridge:
             CapabilityShadowObservationContractError,
             render_capability_shadow_observation_contract,
         )
+        from naumi_agent.evolution.capability_shadow_run_admissions import (
+            CapabilityShadowRunAdmissionError,
+            render_capability_shadow_run_admission,
+        )
         from naumi_agent.evolution.capability_specification import (
             CapabilitySpecificationStoreError,
             render_capability_specification,
@@ -6378,6 +6382,63 @@ class JsonlEngineBridge:
                     self.engine.workspace_root,
                     candidate_id,
                 )
+            elif action in {
+                "capability-shadow-run",
+                "capability-shadow-run-status",
+                "capability-shadow-run-revoke",
+            }:
+                from naumi_agent.tools.base import ToolCall
+
+                candidate_id = str(payload.get("candidate_id") or "")
+                if action == "capability-shadow-run-status":
+                    view = await (
+                        self.engine.evolution_capability_shadow_run_admission_service.inspect(
+                            candidate_id,
+                        )
+                    )
+                    content = render_capability_shadow_run_admission(view)
+                else:
+                    admission_action = (
+                        "issue" if action == "capability-shadow-run" else "revoke"
+                    )
+                    if admission_action == "issue":
+                        run_id = f"uicapshadow-{uuid4().hex}"
+                    else:
+                        current = await (
+                            self.engine.evolution_capability_shadow_run_admission_service.inspect(
+                                candidate_id,
+                            )
+                        )
+                        if current.admission is None:
+                            raise ValueError(
+                                "Candidate 尚无可撤销的 Shadow Run Admission。"
+                            )
+                        run_id = current.admission.run_id
+                    result = await self.engine.execute_tool(
+                        ToolCall(
+                            id=f"ui-capability-shadow-run-{uuid4()}",
+                            name="evolution_capability_shadow_run_admission",
+                            arguments=json.dumps(
+                                {
+                                    "action": admission_action,
+                                    "candidate_id": candidate_id,
+                                    "run_id": run_id,
+                                },
+                                ensure_ascii=False,
+                            ),
+                        ),
+                        agent_name="new-ui",
+                    )
+                    content = result.content
+                await self._emit_system_notice(
+                    "Capability Shadow 运行准入",
+                    content,
+                    request_id=request_id,
+                )
+                snapshot = await service.detail_snapshot(
+                    self.engine.workspace_root,
+                    candidate_id,
+                )
             elif action == "enqueue":
                 session = getattr(self.engine, "_session", None)
                 if session is None:
@@ -6425,6 +6486,7 @@ class JsonlEngineBridge:
             CapabilityRegistryLeaseError,
             CapabilityShadowDescriptorError,
             CapabilityShadowObservationContractError,
+            CapabilityShadowRunAdmissionError,
             EvolutionStoreError,
             OSError,
             ValueError,
@@ -6489,6 +6551,21 @@ class JsonlEngineBridge:
                     "Capability Shadow observation contract 不可读取；"
                     "持久记录或动态来源已失效。",
                     "evolution_capability_shadow_observation_contract_failed",
+                ),
+                "capability-shadow-run": (
+                    "Capability Shadow Run Admission 未签发；"
+                    "Contract、权限、Run Lease、Run Grant 或预算已失效。",
+                    "evolution_capability_shadow_run_admission_failed",
+                ),
+                "capability-shadow-run-status": (
+                    "Capability Shadow Run Admission 不可读取；"
+                    "持久记录或动态 authority 已失效。",
+                    "evolution_capability_shadow_run_admission_failed",
+                ),
+                "capability-shadow-run-revoke": (
+                    "Capability Shadow Run Admission 未撤销；"
+                    "Runtime ownership、Run Grant 或 lease 清理失败。",
+                    "evolution_capability_shadow_run_admission_failed",
                 ),
             }
             if action in capability_errors:

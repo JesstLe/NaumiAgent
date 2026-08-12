@@ -269,8 +269,10 @@ Run Grant、child permission、ToolJob lifecycle 和一次性 Shell Worker，真
 3b2c 已实现短期、可撤销且禁止覆盖内置 Tool 的 catalog-only Registry lease；3b2c 不加载候选代码，
 4a Shadow descriptor 已由 [EVO-06.4a](EVO-06-4a-sealed-shadow-descriptor.md) 独立实现；
 [EVO-06.4b](EVO-06-4b-shadow-observation-contract.md) 已进一步冻结 current baseline、interaction-backed
-正样本、真实负控制、模型能力/reasoning 与预算，但不调用 provider。4c Observation Runner/aggregation 与
-Limited Activation 仍必须分别实现。
+正样本、真实负控制、模型能力/reasoning 与预算，但不调用 provider；
+[EVO-06.4c1a](EVO-06-4c1a-shadow-run-admission.md) 又用父权限回执、Harness Runtime lease 和 Run Grant
+签发有界、可撤销的调用准入，仍未发送请求。4c1b Observation Runner、4c2 aggregation 与 Limited Activation
+仍必须分别实现。
 [EVO-01.4b](EVO-01-4b-composite-source-authority-router.md) 已为下一步 runtime metric/Eval Evidence
 补齐 fail-closed 多来源 authority router：所有动态 kind 必须完整注册，不同 reader 并发重验，且 Review
 绑定不能被后续 reader 静默覆盖。
