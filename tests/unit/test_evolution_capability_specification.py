@@ -14,6 +14,16 @@ from types import SimpleNamespace
 import pytest
 
 from naumi_agent.cli.slash_router import execute_slash_command
+from naumi_agent.config.settings import AppConfig, MemoryConfig
+from naumi_agent.daemons.permission_decisions import (
+    PermissionDecisionActor,
+    PermissionDecisionOutcome,
+    PermissionDecisionSource,
+)
+from naumi_agent.daemons.shell_worker import (
+    ShellSandboxUnavailableError,
+    detect_shell_sandbox_backend,
+)
 from naumi_agent.evolution.candidate import build_candidate_draft
 from naumi_agent.evolution.capability_artifact import (
     CapabilityArtifactError,
@@ -30,6 +40,12 @@ from naumi_agent.evolution.capability_governance import (
     render_capability_governance,
 )
 from naumi_agent.evolution.capability_proposal import generate_capability_proposal
+from naumi_agent.evolution.capability_sandbox_execution import (
+    CapabilitySandboxExecutionError,
+    EvolutionCapabilitySandboxExecutionService,
+    EvolutionCapabilitySandboxExecutionStore,
+    _interpret_result,
+)
 from naumi_agent.evolution.capability_sandbox_request import (
     CapabilitySandboxRequestError,
     EvolutionCapabilitySandboxRequestService,
@@ -64,8 +80,15 @@ from naumi_agent.evolution.prioritization import (
 )
 from naumi_agent.evolution.store import EvolutionCandidateStore
 from naumi_agent.harness.interaction import new_interaction_record
+from naumi_agent.harness.run_lease import HarnessRunKind, HarnessRunLeaseState
+from naumi_agent.harness.sandbox_checks import (
+    HarnessSandboxCheckResult,
+    HarnessSandboxCheckStatus,
+)
 from naumi_agent.harness.sandbox_request import capture_clean_revision
 from naumi_agent.harness.store import HarnessStore
+from naumi_agent.orchestrator.engine import AgentEngine
+from naumi_agent.safety.permissions import PermissionMode
 from naumi_agent.tools.evolution_review import (
     EvolutionCapabilityArtifactTool,
     EvolutionCapabilityGovernanceTool,
@@ -79,6 +102,70 @@ NOW = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
 
 def _digest(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
+
+
+@pytest.mark.asyncio
+async def test_capability_sandbox_execution_claim_fences_other_processes(
+    tmp_path: Path,
+) -> None:
+    store_a = EvolutionCapabilitySandboxExecutionStore(tmp_path / "evolution.db")
+    store_b = EvolutionCapabilitySandboxExecutionStore(tmp_path / "evolution.db")
+    request_id = "evcsr_" + "a" * 24
+    first = await store_a.claim(
+        tmp_path,
+        request_id=request_id,
+        owner_id="evcsexec_" + "b" * 24,
+        now=NOW.isoformat(),
+        lease_seconds=60,
+    )
+    competing = await store_b.claim(
+        tmp_path,
+        request_id=request_id,
+        owner_id="evcsexec_" + "c" * 24,
+        now=(NOW + timedelta(seconds=1)).isoformat(),
+        lease_seconds=60,
+    )
+    recovered = await store_b.claim(
+        tmp_path,
+        request_id=request_id,
+        owner_id="evcsexec_" + "c" * 24,
+        now=(NOW + timedelta(seconds=61)).isoformat(),
+        lease_seconds=60,
+    )
+
+    assert first is not None and first.epoch == 1
+    assert competing is None
+    assert recovered is not None and recovered.epoch == 2
+
+
+def test_capability_sandbox_setup_failure_becomes_infrastructure_receipt() -> None:
+    result = HarnessSandboxCheckResult(
+        check_id="capability_scenario_01",
+        run_id="sandbox-run",
+        status=HarnessSandboxCheckStatus.PASSED,
+        source_revision="a" * 40,
+        source_tree_sha256="b" * 64,
+        snapshot_manifest_sha256="c" * 64,
+        profile_digest="d" * 64,
+        job_id="job-1",
+        lifecycle_receipt_sha256="e" * 64,
+        output=json.dumps({
+            "kind": "infrastructure_error",
+            "error_code": "candidate_setup_failed",
+        }),
+        exit_code=0,
+        duration_ms=3,
+        artifact_path=None,
+        message="",
+    )
+
+    status, kind, actual, observations, complete = _interpret_result("f" * 64, result)
+
+    assert status == "infrastructure_failure"
+    assert kind == "infrastructure_error"
+    assert actual["error_code"] == "candidate_setup_failed"
+    assert observations == []
+    assert complete is False
 
 
 async def _proposal(tmp_path: Path):
@@ -2063,3 +2150,149 @@ async def test_sandbox_execution_request_store_is_first_wins_under_race(
             (str(tmp_path.resolve()), binding_view.binding.binding_id, revision),
         ).fetchone()
     assert count == (1,)
+
+
+@pytest.mark.asyncio
+async def test_capability_sandbox_executes_real_arc04_worker_and_seals_receipt(
+    tmp_path: Path,
+) -> None:
+    try:
+        detect_shell_sandbox_backend()
+    except ShellSandboxUnavailableError as exc:
+        pytest.skip(str(exc))
+    (
+        proposal,
+        specification_service,
+        _,
+        _,
+        _,
+        binding_service,
+        _,
+    ) = await _ready_sandbox_request_fixture(tmp_path)
+    tools_package = tmp_path / "src" / "naumi_agent" / "tools"
+    tools_package.mkdir(parents=True)
+    (tmp_path / "src" / "naumi_agent" / "__init__.py").write_text("")
+    (tools_package / "__init__.py").write_text("")
+    (tools_package / "base.py").write_text(
+        "class Tool:\n"
+        "    pass\n\n"
+        "class ToolExecutionError(RuntimeError):\n"
+        "    def __init__(self, code, message, *, retryable=False):\n"
+        "        super().__init__(message)\n"
+        "        self.code = code\n"
+        "        self.retryable = retryable\n",
+        encoding="utf-8",
+    )
+    _commit_sandbox_request_fixture(tmp_path)
+    request_service = EvolutionCapabilitySandboxRequestService(
+        binding_service=binding_service,
+        specification_store=specification_service.store,
+        store=EvolutionCapabilitySandboxRequestStore(tmp_path / "evolution.db"),
+        now=lambda: NOW.isoformat(),
+    )
+    prepared = await request_service.prepare(
+        tmp_path,
+        candidate_id=proposal.source.candidate_id,
+    )
+    assert prepared.request is not None
+    engine = AgentEngine(AppConfig(
+        workspace_root=str(tmp_path),
+        memory=MemoryConfig(
+            session_db_path=str(tmp_path / ".naumi" / "sessions.db"),
+            vector_db_path=str(tmp_path / ".naumi" / "chroma"),
+            long_term_enabled=False,
+        ),
+    ))
+    engine._session = SimpleNamespace(id="capability-sandbox-slash-session")
+    service = EvolutionCapabilitySandboxExecutionService(
+        workspace_root=tmp_path,
+        request_service=request_service,
+        store=EvolutionCapabilitySandboxExecutionStore(tmp_path / "evolution.db"),
+        harness_store=engine._harness_store,
+        permission_store=engine._resources.permission_decision_store,
+        run_grant_authority=engine.run_delegation_grant_authority,
+        execution_kernel=engine.harness_sandbox_eval_kernel,
+    )
+    decided_at = datetime.now(UTC).isoformat()
+    parent = await engine._resources.permission_decision_store.issue(
+        request_id="capability-sandbox-request",
+        session_id="capability-sandbox-session",
+        run_id="capability-sandbox-run",
+        call_id="capability-sandbox-call",
+        agent_name="test-agent",
+        tool_name="evolution_capability_sandbox_execute",
+        tool_family="evolution",
+        arguments={
+            "candidate_id": proposal.source.candidate_id,
+            "run_id": "capability-sandbox-run",
+        },
+        outcome=PermissionDecisionOutcome.POLICY_ALLOWED,
+        actor=PermissionDecisionActor.RUNTIME,
+        source=PermissionDecisionSource.POLICY,
+        permission_mode=PermissionMode.MODERATE,
+        risk_level="medium",
+        delegated_tool_names=("bash_run",),
+        decided_at=decided_at,
+    )
+    try:
+        view = await service.execute(
+            candidate_id=proposal.source.candidate_id,
+            run_id="capability-sandbox-run",
+            parent_permission=parent,
+        )
+        repeated = await service.execute(
+            candidate_id=proposal.source.candidate_id,
+            run_id="capability-sandbox-run",
+            parent_permission=parent,
+        )
+        engine.evolution_capability_sandbox_execution_service = service
+        slash_output = await execute_slash_command(
+            engine,
+            f"/evolution capability-run {proposal.source.candidate_id}",
+        )
+        lease = await engine._harness_store.get_run_lease(
+            workspace_root=tmp_path,
+            run_kind=HarnessRunKind.RUNTIME,
+            run_id=parent.run_id,
+        )
+        permission_receipts = (
+            engine._resources.permission_decision_store.list_session(
+                "capability-sandbox-session",
+            )
+        )
+    finally:
+        await engine.shutdown()
+
+    assert view.state == "passed"
+    assert view.receipt is not None
+    assert repeated.receipt == view.receipt
+    assert view.receipt.receipt_id in slash_output
+    assert view.receipt.all_scenarios_passed is True
+    assert view.receipt.permission_observation_complete is True
+    assert view.receipt.scenarios[0].status == "passed"
+    assert view.receipt.scenarios[0].permission_observations[0].scope == (
+        "data/traces/a.json"
+    )
+    assert view.receipt.registry_authorized is False
+    assert view.receipt.run_grant_revoked is True
+    assert view.receipt.runtime_lease_released is True
+    assert lease is not None and lease.state is HarnessRunLeaseState.RELEASED
+    child = next(item for item in permission_receipts if item.tool_name == "bash_run")
+    assert child.parent_receipt_id == parent.receipt_id
+    assert list(engine._paths.shell_worker_sandbox_dir.iterdir()) == []
+
+    with sqlite3.connect(tmp_path / "evolution.db") as db:
+        claim_state = db.execute(
+            "SELECT state, epoch FROM evolution_capability_sandbox_execution_claims "
+            "WHERE request_id = ?",
+            (prepared.request.request_id,),
+        ).fetchone()
+        assert claim_state == ("terminal", 1)
+        db.execute(
+            "UPDATE evolution_capability_sandbox_execution_receipts "
+            "SET payload_sha256 = ? WHERE request_id = ?",
+            ("0" * 64, prepared.request.request_id),
+        )
+        db.commit()
+    with pytest.raises(CapabilitySandboxExecutionError, match="持久摘要"):
+        await service.store.get(tmp_path, prepared.request.request_id)

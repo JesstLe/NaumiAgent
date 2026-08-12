@@ -249,6 +249,15 @@ def test_capability_artifact_public_payload_and_protocol() -> None:
     })
     assert sandbox["payload"]["action"] == "capability-sandbox"
     assert sandbox["payload"]["candidate_id"] == f"evc_{'e' * 24}"
+    run = normalize_client_record({
+        "type": ClientEventType.EVOLUTION_REVIEW_REQUEST,
+        "payload": {
+            "action": "capability-run",
+            "candidate_id": f"evc_{'f' * 24}",
+        },
+    })
+    assert run["payload"]["action"] == "capability-run"
+    assert run["payload"]["candidate_id"] == f"evc_{'f' * 24}"
     with pytest.raises(ValueError, match="同时提供"):
         normalize_client_record({
             "type": ClientEventType.EVOLUTION_REVIEW_REQUEST,
@@ -418,6 +427,51 @@ async def test_bridge_prepares_typed_capability_sandbox_request(
         assert "Sandbox 执行授权：否" in notice["payload"]["content"]
         assert any(record["type"] == "evolution/review" for record in records)
         prepare.assert_awaited_once_with(tmp_path, candidate_id=candidate_id)
+    finally:
+        await bridge.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_bridge_executes_typed_capability_sandbox_action(
+    tmp_path: Path,
+) -> None:
+    store = EvolutionCandidateStore(tmp_path / "evolution.db")
+    candidate_id = await _seed(tmp_path, store)
+    engine = create_agent_engine(AppConfig(
+        workspace_root=str(tmp_path),
+        memory=MemoryConfig(
+            session_db_path=str(tmp_path / "sessions.db"),
+            long_term_enabled=False,
+        ),
+    ))
+    engine.evolution_candidate_store = store
+    engine.evolution_review_service = EvolutionReviewService(store)
+    execute = AsyncMock(return_value=SimpleNamespace(
+        content="# Capability Sandbox Execution\n\n- 状态：`passed`",
+    ))
+    engine.execute_tool = execute
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    try:
+        await bridge.handle_client_record({
+            "id": "evolution-capability-run-1",
+            "type": ClientEventType.EVOLUTION_REVIEW_REQUEST,
+            "payload": {
+                "action": "capability-run",
+                "candidate_id": candidate_id,
+            },
+        })
+        records = [json.loads(line) for line in writer.getvalue().splitlines()]
+        notice = next(record for record in records if record["type"] == "ui/message")
+        assert notice["payload"]["title"] == "Capability Sandbox Execution"
+        assert "passed" in notice["payload"]["content"]
+        assert any(record["type"] == "evolution/review" for record in records)
+        call = execute.await_args.args[0]
+        assert call.name == "evolution_capability_sandbox_execute"
+        arguments = json.loads(call.arguments)
+        assert arguments["candidate_id"] == candidate_id
+        assert arguments["run_id"].startswith("uicaprun-")
     finally:
         await bridge.shutdown()
 

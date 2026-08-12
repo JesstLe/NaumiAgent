@@ -97,8 +97,7 @@ overlay、施加 OS/permission 约束并把输出与 oracle 比较。
 
 ## 自我审视与下一步
 
-3b2a 证明输入可重放，但尚未证明隔离、permission observation 或 oracle 判定。下一最小切片
-EVO-06.3b2b 必须把 Request 转为 ARC-04 ephemeral source snapshot + overlays，签发 exact、短期、
-一次性的 Run Grant，在独立 Worker 中逐场景执行，并形成 content-addressed Execution Receipt。Receipt
-必须区分 passed、oracle mismatch、declared error mismatch、timeout、permission violation、source drift
-和 infrastructure failure；任何失败、缺失场景或来源撤权均不得形成 Registry lease。
+3b2a 证明输入可重放，但自身尚未证明隔离、permission observation 或 oracle 判定。下一最小切片
+[EVO-06.3b2b](EVO-06-3b2b-arc04-sandbox-execution-receipt.md) 已把 Request 转为 ARC-04 ephemeral source
+snapshot + overlays，签发 exact、短期、一次性的 Run Grant，在独立 Worker 中逐场景执行，并形成
+content-addressed Execution Receipt；它仍未签发 Registry lease。

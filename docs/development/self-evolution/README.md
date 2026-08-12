@@ -261,7 +261,11 @@ JSON Schema 可校验且动态可撤权的精确 arguments/result-or-error oracl
 message 与 retryable 可贯通 Engine、事件、typed UI 和 Agent Worker RPC，但不执行候选 Artifact。
 [EVO-06.3b2a](EVO-06-3b2a-content-addressed-sandbox-execution-request.md) 已进一步封存 exact Git source、
 Artifact/Binding/permission digests、候选/driver/scenario overlays、argv、timeout 与 oracle digest，并在来源漂移时
-动态撤权；它仍不 materialize 或执行候选。下一步 3b2b 才签发 exact Run Grant、执行隔离场景并生成 Receipt。
+动态撤权；它自身仍不 materialize 或执行候选。后续 3b2b 再签发 exact Run Grant、执行隔离场景并生成 Receipt。
+[EVO-06.3b2b](EVO-06-3b2b-arc04-sandbox-execution-receipt.md) 已复用 ARC-04 exact Git overlay Runner、
+Run Grant、child permission、ToolJob lifecycle 和一次性 Shell Worker，真实执行 result/error oracle 与权限观察，
+并在 authority 清理后形成 content-addressed Receipt。通过 Receipt 仍不授予 Registry/Shadow/执行权；下一步
+3b2c 才实现短期、可撤销且禁止覆盖内置 Tool 的 Registry lease。
 [EVO-01.4b](EVO-01-4b-composite-source-authority-router.md) 已为下一步 runtime metric/Eval Evidence
 补齐 fail-closed 多来源 authority router：所有动态 kind 必须完整注册，不同 reader 并发重验，且 Review
 绑定不能被后续 reader 静默覆盖。

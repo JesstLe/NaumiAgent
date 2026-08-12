@@ -6215,6 +6215,31 @@ class JsonlEngineBridge:
                     self.engine.workspace_root,
                     str(payload.get("candidate_id") or ""),
                 )
+            elif action == "capability-run":
+                from naumi_agent.tools.base import ToolCall
+
+                candidate_id = str(payload.get("candidate_id") or "")
+                run_id = f"uicaprun-{uuid4().hex}"
+                result = await self.engine.execute_tool(
+                    ToolCall(
+                        id=f"ui-capability-sandbox-{uuid4()}",
+                        name="evolution_capability_sandbox_execute",
+                        arguments=json.dumps(
+                            {"candidate_id": candidate_id, "run_id": run_id},
+                            ensure_ascii=False,
+                        ),
+                    ),
+                    agent_name="new-ui",
+                )
+                await self._emit_system_notice(
+                    "Capability Sandbox Execution",
+                    result.content,
+                    request_id=request_id,
+                )
+                snapshot = await service.detail_snapshot(
+                    self.engine.workspace_root,
+                    candidate_id,
+                )
             elif action == "enqueue":
                 session = getattr(self.engine, "_session", None)
                 if session is None:
@@ -6267,6 +6292,7 @@ class JsonlEngineBridge:
                 "capability-spec", "capability-govern", "capability-artifact",
                 "capability-bind",
                 "capability-sandbox",
+                "capability-run",
             }:
                 await self.emit_error(
                     (
@@ -6276,12 +6302,17 @@ class JsonlEngineBridge:
                             "Capability 场景未绑定；Artifact、人工答案或 JSON Schema 已失效。"
                             if action == "capability-bind"
                             else (
-                                "Capability Sandbox Request 未形成；"
-                                "Binding 或 Git source 已失效。"
-                                if action == "capability-sandbox"
+                                "Capability Sandbox Execution 未完成；"
+                                "Request、Run Grant 或 ARC-04 Worker 已失效。"
+                                if action == "capability-run"
                                 else (
-                                    "Capability Specification/Governance 未推进；"
-                                    "来源失效、答案无效或交互仍待处理。"
+                                    "Capability Sandbox Request 未形成；"
+                                    "Binding 或 Git source 已失效。"
+                                    if action == "capability-sandbox"
+                                    else (
+                                        "Capability Specification/Governance 未推进；"
+                                        "来源失效、答案无效或交互仍待处理。"
+                                    )
                                 )
                             )
                         )
@@ -6293,12 +6324,16 @@ class JsonlEngineBridge:
                             "evolution_capability_scenario_binding_failed"
                             if action == "capability-bind"
                             else (
-                                "evolution_capability_sandbox_request_failed"
-                                if action == "capability-sandbox"
+                                "evolution_capability_sandbox_execution_failed"
+                                if action == "capability-run"
                                 else (
-                                    "evolution_capability_governance_failed"
-                                    if action == "capability-govern"
-                                    else "evolution_capability_specification_failed"
+                                    "evolution_capability_sandbox_request_failed"
+                                    if action == "capability-sandbox"
+                                    else (
+                                        "evolution_capability_governance_failed"
+                                        if action == "capability-govern"
+                                        else "evolution_capability_specification_failed"
+                                    )
                                 )
                             )
                         )

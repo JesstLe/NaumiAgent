@@ -3000,6 +3000,28 @@ test("evolution capability-sandbox uses the typed execution-request route", () =
   }]);
 });
 
+test("evolution capability-run uses the typed sandbox-execution route", () => {
+  const state = createInitialState();
+  const sent = [];
+  const candidateId = `evc_${"b".repeat(24)}`;
+  handleSubmitText(
+    state,
+    `/evolution capability-run ${candidateId}`,
+    (type, payload) => sent.push({ type, payload }),
+  );
+  assert.deepEqual(sent, [{
+    type: "evolution/review/request",
+    payload: {
+      action: "capability-run",
+      candidate_id: candidateId,
+      query: "",
+      risk: "",
+      source_kind: "",
+      limit: 50,
+    },
+  }]);
+});
+
 test("outcome discovery uses slash execution then filters its typed projection", () => {
   const state = createInitialState();
   const sent = [];
