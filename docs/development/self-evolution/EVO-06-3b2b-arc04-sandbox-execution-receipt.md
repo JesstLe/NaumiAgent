@@ -92,7 +92,9 @@ retry，必须使用新的显式 retry authority 和 attempt identity。
 ## 自我审视与下一步
 
 本切片已有“Request → 真实隔离执行 → Receipt”的闭环，但通过 Receipt 仍不能进入 ToolRegistry。下一最小
-切片 EVO-06.3b2c 应签发短期、可撤销、namespace 隔离的 Registry lease：只能消费 current、passed、
+切片 [ARC-01.3f](../architecture/ARC-01-3f-revocable-tool-registry-primitives.md) 已先补齐无覆盖注册、exact
+lookup 和 compare-and-remove 撤销原语。EVO-06.3b2c 应在该原语上签发短期、可撤销、namespace 隔离的
+Registry lease：只能消费 current、passed、
 permission-complete 的 3b2b Receipt；不得覆盖内置 Tool；lease 到期、Request/Receipt 漂移或 Runtime 重启时
 自动卸载。随后再进入 EVO-06.4 Shadow evaluation，不能直接跳到 Limited Activation。
 

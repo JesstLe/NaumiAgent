@@ -42,7 +42,7 @@
 
 | ID | 名称 | 状态 | 依赖 | 文档 |
 | --- | --- | --- | --- | --- |
-| ARC-01 | Domain Boundary 与依赖防火墙 | partial (1.1-1.3, 1.4a, 1.4b1, 1.4b2a-1.4b2j, 1.4c1-1.4c3) | 当前 Python 单体 | `architecture/ARC-01-domain-boundaries.md` |
+| ARC-01 | Domain Boundary 与依赖防火墙 | partial (1.1-1.3f, 1.4a, 1.4b1, 1.4b2a-1.4b2j, 1.4c1-1.4c3) | 当前 Python 单体 | `architecture/ARC-01-domain-boundaries.md` |
 | ARC-02 | Runtime Service 化 | partial (2.5a, 2.5b) | ARC-01, ARC-03 | `architecture/ARC-02-runtime-service.md` |
 | ARC-03 | 协议版本与兼容治理 | partial (3.2a, 3.2b1, 3.2b2, 3.3a, 3.4a, 3.5a) | 当前 JSONL | `architecture/ARC-03-protocol-versioning.md` |
 | ARC-04 | Tool/Browser/Agent Daemon | partial (4.1a, 4.1b, 4.2a-4.2c, 4.3a-4.3c, 4.5a, 4.5b1, 4.5b1a, 4.5b2, 4.5c, 4.5d1, 4.5d2a-4.5d2d, 4.5e1-4.5e3b2, 4.6a) | ARC-02, ARC-03 | `architecture/ARC-04-execution-daemons.md` |
