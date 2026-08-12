@@ -299,6 +299,19 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         risk_level=PermissionRiskLevel.MEDIUM,
         tool_family="evolution_capability_sandbox",
     ),
+    "evolution_capability_registry_lease": PermissionRule(
+        tool_name="evolution_capability_registry_lease",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+        max_calls_per_session=50,
+        risk_level=PermissionRiskLevel.MEDIUM,
+        tool_family="evolution_capability_registry",
+    ),
     "file_read": PermissionRule(
         tool_name="file_read",
         allowed_modes=[

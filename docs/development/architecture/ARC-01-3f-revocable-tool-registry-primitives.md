@@ -35,6 +35,6 @@ lease 可能删掉同名的新实例。
 
 ## 下一步
 
-EVO-06.3b2c 可以在此原语之上实现持久 lease authority，但仍必须独立完成：current passed 3b2b Receipt
-重验、候选从 sealed source 的受控 materialization、lease ID/digest/expiry/epoch、Runtime 重启恢复策略、
-到期/来源漂移撤销，以及 CLI/TUI/New UI 可见状态。本切片本身没有授予任何候选执行权。
+[EVO-06.3b2c](../self-evolution/EVO-06-3b2c-catalog-registry-lease.md) 已在此原语上实现 current passed
+3b2b Receipt 重验、lease ID/digest/expiry、到期/来源漂移撤销和 CLI/TUI/New UI 状态。3b2c 刻意不做
+sealed source materialization：它只保留不可见 namespace，下一步由 EVO-06.4 单独实现不可执行 Shadow descriptor。

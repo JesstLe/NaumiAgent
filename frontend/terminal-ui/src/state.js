@@ -5785,9 +5785,25 @@ function parseEvolutionReviewCommand(text) {
     "capability-bind",
     "capability-sandbox",
     "capability-run",
+    "capability-lease",
+    "capability-unregister",
   ].includes(action)) {
     if (values.length !== 2 || !/^evc_[0-9a-f]{24}$/.test(values[1])) return null;
     return { action, candidate_id: values[1], query: "", risk: "", source_kind: "", limit: 50 };
+  }
+  if (action === "capability-register") {
+    if (![2, 3].includes(values.length) || !/^evc_[0-9a-f]{24}$/.test(values[1])) return null;
+    const durationSeconds = values.length === 3 ? Number(values[2]) : 300;
+    if (!Number.isInteger(durationSeconds) || durationSeconds < 30 || durationSeconds > 900) return null;
+    return {
+      action,
+      candidate_id: values[1],
+      duration_seconds: durationSeconds,
+      query: "",
+      risk: "",
+      source_kind: "",
+      limit: 50,
+    };
   }
   if (action === "capability-artifact") {
     if (![2, 4].includes(values.length) || !/^evc_[0-9a-f]{24}$/.test(values[1])) return null;

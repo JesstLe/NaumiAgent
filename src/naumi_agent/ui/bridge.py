@@ -6105,6 +6105,10 @@ class JsonlEngineBridge:
             CapabilityGovernanceError,
             render_capability_governance,
         )
+        from naumi_agent.evolution.capability_registry_leases import (
+            CapabilityRegistryLeaseError,
+            render_capability_registry_lease,
+        )
         from naumi_agent.evolution.capability_sandbox_request import (
             CapabilitySandboxRequestError,
             render_capability_sandbox_request,
@@ -6240,6 +6244,59 @@ class JsonlEngineBridge:
                     self.engine.workspace_root,
                     candidate_id,
                 )
+            elif action == "capability-lease":
+                candidate_id = str(payload.get("candidate_id") or "")
+                view = (
+                    await self.engine.evolution_capability_registry_lease_service.inspect(
+                        candidate_id,
+                    )
+                )
+                await self._emit_system_notice(
+                    "Capability Registry Lease",
+                    render_capability_registry_lease(view),
+                    request_id=request_id,
+                )
+                snapshot = await service.detail_snapshot(
+                    self.engine.workspace_root,
+                    candidate_id,
+                )
+            elif action in {"capability-register", "capability-unregister"}:
+                from naumi_agent.tools.base import ToolCall
+
+                candidate_id = str(payload.get("candidate_id") or "")
+                lease_action = (
+                    "acquire" if action == "capability-register" else "release"
+                )
+                duration_seconds = (
+                    int(payload.get("duration_seconds") or 300)
+                    if lease_action == "acquire"
+                    else 0
+                )
+                result = await self.engine.execute_tool(
+                    ToolCall(
+                        id=f"ui-capability-registry-{uuid4()}",
+                        name="evolution_capability_registry_lease",
+                        arguments=json.dumps(
+                            {
+                                "action": lease_action,
+                                "candidate_id": candidate_id,
+                                "duration_seconds": duration_seconds,
+                                "run_id": f"uicapregistry-{uuid4().hex}",
+                            },
+                            ensure_ascii=False,
+                        ),
+                    ),
+                    agent_name="new-ui",
+                )
+                await self._emit_system_notice(
+                    "Capability Registry Lease",
+                    result.content,
+                    request_id=request_id,
+                )
+                snapshot = await service.detail_snapshot(
+                    self.engine.workspace_root,
+                    candidate_id,
+                )
             elif action == "enqueue":
                 session = getattr(self.engine, "_session", None)
                 if session is None:
@@ -6284,6 +6341,7 @@ class JsonlEngineBridge:
             CapabilityArtifactError,
             CapabilityScenarioBindingError,
             CapabilitySandboxRequestError,
+            CapabilityRegistryLeaseError,
             EvolutionStoreError,
             OSError,
             ValueError,
@@ -6293,7 +6351,15 @@ class JsonlEngineBridge:
                 "capability-bind",
                 "capability-sandbox",
                 "capability-run",
+                "capability-lease",
+                "capability-register",
+                "capability-unregister",
             }:
+                registry_action = action in {
+                    "capability-lease",
+                    "capability-register",
+                    "capability-unregister",
+                }
                 await self.emit_error(
                     (
                         "Capability 实现制品未就绪；源码、规格或治理来源已失效。"
@@ -6302,6 +6368,10 @@ class JsonlEngineBridge:
                             "Capability 场景未绑定；Artifact、人工答案或 JSON Schema 已失效。"
                             if action == "capability-bind"
                             else (
+                                "Capability Registry lease 未完成；"
+                                "passed Receipt、租期或 Runtime ownership 已失效。"
+                                if registry_action
+                                else (
                                 "Capability Sandbox Execution 未完成；"
                                 "Request、Run Grant 或 ARC-04 Worker 已失效。"
                                 if action == "capability-run"
@@ -6314,6 +6384,7 @@ class JsonlEngineBridge:
                                         "来源失效、答案无效或交互仍待处理。"
                                     )
                                 )
+                                )
                             )
                         )
                     ),
@@ -6324,6 +6395,9 @@ class JsonlEngineBridge:
                             "evolution_capability_scenario_binding_failed"
                             if action == "capability-bind"
                             else (
+                                "evolution_capability_registry_lease_failed"
+                                if registry_action
+                                else (
                                 "evolution_capability_sandbox_execution_failed"
                                 if action == "capability-run"
                                 else (
@@ -6334,6 +6408,7 @@ class JsonlEngineBridge:
                                         if action == "capability-govern"
                                         else "evolution_capability_specification_failed"
                                     )
+                                )
                                 )
                             )
                         )

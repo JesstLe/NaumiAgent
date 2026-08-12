@@ -3311,6 +3311,10 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
         CapabilityGovernanceError,
         render_capability_governance,
     )
+    from naumi_agent.evolution.capability_registry_leases import (
+        CapabilityRegistryLeaseError,
+        render_capability_registry_lease,
+    )
     from naumi_agent.evolution.capability_sandbox_request import (
         CapabilitySandboxRequestError,
         render_capability_sandbox_request,
@@ -4886,6 +4890,50 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             )
             console.print(Markdown(result.content))
             return
+        if action == "capability-lease":
+            if len(parts) != 2:
+                raise ValueError("capability-lease 需要一个 Candidate ID。")
+            view = await engine.evolution_capability_registry_lease_service.inspect(
+                parts[1],
+            )
+            console.print(Markdown(render_capability_registry_lease(view)))
+            return
+        if action in {"capability-register", "capability-unregister"}:
+            if action == "capability-register":
+                if len(parts) not in {2, 3}:
+                    raise ValueError(
+                        "capability-register 需要 Candidate ID 和可选的 30..900 秒租期。"
+                    )
+                try:
+                    duration_seconds = int(parts[2]) if len(parts) == 3 else 300
+                except ValueError as exc:
+                    raise ValueError("Registry lease 租期必须是整数秒。") from exc
+                lease_action = "acquire"
+            else:
+                if len(parts) != 2:
+                    raise ValueError("capability-unregister 需要一个 Candidate ID。")
+                duration_seconds = 0
+                lease_action = "release"
+            from naumi_agent.tools.base import ToolCall
+
+            result = await engine.execute_tool(
+                ToolCall(
+                    id=f"slash-capability-registry-{uuid.uuid4()}",
+                    name="evolution_capability_registry_lease",
+                    arguments=json.dumps(
+                        {
+                            "action": lease_action,
+                            "candidate_id": parts[1],
+                            "duration_seconds": duration_seconds,
+                            "run_id": f"evcapregistry-{uuid.uuid4().hex}",
+                        },
+                        ensure_ascii=False,
+                    ),
+                ),
+                agent_name="cli",
+            )
+            console.print(Markdown(result.content))
+            return
         if action == "detail":
             if len(parts) != 2:
                 raise ValueError("detail 需要一个 Candidate ID。")
@@ -4915,6 +4963,9 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "capability-bind、"
                 "capability-sandbox、"
                 "capability-run、"
+                "capability-lease、"
+                "capability-register、"
+                "capability-unregister、"
                 "experiment-contract、evaluation、"
                 "evaluation-contract、"
                 "evaluation-final、decision-input、mechanical-gate、"
@@ -5107,6 +5158,9 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution capability-bind <candidate-id>；"
             "/evolution capability-sandbox <candidate-id>；"
             "/evolution capability-run <candidate-id>；"
+            "/evolution capability-lease <candidate-id>；"
+            "/evolution capability-register <candidate-id> [30..900秒]；"
+            "/evolution capability-unregister <candidate-id>；"
             "/evolution experiment-contract <contract-id>；"
             "/evolution evaluation <comparison-id>；"
             "/evolution evaluation-contract <workspace-relative-request.json>；"
@@ -5478,6 +5532,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     except CapabilitySandboxRequestError as exc:
         console.print(
             f"Capability Sandbox Request 未就绪：{exc}",
+            style="yellow",
+            markup=False,
+        )
+        return
+    except CapabilityRegistryLeaseError as exc:
+        console.print(
+            f"Capability Registry lease 未完成：{exc}",
             style="yellow",
             markup=False,
         )

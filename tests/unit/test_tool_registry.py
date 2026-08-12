@@ -109,6 +109,56 @@ class TestToolRegistry:
         winner = tools[outcomes.index(True)]
         assert registry.get_exact(winner.name) is winner
 
+    def test_catalog_reservation_is_hidden_and_compare_released(self) -> None:
+        registry = ToolRegistry()
+        name = "evolution_sandbox:abc:compare"
+        registry.reserve_unique(name, "evcrl_" + "a" * 24)
+
+        assert registry.reservation_owner(name) == "evcrl_" + "a" * 24
+        assert registry.get(name) is None
+        assert name not in registry.names
+        assert registry.get_openai_tools() == []
+        with pytest.raises(ToolRegistryConflictError, match="保留"):
+            registry.register(_NamedTool(name))
+        assert registry.release_reservation_if_owned(name, "evcrl_" + "b" * 24) is False
+        assert registry.release_reservation_if_owned(name, "evcrl_" + "a" * 24) is True
+
+    def test_catalog_reservation_rejects_legacy_alias_collisions(self) -> None:
+        registry = ToolRegistry()
+        owner = "evcrl_" + "a" * 24
+        registry.register(_NamedTool("browser_trace_compare"))
+
+        with pytest.raises(ToolRegistryConflictError, match="冲突"):
+            registry.reserve_unique("default.browser_trace_compare", owner)
+
+        isolated = ToolRegistry()
+        isolated.reserve_unique("browser_trace_compare", owner)
+        with pytest.raises(ToolRegistryConflictError, match="冲突"):
+            isolated.reserve_unique(
+                "default__browser_trace_compare",
+                "evcrl_" + "b" * 24,
+            )
+        with pytest.raises(ToolRegistryConflictError, match="冲突"):
+            isolated.register_unique(_NamedTool("default.browser_trace_compare"))
+
+    def test_concurrent_catalog_reservation_has_one_owner(self) -> None:
+        registry = ToolRegistry()
+        name = "evolution_sandbox:abc:compare"
+        owners = tuple(f"evcrl_{index:024x}" for index in range(8))
+
+        def reserve(owner: str) -> bool:
+            try:
+                registry.reserve_unique(name, owner)
+            except ToolRegistryConflictError:
+                return False
+            return True
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            outcomes = tuple(pool.map(reserve, owners))
+
+        assert outcomes.count(True) == 1
+        assert registry.reservation_owner(name) == owners[outcomes.index(True)]
+
     def test_openai_tools_format(self, registry: ToolRegistry) -> None:
         tools = registry.get_openai_tools()
         assert len(tools) >= 4

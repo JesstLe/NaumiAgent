@@ -38,6 +38,10 @@ from naumi_agent.evolution.capability_governance import (
     CapabilityGovernanceError,
     render_capability_governance,
 )
+from naumi_agent.evolution.capability_registry_leases import (
+    CapabilityRegistryLeaseError,
+    render_capability_registry_lease,
+)
 from naumi_agent.evolution.capability_sandbox_execution import (
     CapabilitySandboxExecutionError,
     render_capability_sandbox_execution,
@@ -378,7 +382,7 @@ from naumi_agent.release.rollout_control_keys import (
     load_release_rollout_control_trust_policy,
     render_release_rollout_control_key,
 )
-from naumi_agent.tools.base import Tool, ToolMetadata
+from naumi_agent.tools.base import Tool, ToolExecutionError, ToolMetadata
 
 
 class EvolutionCandidatesTool(Tool):
@@ -902,6 +906,111 @@ class EvolutionCapabilitySandboxExecuteTool(Tool):
         except (CapabilitySandboxExecutionError, OSError, TypeError, ValueError) as exc:
             code = getattr(exc, "code", "capability_sandbox_execution_failed")
             return f"Capability Sandbox 未完成（`{code}`）：{exc}"
+
+
+class EvolutionCapabilityRegistryLeaseTool(Tool):
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_capability_registry_lease"
+
+    @property
+    def description(self) -> str:
+        return (
+            "查看、获取或释放已通过 ARC-04 真实场景验证的 Capability 临时目录租约。"
+            "租约只保留 namespace，不导入候选代码、不向模型暴露，也不授予 Shadow 或执行权。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["inspect", "acquire", "release"],
+                },
+                "candidate_id": {
+                    "type": "string",
+                    "pattern": "^evc_[0-9a-f]{24}$",
+                },
+                "duration_seconds": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 900,
+                    "description": "acquire 使用 30..900；inspect/release 使用 0",
+                },
+                "run_id": {
+                    "type": "string",
+                    "maxLength": 128,
+                    "description": "acquire/release 的稳定运行标识；inspect 使用空字符串",
+                },
+            },
+            "required": ["action", "candidate_id", "duration_seconds", "run_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=False,
+            requires_confirmation=False,
+            command_argument_names=(),
+            user_facing_name="Capability 临时目录租约",
+            search_hint="evolution capability registry catalog lease reserve revoke",
+            requires_persistent_authorization=True,
+        )
+
+    async def execute(
+        self,
+        action: str,
+        candidate_id: str,
+        duration_seconds: int,
+        run_id: str,
+    ) -> str:
+        service = self._engine.evolution_capability_registry_lease_service
+        candidate = candidate_id.strip()
+        normalized = action.strip().lower()
+        try:
+            if normalized == "inspect":
+                if duration_seconds != 0 or run_id:
+                    raise ValueError("inspect 必须使用 duration_seconds=0 和空 run_id。")
+                view = await service.inspect(candidate)
+            else:
+                permission = current_permission_receipt()
+                if permission is None:
+                    raise ToolExecutionError(
+                        "capability_parent_permission_missing",
+                        "Capability Registry lease 未变更：缺少当前调用的持久权限回执。",
+                    )
+                if normalized == "acquire":
+                    view = await service.acquire(
+                        candidate_id=candidate,
+                        run_id=run_id.strip(),
+                        duration_seconds=duration_seconds,
+                        parent_permission=permission,
+                    )
+                elif normalized == "release":
+                    if duration_seconds != 0:
+                        raise ValueError("release 必须使用 duration_seconds=0。")
+                    view = await service.release(
+                        candidate_id=candidate,
+                        run_id=run_id.strip(),
+                        parent_permission=permission,
+                    )
+                else:
+                    raise ValueError("action 仅支持 inspect、acquire 或 release。")
+            return render_capability_registry_lease(view)
+        except (CapabilityRegistryLeaseError, OSError, TypeError, ValueError) as exc:
+            code = getattr(exc, "code", "capability_registry_lease_failed")
+            raise ToolExecutionError(
+                code,
+                f"Capability Registry lease 未完成：{exc}",
+            ) from exc
 
 
 class EvolutionOutcomeOpportunityTool(Tool):
@@ -7071,6 +7180,7 @@ def create_evolution_review_tools(
         EvolutionCapabilityScenarioBindingTool(engine),
         EvolutionCapabilitySandboxRequestTool(engine),
         EvolutionCapabilitySandboxExecuteTool(engine),
+        EvolutionCapabilityRegistryLeaseTool(engine),
         EvolutionExperimentContractAuthorityTool(engine),
         EvolutionExperimentContractIssueTool(engine),
         EvolutionEvaluationReceiptTool(engine),
@@ -7165,6 +7275,7 @@ __all__ = [
     "EvolutionCapabilityScenarioBindingTool",
     "EvolutionCapabilitySandboxRequestTool",
     "EvolutionCapabilitySandboxExecuteTool",
+    "EvolutionCapabilityRegistryLeaseTool",
     "EvolutionEvalMetricOpportunityTool",
     "EvolutionGoalNeedOpportunityTool",
     "EvolutionToolCatalogMissOpportunityTool",

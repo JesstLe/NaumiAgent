@@ -94,9 +94,10 @@ retry，必须使用新的显式 retry authority 和 attempt identity。
 本切片已有“Request → 真实隔离执行 → Receipt”的闭环，但通过 Receipt 仍不能进入 ToolRegistry。下一最小
 切片 [ARC-01.3f](../architecture/ARC-01-3f-revocable-tool-registry-primitives.md) 已先补齐无覆盖注册、exact
 lookup 和 compare-and-remove 撤销原语。EVO-06.3b2c 应在该原语上签发短期、可撤销、namespace 隔离的
-Registry lease：只能消费 current、passed、
-permission-complete 的 3b2b Receipt；不得覆盖内置 Tool；lease 到期、Request/Receipt 漂移或 Runtime 重启时
-自动卸载。随后再进入 EVO-06.4 Shadow evaluation，不能直接跳到 Limited Activation。
+[EVO-06.3b2c](EVO-06-3b2c-catalog-registry-lease.md) 已在该原语上实现短期、可撤销、namespace 隔离的
+catalog-only Registry lease：只消费 current、passed、permission-complete 的 3b2b Receipt；不得覆盖内置
+Tool；lease 到期或 Request/Artifact/Receipt 漂移时释放本地 reservation。候选仍未加载、不可见、不可执行。
+下一步进入 EVO-06.4 Shadow evaluation，不能直接跳到 Limited Activation。
 
 当前限制：network/browser/secrets capability 继续 fail closed；permission observation 只覆盖 Python audit
 事件与 ARC-04 Shell sandbox 能表达的边界；Windows backend 的同等 OS 隔离强度仍需在平台 lane 独立验证，
