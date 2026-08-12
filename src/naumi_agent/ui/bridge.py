@@ -6105,6 +6105,10 @@ class JsonlEngineBridge:
             CapabilityGovernanceError,
             render_capability_governance,
         )
+        from naumi_agent.evolution.capability_sandbox_request import (
+            CapabilitySandboxRequestError,
+            render_capability_sandbox_request,
+        )
         from naumi_agent.evolution.capability_scenario_binding import (
             CapabilityScenarioBindingError,
             render_capability_scenario_binding,
@@ -6195,6 +6199,22 @@ class JsonlEngineBridge:
                     self.engine.workspace_root,
                     str(payload.get("candidate_id") or ""),
                 )
+            elif action == "capability-sandbox":
+                view = (
+                    await self.engine.evolution_capability_sandbox_request_service.prepare(
+                        self.engine.workspace_root,
+                        candidate_id=str(payload.get("candidate_id") or ""),
+                    )
+                )
+                await self._emit_system_notice(
+                    "Capability Sandbox Execution Request",
+                    render_capability_sandbox_request(view),
+                    request_id=request_id,
+                )
+                snapshot = await service.detail_snapshot(
+                    self.engine.workspace_root,
+                    str(payload.get("candidate_id") or ""),
+                )
             elif action == "enqueue":
                 session = getattr(self.engine, "_session", None)
                 if session is None:
@@ -6238,6 +6258,7 @@ class JsonlEngineBridge:
             CapabilityGovernanceError,
             CapabilityArtifactError,
             CapabilityScenarioBindingError,
+            CapabilitySandboxRequestError,
             EvolutionStoreError,
             OSError,
             ValueError,
@@ -6245,6 +6266,7 @@ class JsonlEngineBridge:
             if action in {
                 "capability-spec", "capability-govern", "capability-artifact",
                 "capability-bind",
+                "capability-sandbox",
             }:
                 await self.emit_error(
                     (
@@ -6254,8 +6276,13 @@ class JsonlEngineBridge:
                             "Capability 场景未绑定；Artifact、人工答案或 JSON Schema 已失效。"
                             if action == "capability-bind"
                             else (
-                                "Capability Specification/Governance 未推进；"
-                                "来源失效、答案无效或交互仍待处理。"
+                                "Capability Sandbox Request 未形成；"
+                                "Binding 或 Git source 已失效。"
+                                if action == "capability-sandbox"
+                                else (
+                                    "Capability Specification/Governance 未推进；"
+                                    "来源失效、答案无效或交互仍待处理。"
+                                )
                             )
                         )
                     ),
@@ -6266,9 +6293,13 @@ class JsonlEngineBridge:
                             "evolution_capability_scenario_binding_failed"
                             if action == "capability-bind"
                             else (
-                                "evolution_capability_governance_failed"
-                                if action == "capability-govern"
-                                else "evolution_capability_specification_failed"
+                                "evolution_capability_sandbox_request_failed"
+                                if action == "capability-sandbox"
+                                else (
+                                    "evolution_capability_governance_failed"
+                                    if action == "capability-govern"
+                                    else "evolution_capability_specification_failed"
+                                )
                             )
                         )
                     ),

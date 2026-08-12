@@ -38,6 +38,10 @@ from naumi_agent.evolution.capability_governance import (
     CapabilityGovernanceError,
     render_capability_governance,
 )
+from naumi_agent.evolution.capability_sandbox_request import (
+    CapabilitySandboxRequestError,
+    render_capability_sandbox_request,
+)
 from naumi_agent.evolution.capability_scenario_binding import (
     CapabilityScenarioBindingError,
     render_capability_scenario_binding,
@@ -762,6 +766,74 @@ class EvolutionCapabilityScenarioBindingTool(Tool):
             return render_capability_scenario_binding(view)
         except (CapabilityScenarioBindingError, OSError, TypeError, ValueError) as exc:
             return f"Capability 可执行场景未绑定：{exc}"
+
+
+class EvolutionCapabilitySandboxRequestTool(Tool):
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_capability_sandbox_request"
+
+    @property
+    def description(self) -> str:
+        return (
+            "查看或编译 sealed Capability 场景的 ARC-04 Sandbox Execution Request；"
+            "封存 exact Git revision、source overlays、driver、场景输入、超时与权限需求，"
+            "但不签发 Run Grant、不执行或注册候选 Tool。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["inspect", "prepare"],
+                    "default": "inspect",
+                },
+                "candidate_id": {
+                    "type": "string",
+                    "pattern": "^evc_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["candidate_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=False,
+            user_facing_name="能力 Sandbox 执行请求",
+            search_hint="evolution capability sandbox request arc04 overlays driver",
+        )
+
+    async def execute(
+        self,
+        candidate_id: str,
+        action: str = "inspect",
+    ) -> str:
+        try:
+            service = self._engine.evolution_capability_sandbox_request_service
+            if action == "inspect":
+                view = await service.inspect(
+                    self._engine.workspace_root,
+                    candidate_id.strip(),
+                )
+            elif action == "prepare":
+                view = await service.prepare(
+                    self._engine.workspace_root,
+                    candidate_id=candidate_id.strip(),
+                )
+            else:
+                return "action 仅支持 inspect 或 prepare。"
+            return render_capability_sandbox_request(view)
+        except (CapabilitySandboxRequestError, OSError, TypeError, ValueError) as exc:
+            return f"Capability Sandbox Request 未就绪：{exc}"
 
 
 class EvolutionOutcomeOpportunityTool(Tool):
@@ -6929,6 +7001,7 @@ def create_evolution_review_tools(
         EvolutionCapabilityGovernanceTool(engine),
         EvolutionCapabilityArtifactTool(engine),
         EvolutionCapabilityScenarioBindingTool(engine),
+        EvolutionCapabilitySandboxRequestTool(engine),
         EvolutionExperimentContractAuthorityTool(engine),
         EvolutionExperimentContractIssueTool(engine),
         EvolutionEvaluationReceiptTool(engine),
@@ -7021,6 +7094,7 @@ __all__ = [
     "EvolutionCapabilityGovernanceTool",
     "EvolutionCapabilityArtifactTool",
     "EvolutionCapabilityScenarioBindingTool",
+    "EvolutionCapabilitySandboxRequestTool",
     "EvolutionEvalMetricOpportunityTool",
     "EvolutionGoalNeedOpportunityTool",
     "EvolutionToolCatalogMissOpportunityTool",

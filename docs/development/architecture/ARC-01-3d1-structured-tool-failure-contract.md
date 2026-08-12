@@ -56,6 +56,8 @@ Agent Worker result batch 保持 schema version 1 的 additive compatibility：�
 
 ## 自我审视与下一步
 
-本契约解决了“错误 oracle 无法机械判断”的真实缺口，但尚未验证任一候选工具。下一步必须回到 EVO/Harness：
-建立 content-addressed Sandbox Execution Request，把 sealed Artifact、Scenario Binding、exact source revision、
-permission profile 与 ARC-04 Run Grant 绑定，再由隔离 Worker 逐场景执行并签发可撤权 Receipt。
+本契约解决了“错误 oracle 无法机械判断”的真实缺口，但尚未验证任一候选工具。
+[EVO-06.3b2a](../self-evolution/EVO-06-3b2a-content-addressed-sandbox-execution-request.md) 已建立
+content-addressed Sandbox Execution Request，把 sealed Artifact、Scenario Binding、exact source revision、
+permission profile、overlays 与 checks 封存，但明确未签发 Run Grant。EVO-06.3b2b 再由 ARC-04 隔离 Worker
+逐场景执行并签发可撤权 Receipt。

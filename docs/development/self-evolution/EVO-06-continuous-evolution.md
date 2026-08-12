@@ -45,7 +45,10 @@
 - [ARC-01.3d1](../architecture/ARC-01-3d1-structured-tool-failure-contract.md) 已补齐 EVO-06.3b2 所需的最小
   结构化 Tool 失败契约：稳定 error code、用户安全 message 与 retryable 贯通 Engine、事件、UI 和 Worker RPC；
   旧 Tool/RPC 保持兼容，但该契约自身不授予 Sandbox 或 Registry authority。
-- EVO-06.3b2 Sandbox execution 与临时注册 lease：在 ARC-04/Harness Sandbox 中验证已绑定场景、结果/错误
+- [EVO-06.3b2a](EVO-06-3b2a-content-addressed-sandbox-execution-request.md) Content-addressed Sandbox
+  Execution Request（已实现）：封存 exact Git revision/tree、Artifact/Binding/permission digests、候选/driver/
+  scenario overlays、argv、timeout 与 oracle digest；来源漂移动态撤权，仍不 materialize、执行或授权。
+- EVO-06.3b2b Sandbox execution 与临时注册 lease：在 ARC-04/Harness Sandbox 中验证已绑定场景、结果/错误
   schema 和权限观察后，才能获得短期、可撤销 Registry lease；不能覆盖内置 Tool。
 - EVO-06.4 Shadow evaluation：观察建议调用但不执行，比较路由准确度和价值。
 - EVO-06.5 Limited activation：低风险、明确 scope、预算和用户可见标识。
@@ -68,9 +71,9 @@ EVO-06 不得从“LLM 生成了改进建议”直接开始。每次循环必须
 RED/GREEN H5a、H5c comparison、失败归因、签名 Decision、staged rollout、运行监控、rollback/accept Outcome 缺一不可。Outcome 必须回注
 opportunity discovery，并以新 Candidate ID 开启下一轮；不得原地改写上一轮证据或把未执行建议计为能力提升。
 
-当前 `EVO-06.1a/1b/1c1/1c2/1c3/1c4/2a/2b/2c/3a/3b1` 已分别关闭 rolled_back、stable promoted Outcome、H5c 定量回归、
+当前 `EVO-06.1a/1b/1c1/1c2/1c3/1c4/2a/2b/2c/3a/3b1/3b2a` 已分别关闭 rolled_back、stable promoted Outcome、H5c 定量回归、
 durable Goal 明确需求与 exact Tool Catalog miss 的发现断点，但不代表 EVO-06 完成：自然语言缺失意图、
-更细粒度可验证语义聚类、真实 Sandbox execution/registration、
+更细粒度可验证语义聚类、真实 Sandbox execution/Receipt/registration、
 Sandbox/Shadow/Limited Activation、选择、退休和 Meta-governance 仍待实现。
 
 ## 终极边界
