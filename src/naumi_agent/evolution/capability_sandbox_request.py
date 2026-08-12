@@ -36,7 +36,12 @@ from naumi_agent.harness.sandbox_request import (
 _POLICY_VERSION = "evolution-capability-sandbox-request-v1"
 _DRIVER_POLICY_VERSION = "evolution-capability-driver-v1"
 _MAX_OVERLAY_BYTES = 512 * 1024
-CapabilitySandboxOverlayKind = Literal["candidate", "driver", "scenario_input"]
+CapabilitySandboxOverlayKind = Literal[
+    "candidate",
+    "driver",
+    "permission_manifest",
+    "scenario_input",
+]
 _SECRET_RE = re.compile(
     r"(?:\b(?:api[_-]?key|password|secret|token|authorization|cookie)\b\s*[:=]\s*\S+)"
     r"|(?:\bbearer\s+\S+)|(?:\bsk-[A-Za-z0-9_-]{8,})",
@@ -73,7 +78,7 @@ class CapabilitySandboxPermissionRequirement(_StrictModel):
 
 class CapabilitySandboxRequestOverlay(_StrictModel):
     order: int = Field(ge=1, le=10)
-    kind: Literal["candidate", "driver", "scenario_input"]
+    kind: Literal["candidate", "driver", "permission_manifest", "scenario_input"]
     path: str = Field(min_length=1, max_length=512)
     content_utf8: str = Field(min_length=1, max_length=_MAX_OVERLAY_BYTES, repr=False)
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -146,8 +151,8 @@ class EvolutionCapabilitySandboxExecutionRequest(_StrictModel):
     )
     overlay_source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     overlays: tuple[CapabilitySandboxRequestOverlay, ...] = Field(
-        min_length=3,
-        max_length=10,
+        min_length=4,
+        max_length=11,
         repr=False,
     )
     checks: tuple[CapabilitySandboxScenarioCheck, ...] = Field(
@@ -500,9 +505,15 @@ def _build_request_from_artifact(
     root = f".naumi/evolution-sandbox/{artifact.artifact_id}"
     candidate_path = f"{root}/candidate.py"
     driver_path = f"{root}/driver.py"
+    permission_path = f"{root}/permissions.json"
+    permission_text = _canonical({
+        "schema_version": 1,
+        "requirements": [item.model_dump(mode="json") for item in permissions],
+    })
     overlays = [
         _overlay(1, "candidate", candidate_path, artifact.source_text),
         _overlay(2, "driver", driver_path, _DRIVER_SOURCE),
+        _overlay(3, "permission_manifest", permission_path, permission_text),
     ]
     checks: list[CapabilitySandboxScenarioCheck] = []
     for index, scenario in enumerate(binding.scenarios, start=1):
@@ -513,7 +524,7 @@ def _build_request_from_artifact(
             "arguments": scenario.arguments,
             "timeout_ms": scenario.timeout_ms,
         })
-        overlay = _overlay(index + 2, "scenario_input", input_path, input_text)
+        overlay = _overlay(index + 3, "scenario_input", input_path, input_text)
         overlays.append(overlay)
         checks.append(CapabilitySandboxScenarioCheck(
             order=index,
@@ -707,10 +718,114 @@ def _canonical(value: object) -> str:
 _DRIVER_SOURCE = r'''from __future__ import annotations
 
 import asyncio
+import fnmatch
 import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
+
+
+class _PermissionObserver:
+    def __init__(self, workspace: Path, requirements: list[dict[str, object]]):
+        self.workspace = workspace.resolve()
+        self.allowed = {
+            str(item["family"]): tuple(str(scope) for scope in item["scopes"])
+            for item in requirements
+        }
+        self.events: list[dict[str, str]] = []
+        self.violations: list[dict[str, str]] = []
+        self.runtime_roots = tuple({
+            Path(sys.base_prefix).resolve(),
+            Path(sys.prefix).resolve(),
+        })
+
+    def install(self) -> None:
+        sys.addaudithook(self._audit)
+
+    def _audit(self, event: str, args: tuple[object, ...]) -> None:
+        if event == "open" and args:
+            self._observe_open(args)
+        elif event.startswith("subprocess.") or event in {
+            "os.system", "os.exec", "os.posix_spawn", "os.spawn",
+        }:
+            executable = self._executable(args)
+            self._record("process", executable, self._allowed("process", executable))
+        elif event.startswith("socket."):
+            self._record("network", "network_access", False)
+
+    def _observe_open(self, args: tuple[object, ...]) -> None:
+        raw_path = args[0]
+        if isinstance(raw_path, int):
+            return
+        try:
+            value = os.fsdecode(os.fspath(raw_path))
+        except TypeError:
+            self._record("workspace_read", "invalid_path", False)
+            return
+        mode = args[1] if len(args) > 1 else "r"
+        flags = args[2] if len(args) > 2 else 0
+        write = (
+            isinstance(mode, str) and any(token in mode for token in "wax+")
+        ) or (
+            isinstance(flags, int)
+            and bool(flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND))
+        )
+        family = "workspace_write" if write else "workspace_read"
+        absolute = Path(os.path.abspath(value))
+        try:
+            relative = absolute.relative_to(self.workspace).as_posix()
+        except ValueError:
+            if any(_is_relative_to(absolute, root) for root in self.runtime_roots):
+                return
+            self._record(family, "outside_workspace", False)
+            return
+        self._record(family, relative, self._allowed(family, relative))
+
+    def _allowed(self, family: str, scope: str) -> bool:
+        return any(
+            fnmatch.fnmatchcase(scope, pattern)
+            for pattern in self.allowed.get(family, ())
+        )
+
+    def _record(self, family: str, scope: str, allowed: bool) -> None:
+        item = {"family": family, "scope": scope, "decision": "allow" if allowed else "deny"}
+        target = self.events if allowed else self.violations
+        if item not in target:
+            if len(target) >= 128:
+                overflow = {"family": "observation", "scope": "event_limit", "decision": "deny"}
+                if overflow not in self.violations:
+                    self.violations.append(overflow)
+                raise PermissionError("candidate_permission_observation_limit")
+            target.append(item)
+        if not allowed:
+            raise PermissionError("candidate_permission_denied")
+
+    @staticmethod
+    def _executable(args: tuple[object, ...]) -> str:
+        if not args:
+            return "unknown_process"
+        raw = args[0]
+        if isinstance(raw, (str, bytes, os.PathLike)):
+            return Path(os.fsdecode(os.fspath(raw))).name or "unknown_process"
+        return "unknown_process"
+
+    def result(self) -> dict[str, object]:
+        return {
+            "events": self.events,
+            "violations": self.violations,
+            "complete": not any(
+                item["scope"] == "event_limit" for item in self.violations
+            ),
+        }
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
 
 
 def _load(candidate_path: Path, class_name: str):
@@ -735,6 +850,20 @@ async def _run(input_path: Path, candidate_path: Path, class_name: str) -> dict[
     tool = _load(candidate_path, class_name)
     if not isinstance(tool, Tool):
         raise RuntimeError("candidate_tool_invalid")
+    permission_payload = json.loads(
+        Path(__file__).with_name("permissions.json").read_text(encoding="utf-8")
+    )
+    if (
+        set(permission_payload) != {"schema_version", "requirements"}
+        or permission_payload["schema_version"] != 1
+        or not isinstance(permission_payload["requirements"], list)
+    ):
+        raise RuntimeError("permission_manifest_invalid")
+    observer = _PermissionObserver(
+        Path(__file__).resolve().parents[3],
+        permission_payload["requirements"],
+    )
+    observer.install()
     try:
         content = await asyncio.wait_for(
             tool.execute(**payload["arguments"]),
@@ -742,10 +871,38 @@ async def _run(input_path: Path, candidate_path: Path, class_name: str) -> dict[
         )
     except ToolExecutionError as error:
         safe = ToolExecutionError(error.code, str(error), retryable=error.retryable)
-        return {"kind": "error", "error_code": safe.code, "retryable": safe.retryable}
+        return {
+            "kind": "error",
+            "error_code": safe.code,
+            "retryable": safe.retryable,
+            "permission_observation": observer.result(),
+        }
+    except TimeoutError:
+        return {"kind": "timeout", "permission_observation": observer.result()}
+    except PermissionError:
+        return {
+            "kind": "permission_violation",
+            "permission_observation": observer.result(),
+        }
+    except Exception:
+        return {
+            "kind": "infrastructure_error",
+            "error_code": "candidate_execution_failed",
+            "permission_observation": observer.result(),
+        }
+    observation = observer.result()
+    if observation["violations"]:
+        return {
+            "kind": "permission_violation",
+            "permission_observation": observation,
+        }
     if not isinstance(content, str):
         raise RuntimeError("candidate_result_not_string")
-    return {"kind": "result", "value": json.loads(content)}
+    return {
+        "kind": "result",
+        "value": json.loads(content),
+        "permission_observation": observation,
+    }
 
 
 def main() -> int:
@@ -753,8 +910,6 @@ def main() -> int:
         return 64
     try:
         result = asyncio.run(_run(Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]))
-    except TimeoutError:
-        result = {"kind": "timeout"}
     except Exception:
         result = {"kind": "infrastructure_error", "error_code": "candidate_execution_failed"}
     print(json.dumps(
