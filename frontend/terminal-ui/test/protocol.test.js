@@ -2834,6 +2834,106 @@ test("evolution review snapshot is strict and drops private fields", () => {
   } }).payload;
   assert.equal(capabilityDetail.selected.capability_proposal.proposal_id, capabilityId);
   assert.equal(capabilityDetail.selected.capability_proposal.lifecycle.executable, false);
+  const specificationId = `evcs_${createHash("sha256").update(canonical({
+    candidate_id: capabilitySource.candidate_id,
+    candidate_revision: capabilitySource.candidate_revision,
+    candidate_sha256: capabilitySource.candidate_sha256,
+    generator_version: "evolution-capability-specification-v1",
+  })).digest("hex").slice(0, 24)}`;
+  const remainingAfterInterface = [
+    "permissions.required_families", "permissions.scopes",
+    "data.input_output_retention", "data.sensitive_handling",
+    "verification.real_scenario", "operations.owner", "operations.slo",
+    "operations.maintenance",
+  ];
+  const specificationSnapshot = {
+    schema_version: 1,
+    specification_id: specificationId,
+    generator_version: "evolution-capability-specification-v1",
+    revision: 1,
+    state: "drafting",
+    candidate_id: capabilitySource.candidate_id,
+    candidate_revision: capabilitySource.candidate_revision,
+    candidate_sha256: capabilitySource.candidate_sha256,
+    proposal_ids: [capabilityId],
+    interface: { private_schema_detail: "drop-me" },
+    permissions: null,
+    data: null,
+    verification: null,
+    operations: null,
+    completed_steps: ["interface"],
+    pending_step: "permissions",
+    unresolved_requirements: remainingAfterInterface,
+    interaction_sources: [{
+      step: "interface",
+      interaction_id: `ask-evcpspec-${specificationId.slice(5)}-interface-1`,
+      interaction_sequence: 2,
+      interaction_sha256: "e".repeat(64),
+      answered_at: "2026-08-12T12:00:01+00:00",
+      private_owner: "drop-me",
+    }],
+    sandbox_eligible: false,
+    shadow_eligible: false,
+    executable: false,
+    registry_mutation_allowed: false,
+    created_at: "2026-08-12T12:00:02+00:00",
+    private_answer: "drop-me",
+  };
+  const specificationDetail = normalizeServerRecord({ type: "evolution/review", payload: {
+    ...capabilityDetail,
+    selected: {
+      ...capabilityDetail.selected,
+      capability_proposal: capabilityProposal,
+      capability_specification: {
+        schema_version: 1,
+        specification_id: specificationId,
+        candidate_id: capabilitySource.candidate_id,
+        proposal_id: capabilityId,
+        revision: 1,
+        state: "drafting",
+        completed_steps: ["interface"],
+        pending_step: "permissions",
+        unresolved_requirements: remainingAfterInterface,
+        specification: specificationSnapshot,
+        pending_interaction_id: "",
+        sandbox_eligible: false,
+        shadow_eligible: false,
+        executable: false,
+      },
+    },
+  } }).payload;
+  assert.equal(specificationDetail.selected.capability_specification.revision, 1);
+  assert.equal(
+    Object.hasOwn(specificationDetail.selected.capability_specification.specification, "private_answer"),
+    false,
+  );
+  assert.equal(
+    Object.hasOwn(
+      specificationDetail.selected.capability_specification.specification.interaction_sources[0],
+      "private_owner",
+    ),
+    false,
+  );
+  assert.throws(() => normalizeServerRecord({ type: "evolution/review", payload: {
+    ...specificationDetail,
+    selected: {
+      ...specificationDetail.selected,
+      capability_specification: {
+        ...specificationDetail.selected.capability_specification,
+        executable: true,
+      },
+    },
+  } }), /authority contract/);
+  assert.throws(() => normalizeServerRecord({ type: "evolution/review", payload: {
+    ...specificationDetail,
+    selected: {
+      ...specificationDetail.selected,
+      capability_specification: {
+        ...specificationDetail.selected.capability_specification,
+        unresolved_requirements: [],
+      },
+    },
+  } }), /authority contract/);
   assert.throws(() => normalizeServerRecord({ type: "evolution/review", payload: {
     ...capabilityDetail,
     selected: {

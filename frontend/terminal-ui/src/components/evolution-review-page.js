@@ -138,6 +138,22 @@ function detailLines(item, rawEvents) {
       lines.push(color(ANSI.dim, `• ${requirement}`));
     }
   }
+  if (item.capability_specification) {
+    const specification = item.capability_specification;
+    lines.push(
+      color(ANSI.cyan, `── Capability Specification · ${specification.state}`),
+      `${specification.specification_id} · revision ${specification.revision}/5`,
+      color(ANSI.dim, `已完成 · ${specification.completed_steps.join(", ") || "-"}`),
+      color(specification.pending_step ? ANSI.yellow : ANSI.green, `下一步 · ${specification.pending_step || "无"}`),
+      color(ANSI.red, "Sandbox 否 · Shadow 否 · 可执行 否"),
+    );
+    if (specification.pending_interaction_id) {
+      lines.push(color(ANSI.yellow, `待回答交互 · ${specification.pending_interaction_id}`));
+    }
+    if (specification.pending_step) {
+      lines.push(color(ANSI.cyan, `继续 · /evolution capability-spec ${item.candidate_id}`));
+    }
+  }
   const aggregation = item.aggregation;
   if (aggregation) {
     lines.push(

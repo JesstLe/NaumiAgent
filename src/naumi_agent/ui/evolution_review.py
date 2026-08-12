@@ -79,6 +79,7 @@ def _item_payload(item: EvolutionReviewItem, *, detail: bool) -> dict[str, Any]:
             "aggregation": _aggregation_payload(item),
             "proposal": _proposal_payload(item),
             "capability_proposal": _capability_proposal_payload(item),
+            "capability_specification": _capability_specification_payload(item),
         })
     return payload
 
@@ -225,6 +226,15 @@ def _proposal_payload(item: EvolutionReviewItem) -> dict[str, Any] | None:
 
 def _capability_proposal_payload(item: EvolutionReviewItem) -> dict[str, Any] | None:
     value = item.capability_proposal
+    if value is None:
+        return None
+    return value.model_dump(mode="json")
+
+
+def _capability_specification_payload(
+    item: EvolutionReviewItem,
+) -> dict[str, Any] | None:
+    value = item.capability_specification
     if value is None:
         return None
     return value.model_dump(mode="json")

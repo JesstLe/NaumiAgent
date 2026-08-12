@@ -6097,6 +6097,10 @@ class JsonlEngineBridge:
         request_id: str,
     ) -> None:
         """Emit Candidate review state or explicitly enqueue one Proposal."""
+        from naumi_agent.evolution.capability_specification import (
+            CapabilitySpecificationStoreError,
+            render_capability_specification,
+        )
         from naumi_agent.evolution.queue import render_queue_result
         from naumi_agent.evolution.review import EvolutionReviewFilter
         from naumi_agent.evolution.store import EvolutionStoreError
@@ -6105,7 +6109,26 @@ class JsonlEngineBridge:
         action = str(payload.get("action") or "list")
         try:
             service = self.engine.evolution_review_service
-            if action == "enqueue":
+            if action == "capability-spec":
+                session = getattr(self.engine, "_session", None)
+                view = (
+                    await self.engine.evolution_capability_specification_service.advance(
+                        self.engine.workspace_root,
+                        candidate_id=str(payload.get("candidate_id") or ""),
+                        session_id=str(getattr(session, "id", "")),
+                        agent_name="Human",
+                    )
+                )
+                await self._emit_system_notice(
+                    "Capability Specification",
+                    render_capability_specification(view),
+                    request_id=request_id,
+                )
+                snapshot = await service.detail_snapshot(
+                    self.engine.workspace_root,
+                    str(payload.get("candidate_id") or ""),
+                )
+            elif action == "enqueue":
                 session = getattr(self.engine, "_session", None)
                 if session is None:
                     raise ValueError("当前没有活动会话。")
@@ -6143,7 +6166,19 @@ class JsonlEngineBridge:
                 )
             else:
                 raise ValueError("Evolution action 未注册。")
-        except (EvolutionStoreError, OSError, ValueError):
+        except (
+            CapabilitySpecificationStoreError,
+            EvolutionStoreError,
+            OSError,
+            ValueError,
+        ):
+            if action == "capability-spec":
+                await self.emit_error(
+                    "Capability Specification 未推进；来源失效、答案无效或交互仍待处理。",
+                    code="evolution_capability_specification_failed",
+                    request_id=request_id,
+                )
+                return
             if action == "enqueue":
                 await self.emit_error(
                     "Proposal 未入队：Candidate 未就绪或 mission/task 绑定无效。未执行任何变更。",

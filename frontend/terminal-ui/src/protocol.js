@@ -6393,6 +6393,12 @@ function normalizeEvolutionItem(value, detail) {
   const capabilityProposal = item.capability_proposal == null
     ? null
     : normalizeEvolutionCapabilityProposal(item.capability_proposal);
+  const capabilitySpecification = item.capability_specification == null
+    ? null
+    : normalizeEvolutionCapabilitySpecification(
+      item.capability_specification,
+      capabilityProposal,
+    );
   if (normalized.review_ready && proposal === null) {
     throw new Error("evolution/review review_ready detail 必须包含 Proposal Preview");
   }
@@ -6441,7 +6447,152 @@ function normalizeEvolutionItem(value, detail) {
     aggregation: normalizeEvolutionAggregation(item.aggregation),
     proposal,
     capability_proposal: capabilityProposal,
+    capability_specification: capabilitySpecification,
   };
+}
+
+function normalizeEvolutionCapabilitySpecification(value, capabilityProposal) {
+  if (!capabilityProposal) {
+    throw new Error("evolution/review Capability Specification 缺少 Proposal source");
+  }
+  const item = harnessObject(value, "evolution/review capability_specification");
+  const specification = item.specification == null
+    ? null
+    : harnessObject(item.specification, "evolution/review capability_specification.specification");
+  const completed = harnessTextArray(
+    item.completed_steps,
+    "evolution/review capability_specification.completed_steps",
+    5,
+  );
+  const steps = ["interface", "permissions", "data", "verification", "operations"];
+  const pendingStep = item.pending_step == null
+    ? null
+    : harnessChoice(item.pending_step, "evolution/review capability_specification.pending_step", new Set(steps));
+  const unresolved = harnessTextArray(
+    item.unresolved_requirements,
+    "evolution/review capability_specification.unresolved_requirements",
+    16,
+  );
+  const normalized = {
+    schema_version: harnessNonnegativeInteger(item.schema_version, "evolution/review capability_specification.schema_version"),
+    specification_id: harnessText(item.specification_id, "evolution/review capability_specification.specification_id"),
+    candidate_id: harnessText(item.candidate_id, "evolution/review capability_specification.candidate_id"),
+    proposal_id: harnessText(item.proposal_id, "evolution/review capability_specification.proposal_id"),
+    revision: harnessNonnegativeInteger(item.revision, "evolution/review capability_specification.revision"),
+    state: harnessChoice(item.state, "evolution/review capability_specification.state", new Set(["not_started", "drafting", "complete"])),
+    completed_steps: completed,
+    pending_step: pendingStep,
+    unresolved_requirements: unresolved,
+    specification,
+    pending_interaction_id: harnessText(item.pending_interaction_id, "evolution/review capability_specification.pending_interaction_id"),
+    sandbox_eligible: harnessBoolean(item.sandbox_eligible, "evolution/review capability_specification.sandbox_eligible"),
+    shadow_eligible: harnessBoolean(item.shadow_eligible, "evolution/review capability_specification.shadow_eligible"),
+    executable: harnessBoolean(item.executable, "evolution/review capability_specification.executable"),
+  };
+  const source = capabilityProposal.source;
+  const expectedId = `evcs_${createHash("sha256").update(canonicalJson({
+    candidate_id: source.candidate_id,
+    candidate_revision: source.candidate_revision,
+    candidate_sha256: source.candidate_sha256,
+    generator_version: "evolution-capability-specification-v1",
+  })).digest("hex").slice(0, 24)}`;
+  const expectedCompleted = steps.slice(0, normalized.revision);
+  const expectedPending = normalized.revision < steps.length ? steps[normalized.revision] : null;
+  const requirementsByStep = {
+    interface: ["api.tool_name", "api.parameters_schema", "api.result_schema", "api.error_contract", "api.versioning"],
+    permissions: ["permissions.required_families", "permissions.scopes"],
+    data: ["data.input_output_retention", "data.sensitive_handling"],
+    verification: ["verification.real_scenario"],
+    operations: ["operations.owner", "operations.slo", "operations.maintenance"],
+  };
+  const expectedUnresolved = expectedPending == null
+    ? []
+    : steps.slice(steps.indexOf(expectedPending)).flatMap((step) => requirementsByStep[step]);
+  if (
+    normalized.schema_version !== 1
+    || normalized.specification_id !== expectedId
+    || normalized.candidate_id !== source.candidate_id
+    || normalized.proposal_id !== capabilityProposal.proposal_id
+    || normalized.revision > 5
+    || JSON.stringify(completed) !== JSON.stringify(expectedCompleted)
+    || pendingStep !== expectedPending
+    || JSON.stringify(unresolved) !== JSON.stringify(expectedUnresolved)
+    || (normalized.state === "not_started") !== (normalized.revision === 0)
+    || (normalized.state === "complete") !== (normalized.revision === 5)
+    || normalized.sandbox_eligible
+    || normalized.shadow_eligible
+    || normalized.executable
+    || (normalized.revision === 0) !== (specification === null)
+    || (normalized.pending_interaction_id && !/^ask-evcpspec-[0-9a-f]{24}-(?:interface|permissions|data|verification|operations)-\d{1,3}$/.test(normalized.pending_interaction_id))
+  ) {
+    throw new Error("evolution/review Capability Specification authority contract 无效");
+  }
+  if (specification) {
+    const specCandidate = harnessText(specification.candidate_id, "evolution/review capability_specification.spec.candidate_id");
+    const specRevision = harnessNonnegativeInteger(specification.revision, "evolution/review capability_specification.spec.revision");
+    const proposalIds = harnessTextArray(specification.proposal_ids, "evolution/review capability_specification.spec.proposal_ids", 16);
+    const sources = harnessObjectArray(specification.interaction_sources, "evolution/review capability_specification.spec.interaction_sources", 5).map((entry, index) => ({
+      step: harnessChoice(entry.step, "evolution/review capability_specification.spec.source.step", new Set(steps)),
+      interaction_id: harnessText(entry.interaction_id, "evolution/review capability_specification.spec.source.interaction_id"),
+      interaction_sequence: harnessNonnegativeInteger(entry.interaction_sequence, "evolution/review capability_specification.spec.source.interaction_sequence"),
+      interaction_sha256: harnessText(entry.interaction_sha256, "evolution/review capability_specification.spec.source.interaction_sha256"),
+      answered_at: harnessText(entry.answered_at, "evolution/review capability_specification.spec.source.answered_at"),
+      expected_step: steps[index],
+    }));
+    const specCompleted = harnessTextArray(specification.completed_steps, "evolution/review capability_specification.spec.completed_steps", 5);
+    const specPending = specification.pending_step == null
+      ? null
+      : harnessChoice(specification.pending_step, "evolution/review capability_specification.spec.pending_step", new Set(steps));
+    const specUnresolved = harnessTextArray(specification.unresolved_requirements, "evolution/review capability_specification.spec.unresolved_requirements", 16);
+    if (
+      harnessNonnegativeInteger(specification.schema_version, "evolution/review capability_specification.spec.schema_version") !== 1
+      || harnessText(specification.specification_id, "evolution/review capability_specification.spec.specification_id") !== expectedId
+      || specCandidate !== source.candidate_id
+      || harnessNonnegativeInteger(specification.candidate_revision, "evolution/review capability_specification.spec.candidate_revision") !== source.candidate_revision
+      || harnessText(specification.candidate_sha256, "evolution/review capability_specification.spec.candidate_sha256") !== source.candidate_sha256
+      || specRevision !== normalized.revision
+      || sources.length !== normalized.revision
+      || !proposalIds.length
+      || harnessChoice(specification.generator_version, "evolution/review capability_specification.spec.generator_version", new Set(["evolution-capability-specification-v1"])) !== "evolution-capability-specification-v1"
+      || harnessChoice(specification.state, "evolution/review capability_specification.spec.state", new Set(["drafting", "complete"])) !== normalized.state
+      || JSON.stringify(specCompleted) !== JSON.stringify(expectedCompleted)
+      || specPending !== expectedPending
+      || JSON.stringify(specUnresolved) !== JSON.stringify(expectedUnresolved)
+      || sources.some((entry) => (
+        entry.step !== entry.expected_step
+        || entry.interaction_sequence < 2
+        || !(new RegExp(`^ask-evcpspec-${expectedId.slice(5)}-${entry.step}-\\d{1,3}$`)).test(entry.interaction_id)
+        || !/^[0-9a-f]{64}$/.test(entry.interaction_sha256)
+      ))
+      || harnessBoolean(specification.sandbox_eligible, "evolution/review capability_specification.spec.sandbox_eligible")
+      || harnessBoolean(specification.shadow_eligible, "evolution/review capability_specification.spec.shadow_eligible")
+      || harnessBoolean(specification.executable, "evolution/review capability_specification.spec.executable")
+      || harnessBoolean(specification.registry_mutation_allowed, "evolution/review capability_specification.spec.registry_mutation_allowed")
+    ) {
+      throw new Error("evolution/review Capability Specification snapshot 无效");
+    }
+    normalized.specification = {
+      schema_version: 1,
+      specification_id: expectedId,
+      generator_version: "evolution-capability-specification-v1",
+      revision: specRevision,
+      state: normalized.state,
+      candidate_id: specCandidate,
+      candidate_revision: source.candidate_revision,
+      candidate_sha256: source.candidate_sha256,
+      proposal_ids: proposalIds,
+      completed_steps: specCompleted,
+      pending_step: specPending,
+      unresolved_requirements: specUnresolved,
+      interaction_sources: sources.map(({ expected_step: _expectedStep, ...entry }) => entry),
+      sandbox_eligible: false,
+      shadow_eligible: false,
+      executable: false,
+      registry_mutation_allowed: false,
+      created_at: harnessText(specification.created_at, "evolution/review capability_specification.spec.created_at"),
+    };
+  }
+  return normalized;
 }
 
 function normalizeEvolutionCapabilityProposal(value) {

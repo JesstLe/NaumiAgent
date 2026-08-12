@@ -173,6 +173,15 @@ def test_protocol_normalizes_and_rejects_evolution_review_requests() -> None:
             "type": ClientEventType.EVOLUTION_REVIEW_REQUEST,
             "payload": {"action": "detail", "candidate_id": "../other"},
         })
+    capability = normalize_client_record({
+        "type": ClientEventType.EVOLUTION_REVIEW_REQUEST,
+        "payload": {
+            "action": "capability-spec",
+            "candidate_id": f"evc_{'a' * 24}",
+        },
+    })
+    assert capability["payload"]["action"] == "capability-spec"
+    assert capability["payload"]["candidate_id"] == f"evc_{'a' * 24}"
 
 
 @pytest.mark.asyncio
