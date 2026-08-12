@@ -96,7 +96,7 @@ class HarnessSandboxSourceOverlay:
     def __post_init__(self) -> None:
         pure = PurePosixPath(self.path)
         relative = Path(*pure.parts)
-        _validate_snapshot_path(relative)
+        _validate_overlay_path(relative)
         if pure.as_posix() != self.path:
             raise ValueError("Sandbox source overlay path 必须是规范 POSIX 相对路径。")
         if not isinstance(self.content, bytes):
@@ -827,6 +827,23 @@ def _validate_snapshot_path(path: Path) -> None:
         raise ValueError(
             f"Sandbox snapshot 检测到敏感路径，拒绝复制：{path.as_posix()}"
         )
+
+
+def _validate_overlay_path(path: Path) -> None:
+    _validate_relative_snapshot_path(path)
+    if not _is_sensitive_snapshot_path(path):
+        return
+    parts = path.parts
+    if (
+        len(parts) >= 4
+        and parts[0] == ".naumi"
+        and parts[1] == "evolution-sandbox"
+        and re.fullmatch(r"evcia_[0-9a-f]{24}", parts[2]) is not None
+    ):
+        return
+    raise ValueError(
+        f"Sandbox snapshot 检测到敏感 overlay 路径：{path.as_posix()}"
+    )
 
 
 def _accumulate_snapshot_size(current: int, added: int, *, maximum: int) -> int:

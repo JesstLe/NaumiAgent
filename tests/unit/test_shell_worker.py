@@ -829,6 +829,23 @@ async def test_harness_profile_check_runs_in_ephemeral_worker_snapshot(
     assert not tuple((tmp_path / "sandboxes").iterdir())
 
 
+def test_evolution_overlay_namespace_is_exact_and_other_naumi_paths_stay_blocked() -> None:
+    content = b"print('sealed driver')\n"
+    overlay = HarnessSandboxSourceOverlay(
+        path=f".naumi/evolution-sandbox/evcia_{'a' * 24}/driver.py",
+        content=content,
+        sha256=hashlib.sha256(content).hexdigest(),
+    )
+    assert overlay.path.endswith("/driver.py")
+
+    with pytest.raises(ValueError, match="敏感 overlay 路径"):
+        HarnessSandboxSourceOverlay(
+            path=".naumi/secrets/token.txt",
+            content=b"not-a-secret",
+            sha256=hashlib.sha256(b"not-a-secret").hexdigest(),
+        )
+
+
 @pytest.mark.asyncio
 async def test_harness_profile_check_materializes_exact_git_revision(
     tmp_path: Path,

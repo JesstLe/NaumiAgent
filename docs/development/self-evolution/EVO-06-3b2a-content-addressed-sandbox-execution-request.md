@@ -19,7 +19,7 @@ materialize overlay、不启动进程、不签发 Run Grant、不注册候选 To
 - permission specification digest 与按 family 排序的精确 scopes；
 - 干净 Git 根目录的 exact `HEAD^{commit}` 与完整 `ls-tree` SHA-256；
 - 当前受控 Python 解释器绝对路径与固定 driver policy version；
-- candidate、driver、逐场景 input 的 UTF-8 overlay 内容和 SHA-256；
+- candidate、driver、permission manifest、逐场景 input 的 UTF-8 overlay 内容和 SHA-256；
 - 逐场景 exact argv、timeout、input digest 与 result/error oracle digest。
 
 Request 的 `request_sha256` 对完整 canonical payload 寻址，`request_id` 由摘要派生。SQLite Store
@@ -42,7 +42,8 @@ Driver 在隔离解释器中：
 3. 以 scenario timeout 调用 `Tool.execute(**arguments)`；
 4. 普通成功只接受字符串并 JSON decode；
 5. `ToolExecutionError` 只返回稳定 `error_code` 与 `retryable`；
-6. timeout 和其他异常降为固定、无 secret 的结构化 envelope。
+6. Python audit hook 对 workspace read/write、process 和 network 事件执行有界观察，越权操作在发生前阻断；
+7. timeout 和其他异常降为固定、无 secret 的结构化 envelope。
 
 本切片只验证该 driver 在真实临时 Git fixture 中可运行。3b2b 才能通过 ARC-04 Worker materialize
 overlay、施加 OS/permission 约束并把输出与 oracle 比较。
@@ -69,7 +70,8 @@ overlay、施加 OS/permission 约束并把输出与 oracle 比较。
 
 `permission_observation_required=true` 只说明 3b2b 必须观察并核对候选行为，不能把声明的 permission
 当作已授予权限。需要 network/browser/secrets 的候选虽然可形成 Request，但 v1 执行器在对应 capability
-存在可信隔离 adapter 前必须拒绝执行，不能退化为宿主机直通。
+存在可信隔离 adapter 前必须拒绝执行，不能退化为宿主机直通。Python audit hook 是 3b2b 的进程内证据，
+不能代替 ARC-04 的 OS network/resource 隔离；两者必须同时成立。
 `runtime_identity_required=true` 同样要求 3b2b 在签发 Run Grant 前解析并封存解释器/平台 identity；3b2a
 记录的 Python 路径不是 runtime 已受信任的证明。
 

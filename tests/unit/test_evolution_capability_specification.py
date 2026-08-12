@@ -1686,6 +1686,7 @@ def _successful_implementation_source(
     schema: dict[str, object],
 ) -> str:
     return f'''import json
+from pathlib import Path
 
 from naumi_agent.tools.base import Tool
 
@@ -1704,6 +1705,7 @@ class BrowserTraceCompareTool(Tool):
         return {schema!r}
 
     async def execute(self, **kwargs):
+        Path(str(kwargs["left"])).read_text(encoding="utf-8")
         return json.dumps({{"differences": []}}, ensure_ascii=False)
 '''
 
@@ -1719,6 +1721,9 @@ async def _ready_sandbox_request_fixture(tmp_path: Path):
         source_path,
     ) = await _approved_artifact(tmp_path)
     assert specification.interface is not None
+    trace = tmp_path / "data" / "traces" / "a.json"
+    trace.parent.mkdir(parents=True)
+    trace.write_text('{"events": []}\n', encoding="utf-8")
     source_path.write_text(
         _successful_implementation_source(
             specification.interface.tool_name,
@@ -1812,6 +1817,7 @@ async def test_sandbox_execution_request_seals_real_driver_and_scenario(
     assert [item.kind for item in request.overlays] == [
         "candidate",
         "driver",
+        "permission_manifest",
         "scenario_input",
     ]
     assert request.checks[0].timeout_ms == 1500
@@ -1834,6 +1840,15 @@ async def test_sandbox_execution_request_seals_real_driver_and_scenario(
     assert json.loads(completed.stdout) == {
         "kind": "result",
         "value": {"differences": []},
+        "permission_observation": {
+            "complete": True,
+            "events": [{
+                "decision": "allow",
+                "family": "workspace_read",
+                "scope": "data/traces/a.json",
+            }],
+            "violations": [],
+        },
     }
 
     candidate = next(item for item in request.overlays if item.kind == "candidate")
@@ -1860,6 +1875,45 @@ async def test_sandbox_execution_request_seals_real_driver_and_scenario(
         "kind": "error",
         "error_code": "trace_missing",
         "retryable": False,
+        "permission_observation": {
+            "complete": True,
+            "events": [{
+                "decision": "allow",
+                "family": "workspace_read",
+                "scope": "data/traces/a.json",
+            }],
+            "violations": [],
+        },
+    }
+
+    (tmp_path / candidate.path).write_text(artifact.source_text, encoding="utf-8")
+    scenario = next(item for item in request.overlays if item.kind == "scenario_input")
+    forbidden_input = json.loads(scenario.content_utf8)
+    forbidden_input["arguments"]["left"] = "private.json"
+    (tmp_path / scenario.path).write_text(
+        json.dumps(forbidden_input),
+        encoding="utf-8",
+    )
+    (tmp_path / "private.json").write_text('{"secret": false}\n', encoding="utf-8")
+    denied = subprocess.run(
+        list(request.checks[0].argv),
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert json.loads(denied.stdout) == {
+        "kind": "permission_violation",
+        "permission_observation": {
+            "complete": True,
+            "events": [],
+            "violations": [{
+                "decision": "deny",
+                "family": "workspace_read",
+                "scope": "private.json",
+            }],
+        },
     }
 
 
