@@ -105,7 +105,8 @@ Candidate/Eligibility/Proposal/Experiment 81。
 
 1. [EVO-06.1c3](EVO-06-1c3-durable-tool-catalog-miss-opportunity.md) 已把 exact Tool Search miss
    提升为机械 Evidence；自然语言缺失意图仍不能使用瞬时日志；
-2. EVO-06.1c4：跨 Outcome/Eval/Goal/Tool Catalog 时间窗聚类、影响范围和去重；
-3. EVO-01.5：可解释 Prioritization，不以 token、调用次数或重复 Goal 奖励候选；
+2. [EVO-06.1c4](EVO-06-1c4-cross-source-opportunity-prioritization.md) 已交付跨
+   Outcome/Eval/Goal/Tool Catalog 的有界 domain 聚类、影响范围和可解释 Prioritization；
+3. 可验证语义同根聚类仍待结构化 capability taxonomy，不能用 LLM 猜测替代；
 4. EVO-06.2：完整 Capability Proposal 和真实 `goal_completion` acceptance runner；
 5. Goal 完成只能作为用户事实之一，仍需 before/after、回归与长期 Outcome 证据。

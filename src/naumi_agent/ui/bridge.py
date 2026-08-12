@@ -6131,7 +6131,7 @@ class JsonlEngineBridge:
                     self.engine.workspace_root,
                     str(payload.get("candidate_id") or ""),
                 )
-            elif action == "list":
+            elif action in {"list", "priorities"}:
                 snapshot = await service.list_snapshot(
                     self.engine.workspace_root,
                     filters=EvolutionReviewFilter(

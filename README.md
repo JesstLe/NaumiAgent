@@ -14,7 +14,7 @@
 - **工具执行**：文件读写、代码执行、shell、Web、浏览器、记忆、任务、调度等工具走统一权限与预算控制。
 - **会话与记忆**：SQLite 会话历史、Chroma 长期记忆、上下文压缩、`/resume` 与 `/history` 恢复链路。
 - **运行态面板**：`/todo`、`/tasks`、`/runtime` 汇总 todo、subagent、后台任务、浏览器任务和 hook 状态。
-- **持续目标与自我演进**：`/goal` 跨轮次保持工作方向，`/goal pursue` 复用 `/pursue` 启动自主循环；显式未终结 Goal 可经 `/evolution discover-goal <id>` 脱敏进入候选审阅，精确 `tool_search select:<name>` 缺失可经 `/evolution discover-miss <id>` 进入同一审阅面，来源变化后动态撤权；`/self-review`、`/evolve`、`/forge` 支持源码审查、自我修改和工具锻造。
+- **持续目标与自我演进**：`/goal` 跨轮次保持工作方向，`/goal pursue` 复用 `/pursue` 启动自主循环；显式未终结 Goal 可经 `/evolution discover-goal <id>` 脱敏进入候选审阅，精确 `tool_search select:<name>` 缺失可经 `/evolution discover-miss <id>` 进入同一审阅面，来源变化后动态撤权；`/evolution priorities` 以 30 天权威快照聚类并解释每个排序因子；`/self-review`、`/evolve`、`/forge` 支持源码审查、自我修改和工具锻造。
 - **多界面**：Node Terminal UI、Textual fallback、REST API/WebSocket 和原生 Mac Workbench。
 - **跨平台终端**：适配 macOS Terminal/iTerm2、Kitty、WezTerm、常见 Linux
   终端与 Windows Terminal；启动时协商颜色、Unicode、高级键盘协议和动画能力，异常退出会恢复光标、raw mode 与备用屏幕。
@@ -227,7 +227,7 @@ NAUMI_SHOW_STARTUP_WARNINGS=1 naumi chat
 | 调试 | `/copy <all|last|error>` `/debug` `/debug-replay` `/diff` | 导出 transcript、查看结构化调试日志与 git diff |
 | Harness | `/harness status` `/harness eval … --repeat 5` `/harness baseline <suite>` `/harness baseline promote …` `/harness baseline compare …` `/harness explain` `/harness replay` | 实时显示 Candidate 评测/保存进度，在 typed 状态页查看 Baseline，以理由和最终确认引导晋升，再比较、解释并安全回放运行 |
 | 反馈 | `/feedback <category> <scope> <topic> <摘要>` | 将用户纠正或缺陷报告脱敏写入不可执行候选；偏好、取消和赞扬不会计为缺陷 |
-| 候选审阅 | `/evolution [list|detail <id>]` | 只读检查 Candidate、时间趋势、模型/平台分布、证据、审计链和资格 Gate |
+| 候选审阅 | `/evolution [priorities|list|detail <id>]` | 只读检查 30 天机会簇、透明优先级、Candidate 趋势、模型/平台分布、证据、审计链和资格 Gate |
 | 单 Lane 评测回执 | `/evolution evaluation <comparison-id>` | 从 H5a/H5c/归因权威事实签发并显示明确非最终的 before/after 回执 |
 | 结构化反思 | `/evolution reflection <decision-input-id>` | 从 Decision/Resolution 生成非向量、非自动注入、可撤销的结构化经验 |
 | 撤销反思 | `/evolution reflection-revoke <reflection-id> <reason>` | 以 append-only 回执停用 Reflection；normal 确认，bypass 直接执行 |

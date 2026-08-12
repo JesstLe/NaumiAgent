@@ -17,14 +17,38 @@ const candidate = {
   review_ready: true,
   human_review_required: false,
   experiment_eligible: false,
+  priority: {
+    policy_version: "evolution-priority-v1",
+    formula: "severity*frequency*confidence*5/(cost*change_risk)",
+    domain: "correctness", rankable: true, rank: 1, score: 50,
+    severity: 4, frequency: 2, qualifying_observations: 2, confidence: 75,
+    confidence_lanes: ["explicit_user"], implementation_cost: 3,
+    change_risk: 2, exclusion_reasons: [],
+  },
+};
+
+const portfolio = {
+  policy_version: "evolution-priority-v1",
+  formula: "severity*frequency*confidence*5/(cost*change_risk)",
+  anchor_at: "2026-07-18T18:01:00+00:00",
+  window_start_at: "2026-06-18T18:01:00+00:00",
+  window_days: 30, considered_count: 1, ranked_count: 1, excluded_count: 0,
+  clusters: [{
+    cluster_id: `eoc_${"b".repeat(24)}`, rank: 1, domain: "correctness", score: 50,
+    primary_candidate_id: candidate.candidate_id, candidate_ids: [candidate.candidate_id],
+    source_kinds: ["user_feedback"],
+    impact: { candidate_count: 1, source_kind_count: 1, scope_count: 1, provider_count: 1, model_count: 1, platform_count: 1 },
+  }],
 };
 
 test("evolution review list and detail stay bounded at common widths", () => {
   for (const width of [80, 120, 200]) {
-    const list = renderEvolutionReviewPage({ snapshot: { mode: "list", filters: {}, items: [candidate], selected: null, events: [] }, selectedIndex: 0 }, width, 20);
+    const list = renderEvolutionReviewPage({ snapshot: { mode: "list", filters: {}, items: [candidate], selected: null, events: [], portfolio }, selectedIndex: 0 }, width, 20);
     assert.equal(list.length, 20);
     assert(list.every((line) => visibleWidth(line) <= width));
-    assert(list.map(stripAnsi).join("\n").includes("可人工审阅"));
+    assert(list.map(stripAnsi).join("\n").includes("可人工"));
+    assert(list.map(stripAnsi).join("\n").includes("P1 50"));
+    assert(list.map(stripAnsi).join("\n").includes("全局 30d 优先级"));
     const selected = {
       ...candidate,
       status: "draft",
@@ -66,6 +90,8 @@ test("evolution review list and detail stay bounded at common widths", () => {
     assert(plain.includes("Proposal Preview"));
     assert(plain.includes("不可执行 · 未入队 · 必须人工审阅"));
     assert(plain.includes("Workbench 治理"));
+    assert(plain.includes("可解释优先级"));
+    assert(plain.includes("严重度 4 × 频次 2"));
     assert(plain.includes("冷却阻断 · cooldown_active"));
     assert(plain.includes("rejected / r2"));
   }
@@ -78,4 +104,19 @@ test("evolution review distinguishes loading empty and missing detail", () => {
   assert(loading.includes("正在加载"));
   assert(empty.includes("没有 Candidate"));
   assert(missing.includes("不存在"));
+});
+
+test("evolution review keeps the selected ranked candidate visible with cluster summary", () => {
+  const items = Array.from({ length: 20 }, (_, index) => ({
+    ...candidate,
+    candidate_id: `evc_${index.toString(16).padStart(24, "0")}`,
+    priority: { ...candidate.priority, rank: index + 1 },
+  }));
+  const lines = renderEvolutionReviewPage({
+    snapshot: { mode: "list", filters: {}, items, selected: null, events: [], portfolio },
+    selectedIndex: 19,
+  }, 100, 20).map(stripAnsi).join("\n");
+
+  assert(lines.includes(items[19].candidate_id));
+  assert(lines.includes("全局 30d 优先级"));
 });

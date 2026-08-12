@@ -15,7 +15,7 @@ Service 的共享 renderer，不创建第二套 Store 查询。
 - persistence：request `never`，response `snapshot`
 - `payload.items` 与 `payload.selected` 继续声明 required redaction
 
-请求支持 list/detail、query、risk、source_kind 和 1..100 limit；Candidate ID、枚举、长度和控制字符
+请求支持 list/priorities/detail、query、risk、source_kind 和 1..100 limit；Candidate ID、枚举、长度和控制字符
 在 Python protocol normalization 层校验。响应最多包含 100 个列表项、100 个审计事件、200 个
 Evidence 引用以及每个维度 50 个唯一值。
 
@@ -34,7 +34,7 @@ Evidence 引用以及每个维度 50 个唯一值。
 ## TUI parity
 
 Textual TUI 和保留的 legacy CLI 继续通过 `/evolution` 调用 `EvolutionReviewService` 与共享 Markdown
-renderer。它们采用线性降级而非复制 Node 全屏视觉，但 list/detail、过滤、Eligibility 和只读边界一致。
+renderer。它们采用线性降级而非复制 Node 全屏视觉，但 list/priorities/detail、过滤、Eligibility 和只读边界一致。
 
 ## 验收
 

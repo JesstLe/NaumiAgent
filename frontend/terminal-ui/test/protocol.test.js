@@ -2644,16 +2644,61 @@ test("evolution review snapshot is strict and drops private fields", () => {
     source_kinds: ["user_feedback"], last_observed_at: "now", revision: 2,
     decision: "review_ready", review_ready: true, human_review_required: false,
     experiment_eligible: false, private_payload: "drop-me",
+    priority: {
+      policy_version: "evolution-priority-v1",
+      formula: "severity*frequency*confidence*5/(cost*change_risk)",
+      domain: "correctness", rankable: true, rank: 1, score: 50,
+      severity: 4, frequency: 2, qualifying_observations: 2, confidence: 75,
+      confidence_lanes: ["explicit_user"], implementation_cost: 3,
+      change_risk: 2, exclusion_reasons: [],
+    },
+  };
+  const portfolio = {
+    policy_version: "evolution-priority-v1",
+    formula: "severity*frequency*confidence*5/(cost*change_risk)",
+    anchor_at: "now", window_start_at: "before", window_days: 30,
+    considered_count: 1, ranked_count: 1, excluded_count: 0,
+    clusters: [{
+      cluster_id: `eoc_${"b".repeat(24)}`, rank: 1, domain: "correctness", score: 50,
+      primary_candidate_id: item.candidate_id, candidate_ids: [item.candidate_id],
+      source_kinds: ["user_feedback"], impact: {
+        candidate_count: 1, source_kind_count: 1, scope_count: 1,
+        provider_count: 0, model_count: 0, platform_count: 0,
+      },
+    }],
   };
   const normalized = normalizeServerRecord({ type: "evolution/review", payload: {
     schema_version: 1, mode: "list", filters: { query: "", risk: "", source_kind: "", limit: 50 },
-    items: [item], selected: null, events: [], read_only: true,
+    items: [item], selected: null, events: [], portfolio, read_only: true,
   } }).payload;
   assert.equal(normalized.items[0].decision, "review_ready");
+  assert.equal(normalized.items[0].priority.rank, 1);
+  assert.equal(normalized.portfolio.clusters[0].impact.candidate_count, 1);
+  const capability = normalizeServerRecord({ type: "evolution/review", payload: {
+    ...normalized,
+    items: [{ ...item, kind: "capability" }],
+  } }).payload;
+  assert.equal(capability.items[0].kind, "capability");
   assert.equal(Object.hasOwn(normalized.items[0], "private_payload"), false);
   assert.throws(() => normalizeServerRecord({ type: "evolution/review", payload: { ...normalized, mode: "write" } }), /mode/);
   assert.throws(() => normalizeServerRecord({ type: "evolution/review", payload: { ...normalized, read_only: false } }), /只读/);
   assert.throws(() => normalizeServerRecord({ type: "evolution/review", payload: { ...normalized, items: [{ ...item, experiment_eligible: true }] } }), /实验资格/);
+  assert.throws(() => normalizeServerRecord({ type: "evolution/review", payload: {
+    ...normalized, items: [{ ...item, priority: { ...item.priority, score: 101 } }],
+  } }), /因子越界/);
+  assert.throws(() => normalizeServerRecord({ type: "evolution/review", payload: {
+    ...normalized, portfolio: { ...portfolio, excluded_count: 1 },
+  } }), /计数不一致/);
+  assert.throws(() => normalizeServerRecord({ type: "evolution/review", payload: {
+    ...normalized,
+    portfolio: {
+      ...portfolio,
+      clusters: [{
+        ...portfolio.clusters[0],
+        impact: { ...portfolio.clusters[0].impact, candidate_count: 2 },
+      }],
+    },
+  } }), /impact 计数不一致/);
   const proposalSource = {
     candidate_id: `evc_${"a".repeat(24)}`, candidate_revision: 2,
     candidate_sha256: "c".repeat(64), occurrence_count: 2,

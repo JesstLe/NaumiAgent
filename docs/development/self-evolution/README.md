@@ -246,7 +246,7 @@ promoted/superseded 路径已分别由 HAR-09.6d/e 与 EVO-05.7b4a–7b4d 后续
 [EVO-06.1a](EVO-06-1a-outcome-backed-opportunity-discovery.md) 已把真实 `rolled_back` Outcome 确定性回注
 现有 Candidate Store；[EVO-06.1b](EVO-06-1b-promoted-outcome-opportunity-discovery.md) 进一步把 current
 stable `promoted` Outcome 回注为不同于上一轮的新 Candidate。两者均具备同源并发幂等和 Review/Workbench
-入队前动态 authority 重验，不复制源码/补丁，也不授予实验、学习或推广权限。跨类型聚类/优先级、
+入队前动态 authority 重验，不复制源码/补丁，也不授予实验、学习或推广权限。可验证语义同根聚类、
 Capability Proposal、Shadow/Activation 与 learning authority 仍未完成。
 [EVO-01.4b](EVO-01-4b-composite-source-authority-router.md) 已为下一步 runtime metric/Eval Evidence
 补齐 fail-closed 多来源 authority router：所有动态 kind 必须完整注册，不同 reader 并发重验，且 Review
@@ -259,7 +259,9 @@ Goal 脱敏投影为 `goal_need` capability Candidate，Goal 完成、取消或�
 `goal_completion` runner 时明确阻止自动实验。
 [EVO-06.1c3](EVO-06-1c3-durable-tool-catalog-miss-opportunity.md) 已实现 exact
 `select:<tool-name>` miss：工作区隔离、完整目录摘要绑定、目标出现/目录变化/篡改动态撤权，并拒绝保存
-自然语言查询。自然语言缺失意图、跨类型时间窗和可解释 Prioritization 仍待后续独立切片。
+自然语言查询。[EVO-06.1c4](EVO-06-1c4-cross-source-opportunity-prioritization.md) 进一步交付固定 30 天、
+最多 500 条的权威 Opportunity Portfolio：同 lane 同日去重、domain 聚类、影响计数和透明评分，且
+Agent-only、调用/token 数和簇成员数不能刷榜。自然语言缺失意图与可验证语义同根聚类仍待后续切片。
 
 [EVO-05.5f5x3a](EVO-05-5f5x3a-authenticated-remote-readiness-claim.md) 已为跨安装 Stable Finalization
 补齐 Population Credential-bound challenge、Ed25519 assertion 与 durable authenticated claim；它不把远端签名声明冒充

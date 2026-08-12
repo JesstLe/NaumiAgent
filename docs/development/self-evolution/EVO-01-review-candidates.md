@@ -60,9 +60,12 @@ Evolution Candidate，而不是直接触发 self_modify。
 - [EVO-06.1c3](EVO-06-1c3-durable-tool-catalog-miss-opportunity.md) exact Tool Catalog miss
   adapter：已实现。只持久化安全 `select:<tool-name>` 缺失，绑定完整目录摘要；目录变化、目标工具出现、
   篡改或跨工作区会撤权，自然语言查询不进入 Candidate。
+- [EVO-06.1c4](EVO-06-1c4-cross-source-opportunity-prioritization.md) 跨来源 Opportunity Portfolio：
+  已实现。最多 500 条权威 Candidate 在固定 30 天窗口内完成 authority/冷却 Gate、同 lane 同日去重、
+  domain 聚类、影响计数和透明评分；先排序再应用显示 limit，Agent-only、调用/token 数和簇大小不能刷榜。
 - HAR-09.1a Feedback adapter：已实现。直接用户反馈和 Agent 对 durable user turn 的解释使用
   不同 source kind，摘要不落库，非缺陷反馈不生成 Candidate；所有结果仍固定不可执行。
-- EVO-01.6a Candidate 只读审阅面：已实现。用户通过 `/evolution list/detail`、Agent 通过
+- EVO-01.6a Candidate 只读审阅面：已实现。用户通过 `/evolution list/priorities/detail`、Agent 通过
   `evolution_candidates` 读取同一服务；过滤、详情、审计链和资源上限均为确定性实现，读取不改变
   Candidate。设计与证据见 `EVO-01-6a-readonly-review-surface.md`。
 - EVO-01.6a1 Typed Review UI：已实现。默认新 UI 通过 ARC-03 event registry 管理的 typed snapshot
@@ -73,6 +76,6 @@ Evolution Candidate，而不是直接触发 self_modify。
 - HAR-09.5a/5b1/5b2a 已实现 Proposal 显式入队、持久来源、治理状态机、有效冷却与 Eligibility
   只读接线；单条噪声不能越过 reject/defer，显著新证据规则有版本和审计，New UI/TUI 可见同一
   治理结论。Workbench 决策交互页仍未完成。
-- runtime 在线指标 adapter、自然语言缺失意图 adapter、跨 Candidate 影响范围分析、
-  完整 experiment Eligibility、Prioritization、排序解释和 approve/reject/defer 动作仍为 planned；不得把
+- runtime 在线指标 adapter、自然语言缺失意图 adapter、可验证语义同根聚类、
+  完整 experiment Eligibility 和 approve/reject/defer 页面动作仍为 planned；不得把
   EVO-01 整体标记为完成。

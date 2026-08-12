@@ -2833,14 +2833,15 @@ test("Goal dead-letter abandon cycles bounded reason and consumes receipt", () =
   assert.match(state.goalPanel.terminalOutboxActionNotice, /永久停止/);
 });
 
-test("evolution command opens typed review route and navigates to detail", () => {
+test("evolution priorities opens typed review route and navigates to detail", () => {
   const state = createInitialState();
   const sent = [];
   const send = (type, payload) => sent.push({ type, payload });
   const id = `evc_${"a".repeat(24)}`;
-  handleSubmitText(state, "/evolution list --risk medium --limit 20", send);
+  handleSubmitText(state, "/evolution priorities --risk medium --limit 20", send);
   assert.equal(state.route.name, "evolution_review");
   assert.equal(sent[0].type, "evolution/review/request");
+  assert.equal(sent[0].payload.action, "priorities");
   reduceServerEvent(state, { type: "evolution/review", payload: { schema_version: 1, mode: "list", filters: {}, items: [{ candidate_id: id }], selected: null, events: [], read_only: true } });
   assert.equal(handleEvolutionReviewKey(state, "\r", send), true);
   assert.equal(sent[1].payload.action, "detail");

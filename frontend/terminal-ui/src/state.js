@@ -3793,7 +3793,7 @@ export function handleSubmitText(state, text, send) {
       pushSystemMessage(
         state,
         "Evolution",
-        "用法：/evolution list [...]；/evolution detail <candidate-id>；/evolution discover-outcome <rollback-outcome-id>；/evolution enqueue <candidate-id> --mission <id> --task <id> [--agent <name>]",
+        "用法：/evolution priorities [...]；/evolution detail <candidate-id>；/evolution discover-outcome <rollback-outcome-id>；/evolution enqueue <candidate-id> --mission <id> --task <id> [--agent <name>]",
         "warning",
       );
       return;
@@ -5798,15 +5798,19 @@ function parseEvolutionReviewCommand(text) {
     if (!request.mission_id || !request.task_id) return null;
     return request;
   }
-  if (action !== "list") return null;
-  const request = { action: "list", candidate_id: "", query: "", risk: "", source_kind: "", limit: 50 };
+  if (!["list", "priorities"].includes(action)) return null;
+  const request = { action, candidate_id: "", query: "", risk: "", source_kind: "", limit: 50 };
   for (let index = 1; index < values.length; index += 2) {
     const option = values[index];
     const value = values[index + 1];
     if (!value) return null;
     if (option === "--query") request.query = value;
     else if (option === "--risk" && ["low", "medium", "high", "critical"].includes(value)) request.risk = value;
-    else if (option === "--source" && ["harness_failure", "self_review_static", "user_feedback", "agent_interpreted_feedback", "rollback_outcome"].includes(value)) request.source_kind = value;
+    else if (option === "--source" && [
+      "harness_failure", "self_review_static", "user_feedback",
+      "agent_interpreted_feedback", "eval_metric_regression", "goal_need",
+      "tool_catalog_miss", "rollback_outcome", "promoted_outcome",
+    ].includes(value)) request.source_kind = value;
     else if (option === "--limit" && /^\d+$/.test(value) && Number(value) >= 1 && Number(value) <= 100) request.limit = Number(value);
     else return null;
   }

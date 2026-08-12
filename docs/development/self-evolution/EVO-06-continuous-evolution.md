@@ -22,7 +22,9 @@
 - [EVO-06.1c3](EVO-06-1c3-durable-tool-catalog-miss-opportunity.md) Durable exact Tool Catalog
   miss（已实现）：把 `select:<tool-name>` 精确缺失保存为工作区隔离、目录摘要绑定的动态 Evidence；
   目标工具出现、目录变化或记录篡改时撤权，自然语言查询不落库。
-- EVO-06.1c4+ Opportunity discovery（待实现）：跨类型时间窗聚类、影响范围与可解释优先级。
+- [EVO-06.1c4](EVO-06-1c4-cross-source-opportunity-prioritization.md) Cross-source Opportunity
+  Portfolio（已实现）：在固定 30 天、最多 500 条权威快照中完成 authority/冷却 Gate、同 lane 同日去重、
+  domain 聚类、影响计数与透明评分；Agent-only、调用/token 数和簇成员数量不能刷榜。
 - EVO-06.2 Capability proposal：API、双通道、权限、数据、测试、维护者、淘汰标准。
 - EVO-06.3 Sandbox registration：临时 registry/namespace，不能覆盖内置 tool。
 - EVO-06.4 Shadow evaluation：观察建议调用但不执行，比较路由准确度和价值。
@@ -46,9 +48,9 @@ EVO-06 不得从“LLM 生成了改进建议”直接开始。每次循环必须
 RED/GREEN H5a、H5c comparison、失败归因、签名 Decision、staged rollout、运行监控、rollback/accept Outcome 缺一不可。Outcome 必须回注
 opportunity discovery，并以新 Candidate ID 开启下一轮；不得原地改写上一轮证据或把未执行建议计为能力提升。
 
-当前 `EVO-06.1a/1b/1c1/1c2/1c3` 已分别关闭 rolled_back、stable promoted Outcome、H5c 定量回归、
+当前 `EVO-06.1a/1b/1c1/1c2/1c3/1c4` 已分别关闭 rolled_back、stable promoted Outcome、H5c 定量回归、
 durable Goal 明确需求与 exact Tool Catalog miss 的发现断点，但不代表 EVO-06 完成：自然语言缺失意图、
-跨类型聚类与优先级、Capability Proposal、
+更细粒度可验证语义聚类、Capability Proposal、
 Sandbox/Shadow/Limited Activation、选择、退休和 Meta-governance 仍待实现。
 
 ## 终极边界
