@@ -121,6 +121,10 @@ from naumi_agent.evolution.capability_scenario_binding import (
     EvolutionCapabilityScenarioBindingService,
     EvolutionCapabilityScenarioBindingStore,
 )
+from naumi_agent.evolution.capability_shadow_descriptors import (
+    EvolutionCapabilityShadowDescriptorService,
+    EvolutionCapabilityShadowDescriptorStore,
+)
 from naumi_agent.evolution.capability_specification import (
     EvolutionCapabilitySpecificationService,
     EvolutionCapabilitySpecificationStore,
@@ -1609,6 +1613,22 @@ class AgentEngine:
                 store=self.evolution_capability_registry_lease_store,
                 tool_registry=self._tool_registry,
                 runtime_instance_id=f"evcruntime_{uuid.uuid4().hex[:24]}",
+                now=lambda: datetime.now(UTC).isoformat(),
+            )
+        )
+        self.evolution_capability_shadow_descriptor_store = (
+            EvolutionCapabilityShadowDescriptorStore(
+                self.evolution_candidate_store.db_path,
+            )
+        )
+        self.evolution_capability_shadow_descriptor_service = (
+            EvolutionCapabilityShadowDescriptorService(
+                workspace_root=self.workspace_root,
+                review_service=self.evolution_review_service,
+                specification_service=self.evolution_capability_specification_service,
+                artifact_service=self.evolution_capability_artifact_service,
+                registry_lease_service=self.evolution_capability_registry_lease_service,
+                store=self.evolution_capability_shadow_descriptor_store,
                 now=lambda: datetime.now(UTC).isoformat(),
             )
         )

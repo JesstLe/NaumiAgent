@@ -276,6 +276,14 @@ def test_capability_artifact_public_payload_and_protocol() -> None:
         },
     })
     assert unregister["payload"]["action"] == "capability-unregister"
+    shadow = normalize_client_record({
+        "type": ClientEventType.EVOLUTION_REVIEW_REQUEST,
+        "payload": {
+            "action": "capability-shadow",
+            "candidate_id": f"evc_{'c' * 24}",
+        },
+    })
+    assert shadow["payload"]["action"] == "capability-shadow"
     with pytest.raises(ValueError, match="30"):
         normalize_client_record({
             "type": ClientEventType.EVOLUTION_REVIEW_REQUEST,
@@ -546,6 +554,51 @@ async def test_bridge_executes_typed_capability_registry_action(
         assert arguments["candidate_id"] == candidate_id
         assert arguments["duration_seconds"] == 45
         assert arguments["run_id"].startswith("uicapregistry-")
+    finally:
+        await bridge.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_bridge_executes_typed_capability_shadow_action(
+    tmp_path: Path,
+) -> None:
+    store = EvolutionCandidateStore(tmp_path / "evolution.db")
+    candidate_id = await _seed(tmp_path, store)
+    engine = create_agent_engine(AppConfig(
+        workspace_root=str(tmp_path),
+        memory=MemoryConfig(
+            session_db_path=str(tmp_path / "sessions.db"),
+            long_term_enabled=False,
+        ),
+    ))
+    engine.evolution_candidate_store = store
+    engine.evolution_review_service = EvolutionReviewService(store)
+    execute = AsyncMock(return_value=SimpleNamespace(
+        content="# Capability Shadow Descriptor\n\n- 状态：`ready`",
+    ))
+    engine.execute_tool = execute
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    try:
+        await bridge.handle_client_record({
+            "id": "evolution-capability-shadow-1",
+            "type": ClientEventType.EVOLUTION_REVIEW_REQUEST,
+            "payload": {
+                "action": "capability-shadow",
+                "candidate_id": candidate_id,
+            },
+        })
+        records = [json.loads(line) for line in writer.getvalue().splitlines()]
+        notice = next(record for record in records if record["type"] == "ui/message")
+        assert notice["payload"]["title"] == "Capability Shadow Descriptor"
+        assert "ready" in notice["payload"]["content"]
+        call = execute.await_args.args[0]
+        assert call.name == "evolution_capability_shadow_descriptor"
+        assert json.loads(call.arguments) == {
+            "action": "compile",
+            "candidate_id": candidate_id,
+        }
     finally:
         await bridge.shutdown()
 

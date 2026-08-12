@@ -3079,6 +3079,28 @@ test("evolution capability-unregister uses the typed catalog release route", () 
   }]);
 });
 
+test("evolution capability-shadow uses the typed descriptor route", () => {
+  const state = createInitialState();
+  const sent = [];
+  const candidateId = `evc_${"f".repeat(24)}`;
+  handleSubmitText(
+    state,
+    `/evolution capability-shadow ${candidateId}`,
+    (type, payload) => sent.push({ type, payload }),
+  );
+  assert.deepEqual(sent, [{
+    type: "evolution/review/request",
+    payload: {
+      action: "capability-shadow",
+      candidate_id: candidateId,
+      query: "",
+      risk: "",
+      source_kind: "",
+      limit: 50,
+    },
+  }]);
+});
+
 test("outcome discovery uses slash execution then filters its typed projection", () => {
   const state = createInitialState();
   const sent = [];

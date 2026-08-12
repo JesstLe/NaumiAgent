@@ -54,7 +54,9 @@
 - [EVO-06.3b2c](EVO-06-3b2c-catalog-registry-lease.md) Catalog-only Registry lease（已实现）：
   只消费 current passed Receipt，以 30..900 秒 content-addressed lease 保留 namespace；来源漂移、显式释放
   与到期均形成串联终态回执，候选代码仍不加载、不向模型可见且不可执行。
-- EVO-06.4 Shadow evaluation：观察建议调用但不执行，比较路由准确度和价值。
+- [EVO-06.4a](EVO-06-4a-sealed-shadow-descriptor.md) Sealed Shadow descriptor（已实现）：只从 active
+  本地 Registry lease 和 current 来源冻结脱敏路由语义；descriptor 永久未授权，实时 View 才能短暂声明
+  离线输入资格。4b observation 与 4c 评价聚合仍待实现。
 - EVO-06.5 Limited activation：低风险、明确 scope、预算和用户可见标识。
 - EVO-06.6 Market/selection：性能、可靠、成本、用户价值，多指标而非 token 竞争。
 - EVO-06.7 Retirement：低价值/高风险能力禁用、迁移、历史 replay 兼容。
@@ -75,9 +77,10 @@ EVO-06 不得从“LLM 生成了改进建议”直接开始。每次循环必须
 RED/GREEN H5a、H5c comparison、失败归因、签名 Decision、staged rollout、运行监控、rollback/accept Outcome 缺一不可。Outcome 必须回注
 opportunity discovery，并以新 Candidate ID 开启下一轮；不得原地改写上一轮证据或把未执行建议计为能力提升。
 
-当前 `EVO-06.1a/1b/1c1/1c2/1c3/1c4/2a/2b/2c/3a/3b1/3b2a/3b2b/3b2c` 已分别关闭 rolled_back、stable promoted Outcome、H5c 定量回归、
+当前 `EVO-06.1a/1b/1c1/1c2/1c3/1c4/2a/2b/2c/3a/3b1/3b2a/3b2b/3b2c/4a` 已分别关闭 rolled_back、stable promoted Outcome、H5c 定量回归、
 durable Goal 明确需求与 exact Tool Catalog miss 的发现断点，但不代表 EVO-06 完成：自然语言缺失意图、
-更细粒度可验证语义聚类、Shadow/Limited Activation、选择、退休和 Meta-governance 仍待实现。
+更细粒度可验证语义聚类、Shadow observation/aggregation、Limited Activation、选择、退休和
+Meta-governance 仍待实现。
 
 ## 终极边界
 
