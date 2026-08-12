@@ -79,6 +79,14 @@ test("evolution review list and detail stay bounded at common widths", () => {
           verifier: "feedback_recurrence", procedure: "比较后续反馈复发率。",
         }],
       },
+      capability_proposal: {
+        proposal_id: `evcp_${"c".repeat(24)}`,
+        status: "needs_specification",
+        title: "能力提案：browser.trace_compare",
+        source: { priority_rank: 1, priority_score_basis_points: 165 },
+        interface: { requested_name: "browser.trace_compare" },
+        unresolved_requirements: ["api.parameters_schema", "permissions.required_families"],
+      },
     };
     const detail = renderEvolutionReviewPage({ snapshot: { mode: "detail", filters: {}, items: [], selected, events: [] }, scrollOffset: 0 }, width, 60);
     const plain = detail.map(stripAnsi).join("\n");
@@ -89,6 +97,9 @@ test("evolution review list and detail stay bounded at common widths", () => {
     assert(plain.includes("实验资格 否"));
     assert(plain.includes("Proposal Preview"));
     assert(plain.includes("不可执行 · 未入队 · 必须人工审阅"));
+    assert(plain.includes("Capability Proposal"));
+    assert(plain.includes("可注册 否 · 可执行 否 · Shadow 否"));
+    assert(plain.includes("api.parameters_schema"));
     assert(plain.includes("Workbench 治理"));
     assert(plain.includes("可解释优先级"));
     assert(plain.includes("严重度 4 × 频次 2"));

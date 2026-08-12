@@ -123,6 +123,21 @@ function detailLines(item, rawEvents) {
   } else {
     lines.push(color(ANSI.yellow, "── Proposal Preview · 当前证据或安全 Gate 不允许生成"));
   }
+  if (item.capability_proposal) {
+    const capability = item.capability_proposal;
+    lines.push(
+      color(ANSI.cyan, `── Capability Proposal · ${capability.status}`),
+      color(ANSI.yellow, capability.title),
+      color(ANSI.dim, `${capability.proposal_id} · Portfolio P${capability.source.priority_rank} · score ${capability.source.priority_score_basis_points / 100}`),
+      `Tool 名 · ${capability.interface.requested_name || "待用户定义"}`,
+      color(ANSI.yellow, "API / 权限 / 数据 / Owner / SLO 尚未补齐"),
+      color(ANSI.red, "可注册 否 · 可执行 否 · Shadow 否"),
+      color(ANSI.cyan, `进入 Sandbox 前必须补齐 · ${capability.unresolved_requirements.length}`),
+    );
+    for (const requirement of capability.unresolved_requirements) {
+      lines.push(color(ANSI.dim, `• ${requirement}`));
+    }
+  }
   const aggregation = item.aggregation;
   if (aggregation) {
     lines.push(

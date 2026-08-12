@@ -2753,6 +2753,107 @@ test("evolution review snapshot is strict and drops private fields", () => {
   assert.equal(Object.hasOwn(detail.selected.governance, "private_decision_note"), false);
   assert.equal(detail.selected.proposal.proposal_kind, "code");
   assert.equal(detail.selected.proposal.executable, false);
+  const capabilitySource = {
+    candidate_id: item.candidate_id,
+    candidate_revision: item.revision,
+    candidate_sha256: "d".repeat(64),
+    source_kinds: ["tool_catalog_miss"],
+    priority_policy: "evolution-priority-v1",
+    portfolio_anchor_at: "2026-08-12T10:00:00+00:00",
+    priority_rank: 1,
+    priority_score_basis_points: 165,
+    authority_valid: true,
+    governance_valid: true,
+  };
+  const capabilityInterface = {
+    invocation_kind: "tool", requested_name: "browser.trace_compare", name_status: "known",
+    parameters_schema_status: "unresolved", result_schema_status: "unresolved",
+    error_contract_status: "unresolved", versioning_status: "unresolved",
+  };
+  const capabilityScope = "capability:tool:browser.trace_compare";
+  const unresolved = [
+    "api.parameters_schema", "api.result_schema", "api.error_contract", "api.versioning",
+    "permissions.required_families", "data.input_output_retention",
+    "verification.real_scenario", "operations.owner", "operations.slo", "operations.maintenance",
+  ];
+  const canonical = (value) => {
+    if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+    if (value && typeof value === "object") {
+      return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`;
+    }
+    return JSON.stringify(value);
+  };
+  const capabilityId = `evcp_${createHash("sha256").update(canonical({
+    generator_version: "evolution-capability-proposal-v1",
+    source: capabilitySource,
+    interface: capabilityInterface,
+    unresolved_requirements: unresolved,
+  })).digest("hex").slice(0, 24)}`;
+  const capabilityProposal = {
+    schema_version: 1, proposal_id: capabilityId,
+    generator_version: "evolution-capability-proposal-v1", status: "needs_specification",
+    title: "能力提案：browser.trace_compare", summary: "保持未决字段。",
+    impact_scope: capabilityScope, source: capabilitySource, interface: capabilityInterface,
+    permissions: {
+      policy_status: "unresolved",
+      candidate_families: ["workspace_read", "workspace_write", "process", "network", "browser", "secrets"],
+      granted_families: [], bypass_grants_registration: false, bypass_grants_execution: false,
+    },
+    data: {
+      input_classes_status: "unresolved", output_classes_status: "unresolved",
+      retention_status: "unresolved",
+      prohibited_content: ["secret_values", "raw_user_conversation", "absolute_workspace_paths", "unbounded_stdout"],
+    },
+    verification: {
+      source_metrics: ["tool.availability:increase:1:tool_catalog_presence"],
+      required_checks: ["schema_contract", "permission_denial_paths", "empty_and_extreme_inputs", "concurrent_idempotency", "real_scenario_e2e", "slash_agent_parity"],
+      real_scenario_status: "unresolved",
+    },
+    operations: {
+      owner_status: "unassigned", slo_status: "unresolved", maintenance_status: "unresolved",
+      retirement_criteria: ["authority_revoked", "catalog_need_satisfied", "slo_breach", "security_regression", "superseded_capability", "low_verified_value"],
+    },
+    lifecycle: {
+      state: "proposal", next_stage: "sandbox_registration", sandbox_eligible: false,
+      shadow_eligible: false, limited_activation_eligible: false, executable: false,
+      registry_mutation_allowed: false, builtin_override_allowed: false,
+    },
+    unresolved_requirements: unresolved, requires_human_review: true,
+  };
+  const capabilityDetail = normalizeServerRecord({ type: "evolution/review", payload: {
+    ...detail,
+    selected: {
+      ...detail.selected,
+      kind: "capability",
+      scope: capabilityScope,
+      source_kinds: ["tool_catalog_miss"],
+      priority: { ...detail.selected.priority, domain: "capability" },
+      proposal: { ...detail.selected.proposal, impact_scope: capabilityScope },
+      capability_proposal: capabilityProposal,
+    },
+  } }).payload;
+  assert.equal(capabilityDetail.selected.capability_proposal.proposal_id, capabilityId);
+  assert.equal(capabilityDetail.selected.capability_proposal.lifecycle.executable, false);
+  assert.throws(() => normalizeServerRecord({ type: "evolution/review", payload: {
+    ...capabilityDetail,
+    selected: {
+      ...capabilityDetail.selected,
+      capability_proposal: {
+        ...capabilityProposal,
+        lifecycle: { ...capabilityProposal.lifecycle, executable: true },
+      },
+    },
+  } }), /authority contract/);
+  assert.throws(() => normalizeServerRecord({ type: "evolution/review", payload: {
+    ...capabilityDetail,
+    selected: {
+      ...capabilityDetail.selected,
+      capability_proposal: {
+        ...capabilityProposal,
+        permissions: { ...capabilityProposal.permissions, bypass_grants_execution: true },
+      },
+    },
+  } }), /authority contract/);
   assert.throws(() => normalizeServerRecord({ type: "evolution/review", payload: {
     ...detail, selected: { ...detail.selected, aggregation: { ...detail.selected.aggregation, trend: "exploding" } },
   } }), /trend/);
