@@ -80,7 +80,8 @@ fail closed，不返回降级对象。
 
 ## 下一步
 
-EVO-06.4b 应定义 Shadow Observation Contract：输入必须绑定 current 4a View、固定基线工具目录、用户任务样本
-来源、model/provider capability contract、采样参数和预算；输出只允许“推荐/不推荐/无法判断”及结构化理由。
-4b 仍不得执行候选 Tool。EVO-06.4c 再聚合 routing precision/recall、false-positive、成本与稳定性，未达到
-门槛不得进入 Limited Activation。
+[EVO-06.4b](EVO-06-4b-shadow-observation-contract.md) 已实现 Shadow Observation Contract：绑定 current
+4a View、完整基线工具目录、interaction-backed 正样本、真实负控制、model/provider capability contract、
+固定 reasoning/采样参数和 token/时间/成本预算；持久契约仍不调用 Provider 或执行候选 Tool。EVO-06.4c1
+下一步实现 bounded Observation Runner，4c2 再聚合 routing precision/recall、false-positive、成本与稳定性；
+未达到门槛不得进入 Limited Activation。

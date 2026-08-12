@@ -125,6 +125,10 @@ from naumi_agent.evolution.capability_shadow_descriptors import (
     EvolutionCapabilityShadowDescriptorService,
     EvolutionCapabilityShadowDescriptorStore,
 )
+from naumi_agent.evolution.capability_shadow_observation_contracts import (
+    EvolutionCapabilityShadowObservationContractService,
+    EvolutionCapabilityShadowObservationContractStore,
+)
 from naumi_agent.evolution.capability_specification import (
     EvolutionCapabilitySpecificationService,
     EvolutionCapabilitySpecificationStore,
@@ -1629,6 +1633,22 @@ class AgentEngine:
                 artifact_service=self.evolution_capability_artifact_service,
                 registry_lease_service=self.evolution_capability_registry_lease_service,
                 store=self.evolution_capability_shadow_descriptor_store,
+                now=lambda: datetime.now(UTC).isoformat(),
+            )
+        )
+        self.evolution_capability_shadow_observation_contract_store = (
+            EvolutionCapabilityShadowObservationContractStore(
+                self.evolution_candidate_store.db_path,
+            )
+        )
+        self.evolution_capability_shadow_observation_contract_service = (
+            EvolutionCapabilityShadowObservationContractService(
+                workspace_root=self.workspace_root,
+                descriptor_service=self.evolution_capability_shadow_descriptor_service,
+                specification_service=self.evolution_capability_specification_service,
+                tool_registry=self._tool_registry,
+                model_port=self._model_port,
+                store=self.evolution_capability_shadow_observation_contract_store,
                 now=lambda: datetime.now(UTC).isoformat(),
             )
         )

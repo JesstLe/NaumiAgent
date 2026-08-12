@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 from naumi_agent.cli.slash_router import execute_slash_command
-from naumi_agent.config.settings import AppConfig, MemoryConfig
+from naumi_agent.config.settings import AppConfig, MemoryConfig, ModelConfig, ModelMeta
 from naumi_agent.daemons.permission_decisions import (
     PermissionDecisionActor,
     PermissionDecisionOutcome,
@@ -69,6 +69,10 @@ from naumi_agent.evolution.capability_shadow_descriptors import (
     CapabilityShadowDescriptorError,
     EvolutionCapabilityShadowDescriptorService,
     EvolutionCapabilityShadowDescriptorStore,
+)
+from naumi_agent.evolution.capability_shadow_observation_contracts import (
+    EvolutionCapabilityShadowObservationContractService,
+    EvolutionCapabilityShadowObservationContractStore,
 )
 from naumi_agent.evolution.capability_specification import (
     CapabilityDataSpecification,
@@ -2211,6 +2215,28 @@ async def test_capability_sandbox_executes_real_arc04_worker_and_seals_receipt(
     assert prepared.request is not None
     engine = AgentEngine(AppConfig(
         workspace_root=str(tmp_path),
+        models=ModelConfig(
+            provider="test-provider",
+            default_model="shadow-test-model",
+            fast_model="shadow-test-model",
+            reasoning_model="shadow-test-model",
+            model_info={
+                "shadow-test-model": ModelMeta(
+                    max_context=32_768,
+                    max_output=4_096,
+                    input_cost_per_million=1.0,
+                    output_cost_per_million=2.0,
+                    supports_tools=True,
+                    supports_streaming=True,
+                    supports_parallel_tools=True,
+                    supports_structured_output=True,
+                    supports_reasoning=False,
+                    supports_vision=False,
+                    input_modalities=("text",),
+                    output_modalities=("text",),
+                ),
+            },
+        ),
         memory=MemoryConfig(
             session_db_path=str(tmp_path / ".naumi" / "sessions.db"),
             vector_db_path=str(tmp_path / ".naumi" / "chroma"),
@@ -2244,6 +2270,17 @@ async def test_capability_sandbox_executes_real_arc04_worker_and_seals_receipt(
         artifact_service=artifact_service,
         registry_lease_service=registry_service,
         store=EvolutionCapabilityShadowDescriptorStore(tmp_path / "evolution.db"),
+        now=lambda: registry_clock[0].isoformat(),
+    )
+    shadow_observation_service = EvolutionCapabilityShadowObservationContractService(
+        workspace_root=tmp_path,
+        descriptor_service=shadow_service,
+        specification_service=specification_service,
+        tool_registry=engine.tool_registry,
+        model_port=engine.router,
+        store=EvolutionCapabilityShadowObservationContractStore(
+            tmp_path / "evolution.db"
+        ),
         now=lambda: registry_clock[0].isoformat(),
     )
     decided_at = datetime.now(UTC).isoformat()
@@ -2388,6 +2425,25 @@ async def test_capability_sandbox_executes_real_arc04_worker_and_seals_receipt(
             f"/evolution capability-shadow {proposal.source.candidate_id}",
         )
         assert shadow_view.descriptor.descriptor_id in shadow_slash_output
+        shadow_observation = await shadow_observation_service.compile(
+            proposal.source.candidate_id
+        )
+        assert shadow_observation.state == "ready"
+        assert shadow_observation.contract is not None
+        assert shadow_observation.contract.provider_call_authorized is False
+        assert shadow_observation.contract.candidate_execution_authorized is False
+        assert {
+            item.expected_recommendation for item in shadow_observation.contract.samples
+        } == {"recommend", "not_recommend"}
+        engine.evolution_capability_shadow_observation_contract_service = (
+            shadow_observation_service
+        )
+        shadow_observation_slash = await execute_slash_command(
+            engine,
+            f"/evolution capability-shadow-observation-status "
+            f"{proposal.source.candidate_id}",
+        )
+        assert shadow_observation.contract.contract_id in shadow_observation_slash
         candidate_source = tmp_path / "candidate.py"
         sealed_source = candidate_source.read_text(encoding="utf-8")
         candidate_source.write_text(
@@ -2406,6 +2462,11 @@ async def test_capability_sandbox_executes_real_arc04_worker_and_seals_receipt(
         revoked_shadow = await shadow_service.inspect(proposal.source.candidate_id)
         assert revoked_shadow.state == "revoked"
         assert revoked_shadow.offline_shadow_input_eligible is False
+        revoked_observation = await shadow_observation_service.inspect(
+            proposal.source.candidate_id
+        )
+        assert revoked_observation.state == "descriptor_revoked"
+        assert revoked_observation.observation_input_eligible is False
         candidate_source.write_text(sealed_source, encoding="utf-8")
         final_parent = await engine._resources.permission_decision_store.issue(
             request_id="capability-registry-final-request",

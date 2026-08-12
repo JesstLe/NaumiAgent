@@ -6121,6 +6121,10 @@ class JsonlEngineBridge:
             CapabilityShadowDescriptorError,
             render_capability_shadow_descriptor,
         )
+        from naumi_agent.evolution.capability_shadow_observation_contracts import (
+            CapabilityShadowObservationContractError,
+            render_capability_shadow_observation_contract,
+        )
         from naumi_agent.evolution.capability_specification import (
             CapabilitySpecificationStoreError,
             render_capability_specification,
@@ -6334,6 +6338,46 @@ class JsonlEngineBridge:
                     self.engine.workspace_root,
                     candidate_id,
                 )
+            elif action in {
+                "capability-shadow-observation",
+                "capability-shadow-observation-status",
+            }:
+                from naumi_agent.tools.base import ToolCall
+
+                candidate_id = str(payload.get("candidate_id") or "")
+                if action == "capability-shadow-observation":
+                    result = await self.engine.execute_tool(
+                        ToolCall(
+                            id=f"ui-capability-shadow-observation-{uuid4()}",
+                            name="evolution_capability_shadow_observation_contract",
+                            arguments=json.dumps(
+                                {
+                                    "action": "compile",
+                                    "candidate_id": candidate_id,
+                                    "model": str(payload.get("model") or "") or None,
+                                },
+                                ensure_ascii=False,
+                            ),
+                        ),
+                        agent_name="new-ui",
+                    )
+                    content = result.content
+                else:
+                    view = await (
+                        self.engine.evolution_capability_shadow_observation_contract_service.inspect(
+                            candidate_id,
+                        )
+                    )
+                    content = render_capability_shadow_observation_contract(view)
+                await self._emit_system_notice(
+                    "Capability Shadow 观察契约",
+                    content,
+                    request_id=request_id,
+                )
+                snapshot = await service.detail_snapshot(
+                    self.engine.workspace_root,
+                    candidate_id,
+                )
             elif action == "enqueue":
                 session = getattr(self.engine, "_session", None)
                 if session is None:
@@ -6380,6 +6424,7 @@ class JsonlEngineBridge:
             CapabilitySandboxRequestError,
             CapabilityRegistryLeaseError,
             CapabilityShadowDescriptorError,
+            CapabilityShadowObservationContractError,
             EvolutionStoreError,
             OSError,
             ValueError,
@@ -6434,6 +6479,16 @@ class JsonlEngineBridge:
                 "capability-shadow-status": (
                     "Capability Shadow descriptor 不可读取；持久记录或来源已失效。",
                     "evolution_capability_shadow_descriptor_failed",
+                ),
+                "capability-shadow-observation": (
+                    "Capability Shadow observation contract 未形成；"
+                    "Descriptor、样本、模型元数据或 baseline 已失效。",
+                    "evolution_capability_shadow_observation_contract_failed",
+                ),
+                "capability-shadow-observation-status": (
+                    "Capability Shadow observation contract 不可读取；"
+                    "持久记录或动态来源已失效。",
+                    "evolution_capability_shadow_observation_contract_failed",
                 ),
             }
             if action in capability_errors:

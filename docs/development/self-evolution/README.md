@@ -256,7 +256,7 @@ first-terminal-wins 人工决策和动态撤权关闭治理缺口；
 完成 AST/schema/顶层副作用/内置名冲突与临时 namespace 准入预检。真实 Sandbox fixture execution、
 [EVO-06.3b1](EVO-06-3b1-executable-scenario-binding.md) 已将 prose verification 绑定为 Harness 人工提交、
 JSON Schema 可校验且动态可撤权的精确 arguments/result-or-error oracle/timeout；真实 Sandbox execution、
-Shadow observation/aggregation、Activation 与 learning authority 仍未完成。Catalog-only Registry lease 已由
+Shadow Observation Runner/aggregation、Activation 与 learning authority 仍未完成。Catalog-only Registry lease 已由
 [EVO-06.3b2c](EVO-06-3b2c-catalog-registry-lease.md) 关闭；其错误场景执行所需的最小运行时前置
 [ARC-01.3d1](../architecture/ARC-01-3d1-structured-tool-failure-contract.md) 已交付：声明式 error code、用户安全
 message 与 retryable 可贯通 Engine、事件、typed UI 和 Agent Worker RPC，但不执行候选 Artifact。
@@ -267,8 +267,10 @@ Artifact/Binding/permission digests、候选/driver/scenario overlays、argv、t
 Run Grant、child permission、ToolJob lifecycle 和一次性 Shell Worker，真实执行 result/error oracle 与权限观察，
 并在 authority 清理后形成 content-addressed Receipt。通过 Receipt 仍不授予 Registry/Shadow/执行权；下一步
 3b2c 已实现短期、可撤销且禁止覆盖内置 Tool 的 catalog-only Registry lease；3b2c 不加载候选代码，
-4a Shadow descriptor 已由 [EVO-06.4a](EVO-06-4a-sealed-shadow-descriptor.md) 独立实现；4b observation、
-4c aggregation 与 Limited Activation 仍必须分别实现。
+4a Shadow descriptor 已由 [EVO-06.4a](EVO-06-4a-sealed-shadow-descriptor.md) 独立实现；
+[EVO-06.4b](EVO-06-4b-shadow-observation-contract.md) 已进一步冻结 current baseline、interaction-backed
+正样本、真实负控制、模型能力/reasoning 与预算，但不调用 provider。4c Observation Runner/aggregation 与
+Limited Activation 仍必须分别实现。
 [EVO-01.4b](EVO-01-4b-composite-source-authority-router.md) 已为下一步 runtime metric/Eval Evidence
 补齐 fail-closed 多来源 authority router：所有动态 kind 必须完整注册，不同 reader 并发重验，且 Review
 绑定不能被后续 reader 静默覆盖。

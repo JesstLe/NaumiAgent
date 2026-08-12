@@ -3327,6 +3327,10 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
         CapabilityShadowDescriptorError,
         render_capability_shadow_descriptor,
     )
+    from naumi_agent.evolution.capability_shadow_observation_contracts import (
+        CapabilityShadowObservationContractError,
+        render_capability_shadow_observation_contract,
+    )
     from naumi_agent.evolution.capability_specification import (
         CapabilitySpecificationStoreError,
         render_capability_specification,
@@ -4964,6 +4968,42 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             )
             console.print(Markdown(result.content))
             return
+        if action == "capability-shadow-observation-status":
+            if len(parts) != 2:
+                raise ValueError(
+                    "capability-shadow-observation-status 需要一个 Candidate ID。"
+                )
+            view = (
+                await engine.evolution_capability_shadow_observation_contract_service.inspect(
+                    parts[1],
+                )
+            )
+            console.print(Markdown(render_capability_shadow_observation_contract(view)))
+            return
+        if action == "capability-shadow-observation":
+            if len(parts) not in {2, 3}:
+                raise ValueError(
+                    "capability-shadow-observation 需要 Candidate ID，可选指定模型。"
+                )
+            from naumi_agent.tools.base import ToolCall
+
+            result = await engine.execute_tool(
+                ToolCall(
+                    id=f"slash-capability-shadow-observation-{uuid.uuid4()}",
+                    name="evolution_capability_shadow_observation_contract",
+                    arguments=json.dumps(
+                        {
+                            "action": "compile",
+                            "candidate_id": parts[1],
+                            "model": parts[2] if len(parts) == 3 else None,
+                        },
+                        ensure_ascii=False,
+                    ),
+                ),
+                agent_name="cli",
+            )
+            console.print(Markdown(result.content))
+            return
         if action == "detail":
             if len(parts) != 2:
                 raise ValueError("detail 需要一个 Candidate ID。")
@@ -4998,6 +5038,8 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "capability-unregister、"
                 "capability-shadow、"
                 "capability-shadow-status、"
+                "capability-shadow-observation、"
+                "capability-shadow-observation-status、"
                 "experiment-contract、evaluation、"
                 "evaluation-contract、"
                 "evaluation-final、decision-input、mechanical-gate、"
@@ -5195,6 +5237,8 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution capability-unregister <candidate-id>；"
             "/evolution capability-shadow <candidate-id>；"
             "/evolution capability-shadow-status <candidate-id>；"
+            "/evolution capability-shadow-observation <candidate-id> [model]；"
+            "/evolution capability-shadow-observation-status <candidate-id>；"
             "/evolution experiment-contract <contract-id>；"
             "/evolution evaluation <comparison-id>；"
             "/evolution evaluation-contract <workspace-relative-request.json>；"
@@ -5580,6 +5624,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     except CapabilityShadowDescriptorError as exc:
         console.print(
             f"Capability Shadow descriptor 未完成：{exc}",
+            style="yellow",
+            markup=False,
+        )
+        return
+    except CapabilityShadowObservationContractError as exc:
+        console.print(
+            f"Capability Shadow observation contract 未完成：{exc}",
             style="yellow",
             markup=False,
         )

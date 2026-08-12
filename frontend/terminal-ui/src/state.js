@@ -5789,9 +5789,22 @@ function parseEvolutionReviewCommand(text) {
     "capability-unregister",
     "capability-shadow",
     "capability-shadow-status",
+    "capability-shadow-observation-status",
   ].includes(action)) {
     if (values.length !== 2 || !/^evc_[0-9a-f]{24}$/.test(values[1])) return null;
     return { action, candidate_id: values[1], query: "", risk: "", source_kind: "", limit: 50 };
+  }
+  if (action === "capability-shadow-observation") {
+    if (![2, 3].includes(values.length) || !/^evc_[0-9a-f]{24}$/.test(values[1])) return null;
+    return {
+      action,
+      candidate_id: values[1],
+      model: values[2] || "",
+      query: "",
+      risk: "",
+      source_kind: "",
+      limit: 50,
+    };
   }
   if (action === "capability-register") {
     if (![2, 3].includes(values.length) || !/^evc_[0-9a-f]{24}$/.test(values[1])) return null;

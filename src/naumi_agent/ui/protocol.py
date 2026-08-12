@@ -790,13 +790,17 @@ def _normalize_client_payload(
             "capability-unregister",
             "capability-shadow",
             "capability-shadow-status",
+            "capability-shadow-observation",
+            "capability-shadow-observation-status",
         }:
             raise ValueError(
                 "Evolution review action 仅支持 list/priorities/detail/"
                 "capability-spec/capability-govern/capability-artifact/"
                 "capability-bind/capability-sandbox/capability-run/"
                 "capability-lease/capability-register/capability-unregister/"
-                "capability-shadow/capability-shadow-status。"
+                "capability-shadow/capability-shadow-status/"
+                "capability-shadow-observation/"
+                "capability-shadow-observation-status。"
             )
         candidate_id = str(payload.get("candidate_id") or "").strip()
         if action in {
@@ -809,6 +813,8 @@ def _normalize_client_payload(
             "capability-unregister",
             "capability-shadow",
             "capability-shadow-status",
+            "capability-shadow-observation",
+            "capability-shadow-observation-status",
         } and not re.fullmatch(
             r"evc_[0-9a-f]{24}", candidate_id
         ):
@@ -855,6 +861,15 @@ def _normalize_client_payload(
             duration_seconds = raw_duration
         elif "duration_seconds" in payload:
             raise ValueError("只有 capability-register 接受 duration_seconds。")
+        model = str(payload.get("model") or "").strip()
+        if action == "capability-shadow-observation":
+            if (
+                len(model) > 300
+                or any(ord(char) < 33 or ord(char) == 127 for char in model)
+            ):
+                raise ValueError("Shadow observation model 格式无效。")
+        elif "model" in payload:
+            raise ValueError("只有 capability-shadow-observation 接受 model。")
         normalized = {
             "action": action,
             "candidate_id": (
@@ -869,6 +884,8 @@ def _normalize_client_payload(
                     "capability-unregister",
                     "capability-shadow",
                     "capability-shadow-status",
+                    "capability-shadow-observation",
+                    "capability-shadow-observation-status",
                 }
                 else ""
             ),
@@ -882,6 +899,8 @@ def _normalize_client_payload(
             normalized["class_name"] = class_name
         if action == "capability-register":
             normalized["duration_seconds"] = duration_seconds
+        if action == "capability-shadow-observation":
+            normalized["model"] = model
         return normalized
 
     if event_type == ClientEventType.EVOLUTION_EVALUATION_LANE_REQUEST:

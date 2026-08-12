@@ -30,7 +30,8 @@ _POLICY_VERSION = "evolution-capability-shadow-descriptor-v1"
 _SAFE_TOOL_COMPONENT_RE = re.compile(r"[^A-Za-z0-9_-]+")
 _ERROR_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _ABSOLUTE_TEXT_PATH_RE = re.compile(
-    r"(?:^|[\s`(])(?:/(?:Users|home|tmp|var)/\S+|[A-Za-z]:[\\/]\S+)",
+    r"(?:^|[\s`(\"':=,\[])"
+    r"(?:/(?:Users|home|tmp|var)/[^\s\"']+|[A-Za-z]:[\\/][^\s\"']+)",
 )
 _PERMISSION_FAMILIES = frozenset({
     "workspace_read",
