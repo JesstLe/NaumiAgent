@@ -9,6 +9,7 @@ from typing import Protocol
 
 from naumi_agent.evolution.aggregation import CandidateAggregation, aggregate_candidate
 from naumi_agent.evolution.candidate import EvolutionCandidateDraft
+from naumi_agent.evolution.capability_governance import CapabilityGovernanceView
 from naumi_agent.evolution.capability_proposal import (
     EvolutionCapabilityProposal,
     generate_capability_proposal,
@@ -79,6 +80,15 @@ class CapabilitySpecificationReader(Protocol):
     ) -> CapabilitySpecificationView: ...
 
 
+class CapabilityGovernanceReader(Protocol):
+    async def inspect_capability_governance(
+        self,
+        workspace_root: str | Path,
+        proposal: EvolutionCapabilityProposal,
+        specification_view: CapabilitySpecificationView,
+    ) -> CapabilityGovernanceView | None: ...
+
+
 @dataclass(frozen=True, slots=True)
 class EvolutionReviewFilter:
     query: str = ""
@@ -126,6 +136,7 @@ class EvolutionReviewItem:
     proposal: EvolutionProposalPreview | None
     capability_proposal: EvolutionCapabilityProposal | None
     capability_specification: CapabilitySpecificationView | None
+    capability_governance: CapabilityGovernanceView | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,11 +159,13 @@ class EvolutionReviewService:
         governance_reader: CandidateGovernanceReader | None = None,
         source_authority_reader: CandidateSourceAuthorityReader | None = None,
         capability_specification_reader: CapabilitySpecificationReader | None = None,
+        capability_governance_reader: CapabilityGovernanceReader | None = None,
     ) -> None:
         self._store = store
         self._governance_reader = governance_reader
         self._source_authority_reader = source_authority_reader
         self._capability_specification_reader = capability_specification_reader
+        self._capability_governance_reader = capability_governance_reader
 
     def bind_governance_reader(self, reader: CandidateGovernanceReader) -> None:
         """Bind the durable read path after runtime services are composed."""
@@ -182,6 +195,17 @@ class EvolutionReviewService:
         ):
             raise RuntimeError("Capability Specification reader 已绑定。")
         self._capability_specification_reader = reader
+
+    def bind_capability_governance_reader(
+        self,
+        reader: CapabilityGovernanceReader,
+    ) -> None:
+        if (
+            self._capability_governance_reader is not None
+            and self._capability_governance_reader is not reader
+        ):
+            raise RuntimeError("Capability Governance reader 已绑定。")
+        self._capability_governance_reader = reader
 
     async def list_snapshot(
         self,
@@ -234,6 +258,8 @@ class EvolutionReviewService:
         self,
         workspace_root: str | Path,
         candidate_id: str,
+        *,
+        include_capability_extensions: bool = True,
     ) -> EvolutionReviewSnapshot:
         stored = await self._store.get_candidate(workspace_root, candidate_id)
         if stored is None:
@@ -267,7 +293,8 @@ class EvolutionReviewService:
             portfolio=portfolio,
         )
         if (
-            selected.capability_proposal is not None
+            include_capability_extensions
+            and selected.capability_proposal is not None
             and self._capability_specification_reader is not None
         ):
             capability_specification = (
@@ -280,6 +307,18 @@ class EvolutionReviewService:
                 selected,
                 capability_specification=capability_specification,
             )
+            if self._capability_governance_reader is not None:
+                capability_governance = (
+                    await self._capability_governance_reader.inspect_capability_governance(
+                        workspace_root,
+                        selected.capability_proposal,
+                        capability_specification,
+                    )
+                )
+                selected = replace(
+                    selected,
+                    capability_governance=capability_governance,
+                )
         return EvolutionReviewSnapshot(
             mode="detail",
             selected=selected,
@@ -576,6 +615,43 @@ def _render_detail(snapshot: EvolutionReviewSnapshot) -> str:
             lines.append(
                 f"- 继续：`/evolution capability-spec {item.candidate_id}`"
             )
+    if item.capability_governance is not None:
+        governance = item.capability_governance
+        lines.extend([
+            "",
+            f"## Capability Governance · `{governance.state}`",
+            "",
+            f"- Assessment：`{governance.assessment.assessment_id}`",
+            (
+                "- 决策有效：是"
+                if governance.decision_effective
+                else "- 决策有效：否"
+            ),
+            (
+                "- Sandbox 实现设计资格：是"
+                if governance.sandbox_design_eligible
+                else "- Sandbox 实现设计资格：否"
+            ),
+            "- Registry 注册：否 · Shadow：否 · 可执行：否",
+        ])
+        for check in governance.assessment.checks:
+            lines.append(
+                f"- {'通过' if check.passed else '阻断'} · `{check.code}`"
+            )
+        if governance.decision is not None:
+            lines.extend([
+                f"- Decision：`{governance.decision.decision_id}`",
+                f"- 结果：`{governance.decision.outcome}`",
+                f"- 原因：{_escape(governance.decision.reason)}",
+            ])
+        elif governance.pending_interaction_id:
+            lines.append(
+                f"- 待回答交互：`{_escape(governance.pending_interaction_id)}`"
+            )
+        else:
+            lines.append(
+                f"- 继续：`/evolution capability-govern {item.candidate_id}`"
+            )
     lines.extend(["", "## Evidence 引用", ""])
     lines.extend(f"- `{_escape(ref)}`" for ref in item.evidence_refs[:20])
     if len(item.evidence_refs) > 20:
@@ -675,6 +751,7 @@ def _review_item(
             else None
         ),
         capability_specification=None,
+        capability_governance=None,
     )
 
 

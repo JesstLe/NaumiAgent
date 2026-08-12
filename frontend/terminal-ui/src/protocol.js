@@ -6399,6 +6399,14 @@ function normalizeEvolutionItem(value, detail) {
       item.capability_specification,
       capabilityProposal,
     );
+  const capabilityGovernance = item.capability_governance == null
+    ? null
+    : normalizeEvolutionCapabilityGovernance(
+      item.capability_governance,
+      item.capability_specification,
+      capabilityProposal,
+      capabilitySpecification,
+    );
   if (normalized.review_ready && proposal === null) {
     throw new Error("evolution/review review_ready detail 必须包含 Proposal Preview");
   }
@@ -6448,7 +6456,174 @@ function normalizeEvolutionItem(value, detail) {
     proposal,
     capability_proposal: capabilityProposal,
     capability_specification: capabilitySpecification,
+    capability_governance: capabilityGovernance,
   };
+}
+
+function normalizeEvolutionCapabilityGovernance(
+  value,
+  rawSpecificationView,
+  capabilityProposal,
+  capabilitySpecification,
+) {
+  if (!capabilityProposal || !capabilitySpecification?.specification || !rawSpecificationView?.specification) {
+    throw new Error("evolution/review Capability Governance 缺少完整 Specification");
+  }
+  const item = harnessObject(value, "evolution/review capability_governance");
+  const assessment = harnessObject(item.assessment, "evolution/review capability_governance.assessment");
+  const rawChecks = harnessObjectArray(assessment.checks, "evolution/review capability_governance.assessment.checks", 6);
+  const expectedCodes = [
+    "specification_complete", "candidate_lineage", "interaction_cardinality",
+    "interaction_integrity", "answer_replay", "authority_closed",
+  ];
+  const checks = rawChecks.map((check, index) => ({
+    code: harnessChoice(check.code, "evolution/review capability_governance.check.code", new Set(expectedCodes)),
+    passed: harnessBoolean(check.passed, "evolution/review capability_governance.check.passed"),
+    hard_block: harnessBoolean(check.hard_block, "evolution/review capability_governance.check.hard_block"),
+    detail: harnessText(check.detail, "evolution/review capability_governance.check.detail"),
+    expected_code: expectedCodes[index],
+  }));
+  const rawSpecificationSha256 = capabilitySpecification.specification_sha256;
+  const source = capabilityProposal.source;
+  const normalizedAssessment = {
+    schema_version: harnessNonnegativeInteger(assessment.schema_version, "evolution/review capability_governance.assessment.schema_version"),
+    assessment_id: harnessText(assessment.assessment_id, "evolution/review capability_governance.assessment.assessment_id"),
+    policy_version: harnessChoice(assessment.policy_version, "evolution/review capability_governance.assessment.policy_version", new Set(["evolution-capability-governance-v1"])),
+    specification_id: harnessText(assessment.specification_id, "evolution/review capability_governance.assessment.specification_id"),
+    specification_revision: harnessNonnegativeInteger(assessment.specification_revision, "evolution/review capability_governance.assessment.specification_revision"),
+    specification_sha256: harnessText(assessment.specification_sha256, "evolution/review capability_governance.assessment.specification_sha256"),
+    candidate_id: harnessText(assessment.candidate_id, "evolution/review capability_governance.assessment.candidate_id"),
+    candidate_revision: harnessNonnegativeInteger(assessment.candidate_revision, "evolution/review capability_governance.assessment.candidate_revision"),
+    candidate_sha256: harnessText(assessment.candidate_sha256, "evolution/review capability_governance.assessment.candidate_sha256"),
+    checks: checks.map(({ expected_code: _expectedCode, ...check }) => check),
+    eligible_for_decision: harnessBoolean(assessment.eligible_for_decision, "evolution/review capability_governance.assessment.eligible_for_decision"),
+    sandbox_design_eligible: harnessBoolean(assessment.sandbox_design_eligible, "evolution/review capability_governance.assessment.sandbox_design_eligible"),
+    registration_authorized: harnessBoolean(assessment.registration_authorized, "evolution/review capability_governance.assessment.registration_authorized"),
+    executable: harnessBoolean(assessment.executable, "evolution/review capability_governance.assessment.executable"),
+  };
+  const expectedAssessmentId = `evcsa_${createHash("sha256").update(canonicalJson({
+    policy_version: "evolution-capability-governance-v1",
+    specification_id: normalizedAssessment.specification_id,
+    specification_sha256: normalizedAssessment.specification_sha256,
+    candidate_id: normalizedAssessment.candidate_id,
+    candidate_revision: normalizedAssessment.candidate_revision,
+    candidate_sha256: normalizedAssessment.candidate_sha256,
+    checks: normalizedAssessment.checks.map(({ code, passed, hard_block }) => ({ code, passed, hard_block })),
+  })).digest("hex").slice(0, 24)}`;
+  if (
+    normalizedAssessment.schema_version !== 1
+    || normalizedAssessment.assessment_id !== expectedAssessmentId
+    || normalizedAssessment.specification_id !== capabilitySpecification.specification_id
+    || normalizedAssessment.specification_revision !== 5
+    || normalizedAssessment.specification_sha256 !== rawSpecificationSha256
+    || normalizedAssessment.candidate_id !== source.candidate_id
+    || normalizedAssessment.candidate_revision !== source.candidate_revision
+    || normalizedAssessment.candidate_sha256 !== source.candidate_sha256
+    || checks.some((check) => check.code !== check.expected_code || !check.hard_block)
+    || normalizedAssessment.eligible_for_decision !== checks.every((check) => check.passed)
+    || normalizedAssessment.sandbox_design_eligible
+    || normalizedAssessment.registration_authorized
+    || normalizedAssessment.executable
+  ) {
+    throw new Error("evolution/review Capability Governance assessment authority contract 无效");
+  }
+  const decision = item.decision == null
+    ? null
+    : normalizeEvolutionCapabilityDecision(item.decision, normalizedAssessment);
+  const state = harnessChoice(item.state, "evolution/review capability_governance.state", new Set(["blocked", "awaiting_decision", "approved", "rejected", "revoked"]));
+  const decisionEffective = harnessBoolean(item.decision_effective, "evolution/review capability_governance.decision_effective");
+  const sandboxDesignEligible = harnessBoolean(item.sandbox_design_eligible, "evolution/review capability_governance.sandbox_design_eligible");
+  const pendingInteractionId = harnessText(item.pending_interaction_id, "evolution/review capability_governance.pending_interaction_id");
+  const expectedEffective = Boolean(
+    decision
+    && decision.assessment_id === normalizedAssessment.assessment_id
+    && decision.assessment_sha256 === createHash("sha256").update(canonicalJson(normalizedAssessment)).digest("hex")
+    && decision.specification_sha256 === normalizedAssessment.specification_sha256
+  );
+  const expectedState = decision == null
+    ? (normalizedAssessment.eligible_for_decision ? "awaiting_decision" : "blocked")
+    : expectedEffective ? decision.outcome : "revoked";
+  if (
+    harnessNonnegativeInteger(item.schema_version, "evolution/review capability_governance.schema_version") !== 1
+    || harnessText(item.candidate_id, "evolution/review capability_governance.candidate_id") !== source.candidate_id
+    || harnessText(item.specification_id, "evolution/review capability_governance.specification_id") !== capabilitySpecification.specification_id
+    || state !== expectedState
+    || decisionEffective !== expectedEffective
+    || sandboxDesignEligible !== Boolean(expectedEffective && decision?.outcome === "approved")
+    || harnessBoolean(item.registration_authorized, "evolution/review capability_governance.registration_authorized")
+    || harnessBoolean(item.shadow_authorized, "evolution/review capability_governance.shadow_authorized")
+    || harnessBoolean(item.executable, "evolution/review capability_governance.executable")
+    || (pendingInteractionId && !new RegExp(`^ask-evcgov-${capabilitySpecification.specification_id.slice(5)}-\\d{1,3}$`).test(pendingInteractionId))
+  ) {
+    throw new Error("evolution/review Capability Governance authority contract 无效");
+  }
+  return {
+    schema_version: 1,
+    candidate_id: source.candidate_id,
+    specification_id: capabilitySpecification.specification_id,
+    assessment: normalizedAssessment,
+    decision,
+    state,
+    decision_effective: decisionEffective,
+    pending_interaction_id: pendingInteractionId,
+    sandbox_design_eligible: sandboxDesignEligible,
+    registration_authorized: false,
+    shadow_authorized: false,
+    executable: false,
+  };
+}
+
+function normalizeEvolutionCapabilityDecision(value, assessment) {
+  const item = harnessObject(value, "evolution/review capability_governance.decision");
+  const normalized = {
+    schema_version: harnessNonnegativeInteger(item.schema_version, "evolution/review capability_governance.decision.schema_version"),
+    decision_id: harnessText(item.decision_id, "evolution/review capability_governance.decision.decision_id"),
+    policy_version: harnessChoice(item.policy_version, "evolution/review capability_governance.decision.policy_version", new Set(["evolution-capability-governance-v1"])),
+    assessment_id: harnessText(item.assessment_id, "evolution/review capability_governance.decision.assessment_id"),
+    assessment_sha256: harnessText(item.assessment_sha256, "evolution/review capability_governance.decision.assessment_sha256"),
+    specification_id: harnessText(item.specification_id, "evolution/review capability_governance.decision.specification_id"),
+    specification_sha256: harnessText(item.specification_sha256, "evolution/review capability_governance.decision.specification_sha256"),
+    candidate_id: harnessText(item.candidate_id, "evolution/review capability_governance.decision.candidate_id"),
+    candidate_revision: harnessNonnegativeInteger(item.candidate_revision, "evolution/review capability_governance.decision.candidate_revision"),
+    outcome: harnessChoice(item.outcome, "evolution/review capability_governance.decision.outcome", new Set(["approved", "rejected"])),
+    reason: harnessText(item.reason, "evolution/review capability_governance.decision.reason"),
+    source_interaction_id: harnessText(item.source_interaction_id, "evolution/review capability_governance.decision.source_interaction_id"),
+    source_interaction_sequence: harnessNonnegativeInteger(item.source_interaction_sequence, "evolution/review capability_governance.decision.source_interaction_sequence"),
+    source_interaction_sha256: harnessText(item.source_interaction_sha256, "evolution/review capability_governance.decision.source_interaction_sha256"),
+    decided_by: harnessChoice(item.decided_by, "evolution/review capability_governance.decision.decided_by", new Set(["user"])),
+    decided_at: harnessText(item.decided_at, "evolution/review capability_governance.decision.decided_at"),
+    sandbox_design_eligible: harnessBoolean(item.sandbox_design_eligible, "evolution/review capability_governance.decision.sandbox_design_eligible"),
+    registration_authorized: harnessBoolean(item.registration_authorized, "evolution/review capability_governance.decision.registration_authorized"),
+    shadow_authorized: harnessBoolean(item.shadow_authorized, "evolution/review capability_governance.decision.shadow_authorized"),
+    executable: harnessBoolean(item.executable, "evolution/review capability_governance.decision.executable"),
+  };
+  const expectedId = `evcgd_${createHash("sha256").update(canonicalJson({
+    policy_version: "evolution-capability-governance-v1",
+    assessment_sha256: normalized.assessment_sha256,
+    interaction_id: normalized.source_interaction_id,
+    interaction_sha256: normalized.source_interaction_sha256,
+    outcome: normalized.outcome,
+    reason: normalized.reason,
+  })).digest("hex").slice(0, 24)}`;
+  if (
+    normalized.schema_version !== 1
+    || normalized.decision_id !== expectedId
+    || normalized.assessment_id !== assessment.assessment_id
+    || normalized.specification_id !== assessment.specification_id
+    || normalized.specification_sha256 !== assessment.specification_sha256
+    || normalized.candidate_id !== assessment.candidate_id
+    || normalized.candidate_revision !== assessment.candidate_revision
+    || normalized.source_interaction_sequence < 2
+    || !new RegExp(`^ask-evcgov-${assessment.specification_id.slice(5)}-\\d{1,3}$`).test(normalized.source_interaction_id)
+    || !/^[0-9a-f]{64}$/.test(normalized.source_interaction_sha256)
+    || normalized.sandbox_design_eligible !== (normalized.outcome === "approved")
+    || normalized.registration_authorized
+    || normalized.shadow_authorized
+    || normalized.executable
+  ) {
+    throw new Error("evolution/review Capability Governance decision authority contract 无效");
+  }
+  return normalized;
 }
 
 function normalizeEvolutionCapabilitySpecification(value, capabilityProposal) {
@@ -6484,6 +6659,7 @@ function normalizeEvolutionCapabilitySpecification(value, capabilityProposal) {
     pending_step: pendingStep,
     unresolved_requirements: unresolved,
     specification,
+    specification_sha256: harnessText(item.specification_sha256, "evolution/review capability_specification.specification_sha256"),
     pending_interaction_id: harnessText(item.pending_interaction_id, "evolution/review capability_specification.pending_interaction_id"),
     sandbox_eligible: harnessBoolean(item.sandbox_eligible, "evolution/review capability_specification.sandbox_eligible"),
     shadow_eligible: harnessBoolean(item.shadow_eligible, "evolution/review capability_specification.shadow_eligible"),
@@ -6523,6 +6699,9 @@ function normalizeEvolutionCapabilitySpecification(value, capabilityProposal) {
     || normalized.shadow_eligible
     || normalized.executable
     || (normalized.revision === 0) !== (specification === null)
+    || (specification === null
+      ? normalized.specification_sha256 !== ""
+      : !/^[0-9a-f]{64}$/.test(normalized.specification_sha256))
     || (normalized.pending_interaction_id && !/^ask-evcpspec-[0-9a-f]{24}-(?:interface|permissions|data|verification|operations)-\d{1,3}$/.test(normalized.pending_interaction_id))
   ) {
     throw new Error("evolution/review Capability Specification authority contract 无效");

@@ -30,6 +30,10 @@ from naumi_agent.evolution.approval_signatures import (
     EvolutionApprovalSignatureError,
     render_evolution_approval_signature,
 )
+from naumi_agent.evolution.capability_governance import (
+    CapabilityGovernanceError,
+    render_capability_governance,
+)
 from naumi_agent.evolution.capability_specification import (
     CapabilitySpecificationStoreError,
     render_capability_specification,
@@ -529,6 +533,80 @@ class EvolutionCapabilitySpecificationTool(Tool):
             ValueError,
         ) as exc:
             return f"Capability Specification 未推进：{exc}"
+
+
+class EvolutionCapabilityGovernanceTool(Tool):
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_capability_governance"
+
+    @property
+    def description(self) -> str:
+        return (
+            "查看或请求用户治理一个完整 Capability Specification。系统独立重放"
+            "五条 Harness 答案；approved 只授予 Sandbox 实现设计资格，"
+            "不授予注册、Shadow 或执行 authority。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["inspect", "decide"],
+                    "default": "inspect",
+                },
+                "candidate_id": {
+                    "type": "string",
+                    "pattern": "^evc_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["candidate_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=False,
+            user_facing_name="能力规格治理",
+            search_hint="evolution capability specification governance approval sandbox",
+        )
+
+    async def execute(
+        self,
+        candidate_id: str,
+        action: str = "inspect",
+    ) -> str:
+        try:
+            service = self._engine.evolution_capability_governance_service
+            if action == "inspect":
+                view = await service.inspect(
+                    self._engine.workspace_root,
+                    candidate_id.strip(),
+                )
+            elif action == "decide":
+                view = await service.decide(
+                    self._engine.workspace_root,
+                    candidate_id=candidate_id.strip(),
+                )
+            else:
+                return "action 仅支持 inspect 或 decide。"
+            return render_capability_governance(view)
+        except (
+            CapabilityGovernanceError,
+            HarnessStoreError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            return f"Capability Governance 未完成：{exc}"
 
 
 class EvolutionOutcomeOpportunityTool(Tool):
@@ -6693,6 +6771,7 @@ def create_evolution_review_tools(
     return [
         EvolutionCandidatesTool(engine, service),
         EvolutionCapabilitySpecificationTool(engine),
+        EvolutionCapabilityGovernanceTool(engine),
         EvolutionExperimentContractAuthorityTool(engine),
         EvolutionExperimentContractIssueTool(engine),
         EvolutionEvaluationReceiptTool(engine),
@@ -6782,6 +6861,7 @@ __all__ = [
     "EvolutionApprovalSignatureTool",
     "EvolutionCandidatesTool",
     "EvolutionCapabilitySpecificationTool",
+    "EvolutionCapabilityGovernanceTool",
     "EvolutionEvalMetricOpportunityTool",
     "EvolutionGoalNeedOpportunityTool",
     "EvolutionToolCatalogMissOpportunityTool",

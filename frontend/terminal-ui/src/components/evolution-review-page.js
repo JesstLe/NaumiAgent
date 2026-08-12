@@ -154,6 +154,29 @@ function detailLines(item, rawEvents) {
       lines.push(color(ANSI.cyan, `继续 · /evolution capability-spec ${item.candidate_id}`));
     }
   }
+  if (item.capability_governance) {
+    const governance = item.capability_governance;
+    lines.push(
+      color(ANSI.cyan, `── Capability Governance · ${governance.state}`),
+      `${governance.assessment.assessment_id} · checks ${governance.assessment.checks.filter((check) => check.passed).length}/6`,
+      color(governance.decision_effective ? ANSI.green : ANSI.yellow, `决策有效 · ${governance.decision_effective ? "是" : "否"}`),
+      color(governance.sandbox_design_eligible ? ANSI.green : ANSI.yellow, `Sandbox 实现设计资格 · ${governance.sandbox_design_eligible ? "是" : "否"}`),
+      color(ANSI.red, "Registry 注册 否 · Shadow 否 · 可执行 否"),
+    );
+    for (const check of governance.assessment.checks) {
+      lines.push(color(check.passed ? ANSI.green : ANSI.red, `${check.passed ? "通过" : "阻断"} · ${check.code}`));
+    }
+    if (governance.decision) {
+      lines.push(
+        color(governance.decision.outcome === "approved" ? ANSI.green : ANSI.red, `Decision · ${governance.decision.outcome}`),
+        color(ANSI.dim, governance.decision.reason),
+      );
+    } else if (governance.pending_interaction_id) {
+      lines.push(color(ANSI.yellow, `待回答交互 · ${governance.pending_interaction_id}`));
+    } else {
+      lines.push(color(ANSI.cyan, `治理 · /evolution capability-govern ${item.candidate_id}`));
+    }
+  }
   const aggregation = item.aggregation;
   if (aggregation) {
     lines.push(

@@ -95,6 +95,20 @@ test("evolution review list and detail stay bounded at common widths", () => {
         pending_step: "data",
         pending_interaction_id: "",
       },
+      capability_governance: {
+        state: "awaiting_decision",
+        decision_effective: false,
+        sandbox_design_eligible: false,
+        pending_interaction_id: "",
+        assessment: {
+          assessment_id: `evcsa_${"e".repeat(24)}`,
+          checks: [
+            "specification_complete", "candidate_lineage", "interaction_cardinality",
+            "interaction_integrity", "answer_replay", "authority_closed",
+          ].map((code) => ({ code, passed: true })),
+        },
+        decision: null,
+      },
     };
     const detail = renderEvolutionReviewPage({ snapshot: { mode: "detail", filters: {}, items: [], selected, events: [] }, scrollOffset: 0 }, width, 60);
     const plain = detail.map(stripAnsi).join("\n");
@@ -111,6 +125,9 @@ test("evolution review list and detail stay bounded at common widths", () => {
     assert(plain.includes("Capability Specification · drafting"));
     assert(plain.includes("revision 2/5"));
     assert(plain.includes(`/evolution capability-spec ${candidate.candidate_id}`));
+    assert(plain.includes("Capability Governance · awaiting_decision"));
+    assert(plain.includes("Registry 注册 否 · Shadow 否 · 可执行 否"));
+    assert(plain.includes(`/evolution capability-govern ${candidate.candidate_id}`));
     assert(plain.includes("Workbench 治理"));
     assert(plain.includes("可解释优先级"));
     assert(plain.includes("严重度 4 × 频次 2"));

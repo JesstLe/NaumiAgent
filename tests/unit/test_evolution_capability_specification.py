@@ -11,7 +11,15 @@ from types import SimpleNamespace
 
 import pytest
 
+from naumi_agent.cli.slash_router import execute_slash_command
 from naumi_agent.evolution.candidate import build_candidate_draft
+from naumi_agent.evolution.capability_governance import (
+    CapabilityGovernanceError,
+    CapabilitySpecificationAssessor,
+    EvolutionCapabilityGovernanceService,
+    EvolutionCapabilityGovernanceStore,
+    render_capability_governance,
+)
 from naumi_agent.evolution.capability_proposal import generate_capability_proposal
 from naumi_agent.evolution.capability_specification import (
     CapabilityDataSpecification,
@@ -34,6 +42,7 @@ from naumi_agent.evolution.prioritization import (
 from naumi_agent.evolution.store import EvolutionCandidateStore
 from naumi_agent.harness.interaction import new_interaction_record
 from naumi_agent.harness.store import HarnessStore
+from naumi_agent.tools.evolution_review import EvolutionCapabilityGovernanceTool
 from naumi_agent.user_interaction import normalize_interaction_request
 
 NOW = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
@@ -86,7 +95,12 @@ class _Review:
     def __init__(self, proposal) -> None:
         self.proposal = proposal
 
-    async def detail_snapshot(self, _workspace: Path, _candidate_id: str):
+    async def detail_snapshot(
+        self,
+        _workspace: Path,
+        _candidate_id: str,
+        **_kwargs: object,
+    ):
         selected = (
             None
             if self.proposal is None
@@ -281,6 +295,54 @@ def _service(
         clock=active_clock,
     )
     return service, specification_store, harness_store, host
+
+
+async def _complete_specification(tmp_path: Path):
+    proposal = await _proposal(tmp_path)
+    service, specification_store, harness_store, host = _service(
+        proposal=proposal,
+        workspace=tmp_path,
+        responses=_answers(),
+    )
+    view = None
+    for _ in range(5):
+        view = await service.advance(
+            tmp_path,
+            candidate_id=proposal.source.candidate_id,
+            session_id="spec-session",
+            agent_name="Human",
+        )
+    assert view is not None and view.state == "complete"
+    return proposal, service, specification_store, harness_store, host, view
+
+
+def _governance_service(
+    *,
+    tmp_path: Path,
+    proposal,
+    specification_service,
+    harness_store: HarnessStore,
+    responses: list[dict[str, str]],
+    fail_after_commit: bool = False,
+):
+    clock = _Clock()
+    host = _InteractionHost(
+        store=harness_store,
+        workspace=tmp_path,
+        responses=responses,
+        clock=clock,
+        fail_after_commit=fail_after_commit,
+    )
+    store = EvolutionCapabilityGovernanceStore(tmp_path / "evolution.db")
+    service = EvolutionCapabilityGovernanceService(
+        review_service=_Review(proposal),
+        specification_service=specification_service,
+        assessor=CapabilitySpecificationAssessor(harness_store),
+        store=store,
+        interaction_store=harness_store,
+        request_user_input=host,
+    )
+    return service, store, host
 
 
 @pytest.mark.asyncio
@@ -532,3 +594,385 @@ async def test_authority_revoked_while_answering_prevents_revision(tmp_path: Pat
 
     specification_id = str(host.requests[0]["_durable_subject_id"])
     assert await store.latest(tmp_path, specification_id) is None
+
+
+@pytest.mark.asyncio
+async def test_complete_specification_replays_and_user_approval_is_authority_closed(
+    tmp_path: Path,
+) -> None:
+    proposal, specification_service, _, harness, _, specification = (
+        await _complete_specification(tmp_path)
+    )
+    governance, store, host = _governance_service(
+        tmp_path=tmp_path,
+        proposal=proposal,
+        specification_service=specification_service,
+        harness_store=harness,
+        responses=[{"kind": "option", "value": "approve"}],
+    )
+
+    view = await governance.decide(
+        tmp_path,
+        candidate_id=proposal.source.candidate_id,
+    )
+
+    assert view.state == "approved"
+    assert view.decision_effective is True
+    assert view.sandbox_design_eligible is True
+    assert view.registration_authorized is False
+    assert view.shadow_authorized is False
+    assert view.executable is False
+    assert view.assessment.eligible_for_decision is True
+    assert all(check.passed for check in view.assessment.checks)
+    assert view.decision is not None
+    assert view.decision.specification_sha256 == specification.specification.digest()
+    assert view.decision.source_interaction_id.startswith("ask-evcgov-")
+    assert await store.latest(tmp_path, view.specification_id) == view.decision
+    assert len(host.requests) == 1
+    rendered = render_capability_governance(view)
+    assert "Sandbox 实现设计资格：是" in rendered
+    assert "Registry 注册：否" in rendered
+    engine = SimpleNamespace(
+        workspace_root=tmp_path,
+        evolution_capability_governance_service=governance,
+        evolution_review_service=governance.review_service,
+        _session=SimpleNamespace(id="spec-session"),
+    )
+    tool_output = await EvolutionCapabilityGovernanceTool(engine).execute(
+        candidate_id=proposal.source.candidate_id,
+        action="inspect",
+    )
+    slash_output = await execute_slash_command(
+        engine,
+        f"/evolution capability-govern {proposal.source.candidate_id}",
+    )
+    assert view.decision.decision_id in tool_output
+    assert view.decision.decision_id in slash_output
+
+
+@pytest.mark.asyncio
+async def test_governance_inspect_requires_complete_specification(tmp_path: Path) -> None:
+    proposal = await _proposal(tmp_path)
+    specification_service, _, harness, _ = _service(
+        proposal=proposal,
+        workspace=tmp_path,
+        responses=[],
+    )
+    governance, _, _ = _governance_service(
+        tmp_path=tmp_path,
+        proposal=proposal,
+        specification_service=specification_service,
+        harness_store=harness,
+        responses=[],
+    )
+
+    with pytest.raises(CapabilityGovernanceError, match="尚未完成"):
+        await governance.inspect(tmp_path, proposal.source.candidate_id)
+
+
+@pytest.mark.asyncio
+async def test_governance_defer_writes_no_terminal_and_reject_is_first_terminal(
+    tmp_path: Path,
+) -> None:
+    proposal, specification_service, _, harness, _, _ = (
+        await _complete_specification(tmp_path)
+    )
+    governance, store, host = _governance_service(
+        tmp_path=tmp_path,
+        proposal=proposal,
+        specification_service=specification_service,
+        harness_store=harness,
+        responses=[
+            {"kind": "option", "value": "defer"},
+            {"kind": "custom", "custom_text": "真实场景验收范围仍不足"},
+        ],
+    )
+
+    deferred = await governance.decide(
+        tmp_path,
+        candidate_id=proposal.source.candidate_id,
+    )
+    assert deferred.state == "awaiting_decision"
+    assert await store.latest(tmp_path, deferred.specification_id) is None
+
+    rejected = await governance.decide(
+        tmp_path,
+        candidate_id=proposal.source.candidate_id,
+    )
+    assert rejected.state == "rejected"
+    assert rejected.sandbox_design_eligible is False
+    assert rejected.decision is not None
+    assert rejected.decision.reason == "真实场景验收范围仍不足"
+    assert host.requests[0]["_interaction_id"].endswith("-1")
+    assert host.requests[1]["_interaction_id"].endswith("-2")
+
+
+@pytest.mark.asyncio
+async def test_invalid_governance_reason_does_not_poison_next_attempt(tmp_path: Path) -> None:
+    proposal, specification_service, _, harness, _, _ = (
+        await _complete_specification(tmp_path)
+    )
+    governance, store, host = _governance_service(
+        tmp_path=tmp_path,
+        proposal=proposal,
+        specification_service=specification_service,
+        harness_store=harness,
+        responses=[
+            {"kind": "custom", "custom_text": "x" * 1_001},
+            {"kind": "option", "value": "approve"},
+        ],
+    )
+
+    with pytest.raises(CapabilityGovernanceError, match="拒绝原因无效"):
+        await governance.decide(
+            tmp_path,
+            candidate_id=proposal.source.candidate_id,
+        )
+    approved = await governance.decide(
+        tmp_path,
+        candidate_id=proposal.source.candidate_id,
+    )
+    assert approved.state == "approved"
+    assert await store.latest(tmp_path, approved.specification_id) is not None
+    assert host.requests[1]["_interaction_id"].endswith("-2")
+
+
+@pytest.mark.asyncio
+async def test_governance_answered_before_crash_is_recovered_once(tmp_path: Path) -> None:
+    proposal, specification_service, _, harness, _, _ = (
+        await _complete_specification(tmp_path)
+    )
+    governance, store, _ = _governance_service(
+        tmp_path=tmp_path,
+        proposal=proposal,
+        specification_service=specification_service,
+        harness_store=harness,
+        responses=[{"kind": "option", "value": "approve"}],
+        fail_after_commit=True,
+    )
+    with pytest.raises(RuntimeError, match="host crash"):
+        await governance.decide(
+            tmp_path,
+            candidate_id=proposal.source.candidate_id,
+        )
+    assert await store.latest(tmp_path, f"evcs_{'0' * 24}") is None
+
+    recovered, _, recovery_host = _governance_service(
+        tmp_path=tmp_path,
+        proposal=proposal,
+        specification_service=specification_service,
+        harness_store=harness,
+        responses=[],
+    )
+    view = await recovered.decide(
+        tmp_path,
+        candidate_id=proposal.source.candidate_id,
+    )
+    assert view.state == "approved"
+    assert recovery_host.requests == []
+
+
+@pytest.mark.asyncio
+async def test_governance_rejects_non_user_specification_evidence(tmp_path: Path) -> None:
+    proposal, specification_service, _, harness, _, specification = (
+        await _complete_specification(tmp_path)
+    )
+    assert specification.specification is not None
+    first_source = specification.specification.interaction_sources[0]
+    original = await harness.get_interaction(
+        workspace_root=tmp_path,
+        interaction_id=first_source.interaction_id,
+    )
+    assert original is not None
+
+    class _ForgedInteractionStore:
+        async def get_interaction(self, **kwargs: object):
+            if kwargs["interaction_id"] == original.interaction_id:
+                return original.model_copy(update={"answered_by": "agent"})
+            return await harness.get_interaction(**kwargs)
+
+    assessment = await CapabilitySpecificationAssessor(
+        _ForgedInteractionStore()  # type: ignore[arg-type]
+    ).assess(
+        tmp_path,
+        proposal=proposal,
+        specification_view=specification,
+    )
+    assert assessment.eligible_for_decision is False
+    assert next(
+        check for check in assessment.checks if check.code == "interaction_integrity"
+    ).passed is False
+
+
+@pytest.mark.asyncio
+async def test_governance_revalidates_authority_after_user_answer(tmp_path: Path) -> None:
+    proposal, specification_service, _, harness, _, _ = (
+        await _complete_specification(tmp_path)
+    )
+    governance, store, host = _governance_service(
+        tmp_path=tmp_path,
+        proposal=proposal,
+        specification_service=specification_service,
+        harness_store=harness,
+        responses=[{"kind": "option", "value": "approve"}],
+    )
+    host.after_answer = lambda: setattr(governance.review_service, "proposal", None)
+
+    with pytest.raises(CapabilityGovernanceError, match="没有"):
+        await governance.decide(
+            tmp_path,
+            candidate_id=proposal.source.candidate_id,
+        )
+    specification_id = str(host.requests[0]["_durable_subject_id"])
+    assert await store.latest(tmp_path, specification_id) is None
+
+
+@pytest.mark.asyncio
+async def test_governance_first_terminal_wins_concurrent_decisions(tmp_path: Path) -> None:
+    proposal, specification_service, _, harness, _, specification = (
+        await _complete_specification(tmp_path)
+    )
+    assert specification.specification is not None
+    assessor = CapabilitySpecificationAssessor(harness)
+    assessment = await assessor.assess(
+        tmp_path,
+        proposal=proposal,
+        specification_view=specification,
+    )
+    clock = _Clock()
+    host = _InteractionHost(
+        store=harness,
+        workspace=tmp_path,
+        responses=[
+            {"kind": "option", "value": "approve"},
+            {"kind": "custom", "custom_text": "拒绝并发覆盖"},
+        ],
+        clock=clock,
+    )
+    base_payload = {
+        "header": "能力规格治理",
+        "question": "请选择批准，或填写拒绝原因。",
+        "options": [
+            {"value": "approve", "label": "批准规格", "description": "进入设计。"},
+            {"value": "defer", "label": "稍后决定", "description": "暂不决定。"},
+        ],
+        "allow_custom": True,
+        "custom_label": "填写拒绝原因",
+        "priority": "high",
+        "_durable_subject_kind": "tool",
+        "_durable_subject_id": specification.specification_id,
+    }
+    first_id = f"ask-evcgov-{specification.specification_id[5:]}-1"
+    second_id = f"ask-evcgov-{specification.specification_id[5:]}-2"
+    await host({**base_payload, "_interaction_id": first_id})
+    await host({**base_payload, "_interaction_id": second_id})
+    first = await harness.get_interaction(
+        workspace_root=tmp_path,
+        interaction_id=first_id,
+    )
+    second = await harness.get_interaction(
+        workspace_root=tmp_path,
+        interaction_id=second_id,
+    )
+    assert first is not None and second is not None
+    store = EvolutionCapabilityGovernanceStore(tmp_path / "evolution.db")
+    competing_store = EvolutionCapabilityGovernanceStore(tmp_path / "evolution.db")
+
+    results = await asyncio.gather(
+        competing_store.record(
+            tmp_path,
+            assessment=assessment,
+            interaction=first,
+            outcome="approved",
+            reason="用户明确批准该完整规格进入 Sandbox 实现设计阶段。",
+        ),
+        store.record(
+            tmp_path,
+            assessment=assessment,
+            interaction=second,
+            outcome="rejected",
+            reason="拒绝并发覆盖",
+        ),
+        return_exceptions=True,
+    )
+
+    assert sum(not isinstance(result, Exception) for result in results) == 1
+    assert sum(isinstance(result, CapabilityGovernanceError) for result in results) == 1
+    terminal = await store.latest(tmp_path, specification.specification_id)
+    assert terminal is not None
+    assert terminal.source_interaction_id in {first_id, second_id}
+
+
+@pytest.mark.asyncio
+async def test_governance_tampered_assessment_snapshot_fails_closed(tmp_path: Path) -> None:
+    proposal, specification_service, _, harness, _, _ = (
+        await _complete_specification(tmp_path)
+    )
+    governance, store, _ = _governance_service(
+        tmp_path=tmp_path,
+        proposal=proposal,
+        specification_service=specification_service,
+        harness_store=harness,
+        responses=[{"kind": "option", "value": "approve"}],
+    )
+    view = await governance.decide(
+        tmp_path,
+        candidate_id=proposal.source.candidate_id,
+    )
+    with sqlite3.connect(store.db_path) as db:
+        db.execute(
+            "UPDATE evolution_capability_governance_decisions "
+            "SET assessment_json = ? WHERE specification_id = ?",
+            ("{}", view.specification_id),
+        )
+        db.commit()
+
+    with pytest.raises(CapabilityGovernanceError, match="JSON 损坏"):
+        await store.latest(tmp_path, view.specification_id)
+
+
+@pytest.mark.asyncio
+async def test_historical_approval_is_revoked_when_spec_evidence_no_longer_replays(
+    tmp_path: Path,
+) -> None:
+    proposal, specification_service, _, harness, _, specification = (
+        await _complete_specification(tmp_path)
+    )
+    governance, _, _ = _governance_service(
+        tmp_path=tmp_path,
+        proposal=proposal,
+        specification_service=specification_service,
+        harness_store=harness,
+        responses=[{"kind": "option", "value": "approve"}],
+    )
+    approved = await governance.decide(
+        tmp_path,
+        candidate_id=proposal.source.candidate_id,
+    )
+    assert approved.state == "approved"
+    assert specification.specification is not None
+    source = specification.specification.interaction_sources[0]
+    original = await harness.get_interaction(
+        workspace_root=tmp_path,
+        interaction_id=source.interaction_id,
+    )
+    assert original is not None
+
+    class _ChangedEvidenceStore:
+        async def get_interaction(self, **kwargs: object):
+            if kwargs["interaction_id"] == original.interaction_id:
+                return original.model_copy(update={"answered_by": "agent"})
+            return await harness.get_interaction(**kwargs)
+
+    governance.assessor = CapabilitySpecificationAssessor(
+        _ChangedEvidenceStore()  # type: ignore[arg-type]
+    )
+    revoked = await governance.inspect(
+        tmp_path,
+        proposal.source.candidate_id,
+    )
+    assert revoked.state == "revoked"
+    assert revoked.decision_effective is False
+    assert revoked.sandbox_design_eligible is False
+    assert revoked.registration_authorized is False
+    assert revoked.executable is False

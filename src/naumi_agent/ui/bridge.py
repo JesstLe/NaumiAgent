@@ -6097,6 +6097,10 @@ class JsonlEngineBridge:
         request_id: str,
     ) -> None:
         """Emit Candidate review state or explicitly enqueue one Proposal."""
+        from naumi_agent.evolution.capability_governance import (
+            CapabilityGovernanceError,
+            render_capability_governance,
+        )
         from naumi_agent.evolution.capability_specification import (
             CapabilitySpecificationStoreError,
             render_capability_specification,
@@ -6122,6 +6126,20 @@ class JsonlEngineBridge:
                 await self._emit_system_notice(
                     "Capability Specification",
                     render_capability_specification(view),
+                    request_id=request_id,
+                )
+                snapshot = await service.detail_snapshot(
+                    self.engine.workspace_root,
+                    str(payload.get("candidate_id") or ""),
+                )
+            elif action == "capability-govern":
+                view = await self.engine.evolution_capability_governance_service.decide(
+                    self.engine.workspace_root,
+                    candidate_id=str(payload.get("candidate_id") or ""),
+                )
+                await self._emit_system_notice(
+                    "Capability Governance",
+                    render_capability_governance(view),
                     request_id=request_id,
                 )
                 snapshot = await service.detail_snapshot(
@@ -6168,14 +6186,22 @@ class JsonlEngineBridge:
                 raise ValueError("Evolution action 未注册。")
         except (
             CapabilitySpecificationStoreError,
+            CapabilityGovernanceError,
             EvolutionStoreError,
             OSError,
             ValueError,
         ):
-            if action == "capability-spec":
+            if action in {"capability-spec", "capability-govern"}:
                 await self.emit_error(
-                    "Capability Specification 未推进；来源失效、答案无效或交互仍待处理。",
-                    code="evolution_capability_specification_failed",
+                    (
+                        "Capability Specification/Governance 未推进；"
+                        "来源失效、答案无效或交互仍待处理。"
+                    ),
+                    code=(
+                        "evolution_capability_governance_failed"
+                        if action == "capability-govern"
+                        else "evolution_capability_specification_failed"
+                    ),
                     request_id=request_id,
                 )
                 return

@@ -249,8 +249,10 @@ stable `promoted` Outcome 回注为不同于上一轮的新 Candidate。两者�
 入队前动态 authority 重验，不复制源码/补丁，也不授予实验、学习或推广权限。可验证语义同根聚类、
 EVO-06.2a 已实现 fail-closed Capability Proposal Contract；
 [EVO-06.2b](EVO-06-2b-interaction-backed-capability-specification.md) 已用 Harness 持久交互交付五步、
-append-only、可恢复的 Capability Specification。独立规格校验与 Proposal 治理、
-Sandbox/Shadow/Activation 与 learning authority 仍未完成。
+append-only、可恢复的 Capability Specification；
+[EVO-06.2c](EVO-06-2c-capability-specification-governance.md) 又以原始答案重放、不可变 Assessment、
+first-terminal-wins 人工决策和动态撤权关闭治理缺口。Sandbox implementation/registration、
+Shadow/Activation 与 learning authority 仍未完成。
 [EVO-01.4b](EVO-01-4b-composite-source-authority-router.md) 已为下一步 runtime metric/Eval Evidence
 补齐 fail-closed 多来源 authority router：所有动态 kind 必须完整注册，不同 reader 并发重验，且 Review
 绑定不能被后续 reader 静默覆盖。

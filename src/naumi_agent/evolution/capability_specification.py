@@ -326,6 +326,7 @@ class CapabilitySpecificationView(_StrictModel):
     pending_step: CapabilitySpecificationStep | None
     unresolved_requirements: tuple[str, ...]
     specification: EvolutionCapabilitySpecification | None
+    specification_sha256: str = Field(pattern=r"^(?:|[0-9a-f]{64})$")
     pending_interaction_id: str = Field(max_length=160)
     sandbox_eligible: Literal[False] = False
     shadow_eligible: Literal[False] = False
@@ -637,6 +638,7 @@ class EvolutionCapabilitySpecificationService:
         snapshot = await self.review_service.detail_snapshot(
             workspace_root,
             str(candidate_id).strip(),
+            include_capability_extensions=False,
         )
         selected = snapshot.selected
         proposal = selected.capability_proposal if selected is not None else None
@@ -804,6 +806,15 @@ def _parse_step(
     raise ValueError("未知 Capability Specification step。")
 
 
+def validate_capability_specification_step(
+    step: CapabilitySpecificationStep,
+    text: str,
+    proposal: EvolutionCapabilityProposal,
+) -> _StrictModel:
+    """Replay one durable answer through the authoritative step validator."""
+    return _parse_step(step, text, proposal)
+
+
 def _interaction_request(
     step: CapabilitySpecificationStep,
     proposal: EvolutionCapabilityProposal,
@@ -942,6 +953,7 @@ def _view(
             else _requirements_from_pending("interface")
         ),
         specification=current,
+        specification_sha256=current.digest() if current is not None else "",
         pending_interaction_id=pending.interaction_id if pending is not None else "",
     )
 
@@ -1198,4 +1210,5 @@ __all__ = [
     "EvolutionCapabilitySpecificationService",
     "EvolutionCapabilitySpecificationStore",
     "render_capability_specification",
+    "validate_capability_specification_step",
 ]
