@@ -25,7 +25,10 @@
 - [EVO-06.1c4](EVO-06-1c4-cross-source-opportunity-prioritization.md) Cross-source Opportunity
   Portfolio（已实现）：在固定 30 天、最多 500 条权威快照中完成 authority/冷却 Gate、同 lane 同日去重、
   domain 聚类、影响计数与透明评分；Agent-only、调用/token 数和簇成员数量不能刷榜。
-- EVO-06.2 Capability proposal：API、双通道、权限、数据、测试、维护者、淘汰标准。
+- [EVO-06.2a](EVO-06-2a-capability-proposal-contract.md) Capability Proposal Contract
+  （已实现）：只从当前 authority/cooldown/Portfolio 均有效的 capability Candidate 形成结构化只读提案；
+  exact Tool miss 只继承精确名称，Goal need 不反推私密目标，API/权限/数据/owner/SLO 未知项显式阻断
+  Sandbox。EVO-06.2 的交互式规格补全与治理仍待实现。
 - EVO-06.3 Sandbox registration：临时 registry/namespace，不能覆盖内置 tool。
 - EVO-06.4 Shadow evaluation：观察建议调用但不执行，比较路由准确度和价值。
 - EVO-06.5 Limited activation：低风险、明确 scope、预算和用户可见标识。

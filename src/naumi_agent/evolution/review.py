@@ -9,6 +9,10 @@ from typing import Protocol
 
 from naumi_agent.evolution.aggregation import CandidateAggregation, aggregate_candidate
 from naumi_agent.evolution.candidate import EvolutionCandidateDraft
+from naumi_agent.evolution.capability_proposal import (
+    EvolutionCapabilityProposal,
+    generate_capability_proposal,
+)
 from naumi_agent.evolution.eligibility import (
     CandidateEligibilityAssessment,
     CandidateGovernanceContext,
@@ -111,6 +115,7 @@ class EvolutionReviewItem:
     priority: CandidatePriority | None
     aggregation: CandidateAggregation | None
     proposal: EvolutionProposalPreview | None
+    capability_proposal: EvolutionCapabilityProposal | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -238,6 +243,7 @@ class EvolutionReviewService:
                 source_authority_valid=source_authority.get(candidate_id, False),
                 eligibility=assessments[candidate_id],
                 priority=priorities.get(candidate_id),
+                portfolio=portfolio,
             ),
             events=events[-100:],
             portfolio=portfolio,
@@ -482,6 +488,32 @@ def _render_detail(snapshot: EvolutionReviewSnapshot) -> str:
             "",
             "当前 Candidate 未达到 review_ready，未生成 Proposal。",
         ])
+    if item.capability_proposal is not None:
+        capability = item.capability_proposal
+        requested_name = capability.interface.requested_name or "待用户定义"
+        lines.extend([
+            "",
+            f"## Capability Proposal · `{capability.status}`",
+            "",
+            f"- ID：`{capability.proposal_id}`",
+            f"- Tool 名：`{_escape(requested_name)}`",
+            (
+                f"- 来源：Portfolio P{capability.source.priority_rank} · "
+                f"score {capability.source.priority_score_basis_points / 100:g} · "
+                f"`{capability.source.priority_policy}`"
+            ),
+            "- API schema / 返回值 / 错误契约：未决",
+            "- 权限与数据范围：未决，当前授予 0 项",
+            "- Owner / SLO / 维护责任：未决",
+            "- 可注册：否 · 可执行：否 · 可进入 Shadow：否",
+            "",
+            "### 进入 Sandbox 前必须补齐",
+            "",
+        ])
+        lines.extend(
+            f"- `{_escape(requirement)}`"
+            for requirement in capability.unresolved_requirements
+        )
     lines.extend(["", "## Evidence 引用", ""])
     lines.extend(f"- `{_escape(ref)}`" for ref in item.evidence_refs[:20])
     if len(item.evidence_refs) > 20:
@@ -512,6 +544,7 @@ def _review_item(
     source_authority_valid: bool,
     eligibility: CandidateEligibilityAssessment | None = None,
     priority: CandidatePriority | None = None,
+    portfolio: OpportunityPortfolio | None = None,
 ) -> EvolutionReviewItem:
     draft = stored.draft
     evidence = draft.evidence
@@ -563,6 +596,20 @@ def _review_item(
                 source_authority_valid=source_authority_valid,
             )
             if include_refs
+            else None
+        ),
+        capability_proposal=(
+            generate_capability_proposal(
+                stored,
+                eligibility=eligibility or assess_candidate_eligibility(
+                    draft,
+                    governance=governance,
+                    source_authority_valid=source_authority_valid,
+                ),
+                priority=priority,
+                portfolio=portfolio,
+            )
+            if include_refs and portfolio is not None
             else None
         ),
     )

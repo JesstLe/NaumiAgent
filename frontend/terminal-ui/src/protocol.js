@@ -6390,6 +6390,9 @@ function normalizeEvolutionItem(value, detail) {
   }
   if (!detail) return normalized;
   const proposal = item.proposal == null ? null : normalizeEvolutionProposal(item.proposal);
+  const capabilityProposal = item.capability_proposal == null
+    ? null
+    : normalizeEvolutionCapabilityProposal(item.capability_proposal);
   if (normalized.review_ready && proposal === null) {
     throw new Error("evolution/review review_ready detail 必须包含 Proposal Preview");
   }
@@ -6404,6 +6407,18 @@ function normalizeEvolutionItem(value, detail) {
     || proposal.risk_level !== normalized.risk
   )) {
     throw new Error("evolution/review Proposal Preview 与 Candidate 不一致");
+  }
+  if (capabilityProposal && (
+    normalized.kind !== "capability"
+    || !normalized.review_ready
+    || !normalized.priority?.rankable
+    || capabilityProposal.source.candidate_id !== candidateId
+    || capabilityProposal.source.candidate_revision !== normalized.revision
+    || capabilityProposal.source.priority_rank !== normalized.priority.rank
+    || capabilityProposal.source.priority_policy !== normalized.priority.policy_version
+    || capabilityProposal.impact_scope !== normalized.scope
+  )) {
+    throw new Error("evolution/review Capability Proposal 与当前 Candidate/Portfolio 不一致");
   }
   return {
     ...normalized,
@@ -6425,7 +6440,169 @@ function normalizeEvolutionItem(value, detail) {
     governance: normalizeEvolutionGovernance(item.governance),
     aggregation: normalizeEvolutionAggregation(item.aggregation),
     proposal,
+    capability_proposal: capabilityProposal,
   };
+}
+
+function normalizeEvolutionCapabilityProposal(value) {
+  const permissionFamilies = ["workspace_read", "workspace_write", "process", "network", "browser", "secrets"];
+  const prohibitedContent = ["secret_values", "raw_user_conversation", "absolute_workspace_paths", "unbounded_stdout"];
+  const requiredChecks = ["schema_contract", "permission_denial_paths", "empty_and_extreme_inputs", "concurrent_idempotency", "real_scenario_e2e", "slash_agent_parity"];
+  const retirementCriteria = ["authority_revoked", "catalog_need_satisfied", "slo_breach", "security_regression", "superseded_capability", "low_verified_value"];
+  const item = harnessObject(value, "evolution/review capability_proposal");
+  const source = harnessObject(item.source, "evolution/review capability_proposal.source");
+  const api = harnessObject(item.interface, "evolution/review capability_proposal.interface");
+  const permissions = harnessObject(item.permissions, "evolution/review capability_proposal.permissions");
+  const data = harnessObject(item.data, "evolution/review capability_proposal.data");
+  const verification = harnessObject(item.verification, "evolution/review capability_proposal.verification");
+  const operations = harnessObject(item.operations, "evolution/review capability_proposal.operations");
+  const lifecycle = harnessObject(item.lifecycle, "evolution/review capability_proposal.lifecycle");
+  const unresolved = harnessTextArray(
+    item.unresolved_requirements,
+    "evolution/review capability_proposal.unresolved_requirements",
+    32,
+  );
+  const proposalId = harnessText(item.proposal_id, "evolution/review capability_proposal.proposal_id");
+  const normalizedSource = {
+    candidate_id: harnessText(source.candidate_id, "evolution/review capability_proposal.source.candidate_id"),
+    candidate_revision: harnessNonnegativeInteger(source.candidate_revision, "evolution/review capability_proposal.source.candidate_revision"),
+    candidate_sha256: harnessText(source.candidate_sha256, "evolution/review capability_proposal.source.candidate_sha256"),
+    source_kinds: harnessTextArray(source.source_kinds, "evolution/review capability_proposal.source.source_kinds", 16),
+    priority_policy: harnessChoice(source.priority_policy, "evolution/review capability_proposal.source.priority_policy", new Set(["evolution-priority-v1"])),
+    portfolio_anchor_at: harnessText(source.portfolio_anchor_at, "evolution/review capability_proposal.source.portfolio_anchor_at"),
+    priority_rank: harnessNonnegativeInteger(source.priority_rank, "evolution/review capability_proposal.source.priority_rank"),
+    priority_score_basis_points: harnessNonnegativeInteger(source.priority_score_basis_points, "evolution/review capability_proposal.source.priority_score_basis_points"),
+    authority_valid: harnessBoolean(source.authority_valid, "evolution/review capability_proposal.source.authority_valid"),
+    governance_valid: harnessBoolean(source.governance_valid, "evolution/review capability_proposal.source.governance_valid"),
+  };
+  const requestedName = api.requested_name == null
+    ? null
+    : harnessText(api.requested_name, "evolution/review capability_proposal.interface.requested_name");
+  const normalizedInterface = {
+    invocation_kind: harnessChoice(api.invocation_kind, "evolution/review capability_proposal.interface.invocation_kind", new Set(["tool"])),
+    requested_name: requestedName,
+    name_status: harnessChoice(api.name_status, "evolution/review capability_proposal.interface.name_status", new Set(["known", "unresolved"])),
+    parameters_schema_status: harnessChoice(api.parameters_schema_status, "evolution/review capability_proposal.interface.parameters_schema_status", new Set(["unresolved"])),
+    result_schema_status: harnessChoice(api.result_schema_status, "evolution/review capability_proposal.interface.result_schema_status", new Set(["unresolved"])),
+    error_contract_status: harnessChoice(api.error_contract_status, "evolution/review capability_proposal.interface.error_contract_status", new Set(["unresolved"])),
+    versioning_status: harnessChoice(api.versioning_status, "evolution/review capability_proposal.interface.versioning_status", new Set(["unresolved"])),
+  };
+  const normalized = {
+    schema_version: harnessNonnegativeInteger(item.schema_version, "evolution/review capability_proposal.schema_version"),
+    proposal_id: proposalId,
+    generator_version: harnessChoice(item.generator_version, "evolution/review capability_proposal.generator_version", new Set(["evolution-capability-proposal-v1"])),
+    status: harnessChoice(item.status, "evolution/review capability_proposal.status", new Set(["needs_specification"])),
+    title: harnessText(item.title, "evolution/review capability_proposal.title"),
+    summary: harnessText(item.summary, "evolution/review capability_proposal.summary"),
+    impact_scope: harnessText(item.impact_scope, "evolution/review capability_proposal.impact_scope"),
+    source: normalizedSource,
+    interface: normalizedInterface,
+    permissions: {
+      policy_status: harnessChoice(permissions.policy_status, "evolution/review capability_proposal.permissions.policy_status", new Set(["unresolved"])),
+      candidate_families: harnessTextArray(permissions.candidate_families, "evolution/review capability_proposal.permissions.candidate_families", 6),
+      granted_families: harnessTextArray(permissions.granted_families, "evolution/review capability_proposal.permissions.granted_families", 6),
+      bypass_grants_registration: harnessBoolean(permissions.bypass_grants_registration, "evolution/review capability_proposal.permissions.bypass_grants_registration"),
+      bypass_grants_execution: harnessBoolean(permissions.bypass_grants_execution, "evolution/review capability_proposal.permissions.bypass_grants_execution"),
+    },
+    data: {
+      input_classes_status: harnessChoice(data.input_classes_status, "evolution/review capability_proposal.data.input_classes_status", new Set(["unresolved"])),
+      output_classes_status: harnessChoice(data.output_classes_status, "evolution/review capability_proposal.data.output_classes_status", new Set(["unresolved"])),
+      retention_status: harnessChoice(data.retention_status, "evolution/review capability_proposal.data.retention_status", new Set(["unresolved"])),
+      prohibited_content: harnessTextArray(data.prohibited_content, "evolution/review capability_proposal.data.prohibited_content", 16),
+    },
+    verification: {
+      source_metrics: harnessTextArray(verification.source_metrics, "evolution/review capability_proposal.verification.source_metrics", 8),
+      required_checks: harnessTextArray(verification.required_checks, "evolution/review capability_proposal.verification.required_checks", 16),
+      real_scenario_status: harnessChoice(verification.real_scenario_status, "evolution/review capability_proposal.verification.real_scenario_status", new Set(["unresolved"])),
+    },
+    operations: {
+      owner_status: harnessChoice(operations.owner_status, "evolution/review capability_proposal.operations.owner_status", new Set(["unassigned"])),
+      slo_status: harnessChoice(operations.slo_status, "evolution/review capability_proposal.operations.slo_status", new Set(["unresolved"])),
+      maintenance_status: harnessChoice(operations.maintenance_status, "evolution/review capability_proposal.operations.maintenance_status", new Set(["unresolved"])),
+      retirement_criteria: harnessTextArray(operations.retirement_criteria, "evolution/review capability_proposal.operations.retirement_criteria", 16),
+    },
+    lifecycle: {
+      state: harnessChoice(lifecycle.state, "evolution/review capability_proposal.lifecycle.state", new Set(["proposal"])),
+      next_stage: harnessChoice(lifecycle.next_stage, "evolution/review capability_proposal.lifecycle.next_stage", new Set(["sandbox_registration"])),
+      sandbox_eligible: harnessBoolean(lifecycle.sandbox_eligible, "evolution/review capability_proposal.lifecycle.sandbox_eligible"),
+      shadow_eligible: harnessBoolean(lifecycle.shadow_eligible, "evolution/review capability_proposal.lifecycle.shadow_eligible"),
+      limited_activation_eligible: harnessBoolean(lifecycle.limited_activation_eligible, "evolution/review capability_proposal.lifecycle.limited_activation_eligible"),
+      executable: harnessBoolean(lifecycle.executable, "evolution/review capability_proposal.lifecycle.executable"),
+      registry_mutation_allowed: harnessBoolean(lifecycle.registry_mutation_allowed, "evolution/review capability_proposal.lifecycle.registry_mutation_allowed"),
+      builtin_override_allowed: harnessBoolean(lifecycle.builtin_override_allowed, "evolution/review capability_proposal.lifecycle.builtin_override_allowed"),
+    },
+    unresolved_requirements: unresolved,
+    requires_human_review: harnessBoolean(item.requires_human_review, "evolution/review capability_proposal.requires_human_review"),
+  };
+  if (
+    normalized.schema_version !== 1
+    || !/^evcp_[0-9a-f]{24}$/.test(proposalId)
+    || !/^evc_[0-9a-f]{24}$/.test(normalizedSource.candidate_id)
+    || !/^[0-9a-f]{64}$/.test(normalizedSource.candidate_sha256)
+    || normalizedSource.candidate_revision < 1
+    || normalizedSource.priority_rank < 1
+    || normalizedSource.priority_score_basis_points < 1
+    || normalizedSource.priority_score_basis_points > 10_000
+    || !normalizedSource.authority_valid
+    || !normalizedSource.governance_valid
+    || !normalized.requires_human_review
+    || normalized.permissions.granted_families.length
+    || normalized.permissions.bypass_grants_registration
+    || normalized.permissions.bypass_grants_execution
+    || Object.values(normalized.lifecycle).some((entry) => entry === true)
+    || !unresolved.length
+    || new Set(unresolved).size !== unresolved.length
+  ) {
+    throw new Error("evolution/review Capability Proposal authority contract 无效");
+  }
+  const commonUnresolved = [
+    "api.parameters_schema", "api.result_schema", "api.error_contract", "api.versioning",
+    "permissions.required_families", "data.input_output_retention",
+    "verification.real_scenario", "operations.owner", "operations.slo", "operations.maintenance",
+  ];
+  const expectedUnresolved = normalizedInterface.name_status === "known"
+    ? commonUnresolved
+    : ["api.tool_name", ...commonUnresolved];
+  if (
+    JSON.stringify(normalized.permissions.candidate_families) !== JSON.stringify(permissionFamilies)
+    || JSON.stringify(normalized.data.prohibited_content) !== JSON.stringify(prohibitedContent)
+    || JSON.stringify(normalized.verification.required_checks) !== JSON.stringify(requiredChecks)
+    || JSON.stringify(normalized.operations.retirement_criteria) !== JSON.stringify(retirementCriteria)
+    || JSON.stringify(unresolved) !== JSON.stringify(expectedUnresolved)
+  ) {
+    throw new Error("evolution/review Capability Proposal 治理下限不完整");
+  }
+  if (
+    (normalizedInterface.name_status === "known" && !/^[a-z][a-z0-9_.:-]{0,127}$/.test(requestedName ?? ""))
+    || (normalizedInterface.name_status === "unresolved" && requestedName !== null)
+  ) {
+    throw new Error("evolution/review Capability Proposal Tool 名状态无效");
+  }
+  const toolScope = requestedName === null
+    ? null
+    : `capability:tool:${requestedName}`;
+  if (
+    (normalizedInterface.name_status === "known" && (
+      normalized.impact_scope !== toolScope
+      || !normalized.source.source_kinds.includes("tool_catalog_miss")
+    ))
+    || (normalizedInterface.name_status === "unresolved" && (
+      !/^capability:need:[0-9a-f]{16}$/.test(normalized.impact_scope)
+      || !normalized.source.source_kinds.includes("goal_need")
+    ))
+  ) {
+    throw new Error("evolution/review Capability Proposal scope 与来源不一致");
+  }
+  const expectedId = `evcp_${createHash("sha256").update(canonicalJson({
+    generator_version: normalized.generator_version,
+    source: normalized.source,
+    interface: normalized.interface,
+    unresolved_requirements: normalized.unresolved_requirements,
+  })).digest("hex").slice(0, 24)}`;
+  if (proposalId !== expectedId) {
+    throw new Error("evolution/review Capability Proposal ID 与来源快照不一致");
+  }
+  return normalized;
 }
 
 function normalizeEvolutionPriority(value) {
