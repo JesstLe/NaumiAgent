@@ -32,7 +32,10 @@
 - [EVO-06.2b](EVO-06-2b-interaction-backed-capability-specification.md) Interaction-backed Capability
   Specification（已实现）：以五步 Harness 持久交互形成 Candidate revision 绑定、append-only、可恢复的
   结构化规格；每步前后重验 authority，完整规格仍不授予 Sandbox/Shadow/执行权。EVO-06.2c 独立校验与
-  治理决策仍待实现。
+  治理决策见下一项。
+- [EVO-06.2c](EVO-06-2c-capability-specification-governance.md) Capability Specification Governance
+  （已实现）：独立重放五条 Harness 人工答案，形成确定性 Assessment 与 first-terminal-wins 人工决策；
+  历史批准随证据变化动态撤权，approved 只允许进入 Sandbox 实现设计，不授予注册、Shadow 或执行权。
 - EVO-06.3 Sandbox registration：临时 registry/namespace，不能覆盖内置 tool。
 - EVO-06.4 Shadow evaluation：观察建议调用但不执行，比较路由准确度和价值。
 - EVO-06.5 Limited activation：低风险、明确 scope、预算和用户可见标识。
@@ -57,7 +60,7 @@ opportunity discovery，并以新 Candidate ID 开启下一轮；不得原地改
 
 当前 `EVO-06.1a/1b/1c1/1c2/1c3/1c4` 已分别关闭 rolled_back、stable promoted Outcome、H5c 定量回归、
 durable Goal 明确需求与 exact Tool Catalog miss 的发现断点，但不代表 EVO-06 完成：自然语言缺失意图、
-更细粒度可验证语义聚类、Capability Specification 治理、
+更细粒度可验证语义聚类、Sandbox implementation/registration、
 Sandbox/Shadow/Limited Activation、选择、退休和 Meta-governance 仍待实现。
 
 ## 终极边界

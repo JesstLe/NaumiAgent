@@ -1625,7 +1625,12 @@ export function reduceServerEvent(state, record) {
         break;
       }
       dismissWelcome(state);
-      if (["evolution_review_failed", "evolution_queue_failed"].includes(payload.code)) {
+      if ([
+        "evolution_review_failed",
+        "evolution_queue_failed",
+        "evolution_capability_specification_failed",
+        "evolution_capability_governance_failed",
+      ].includes(payload.code)) {
         state.evolutionReview.loading = false;
         state.evolutionReview.error = payload.message ?? "Evolution Candidate 操作失败。";
         break;
@@ -5769,7 +5774,7 @@ function parseEvolutionReviewCommand(text) {
     return token;
   });
   const action = values[0] || "list";
-  if (["detail", "capability-spec"].includes(action)) {
+  if (["detail", "capability-spec", "capability-govern"].includes(action)) {
     if (values.length !== 2 || !/^evc_[0-9a-f]{24}$/.test(values[1])) return null;
     return { action, candidate_id: values[1], query: "", risk: "", source_kind: "", limit: 50 };
   }

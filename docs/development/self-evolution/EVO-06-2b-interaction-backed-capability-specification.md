@@ -78,6 +78,7 @@ source interaction 另有 workspace 级唯一约束。payload 使用 canonical J
 本实现没有自动生成 Tool 代码，也没有把用户答案当作可信实现。完整规格只关闭“字段未知”这一道门；
 owner 身份、权限合理性、schema 兼容性、真实 fixture 可执行性和 SLO 可达性尚未由独立治理者签署。
 
-下一最小切片为 EVO-06.2c：对 complete specification 建立不可变治理输入、独立校验结果与明确的
-approve/reject 决策。只有有效批准快照存在时，EVO-06.3 才能设计临时 namespace、内置 Tool 冲突拒绝、
+下一最小切片 [EVO-06.2c](EVO-06-2c-capability-specification-governance.md) 已对 complete specification
+建立不可变治理输入、独立答案重放与明确的 approve/reject 决策。只有其有效批准快照存在时，
+EVO-06.3 才能设计临时 namespace、内置 Tool 冲突拒绝、
 可撤销 Sandbox Registry 和注册恢复；不得从 `state=complete` 直接跳到 Sandbox。

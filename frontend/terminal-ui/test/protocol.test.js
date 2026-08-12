@@ -2879,6 +2879,8 @@ test("evolution review snapshot is strict and drops private fields", () => {
     created_at: "2026-08-12T12:00:02+00:00",
     private_answer: "drop-me",
   };
+  const specificationSnapshotSha256 = createHash("sha256")
+    .update(canonical(specificationSnapshot)).digest("hex");
   const specificationDetail = normalizeServerRecord({ type: "evolution/review", payload: {
     ...capabilityDetail,
     selected: {
@@ -2895,6 +2897,7 @@ test("evolution review snapshot is strict and drops private fields", () => {
         pending_step: "permissions",
         unresolved_requirements: remainingAfterInterface,
         specification: specificationSnapshot,
+        specification_sha256: specificationSnapshotSha256,
         pending_interaction_id: "",
         sandbox_eligible: false,
         shadow_eligible: false,
@@ -2921,6 +2924,147 @@ test("evolution review snapshot is strict and drops private fields", () => {
       capability_specification: {
         ...specificationDetail.selected.capability_specification,
         executable: true,
+      },
+    },
+  } }), /authority contract/);
+  const stepNames = ["interface", "permissions", "data", "verification", "operations"];
+  const completeSpecification = {
+    ...specificationSnapshot,
+    revision: 5,
+    state: "complete",
+    interface: { tool_name: "browser.trace_compare" },
+    permissions: { requirements: [] },
+    data: { retention: "none" },
+    verification: { scenarios: [{}] },
+    operations: { owner: "runtime-tools" },
+    completed_steps: stepNames,
+    pending_step: null,
+    unresolved_requirements: [],
+    interaction_sources: stepNames.map((step, index) => ({
+      step,
+      interaction_id: `ask-evcpspec-${specificationId.slice(5)}-${step}-1`,
+      interaction_sequence: 2,
+      interaction_sha256: (index + 1).toString(16).repeat(64),
+      answered_at: `2026-08-12T12:00:0${index + 1}+00:00`,
+    })),
+  };
+  const specificationSha256 = createHash("sha256")
+    .update(canonical(completeSpecification)).digest("hex");
+  const governanceChecks = [
+    "specification_complete", "candidate_lineage", "interaction_cardinality",
+    "interaction_integrity", "answer_replay", "authority_closed",
+  ].map((code) => ({ code, passed: true, hard_block: true, detail: `${code} 已通过` }));
+  const assessmentIdentity = {
+    policy_version: "evolution-capability-governance-v1",
+    specification_id: specificationId,
+    specification_sha256: specificationSha256,
+    candidate_id: capabilitySource.candidate_id,
+    candidate_revision: capabilitySource.candidate_revision,
+    candidate_sha256: capabilitySource.candidate_sha256,
+    checks: governanceChecks.map(({ code, passed, hard_block }) => ({ code, passed, hard_block })),
+  };
+  const assessmentId = `evcsa_${createHash("sha256").update(canonical(assessmentIdentity)).digest("hex").slice(0, 24)}`;
+  const assessment = {
+    schema_version: 1,
+    assessment_id: assessmentId,
+    policy_version: "evolution-capability-governance-v1",
+    specification_id: specificationId,
+    specification_revision: 5,
+    specification_sha256: specificationSha256,
+    candidate_id: capabilitySource.candidate_id,
+    candidate_revision: capabilitySource.candidate_revision,
+    candidate_sha256: capabilitySource.candidate_sha256,
+    checks: governanceChecks,
+    eligible_for_decision: true,
+    sandbox_design_eligible: false,
+    registration_authorized: false,
+    executable: false,
+  };
+  const assessmentSha256 = createHash("sha256").update(canonical(assessment)).digest("hex");
+  const governanceInteractionId = `ask-evcgov-${specificationId.slice(5)}-1`;
+  const governanceInteractionSha256 = "f".repeat(64);
+  const governanceReason = "用户明确批准该完整规格进入 Sandbox 实现设计阶段。";
+  const decisionIdentity = {
+    policy_version: "evolution-capability-governance-v1",
+    assessment_sha256: assessmentSha256,
+    interaction_id: governanceInteractionId,
+    interaction_sha256: governanceInteractionSha256,
+    outcome: "approved",
+    reason: governanceReason,
+  };
+  const governanceDecisionId = `evcgd_${createHash("sha256").update(canonical(decisionIdentity)).digest("hex").slice(0, 24)}`;
+  const governanceDecision = {
+    schema_version: 1,
+    decision_id: governanceDecisionId,
+    policy_version: "evolution-capability-governance-v1",
+    assessment_id: assessmentId,
+    assessment_sha256: assessmentSha256,
+    specification_id: specificationId,
+    specification_sha256: specificationSha256,
+    candidate_id: capabilitySource.candidate_id,
+    candidate_revision: capabilitySource.candidate_revision,
+    outcome: "approved",
+    reason: governanceReason,
+    source_interaction_id: governanceInteractionId,
+    source_interaction_sequence: 2,
+    source_interaction_sha256: governanceInteractionSha256,
+    decided_by: "user",
+    decided_at: "2026-08-12T12:10:00+00:00",
+    sandbox_design_eligible: true,
+    registration_authorized: false,
+    shadow_authorized: false,
+    executable: false,
+  };
+  const governed = normalizeServerRecord({ type: "evolution/review", payload: {
+    ...capabilityDetail,
+    selected: {
+      ...capabilityDetail.selected,
+      capability_proposal: capabilityProposal,
+      capability_specification: {
+        schema_version: 1,
+        specification_id: specificationId,
+        candidate_id: capabilitySource.candidate_id,
+        proposal_id: capabilityId,
+        revision: 5,
+        state: "complete",
+        completed_steps: stepNames,
+        pending_step: null,
+        unresolved_requirements: [],
+        specification: completeSpecification,
+        specification_sha256: specificationSha256,
+        pending_interaction_id: "",
+        sandbox_eligible: false,
+        shadow_eligible: false,
+        executable: false,
+      },
+      capability_governance: {
+        schema_version: 1,
+        candidate_id: capabilitySource.candidate_id,
+        specification_id: specificationId,
+        assessment,
+        decision: governanceDecision,
+        state: "approved",
+        decision_effective: true,
+        pending_interaction_id: "",
+        sandbox_design_eligible: true,
+        registration_authorized: false,
+        shadow_authorized: false,
+        executable: false,
+        private_note: "drop-me",
+      },
+    },
+  } }).payload;
+  assert.equal(governed.selected.capability_governance.state, "approved");
+  assert.equal(governed.selected.capability_governance.sandbox_design_eligible, true);
+  assert.equal(governed.selected.capability_governance.registration_authorized, false);
+  assert.equal(Object.hasOwn(governed.selected.capability_governance, "private_note"), false);
+  assert.throws(() => normalizeServerRecord({ type: "evolution/review", payload: {
+    ...governed,
+    selected: {
+      ...governed.selected,
+      capability_governance: {
+        ...governed.selected.capability_governance,
+        registration_authorized: true,
       },
     },
   } }), /authority contract/);

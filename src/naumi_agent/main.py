@@ -3303,6 +3303,10 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
         EvolutionApprovalSignatureError,
         render_evolution_approval_signature,
     )
+    from naumi_agent.evolution.capability_governance import (
+        CapabilityGovernanceError,
+        render_capability_governance,
+    )
     from naumi_agent.evolution.capability_specification import (
         CapabilitySpecificationStoreError,
         render_capability_specification,
@@ -4803,6 +4807,15 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             )
             console.print(Markdown(render_capability_specification(view)))
             return
+        if action == "capability-govern":
+            if len(parts) != 2:
+                raise ValueError("capability-govern 需要一个 Candidate ID。")
+            view = await engine.evolution_capability_governance_service.decide(
+                engine.workspace_root,
+                candidate_id=parts[1],
+            )
+            console.print(Markdown(render_capability_governance(view)))
+            return
         if action == "detail":
             if len(parts) != 2:
                 raise ValueError("detail 需要一个 Candidate ID。")
@@ -4827,7 +4840,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             )
         else:
             raise ValueError(
-                "仅支持 list、priorities、detail、capability-spec、"
+                "仅支持 list、priorities、detail、capability-spec、capability-govern、"
                 "experiment-contract、evaluation、"
                 "evaluation-contract、"
                 "evaluation-final、decision-input、mechanical-gate、"
@@ -5014,6 +5027,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "[--query 词 --risk level --source kind --limit N]；"
             "/evolution detail <candidate-id>；"
             "/evolution capability-spec <candidate-id>；"
+            "/evolution capability-govern <candidate-id>；"
             "/evolution experiment-contract <contract-id>；"
             "/evolution evaluation <comparison-id>；"
             "/evolution evaluation-contract <workspace-relative-request.json>；"
@@ -5357,6 +5371,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     except CapabilitySpecificationStoreError as exc:
         console.print(
             f"Capability Specification 未推进：{exc}",
+            style="yellow",
+            markup=False,
+        )
+        return
+    except CapabilityGovernanceError as exc:
+        console.print(
+            f"Capability Governance 未完成：{exc}",
             style="yellow",
             markup=False,
         )
