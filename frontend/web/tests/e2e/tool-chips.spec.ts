@@ -1,0 +1,58 @@
+import { expect, test } from '@playwright/test'
+import { mockWorkbenchApi } from './mocks'
+
+test('compact rows expand independently, file previews support keyboard, and narrow screens fit', async ({ page }) => {
+  await mockWorkbenchApi(page)
+  await page.route('**/sessions/*/messages*', route => route.fulfill({ json: { messages: [{ id: 'u', role: 'user', content: '检查布局并修改文件', metadata: {} }], total: 1 } }))
+  await page.route('**/sessions/*/runs*', route => route.fulfill({ json: { runs: [{
+    id: 'chips', user_message_id: 'u', status: 'completed', started_at: '2026-09-11T01:00:00Z', completed_at: '2026-09-11T01:00:28Z', steps: [
+      { sequence: 1, stage: 'analysis', summary: '第 1 轮分析', status: 'completed', detail: 'PRIVATE_REASONING' },
+      { sequence: 2, stage: 'tool', summary: 'file_write', status: 'completed', detail: '✅ 已创建 src/demo.ts (204 行, 999 字符)\n\n```ts\nconst first = 1\n```', metadata: { public_action: '修改文件：src/demo.ts', output_recorded: true } },
+      { sequence: 3, stage: 'tool', summary: 'file_write', status: 'completed', detail: '✅ 已编辑 other/demo.ts\n```diff\n--- before\n+++ after\n@@ -1 +1 @@\n-old\n+new\n```', metadata: { public_action: '修改文件：other/demo.ts', output_recorded: true } },
+    ],
+  }] } }))
+  await page.goto('/web2')
+  const trace = page.getByLabel('执行过程', { exact: true })
+  await expect(trace).toContainText('2 次工具调用，1 条摘要')
+  const writes = trace.getByRole('button', { name: 'file_write 已完成', exact: true })
+  await expect(writes).toHaveCount(2)
+  await expect(writes.nth(0)).toHaveCSS('height', '28px')
+  await writes.nth(0).click()
+  await expect(writes.nth(0)).toHaveAttribute('aria-expanded', 'true')
+  await expect(writes.nth(1)).toHaveAttribute('aria-expanded', 'false')
+  await writes.nth(1).click()
+  await expect(trace.getByText('修改文件：other/demo.ts', { exact: true })).toBeVisible()
+  await expect(trace).not.toContainText('PRIVATE_REASONING')
+  const chip = trace.getByRole('button', { name: '查看文件变更 other/demo.ts', exact: true })
+  await chip.focus()
+  const preview = page.getByRole('tooltip')
+  await expect(preview).toBeVisible()
+  await expect(preview).toContainText('new')
+  await expect(preview.locator('.text-green').first()).toHaveCSS('color', 'oklch(0.603 0.155 150.883)')
+  await page.keyboard.press('Escape')
+  await expect(preview).toHaveCount(0)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.getByRole('button', { name: '切换侧栏', exact: true }).click()
+  await expect(trace.locator('.bui-action-summary').first()).toHaveCSS('white-space', 'nowrap')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await trace.getByRole('button', { name: /2 次工具调用/ }).click()
+  await expect(writes.nth(0)).not.toBeVisible()
+})
+
+test('real creative-mode run shows persisted file counts', async ({ page }) => {
+  test.skip(!process.env.NAUMI_CHIPS_LIVE, '显式启用本地真实会话验收')
+  await page.addInitScript(() => localStorage.setItem('naumi:workspace:session', '97e3d5b4a2e8'))
+  await page.goto('http://127.0.0.1:5174/web2')
+  await page.setViewportSize({ width: 1440, height: 1100 })
+  const terminal = page.getByRole('button', { name: '收起执行面板', exact: true })
+  if (await terminal.isVisible()) await terminal.click()
+  const trace = page.locator('[data-run-id="7fddb68ed497"]')
+  await trace.scrollIntoViewIfNeeded()
+  await expect(trace.getByRole('button', { name: 'file_write 已完成', exact: true })).toContainText('写入 284 行')
+  await expect(trace.getByRole('button', { name: /查看文件变更.*creative_mode.html/ })).toContainText('+284')
+  await trace.getByRole('button', { name: /任务摘要/ }).first().click()
+  await trace.scrollIntoViewIfNeeded()
+  await trace.screenshot({ path: '../../.naumi/data/tool-chips-real.png' })
+  await page.reload()
+  await expect(page.locator('[data-run-id="7fddb68ed497"]').getByRole('button', { name: /查看文件变更.*creative_mode.html/ })).toContainText('+284')
+})

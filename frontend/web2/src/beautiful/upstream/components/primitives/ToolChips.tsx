@@ -22,6 +22,10 @@ const Icons: Record<string, React.ReactNode> = {
 export type ToolDetailLine = { text: string; tone?: "add" };
 
 export type ToolStep = {
+  id?: string;
+  ariaLabel?: string;
+  state?: string;
+  input?: string;
   icon: string;
   label: string;
   chip: string;
@@ -30,7 +34,7 @@ export type ToolStep = {
   detail: ToolDetailLine[];
 };
 
-export type ToolDiff = { file: string; add: number; del: number };
+export type ToolDiff = { file: string; label?: string; add?: number; del?: number };
 
 export type ToolDiffLine = { text: string; tone: "add" | "del" | "ctx" };
 
@@ -111,6 +115,7 @@ export default function ToolChips({
   className,
   onOpenChange,
   onToggleRow,
+  headerLabel,
 }: {
   /** Accepted for gallery/registry parity; ToolChips has no visual variants. */
   variant?: string;
@@ -121,6 +126,7 @@ export default function ToolChips({
   className?: string;
   onOpenChange?: (open: boolean) => void;
   onToggleRow?: (label: string, open: boolean) => void;
+  headerLabel?: string;
 } = {}) {
   const copy = { ...DEFAULT_LABELS, ...labels };
   const step = steps.length + 1;
@@ -136,7 +142,7 @@ export default function ToolChips({
   } | null>(null);
   const openPreview = (file: string) => (event: React.SyntheticEvent) => {
     const rect = (event.currentTarget as Element).closest("[data-diffchip]")!.getBoundingClientRect();
-    const previewHeight = 38 + (diffLines[file]?.length ?? 0) * 19;
+    const previewHeight = Math.min(380, 38 + (diffLines[file]?.length ?? 0) * 19);
     const fitsBelow = rect.bottom + 6 + previewHeight <= window.innerHeight - 12;
     setPreview({
       file,
@@ -160,11 +166,12 @@ export default function ToolChips({
     });
 
   return (
-    <div className={`min-h-[220px] w-full max-w-80 pb-1${className ? ` ${className}` : ""}`}>
+    <div className={`bui-tool-chips w-full max-w-80 pb-1${className ? ` ${className}` : ""}`}>
       {/* collapsed run header */}
       <button
         type="button"
         aria-expanded={open}
+        aria-label={headerLabel}
         onClick={() =>
           setOpen((current) => {
             onOpenChange?.(!current);
@@ -180,19 +187,21 @@ export default function ToolChips({
       </button>
 
       {/* tool call rows */}
-      <div className="grid transition-[grid-template-rows,opacity] duration-300" style={{ gridTemplateRows: open ? "1fr" : "0fr", opacity: open ? 1 : 0 }}>
+      <div className="grid transition-[grid-template-rows,opacity] duration-300" style={{ gridTemplateRows: open ? "1fr" : "0fr", opacity: open ? 1 : 0, visibility: open ? 'visible' : 'hidden' }}>
         {/* -mx-1 + px-1.5 keeps content at the same x while giving the
             row hover pills room inside this overflow-hidden clip box */}
-        <div className="-mx-1 overflow-hidden px-1.5 pb-1">
-        <div className="mt-1.5 flex flex-col gap-1">
-          {steps.slice(0, step).map((row) => {
-            const rowOpen = openRows.has(row.label);
+        <div className="-mx-1 overflow-hidden px-1.5 pb-1" inert={!open}>
+        <div className="bui-chip-rows mt-1.5 flex flex-col gap-1" aria-label="执行时间线">
+          {steps.slice(0, step).map((row, index) => {
+            const rowId = row.id ?? `${index}:${row.label}`;
+            const rowOpen = openRows.has(rowId);
             return (
-            <div key={row.label} style={{ animation: "fade-up 300ms cubic-bezier(0.23,1,0.32,1) both" }}>
+            <div key={rowId} data-step-id={rowId} data-state={row.state} style={{ animation: "fade-up 300ms cubic-bezier(0.23,1,0.32,1) both" }}>
               <button
                 type="button"
                 aria-expanded={rowOpen}
-                onClick={() => toggleRow(row.label)}
+                aria-label={row.ariaLabel}
+                onClick={() => toggleRow(rowId)}
                 className="group/row -mx-[3px] flex h-7 w-[calc(100%+6px)] min-w-0 items-center gap-2 rounded-control px-[3px] text-left transition-colors duration-100 hover:bg-hover-2"
               >
                 <span className="relative flex size-4 shrink-0 items-center justify-center text-ink-3">
@@ -210,14 +219,16 @@ export default function ToolChips({
                     <path d="M6 9l6 6 6-6" />
                   </svg>
                 </span>
-                <span title={row.label} className="min-w-0 max-w-[60%] truncate text-[12.5px] font-medium text-ink">{row.label}</span>
+                <span title={row.label} className="bui-operation min-w-0 max-w-[60%] truncate text-[12.5px] font-medium text-ink">{row.label}</span>
                 <span
-                  className={`inline-flex h-5.5 min-w-0 flex-1 cursor-pointer items-center truncate rounded-chip bg-field px-1.5
+                  title={row.chip}
+                  className={`bui-action-summary inline-flex h-5.5 min-w-0 flex-1 cursor-pointer items-center truncate rounded-chip bg-field px-1.5
                     text-[11.5px] text-ink-2 shadow-hairline transition-colors duration-100 hover:bg-hover-2
                     ${row.mono ? "font-mono" : ""}`}
                 >
                   {row.chip}
                 </span>
+                {row.state && row.state !== 'completed' && <span className="bui-chip-status">{{ running: '执行中', failed: '失败', cancelled: '已停止', unknown: '待确认' }[row.state]}</span>}
               </button>
 
               {/* expanded detail */}
@@ -225,17 +236,21 @@ export default function ToolChips({
                 className="grid transition-[grid-template-rows,opacity] duration-300"
                 style={{ gridTemplateRows: rowOpen ? "1fr" : "0fr", opacity: rowOpen ? 1 : 0, transitionTimingFunction: "cubic-bezier(0.23, 1, 0.32, 1)" }}
               >
-                <div className="min-h-0 overflow-hidden">
+                <div className="min-h-0 overflow-hidden" inert={!rowOpen} aria-hidden={!rowOpen}>
                   <div className="mt-0.5 mb-1 ml-2 flex flex-col gap-0.5 border-l border-line py-0.5 pl-3.5">
-                    {row.detail.map((line) => (
+                    {row.detail.map((line, index) => (
                       <span
-                        key={line.text}
+                        key={index}
                         title={line.text}
                         className={`max-h-80 overflow-auto whitespace-pre-wrap break-words text-[11.5px] leading-[1.6] ${row.detailMono ? "font-mono" : ""} ${line.tone === "add" ? "text-green" : "text-ink-2"}`}
                       >
                         {line.text}
                       </span>
                     ))}
+                    {row.input && <details className="bui-tool-input">
+                      <summary>输入参数</summary>
+                      <pre>{row.input}</pre>
+                    </details>}
                   </div>
                 </div>
               </div>
@@ -253,27 +268,30 @@ export default function ToolChips({
               data-diffchip
               className="relative"
               onMouseEnter={openPreview(d.file)}
-              onMouseLeave={closePreview(d.file)}
+              onMouseLeave={event => { if (!event.currentTarget.contains(document.activeElement)) closePreview(d.file)(); }}
             >
               <button
                 type="button"
                 aria-expanded={preview?.file === d.file}
-                aria-label={`Show diff for ${d.file}`}
+                aria-label={`查看文件变更 ${d.file}`}
+                title={d.file}
                 onFocus={openPreview(d.file)}
                 onBlur={closePreview(d.file)}
+                onClick={openPreview(d.file)}
+                onKeyDown={event => { if (event.key === 'Escape') setPreview(null); }}
                 className="inline-flex h-7 max-w-full items-center gap-2 rounded-chip
                   bg-surface px-2 font-mono text-[11.5px] text-ink shadow-btn
                   transition-colors duration-100 hover:bg-hover"
                 style={{ animation: `pop-in 250ms cubic-bezier(0.23,1,0.32,1) ${i * 80}ms both` }}
               >
-                <span className="min-w-0 truncate">{d.file}</span>
-                <span className="shrink-0 text-green tabular-nums">+{d.add}</span>
-                {d.del > 0 && <span className="shrink-0 text-red tabular-nums">−{d.del}</span>}
+                <span className="min-w-0 truncate">{d.label || d.file}</span>
+                {d.add !== undefined && <span className="shrink-0 text-green tabular-nums">+{d.add}</span>}
+                {(d.del ?? 0) > 0 && <span className="shrink-0 text-red tabular-nums">−{d.del}</span>}
               </button>
 
             </span>
           ))}
-          <button
+          {copy.more && <button
             type="button"
             className="inline-flex h-7 items-center rounded-chip px-1.5 font-mono text-[11.5px] text-ink-3
               underline decoration-transparent underline-offset-2 transition-colors duration-100
@@ -281,14 +299,16 @@ export default function ToolChips({
             style={{ animation: `fade-in 300ms ease-out ${diffs.length * 80}ms both` }}
           >
             {copy.more}
-          </button>
+          </button>}
         </div>
       )}
         </div>
       </div>
       {preview && typeof document !== "undefined" && createPortal(
+        <div className="bui-root">
         <div
-          className="fixed z-50 w-72 overflow-hidden rounded-[10px] bg-surface shadow-overlay"
+          role="tooltip"
+          className="bui-diff-preview fixed z-50 w-72 overflow-hidden rounded-[10px] bg-surface shadow-overlay"
           style={{
             left: preview.x,
             top: preview.top,
@@ -300,13 +320,13 @@ export default function ToolChips({
           <div className="flex items-center justify-between border-b border-line px-2.5 py-1.5 font-mono text-[11px]">
             <span className="min-w-0 truncate text-ink-2">{preview.file}</span>
             <span className="shrink-0 tabular-nums">
-              <span className="text-green">+{diffs.find((diff) => diff.file === preview.file)?.add}</span>
+              {diffs.find((diff) => diff.file === preview.file)?.add !== undefined && <span className="text-green">+{diffs.find((diff) => diff.file === preview.file)?.add}</span>}
               {(diffs.find((diff) => diff.file === preview.file)?.del ?? 0) > 0 && (
                 <span className="text-red"> −{diffs.find((diff) => diff.file === preview.file)?.del}</span>
               )}
             </span>
           </div>
-          <div className="py-1 font-mono text-[11px] leading-[1.8]">
+          <div className="bui-diff-lines py-1 font-mono text-[11px] leading-[1.8]">
             {(diffLines[preview.file] ?? []).map((line, index) => (
               <div
                 key={index}
@@ -323,7 +343,7 @@ export default function ToolChips({
               </div>
             ))}
           </div>
-        </div>,
+        </div></div>,
         document.body,
       )}
     </div>

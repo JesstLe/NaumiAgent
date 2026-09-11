@@ -1,10 +1,12 @@
-import type { ActivityStep, ActivityState } from '@naumi/shared/api/activity'
+import type { ExecutionTimelineStep } from '@naumi/shared/api/activity'
 import Primitive from './upstream/components/primitives/ToolChips'
-export const activityNames: Record<ActivityState, string> = { running: '执行中', completed: '已完成', failed: '失败', cancelled: '已停止', unknown: '状态待确认' }
-export function ToolChips({ steps }: { steps: ActivityStep[] }) {
-  return <Primitive steps={steps.map((row, index) => ({
-    icon: /read|读取/i.test(row.label) ? 'read' : /write|edit|写|编辑/i.test(row.label) ? 'write' : 'run',
-    label: `${index + 1}. ${row.label}`, chip: activityNames[row.state], mono: true, detailMono: true,
-    detail: [...(row.input ? [{ text: `输入：${row.input}` }] : []), { text: row.output || (row.state === 'running' ? '等待工具结果…' : row.outputRecorded ? '工具未返回文本内容' : '旧记录未保存工具输出') }, ...(row.outputTruncated ? [{ text: '当前记录仅包含工具返回的输出预览。' }] : [])],
-  }))} diffs={[]} diffLines={{}} labels={{ header: `${steps.length} 条工具记录`, more: '' }} />
+import { toolChipData } from './toolChipData'
+export { activityNames } from './toolChipData'
+
+export function ToolChips({ steps, status, working = false }: { steps: ExecutionTimelineStep[]; status: string; working?: boolean }) {
+  const data = toolChipData(steps)
+  const tools = steps.filter(step => step.kind !== 'reasoning').length
+  const messages = steps.length - tools
+  return <Primitive {...data} headerLabel={working ? '正在推理' : undefined}
+    labels={{ header: `${tools} 次工具调用，${messages} 条摘要 · ${working ? '执行中' : status}`, more: '' }} />
 }
