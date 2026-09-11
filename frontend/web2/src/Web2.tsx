@@ -46,6 +46,7 @@ import { TodoPanel } from './TodoPanel'
 import { GoalPanel } from './GoalPanel'
 import { DiffPanel } from './DiffPanel'
 import { ThinkingState } from './beautiful/ThinkingState'
+import { SelectionActions } from './beautiful/SelectionActions'
 import './beautiful/beautiful.css'
 import { useCommandCompletion } from '@naumi/shared/hooks/useCommandCompletion'
 
@@ -278,6 +279,7 @@ export function Web2() {
     <div
       className={`web2 ${sidebar ? '' : 'w2-sidebar-hidden'} ${right ? '' : 'w2-right-hidden'}`}
     >
+      <SelectionActions focusComposer={() => textarea.current?.focus()} />
       <header className="w2-titlebar">
         <MenuBar menus={[
           { label: '文件', actions: [
