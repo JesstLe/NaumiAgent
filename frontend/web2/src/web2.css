@@ -1207,3 +1207,22 @@
 .w2-menu-popup button:disabled { opacity: .4; cursor: default; }
 .w2-menu-popup kbd { font: 10px system-ui; color: #9b9e97; }
 @media(max-width: 580px) { .w2-titlebar > span { display: none; } .w2-titlebar { gap: 5px; } .w2-menu-popup { width: 210px; } .w2-menu:last-child .w2-menu-popup { left: auto; right: -50px; } }
+
+.w2-settings-dialog { width: min(840px, calc(100vw - 32px)); border-radius: 12px; }
+.w2-dialog { margin: auto; }
+.w2-settings-dialog .w2-dialog-inner { padding: 0; }
+.w2-settings-dialog .w2-dialog-inner > header { margin: 0; padding: 18px 24px; border-bottom: 1px solid var(--w2-line); }
+.w2-settings { display: grid; grid-template-columns: 180px minmax(0,1fr); min-height: 420px; }
+.w2-settings nav { padding: 20px 12px; background: #f8f9f6; border-right: 1px solid var(--w2-line); }
+.w2-settings nav button { display: flex; width: 100%; gap: 10px; align-items: center; padding: 10px 13px; border-radius: 5px; font-size: 13px; }
+.w2-settings nav button[aria-current] { background: #e9ede5; color: #30382b; }
+.w2-settings section { padding: 26px 32px; min-width: 0; overflow-wrap: anywhere; }
+.w2-settings h3 { font-size: 19px; font-weight: 500; margin: 0 0 28px; }
+.w2-setting-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; border-bottom: 1px solid #edf0e9; padding: 16px 0; font-size: 13px; }
+.w2-setting-row select { border: 1px solid #e0e4db; border-radius: 5px; padding: 7px; max-width: 240px; background: #fff; min-width: 0; }
+.w2-setting-description { font-size: 12px; line-height: 1.8; color: #828a7b; }
+.w2-settings .w2-primary { width: auto; margin-top: 24px; }
+.w2-settings-legacy { display: block; font-size: 12px; margin: 100px 10px 10px; color: #7d8774; }
+.w2-about { display: grid; grid-template-columns: 85px minmax(0,1fr); gap: 24px 10px; font-size: 13px; }
+.w2-about dt { color: #92998b; } .w2-about dd { margin: 0; }
+@media(max-width:580px) { .w2-settings { grid-template-columns: 1fr; } .w2-settings nav { display: flex; flex-wrap: wrap; gap: 3px; padding: 8px; border-right: 0; border-bottom: 1px solid var(--w2-line); } .w2-settings nav button { width: auto; padding: 8px; } .w2-settings-legacy { margin: 8px; } .w2-settings section { padding: 20px; } .w2-setting-row { flex-wrap: wrap; gap: 8px; } }

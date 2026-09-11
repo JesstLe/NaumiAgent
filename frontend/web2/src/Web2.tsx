@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Link } from 'react-router-dom'
 import {
   ArrowUp,
   ArrowUpRight,
@@ -43,6 +42,7 @@ import {
 import { errorText } from '@naumi/shared/hooks/useWorkspaceController'
 import './web2.css'
 import { MenuBar } from './MenuBar'
+import { SettingsPage } from './SettingsPage'
 
 type Panel = 'home' | 'review' | 'files' | 'browser' | 'tools' | 'tasks'
 const panelNames: Record<Panel, string> = {
@@ -166,9 +166,6 @@ export function Web2() {
   const [dialog, setDialog] = useState<'settings' | 'help' | 'delete' | null>(
     null,
   )
-  const [apiUrl, setApiUrl] = useState(w.base)
-  const [token, setToken] = useState('')
-  const [saving, setSaving] = useState(false)
   const [diffLoading, setDiffLoading] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
   const dialogRef = useRef<HTMLDialogElement>(null)
@@ -220,13 +217,6 @@ export function Web2() {
   useEffect(() => {
     if (dialog) {
       dialogRef.current?.showModal()
-      if (dialog === 'settings') {
-        setApiUrl(w.base)
-        platform
-          .getToken()
-          .then((value) => setToken(value || ''))
-          .catch(() => w.setError('无法读取连接令牌'))
-      }
     } else dialogRef.current?.close()
   }, [dialog, platform, w.base])
   useEffect(() => {
@@ -586,6 +576,7 @@ export function Web2() {
                   onKeyDown={(event) => {
                     if (
                       event.key === 'Enter' &&
+                      (w.sendKey === 'enter' || event.ctrlKey || event.metaKey) &&
                       !event.shiftKey &&
                       !event.nativeEvent.isComposing &&
                       event.keyCode !== 229
@@ -1049,7 +1040,7 @@ export function Web2() {
       </main>
       <dialog
         ref={dialogRef}
-        className="w2-dialog"
+        className={`w2-dialog ${dialog === 'settings' ? 'w2-settings-dialog' : ''}`}
         onCancel={() => setDialog(null)}
         onClick={(event) => {
           if (event.target === dialogRef.current) setDialog(null)
@@ -1068,43 +1059,7 @@ export function Web2() {
               <X />
             </IconButton>
           </header>
-          {dialog === 'settings' && (
-            <form
-              onSubmit={(event) => {
-                event.preventDefault()
-                setSaving(true)
-                w.configure(apiUrl, token)
-                  .then(() => setDialog(null))
-                  .catch(() => {})
-                  .finally(() => setSaving(false))
-              }}
-            >
-              <label>
-                API 地址
-                <input
-                  required
-                  value={apiUrl}
-                  onChange={(event) => setApiUrl(event.target.value)}
-                />
-              </label>
-              <label>
-                连接令牌
-                <input
-                  type="password"
-                  autoComplete="off"
-                  value={token}
-                  onChange={(event) => setToken(event.target.value)}
-                  placeholder="本地服务未启用认证时可留空"
-                />
-              </label>
-              <button className="w2-primary" disabled={saving || locked}>
-                {saving ? '正在连接…' : '保存并连接'}
-              </button>
-              <Link className="w2-legacy-link" to="/chat">
-                打开原版 Web <ArrowUpRight size={14} />
-              </Link>
-            </form>
-          )}
+          {dialog === 'settings' && <SettingsPage />}
           {dialog === 'help' && (
             <div className="w2-shortcuts">
               <p>
