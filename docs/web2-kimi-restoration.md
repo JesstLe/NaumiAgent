@@ -12,9 +12,10 @@
 ## 验证与尚未完成事项
 
 通过实际配置加载和 `ModelRouter.resolve_model()` 核对两个入口的三档模型、接口和数据路径。
-使用项目 `ModelRouter.call()` 发送一次无工具的简短连接请求，Kimi 返回 HTTP 401 `AuthenticationError`。
-当前进程存在 `NAUMI_MODELS__API_KEY`，但本项目没有 `.env`，系统凭据库也没有 Kimi 专用凭据。
-因此尚未验证 Kimi 成功回复，需要更新有效的 Kimi Coding 凭据后再验证。
+用户补充有效凭据后，已保存到系统凭据库的 Kimi 专用账户并完成读取校验。
+两个本机配置显式设置 `models.api_key: null`，经实际加载验证使用系统凭据，避免当前进程中的旧通用环境密钥覆盖。
+使用项目默认 `ModelRouter.call()` 调用成功，实际回复 `Kimi connected.`，供应商返回模型为 `kimi-for-coding`。
+验证发现接口按思考模式约束 temperature：默认开启思考时要求 1.0，显式关闭思考时要求 0.6。最终保留项目原预设及默认思考模式，无需修改源码。验证证据位于 `.naumi/data/kimi-credential-check.json`，不包含密钥。
 
 既有 8765 后端仍加载旧配置。此前停止并重启该进程的动作被自动审批以 `blocked by policy` 拒绝，本次未重试或绕过。
 需要重新启动后端才能加载本次配置，并再次检查 `/api/v1/config` 和 Web2 实际对话。
