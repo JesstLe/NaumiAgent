@@ -7,6 +7,12 @@
 
 ## 从一个具体问题开始
 
+<!-- teaching-figure:13:start -->
+![子 Agent 与 Worker 不是同一种角色：章节教学示意图](assets/illustrations/13-teaching-v1.png)
+
+读图：上层拆分任务合同并回收证据，下层处理排队、容量和执行资源。子 Agent 是任务角色，Worker 是资源角色，不要求一一对应；图中的“已核验”是汇总前的要求，不意味着收到子 Agent 的文字就已经完成核验。
+<!-- teaching-figure:13:end -->
+
 单 Agent 已经能完成许多任务。只有当工作可以拆分、每部分相对独立、并行收益大于协调成本时，多 Agent 才值得引入。典型例子是研究任务：一个子 Agent 收集竞品功能，一个核验价格，一个阅读技术文档，父 Agent 在明确的输出格式下汇总。相反，让五个 Agent 同时“想想怎么修这个 bug”，通常只会产生重复 token、冲突建议和更难解释的过程。
 
 委派前需要定义任务合同：子 Agent 的目标、允许访问的上下文和工具、deadline、输出 schema、失败语义，以及父 Agent 如何合并结果。上下文不能全部复制，否则成本随着 Agent 数量爆炸；更好的方式是传递最小必要输入，让子 Agent 返回结构化结论、证据链接和不确定性。NaumiAgent 的 message bus、team protocol 和 `SubAgentManager` 就是为这类生命周期与通信边界而设。
