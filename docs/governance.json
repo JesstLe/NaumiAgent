@@ -84,6 +84,10 @@
       "status": "reference"
     },
     {
+      "pattern": "docs/interview/*.md",
+      "status": "reference"
+    },
+    {
       "pattern": "docs/examples/**/*.md",
       "status": "reference"
     },
