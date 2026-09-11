@@ -97,3 +97,35 @@ test('Kimi generates interactive components from measured repository data', asyn
   await page.reload()
   await expect(page.locator('.rich-tablist [role=tab]')).toHaveCount(4)
 })
+
+test('real generated images and a CSV load with authenticated asset requests', async ({ page }) => {
+  const session = process.env.NAUMI_ASSETS_LIVE_SESSION
+  test.skip(!session, '需要真实图片发布会话和资源验证服务')
+  await page.addInitScript(id => {
+    localStorage.setItem('naumi:workspace:session', id!)
+    if (localStorage.getItem('rich-check-no-token')) localStorage.removeItem('naumi:token')
+    else localStorage.setItem('naumi:token', 'local-rich-output-verification')
+  }, session)
+  // Forward to the isolated instance of the real asset API, without restarting the user's daemon.
+  await page.route('**/api/v1/output-assets/*', async route => {
+    const path = new URL(route.request().url()).pathname
+    const response = await route.fetch({ url: `http://127.0.0.1:18766${path}` })
+    await route.fulfill({ response })
+  })
+  await page.goto('http://127.0.0.1:5174/web2')
+  const images = page.locator('.rich-image-open img')
+  await expect(images).toHaveCount(2)
+  for (let i = 0; i < 2; i++) expect(await images.nth(i).evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0)
+  await page.locator('.rich-image-open').first().click()
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await page.getByRole('button', { name: '关闭图片' }).click()
+  const download = page.waitForEvent('download')
+  await page.locator('.rich-file button').click()
+  expect((await download).suggestedFilename()).toMatch(/\.csv$/)
+  await page.reload()
+  await expect(images).toHaveCount(2)
+  await page.screenshot({ path: '../../.naumi/data/rich-assets-real.png', fullPage: true })
+  await page.evaluate(() => localStorage.setItem('rich-check-no-token', 'true'))
+  await page.reload()
+  await expect(page.locator('.rich-image-error').first()).toContainText('令牌无效')
+})

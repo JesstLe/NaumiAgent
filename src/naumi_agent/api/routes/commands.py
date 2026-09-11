@@ -26,7 +26,7 @@ router = APIRouter(tags=["commands"])
 # Terminal-only lifecycle and interactive terminal commands are not Web actions.
 _SUPPORTED = frozenset(
     """
-/help /history /tools /models /usage /version /pwd /diff /extensions
+/help /history /tools /models /usage /version /pwd /diff /extensions /output
 /goal /todo /tasks /task /glob /grep /read /file_read /write /file_write /edit /file_edit
 /chaos /scale /state /vibe /eval /page /heal /dspy /graph /mcts /route
 /speculate /jit /pointer /cooe /sleep /entropy /ooda /probe /hook /vision

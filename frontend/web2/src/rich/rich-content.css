@@ -63,4 +63,7 @@
 .rich-tablist button[aria-selected=true] { color:#526b3f; border-color:#849e6d; }
 .rich-widget .rich-widget { border:0; padding:12px 0; } .rich-invalid { background:#faf6ed; color:#947342; padding:14px; font-size:12px; margin:0; }
 .rich-artifact > details { padding:12px; font-size:12px; } .rich-artifact summary { cursor:pointer; }
+.rich-file { display:inline-flex; flex-direction:column; gap:5px; margin:5px 0; }
+.rich-file button { display:inline-flex; align-items:center; gap:8px; border:1px solid #dfe7d7; padding:9px 14px; border-radius:5px; color:#607b4a; background:#fafcf7; font-size:13px; }
+.rich-file > span { color:#a37a4e; font-size:12px; }
 @media(max-width:600px) { .rich-widget { padding:12px; } .rich-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); } .rich-metrics strong { font-size:23px; } .rich-toolbar { gap:7px; } }

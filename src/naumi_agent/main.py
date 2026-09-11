@@ -2449,6 +2449,16 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                 console.print(str(exc), style="yellow", markup=False)
             else:
                 console.print(Markdown(output))
+        case "/output":
+            from naumi_agent.cli.commands_meta import _execute_tool_result
+
+            result = await _execute_tool_result(
+                engine, "output_publish", {"path": arg.strip().strip('"')},
+            )
+            content = result.content
+            if result.status == "success" and arg.strip():
+                content = json.loads(content)["markdown"]
+            console.print(content, markup=False, highlight=False, soft_wrap=True)
         case "/tools" | "/t":
             tools = engine.tool_registry.all()
             console.print("[bold]可用工具:[/bold]")
