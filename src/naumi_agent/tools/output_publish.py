@@ -9,6 +9,7 @@ import json
 import os
 import re
 import tempfile
+import threading
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,7 @@ _SVG_TAGS = {
     'line', 'polyline', 'polygon', 'text', 'tspan', 'textPath', 'linearGradient',
     'radialGradient', 'stop', 'clipPath', 'mask', 'pattern', 'use', 'marker',
 }
+ASSET_STORAGE_LOCK = threading.Lock()
 
 
 def asset_root(config: AppConfig) -> Path:
@@ -109,22 +111,26 @@ def publish_bytes(config: AppConfig, content: bytes, suffix: str) -> str:
     validate_asset(content, suffix)
     name = hashlib.sha256(content).hexdigest() + suffix
     directory = asset_root(config)
-    directory.mkdir(parents=True, exist_ok=True)
-    target = directory / name
-    # Atomic hard-link publication never replaces an asset used by readers.
-    fd, temporary = tempfile.mkstemp(prefix='.publish-', dir=directory)
-    try:
-        with os.fdopen(fd, 'wb') as stream:
-            stream.write(content)
-            stream.flush()
-            os.fsync(stream.fileno())
+    with ASSET_STORAGE_LOCK:
+        directory.mkdir(parents=True, exist_ok=True)
+        target = directory / name
+        # Atomic hard-link publication never replaces an asset used by readers.
+        fd, temporary = tempfile.mkstemp(prefix='.publish-', dir=directory)
         try:
-            os.link(temporary, target)
-        except FileExistsError:
-            if target.is_symlink() or target.read_bytes() != content:
-                raise ValueError('已保存的内容校验失败，请检查资源目录') from None
-    finally:
-        Path(temporary).unlink(missing_ok=True)
+            with os.fdopen(fd, 'wb') as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+            try:
+                os.link(temporary, target)
+            except FileExistsError:
+                if target.is_symlink() or target.read_bytes() != content:
+                    raise ValueError('已保存的内容校验失败，请检查资源目录') from None
+                # Re-publication renews the grace period before the durable
+                # message/run reference is committed.
+                os.utime(target, None)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
     return f'/api/v1/output-assets/{name}'
 
 
