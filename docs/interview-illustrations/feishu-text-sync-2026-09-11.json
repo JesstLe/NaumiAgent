@@ -1,0 +1,52 @@
+{
+  "date": "2026-09-11",
+  "source_revision": "70314e0e3862a37725e55b929c5641495ffa9126",
+  "method": "通过已登录浏览器原位编辑既有飞书章节",
+  "homepage": "https://ccnk8g8uwywk.feishu.cn/wiki/LfA4wAaJXiuKsOkEIcOcYHO8ntb",
+  "updated_page_count": 21,
+  "full_body_updates": [
+    "01",
+    "02",
+    "03",
+    "04",
+    "05",
+    "06",
+    "07",
+    "08",
+    "09",
+    "10",
+    "11",
+    "12",
+    "13",
+    "14",
+    "00",
+    "16",
+    "19",
+    "24",
+    "18",
+    "阅读导航"
+  ],
+  "homepage_update": "仅更新标题与读者定位，保留原有封面、导航和链接",
+  "changes": [
+    "同步大厂求职定位、岗位路线与十四章项目深挖",
+    "删除十四章的“学完怎样写进简历”整节及重复提示",
+    "更新总纲、项目介绍、求职训练、验证记录与阅读导航"
+  ],
+  "verification": {
+    "full_body_readback_pages": 20,
+    "method": "浏览器全选并复制实际飞书正文，与转换后的本地正文比较；忽略空白与导出代码围栏，含表格章节使用富文本回读比较",
+    "homepage_title_and_intro_verified": true,
+    "reopened_core_chapters": 14,
+    "reopened_support_pages": 7,
+    "core_chapters_have_deep_dive": true,
+    "core_chapters_have_no_legacy_resume_section": true
+  },
+  "links": "章节链接改为既有飞书节点；未公开源码链接转为仓库路径说明",
+  "permissions_changed": false,
+  "new_pages_created": 0,
+  "illustrations": {
+    "uploaded_this_run": 0,
+    "status": "尚未上传；正文同步不代表配图同步完成",
+    "prior_blocker": "此前 Chrome 扩展文件上传返回 Not allowed；本轮未重试或调整扩展权限"
+  }
+}
