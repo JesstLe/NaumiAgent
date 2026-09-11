@@ -23,6 +23,7 @@ import {
 } from '@naumi/shared/api/WorkbenchRuntimeClient'
 
 export interface Permission {
+  sessionId: string
   callId: string
   name: string
   reason: string
@@ -92,6 +93,7 @@ export function useWorkspaceController() {
   const controller = useRef<AbortController | null>(null)
   const runId = useRef('')
   const runningSessionId = useRef<string | null>(null)
+  const [visibleRunningSessionId, setVisibleRunningSessionId] = useState<string | null>(null)
   const activeId = useRef<string | null>(null)
   const operation = useRef(false)
   const generation = useRef(0)
@@ -146,7 +148,9 @@ export function useWorkspaceController() {
       snapshotRevision.current++
       setSnapshotLoading(false)
       setSnapshotError('')
-      setPermissions([])
+      setPermissions((previous) => previous.filter(
+        (permission) => permission.sessionId === runningSessionId.current,
+      ))
       setLiveEvents([])
       setRunningUserMessageId(null)
       setError('')
@@ -434,6 +438,7 @@ export function useWorkspaceController() {
       const id = await ensureSession()
       sentSessionId = id
       runningSessionId.current = id
+      setVisibleRunningSessionId(id)
       sessionReady = true
       if (!replacingAssistant) savePreference(`draft:${id}`, '')
       if (stopped.current) return
@@ -492,6 +497,7 @@ export function useWorkspaceController() {
                 ...(event.data.status === 'needs_confirmation'
                   ? [
                       {
+                        sessionId: id,
                         callId,
                         name: String(event.data.tool_name ?? '工具执行'),
                         reason: String(event.data.reason ?? ''),
@@ -577,6 +583,7 @@ export function useWorkspaceController() {
       setBusy(false)
       setRunningUserMessageId(null)
       runningSessionId.current = null
+      setVisibleRunningSessionId(null)
       operation.current = false
       void taskState.refreshTasks()
       void goalState.refreshGoals()
@@ -779,9 +786,9 @@ export function useWorkspaceController() {
     permission: Permission,
     decision: 'allow' | 'deny',
   ) => {
-    if (!sessionId) return
+    if (!permission.sessionId) return
     try {
-      await api.resolvePermission(sessionId, permission.callId, { decision })
+      await api.resolvePermission(permission.sessionId, permission.callId, { decision })
       setPermissions((previous) =>
         previous.filter((item) => item.callId !== permission.callId),
       )
@@ -851,7 +858,7 @@ export function useWorkspaceController() {
     loading,
     busy,
     runningUserMessageId,
-    runningSessionId: runningSessionId.current,
+    runningSessionId: visibleRunningSessionId,
     uploading,
     draft,
     setDraft,
@@ -860,7 +867,7 @@ export function useWorkspaceController() {
     sendKey,
     setSendKey,
     setMode,
-    permissions,
+    permissions: permissions.filter((permission) => permission.sessionId === sessionId),
     liveEvents,
     select,
     connect,

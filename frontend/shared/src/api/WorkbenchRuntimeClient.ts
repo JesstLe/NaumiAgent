@@ -57,16 +57,48 @@ export interface StreamEvent {
   data: Record<string, unknown>
 }
 
+function preferenceNamespace(): string {
+  try {
+    return new URLSearchParams(location.search).get('naumiWindow')?.trim() || ''
+  } catch {
+    return ''
+  }
+}
+
+function preferenceStorageKey(key: string): string {
+  const namespace = preferenceNamespace()
+  return `naumi:workspace:${namespace ? `${namespace}:` : ''}${key}`
+}
+
+function launchPreference(key: string): string | null {
+  try {
+    const params = new URLSearchParams(location.search)
+    if (key === 'api') return params.get('naumiApi')
+    if (key === 'session') return params.get('naumiSession')
+  } catch {
+    /* The browser URL is unavailable in isolated tests. */
+  }
+  return null
+}
+
 export function readPreference(key: string, fallback = ''): string {
   try {
-    return localStorage.getItem(`naumi:workspace:${key}`) ?? fallback
+    const storageKey = preferenceStorageKey(key)
+    const stored = localStorage.getItem(storageKey)
+    if (stored !== null) return stored
+    const launched = launchPreference(key)
+    if (launched !== null) {
+      localStorage.setItem(storageKey, launched)
+      return launched
+    }
+    return fallback
   } catch {
     return fallback
   }
 }
 export function savePreference(key: string, value: string) {
   try {
-    localStorage.setItem(`naumi:workspace:${key}`, value)
+    localStorage.setItem(preferenceStorageKey(key), value)
   } catch {
     /* Storage can be unavailable in private sessions. */
   }

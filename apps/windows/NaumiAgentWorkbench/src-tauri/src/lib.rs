@@ -17,6 +17,15 @@ pub fn run() {
             }
             Ok(())
         })
+        .on_window_event(|window, event| {
+            if matches!(
+                event,
+                tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed
+            ) {
+                let label = window.label().to_string();
+                let _ = daemon::stop_daemon_now(&label);
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             secure_storage::get_token,
             secure_storage::set_token,
@@ -30,6 +39,7 @@ pub fn run() {
             daemon::stop_daemon,
             daemon::get_daemon_status,
             daemon::get_daemon_logs,
+            daemon::open_workspace_window,
             shell::open_in_explorer,
             shell::open_in_terminal,
             shell::select_workspace_directory,
