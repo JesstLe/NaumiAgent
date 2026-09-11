@@ -157,6 +157,11 @@ function View({ label }: { label: string }) {
       <div data-testid={`${label}-busy`}>{String(w.busy)}</div>
       <div data-testid={`${label}-sources`}>{w.selectedSources.join(',')}</div>
       <div data-testid={`${label}-model`}>{w.model}</div>
+      <div data-testid={`${label}-running-user`}>{w.runningUserMessageId}</div>
+      <div data-testid={`${label}-runs`}>{w.runs.map((run) => run.id).join(',')}</div>
+      <button onClick={() => void w.regenerate('原始问题', 'question', 'answer')}>
+        重新生成 {label}
+      </button>
     </section>
   )
 }
@@ -300,6 +305,67 @@ describe('one shared workspace for two presentation shells', () => {
         .getByTestId('web-messages')
         .textContent?.match(/不要丢失这条任务/g),
     ).toHaveLength(1)
+  })
+  it('regenerates an answer in place and exposes the new run to both views', async () => {
+    let release: (() => void) | undefined
+    let regenerated = false
+    server.use(
+      http.get(`${base}/sessions/:id/messages`, () => HttpResponse.json({
+        messages: [
+          { id: 'question', role: 'user', content: '原始问题', timestamp: '', metadata: {} },
+          { id: 'answer', role: 'assistant', content: '旧回答', timestamp: '', metadata: {} },
+        ],
+        total: 2,
+      })),
+      http.get(`${base}/sessions/:id/runs`, () => HttpResponse.json({ runs: regenerated
+        ? [{ id: 'new-run', user_message_id: 'legacy-new', status: 'completed', started_at: '2026-09-11T00:01:00Z', completed_at: '2026-09-11T00:01:04Z', steps: [] }]
+        : [{ id: 'old-run', user_message_id: 'legacy-old', status: 'completed', started_at: '2026-09-11T00:00:00Z', completed_at: '2026-09-11T00:00:02Z', steps: [] }], total: 1 })),
+      http.post(`${base}/sessions/:id/messages`, async () => {
+        await new Promise<void>((resolve) => { release = resolve })
+        regenerated = true
+        return new HttpResponse(
+          'data: {"id":"t","type":"token_delta","run_id":"new-run","data":{"token":"新回答"}}\n\ndata: {"id":"e","type":"agent_end","run_id":"new-run","data":{"status":"completed"}}\n\n',
+          { headers: { 'Content-Type': 'text/event-stream' } },
+        )
+      }),
+    )
+    setup()
+    await waitFor(() => expect(screen.getByTestId('web-connected')).toHaveTextContent('connected'))
+    fireEvent.click(screen.getByText('选择 web one'))
+    await waitFor(() => expect(screen.getByTestId('web-messages')).toHaveTextContent('原始问题|旧回答'))
+    fireEvent.change(screen.getByLabelText('web-draft'), { target: { value: '尚未发送的草稿' } })
+    fireEvent.click(screen.getByText('重新生成 web2'))
+    await waitFor(() => expect(screen.getByTestId('web-running-user')).toHaveTextContent('question'))
+    expect(screen.getByTestId('web-messages')).not.toHaveTextContent('旧回答')
+    await waitFor(() => expect(release).toBeDefined())
+    await act(async () => { release?.() })
+    await waitFor(() => expect(screen.getByTestId('web2-messages')).toHaveTextContent('原始问题|新回答'))
+    expect(screen.getByTestId('web-messages').textContent?.match(/原始问题/g)).toHaveLength(1)
+    expect(screen.getByTestId('web-runs')).toHaveTextContent('new-run')
+    expect(screen.getByLabelText('web2-draft')).toHaveValue('尚未发送的草稿')
+  })
+  it('restores the previous answer when regeneration fails', async () => {
+    server.use(
+      http.get(`${base}/sessions/:id/messages`, () => HttpResponse.json({
+        messages: [
+          { id: 'question', role: 'user', content: '原始问题', timestamp: '', metadata: {} },
+          { id: 'answer', role: 'assistant', content: '可保留的旧回答', timestamp: '', metadata: {} },
+        ],
+        total: 2,
+      })),
+      http.post(`${base}/sessions/:id/messages`, () =>
+        HttpResponse.json({ detail: '重新生成暂不可用' }, { status: 503 }),
+      ),
+    )
+    setup()
+    await waitFor(() => expect(screen.getByTestId('web-connected')).toHaveTextContent('connected'))
+    fireEvent.click(screen.getByText('选择 web one'))
+    await waitFor(() => expect(screen.getByTestId('web-messages')).toHaveTextContent('可保留的旧回答'))
+    fireEvent.change(screen.getByLabelText('web-draft'), { target: { value: '不能丢失的草稿' } })
+    fireEvent.click(screen.getByText('重新生成 web'))
+    await waitFor(() => expect(screen.getByTestId('web-error')).toHaveTextContent('重新生成暂不可用'))
+    expect(screen.getByTestId('web2-messages')).toHaveTextContent('可保留的旧回答')
+    expect(screen.getByLabelText('web2-draft')).toHaveValue('不能丢失的草稿')
   })
   it('does not mistake a response boundary for a completed server run', async () => {
     server.use(http.post(`${base}/sessions/:id/messages`, () => new HttpResponse('data: {"id":"boundary","type":"agent_end","data":{}}\n\n', { headers: { 'Content-Type': 'text/event-stream' } })))

@@ -321,16 +321,9 @@ export function Web2() {
   const messages = w.messages.filter(
     (item) => ['user', 'assistant'].includes(item.role) && item.content,
   )
-  const latestUserIndex = messages.reduce(
-    (latest, item, index) => item.role === 'user' ? index : latest,
-    -1,
-  )
   const messageRuns = useMemo(
     () => runsByUserMessage(messages, w.runs),
     [messages, w.runs],
-  )
-  const liveRunId = String(
-    w.liveEvents.at(-1)?.run_id || w.liveEvents.at(-1)?.data.run_id || '',
   )
   const composerLocked = w.busy || w.uploading || w.loading || w.connecting
   const uploadLocked = w.busy || w.uploading || !w.daemon
@@ -797,13 +790,12 @@ export function Web2() {
                   {messages.map((message, index) => {
                     const run = message.role === 'user' ? messageRuns.get(message.id) : undefined
                     const sources = message.role === 'assistant' ? messageSources(message) : []
-                    const retryPrompt = message.role === 'assistant'
-                      ? [...messages.slice(0, index)].reverse().find(item => item.role === 'user')?.content || ''
-                      : ''
+                    const retryUser = message.role === 'assistant'
+                      ? [...messages.slice(0, index)].reverse().find(item => item.role === 'user')
+                      : undefined
                     const live = message.role === 'user'
-                      && index === latestUserIndex
+                      && message.id === w.runningUserMessageId
                       && (w.busy || w.liveEvents.length > 0)
-                      && (!liveRunId || !run || liveRunId === run.id)
                     return <Fragment key={message.id}>
                       <article className={`w2-message ${message.role}`}>
                         <MessageContent content={message.content} plain={message.role === 'user'} />
@@ -814,10 +806,10 @@ export function Web2() {
                               timestamp={message.timestamp}
                               text={message.content}
                               onCopyError={() => w.setError('复制失败，请选中文字复制')}
-                              retryDisabled={!retryPrompt || composerLocked}
+                              retryDisabled={!retryUser || composerLocked}
                               onRetry={() => {
-                                if (!retryPrompt) return
-                                void w.send(retryPrompt)
+                                if (!retryUser) return
+                                void w.regenerate(retryUser.content, retryUser.id, message.id)
                               }}
                             />
                           : <div className="w2-message-actions"><CopyButton text={message.content} /></div>}

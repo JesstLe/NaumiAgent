@@ -127,4 +127,26 @@ describe('public execution activity', () => {
     expect(assigned.get('u1')?.id).toBe('r1')
     expect(assigned.get('u2')?.id).toBe('r2')
   })
+  it('uses the newest matching run after regenerating an earlier answer', () => {
+    const messages = [
+      { id: 'u1', role: 'user', content: '读取 README', timestamp: '', metadata: {} },
+      { id: 'a1', role: 'assistant', content: '第一版', timestamp: '', metadata: {} },
+      { id: 'u2', role: 'user', content: '检查配置', timestamp: '', metadata: {} },
+      { id: 'a2', role: 'assistant', content: '配置正常', timestamp: '', metadata: {} },
+    ]
+    const run = (id: string, started_at: string, summary: string) => ({
+      id,
+      user_message_id: `legacy-${id}`,
+      status: 'completed',
+      started_at,
+      steps: [{ sequence: 1, stage: 'request', status: 'completed', summary, detail: '' }],
+    })
+    const assigned = runsByUserMessage(messages, [
+      run('regenerated', '2026-09-11T00:03:00Z', '读取 README'),
+      run('second', '2026-09-11T00:02:00Z', '检查配置'),
+      run('first', '2026-09-11T00:01:00Z', '读取 README'),
+    ])
+    expect(assigned.get('u1')?.id).toBe('regenerated')
+    expect(assigned.get('u2')?.id).toBe('second')
+  })
 })
