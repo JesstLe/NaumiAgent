@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react'
 import { BarChart3, Code2, Download, Play, RotateCcw, Square, Table2 } from 'lucide-react'
-import { CodeBlock, contentUrl, downloadContent, ImagePreview } from './MessageContent'
+import { CodeBlock, contentUrl, downloadContent, RichImage } from './MessageContent'
 import { parseRichSpec, toCsv, type Column, type RichSpec, type Row } from './schema'
 
 const formatter = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 4 })
-const format = (value: unknown) => typeof value === 'number' ? formatter.format(value) : value === null || value === undefined ? '—' : String(value)
+const format = (value: unknown) => typeof value === 'number' ? Number.isFinite(value) ? formatter.format(value) : '超出数值范围' : value === null || value === undefined ? '—' : String(value)
 
 function DataTable({ columns, rows }: { columns: Column[]; rows: Row[] }) {
   const [query, setQuery] = useState(''), [page, setPage] = useState(0)
@@ -39,15 +39,16 @@ function Chart({ spec }: { spec: Extract<RichSpec, { type: 'chart' }> }) {
   const [style, setStyle] = useState(spec.style), [table, setTable] = useState(false), [hidden, setHidden] = useState<string[]>([]), [selected, setSelected] = useState<number | null>(null)
   const series = spec.series.filter(s => !hidden.includes(s.key))
   const values = spec.rows.flatMap(row => series.map(s => row[s.key]).filter((v): v is number => typeof v === 'number'))
-  const min = Math.min(0, ...values), max = Math.max(0, ...values), extent = max - min || 1
-  const x = (i: number) => 62 + (i + .5) * 560 / Math.max(1, spec.rows.length), y = (n: number) => 240 - (n - min) / extent * 200
+  const scale = Math.max(1, ...values.map(Math.abs))
+  const min = Math.min(0, ...values.map(v => v / scale)), max = Math.max(0, ...values.map(v => v / scale)), extent = max - min || 1
+  const x = (i: number) => 62 + (i + .5) * 560 / Math.max(1, spec.rows.length), y = (n: number) => 240 - (n / scale - min) / extent * 200
   return <>
     <div className="rich-toolbar"><div className="rich-segment"><button aria-pressed={!table} onClick={() => setTable(false)}><BarChart3 size={14} />图表</button><button aria-pressed={table} onClick={() => setTable(true)}><Table2 size={14} />数据</button></div><select aria-label="图表类型" value={style} onChange={e => setStyle(e.target.value as typeof style)}><option value="bar">柱状图</option><option value="line">折线图</option><option value="scatter">散点图</option></select></div>
     {table ? <DataTable columns={[{ key: spec.x, label: spec.x }, ...spec.series]} rows={spec.rows} /> : <>
       <div className="rich-legend">{spec.series.map((s, i) => <button key={s.key} aria-pressed={!hidden.includes(s.key)} onClick={() => setHidden(hidden.includes(s.key) ? hidden.filter(k => k !== s.key) : [...hidden, s.key])}><i style={{ background: colors[i] }} />{s.label}</button>)}</div>
       {!spec.rows.length || !values.length ? <p className="rich-empty">{!series.length ? '选择上方系列以显示图表' : '暂无可绘制的数值'}</p> : <>
         <svg className="rich-chart" viewBox="0 0 660 285" role="img" aria-label={spec.title}>
-          {[0, 1, 2, 3, 4].map(tick => { const n = min + extent * tick / 4; return <g key={tick}><line x1="62" x2="622" y1={y(n)} y2={y(n)} stroke="#e6ece1" /><text x="54" y={y(n) + 4} textAnchor="end">{format(n)}</text></g> })}
+          {[0, 1, 2, 3, 4].map(tick => { const n = (min + extent * tick / 4) * scale; return <g key={tick}><line x1="62" x2="622" y1={y(n)} y2={y(n)} stroke="#e6ece1" /><text x="54" y={y(n) + 4} textAnchor="end">{format(n)}</text></g> })}
           {series.map((s, si) => {
             const color = colors[spec.series.findIndex(original => original.key === s.key)]
             const d = spec.rows.map((row, i) => typeof row[s.key] === 'number' ? `${i === 0 || typeof spec.rows[i - 1]?.[s.key] !== 'number' ? 'M' : 'L'}${x(i)},${y(row[s.key] as number)}` : '').join(' ')
@@ -86,7 +87,7 @@ function WidgetView({ spec }: { spec: RichSpec }) {
     {spec.type === 'metrics' && <div className="rich-metrics">{spec.items.length ? spec.items.map((item, i) => <div key={i}><span>{item.label}</span><strong>{format(item.value)}<small>{item.unit}</small></strong>{item.note && <p>{item.note}</p>}</div>) : <p className="rich-empty">暂无指标</p>}</div>}
     {spec.type === 'table' && <DataTable columns={spec.columns} rows={spec.rows} />}
     {spec.type === 'chart' && <Chart spec={spec} />}
-    {spec.type === 'image' && <ImagePreview src={contentUrl(spec.url)} alt={spec.caption || spec.title} />}
+    {spec.type === 'image' && <RichImage src={contentUrl(spec.url)} alt={spec.caption || spec.title} />}
     {spec.type === 'html' && <HtmlWidget spec={spec} />}
     {spec.type === 'tabs' && <Tabs spec={spec} />}
   </section>

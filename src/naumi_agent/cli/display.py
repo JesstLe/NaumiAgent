@@ -47,6 +47,7 @@ def print_help() -> None:
         ("/hooks", "显示已注册的钩子"),
         ("/skills", "列出已加载的 Skill"),
         ("/extensions [skills]", "查看扩展来源、优先级、冲突与无效清单"),
+        ("/output [文件路径]", "返回图片/数据文件，查看交互组件格式"),
         ("/history", "查看历史会话列表"),
         ("/memory [子命令]", "记忆管理 (stats/search/clean/export)"),
         ("/load <id>", "加载指定会话并继续对话"),

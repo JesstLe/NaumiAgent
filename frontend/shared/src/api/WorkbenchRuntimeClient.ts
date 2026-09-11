@@ -155,6 +155,10 @@ export class WorkbenchRuntimeClient extends WorkbenchApiClient {
   async config(): Promise<ModelConfig> {
     return (await this.fetch('/config')).json()
   }
+  async outputAsset(path: string, signal?: AbortSignal): Promise<Blob> {
+    if (!/^\/api\/v1\/output-assets\/[a-f0-9]{64}\.(svg|png|jpg|webp|gif|pdf|csv|json|txt|md)$/.test(path)) throw new Error('文件地址无效')
+    return (await this.fetch(path.replace('/api/v1', ''), { signal })).blob()
+  }
   async commands(): Promise<{ commands: SlashCommand[] }> { return (await this.fetch('/commands')).json() }
   async todos(session: string): Promise<{ todos: Todo[] }> {
     return (await this.fetch(`/sessions/${encodeURIComponent(session)}/todos`)).json()

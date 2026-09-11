@@ -1,4 +1,5 @@
-import { Children, isValidElement, lazy, memo, Suspense, useState, type ReactNode } from 'react'
+import { Children, isValidElement, lazy, memo, Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
@@ -9,9 +10,11 @@ import 'katex/dist/katex.min.css'
 import './rich-content.css'
 
 const RichWidget = lazy(() => import('./RichWidget'))
+const PublishedImage = lazy(() => import('./PublishedAsset').then(module => ({ default: module.PublishedImage })))
+const PublishedFile = lazy(() => import('./PublishedAsset').then(module => ({ default: module.PublishedFile })))
 
 export function contentUrl(value: string): string {
-  if (/^\/api\/v1\/output-assets\/[a-f0-9]{64}\.(png|jpg|webp|gif|pdf|csv|txt|json)$/.test(value)) return value
+  if (/^\/api\/v1\/output-assets\/[a-f0-9]{64}\.(svg|png|jpg|webp|gif|pdf|csv|txt|json|md)$/.test(value)) return value
   if (/^#[\w-]+$/.test(value)) return value
   try {
     const url = new URL(value)
@@ -38,12 +41,27 @@ export function ImagePreview({ src, alt }: { src?: string; alt?: string }) {
       <span><ZoomIn size={15} />查看图片</span>
     </button>
     {alt && <span className="rich-caption">{alt}</span>}
-    {expanded && <dialog open className="rich-lightbox" aria-label={alt || '图片预览'} onKeyDown={event => { if (event.key === 'Escape') setExpanded(false) }}>
-      <button autoFocus className="rich-close" aria-label="关闭图片" onClick={() => setExpanded(false)}><X /></button>
-      <img src={src} alt={alt || '图片'} referrerPolicy="no-referrer" />
-      <a href={src} target="_blank" rel="noopener noreferrer">打开原图</a>
-    </dialog>}
+    {expanded && <ImageLightbox src={src} alt={alt || '图片'} close={() => setExpanded(false)} />}
   </span>
+}
+
+function ImageLightbox({ src, alt, close }: { src: string; alt: string; close: () => void }) {
+  const dialog = useRef<HTMLDialogElement>(null)
+  useEffect(() => {
+    const element = dialog.current
+    if (typeof element?.showModal === 'function') element.showModal()
+    else element?.setAttribute('open', '')
+    return () => { if (typeof element?.close === 'function') element.close() }
+  }, [])
+  return createPortal(<dialog ref={dialog} className="rich-lightbox" aria-label={alt} onCancel={event => { event.preventDefault(); close() }}>
+    <button autoFocus className="rich-close" aria-label="关闭图片" onClick={close}><X /></button>
+    <img src={src} alt={alt} referrerPolicy="no-referrer" />
+    <a href={src} target="_blank" rel="noopener noreferrer">打开原图</a>
+  </dialog>, document.body)
+}
+
+export function RichImage({ src, alt }: { src: string; alt?: string }) {
+  return src.startsWith('/api/v1/output-assets/') ? <Suspense fallback={<span>正在加载图片…</span>}><PublishedImage path={src} alt={alt || '图片'} /></Suspense> : <ImagePreview src={src} alt={alt} />
 }
 
 export function CodeBlock({ code, language = '' }: { code: string; language?: string }) {
@@ -74,8 +92,8 @@ export const MessageContent = memo(function MessageContent({ content, plain = fa
     <Markdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[[rehypeKatex, { strict: false, trust: false, throwOnError: false, maxExpand: 500 }], [rehypeHighlight, { detect: false }]]}
       skipHtml urlTransform={contentUrl}
       components={{
-        a: ({ href, children }) => href ? <a href={href} target={href.startsWith('#') ? undefined : '_blank'} rel="noopener noreferrer">{children}</a> : <span>{children}</span>,
-        img: ({ src, alt }) => <ImagePreview key={typeof src === 'string' ? src : ''} src={typeof src === 'string' ? src : ''} alt={alt} />,
+        a: ({ href, children }) => href?.startsWith('/api/v1/output-assets/') ? <Suspense fallback={<span>正在加载文件…</span>}><PublishedFile path={href}>{children}</PublishedFile></Suspense> : href ? <a href={href} target={href.startsWith('#') ? undefined : '_blank'} rel="noopener noreferrer">{children}</a> : <span>{children}</span>,
+        img: ({ src, alt }) => <RichImage key={typeof src === 'string' ? src : ''} src={typeof src === 'string' ? src : ''} alt={alt} />,
         pre: PlainPre,
         table: ({ children }) => <div className="rich-table-scroll"><table>{children}</table></div>,
       }}>{content}</Markdown>
