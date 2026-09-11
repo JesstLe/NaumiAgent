@@ -27,6 +27,17 @@ pnpm test
 pnpm e2e --workers=2
 ```
 
+`dev` 会把 TSX 模块交给浏览器以支持热更新，因此开发者工具能够看到源码路径。
+需要按发布形态在本机运行时使用：
+
+```powershell
+pnpm serve:production
+```
+
+该命令先生成压缩且不含 source map 的生产包，再由 5174 端口提供 `dist`。
+浏览器端 JavaScript 仍属于交付代码，不能存放密钥或安全逻辑；模型密钥、文件
+权限和执行能力必须留在 Python／Tauri 后端。
+
 也可以继续在 `web` 中运行原来的 `npm run dev`、`npm run build` 命令。依赖统一由本目录的 pnpm workspace 和锁文件管理。`web2` 的 `pnpm dev`／`pnpm build` 转发到统一入口，不另起一套控制器。
 
 构建产物保持 `web/dist`，兼容现有 Windows 打包脚本。共享层单元测试放在 `shared/tests`，由统一 Vitest 配置收集；跨界面测试放在 `web/tests/e2e`。
