@@ -234,10 +234,14 @@ class SessionStore:
         title: str | None = None,
         model: str | None = None,
         system_prompt: str | None = None,
+        workspace_root: str | None = None,
+        git_branch: str | None = None,
     ) -> Session:
         session = Session(
             title=title or "新会话",
             model=model or "kimi-for-coding",
+            workspace_root=str(workspace_root or "").strip(),
+            git_branch=str(git_branch or "").strip(),
         )
         if system_prompt:
             session.add_message("system", system_prompt)

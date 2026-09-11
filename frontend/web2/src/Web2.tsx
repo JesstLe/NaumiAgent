@@ -14,7 +14,6 @@ import {
   Check,
   Copy,
   ChevronDown,
-  ChevronRight,
   Clock3,
   CopyPlus,
   File,
@@ -85,10 +84,14 @@ import type {
 } from '@naumi/shared/api/types'
 import {
   loadWorkspaceProjects,
+  mergeWorkspaceProjects,
   normalizeWorkspacePath,
   saveWorkspaceProject,
   workspaceProjectMatches,
+  workspaceProjectSessions,
+  workspacePathsMatch,
   type WorkspaceProject,
+  type WorkspaceProjectCandidate,
 } from '@naumi/shared/projects/workspaceProjects'
 import { ProjectCreationDialog, type ProjectCreationInput } from './ProjectCreationDialog'
 
@@ -301,7 +304,6 @@ export function Web2() {
   const [resizing, setResizing] = useState<'left' | 'right' | null>(null)
   const [summaryOpen, setSummaryOpen] = useState(false)
   const [panel, setPanel] = useState<Panel>('home')
-  const [expanded, setExpanded] = useState(true)
   const [searching, setSearching] = useState(false)
   const [query, setQuery] = useState('')
   const [toolQuery, setToolQuery] = useState('')
@@ -333,25 +335,21 @@ export function Web2() {
   const scroll = useRef<HTMLDivElement>(null)
   const followOutput = useRef(true)
   const workspaceRoot = w.daemon?.workspace_root
-  const activeProject = projects.find((project) =>
+  const visibleProjects = useMemo(() => {
+    const candidates: WorkspaceProjectCandidate[] = w.sessions.flatMap((session) => session.workspace_root
+      ? [{ path: session.workspace_root, openedAt: session.updated_at }]
+      : [])
+    if (workspaceRoot) candidates.push({
+      path: workspaceRoot,
+      name: w.daemon?.workspace_name || directoryName(workspaceRoot),
+      openedAt: new Date(0).toISOString(),
+    })
+    return mergeWorkspaceProjects(projects, candidates)
+  }, [projects, w.daemon?.workspace_name, w.sessions, workspaceRoot])
+  const activeProject = visibleProjects.find((project) =>
     workspaceProjectMatches(project, workspaceRoot),
   )
   const workspace = activeProject?.name || w.daemon?.workspace_name || 'NaumiAgent'
-  const visibleProjects = useMemo(() => {
-    if (!workspaceRoot || projects.some((project) => workspaceProjectMatches(project, workspaceRoot)))
-      return projects
-    return [
-      {
-        id: `local:${workspaceRoot}`,
-        name: w.daemon?.workspace_name || 'NaumiAgent',
-        path: workspaceRoot,
-        location: 'local' as const,
-        createdAt: '',
-        lastOpenedAt: '',
-      },
-      ...projects,
-    ]
-  }, [projects, w.daemon?.workspace_name, workspaceRoot])
   const current = w.sessions.find((item) => item.id === w.sessionId)
   const messages = w.messages.filter(
     (item) => ['user', 'assistant'].includes(item.role) && item.content,
@@ -468,9 +466,20 @@ export function Web2() {
     if (!path || !action) return
     void action.call(platform, path).catch(error => w.setError(errorText(error)))
   }
-  const activateWorkspace = async (path: string, name?: string) => {
+  const activateWorkspace = async (path: string, name?: string, sessionId?: string) => {
     if (!platform.getDaemonLaunchConfig || !platform.startDaemon)
       throw new Error('切换项目需要 NaumiAgent 桌面版')
+    if (workspacePathsMatch(path, workspaceRoot)) {
+      const nextProjects = await saveWorkspaceProject(platform, {
+        name: name || directoryName(path) || '未命名项目',
+        path,
+        location: 'local',
+      })
+      setProjects(nextProjects)
+      setProjectDialogOpen(false)
+      if (sessionId) await w.select(sessionId)
+      return
+    }
     setWorkspaceSwitching(true)
     setWorkspaceTarget(path)
     try {
@@ -508,6 +517,8 @@ export function Web2() {
       } catch (error) {
         void platform.log('warn', '项目名称未能保存：' + errorText(error))
       }
+      savePreference('session', sessionId || '')
+      setProjectDialogOpen(false)
       window.location.reload()
     } catch (error) {
       setWorkspaceSwitching(false)
@@ -770,30 +781,42 @@ export function Web2() {
           {visibleProjects.map((project) => {
             const active = workspaceProjectMatches(project, workspaceRoot)
             const switching = workspaceSwitching && workspaceProjectMatches(project, workspaceTarget)
+            const projectSessionItems = workspaceProjectSessions(
+              project,
+              filteredSessions,
+              workspaceRoot,
+            )
+            const projectMatchesQuery = project.name.toLowerCase().includes(query.trim().toLowerCase())
+            if (query.trim() && !projectMatchesQuery && !projectSessionItems.length) return null
             return <Fragment key={project.id}>
               <button
                 className={`w2-project ${active ? 'active' : ''}`}
                 disabled={!active && (workspaceSwitching || !platform.startDaemon)}
                 onClick={() => {
-                  if (active) setExpanded((value) => !value)
-                  else void activateWorkspace(project.path, project.name).catch((error) => w.setError(errorText(error)))
+                  if (!active) void activateWorkspace(project.path, project.name).catch((error) => w.setError(errorText(error)))
                 }}
-                aria-expanded={active ? expanded : undefined}
+                aria-current={active ? 'true' : undefined}
                 title={project.path}
               >
-                {active && expanded ? <FolderOpen /> : <FolderClosed />}
+                {active ? <FolderOpen /> : <FolderClosed />}
                 <span>{project.name}</span>
                 {switching
                   ? <Loader2 className="w2-spin" />
-                  : active
-                    ? expanded ? <ChevronDown /> : <ChevronRight />
-                    : null}
+                  : null}
               </button>
-              {active && expanded && (
-                <div className="w2-session-list">
-              {filteredSessions.map((session) => (
+              <div className="w2-session-list">
+              {projectSessionItems.map((session) => (
                 <div className={`w2-session-row ${session.id === w.sessionId ? 'selected' : ''}`} key={session.id}>
-                  <button className="w2-session-open" aria-current={session.id === w.sessionId ? 'page' : undefined} title={session.title || '新对话'} onClick={() => void w.select(session.id)}>
+                  <button
+                    className="w2-session-open"
+                    aria-current={session.id === w.sessionId ? 'page' : undefined}
+                    title={session.title || '新对话'}
+                    disabled={workspaceSwitching}
+                    onClick={() => {
+                      if (active) void w.select(session.id)
+                      else void activateWorkspace(project.path, project.name, session.id).catch((error) => w.setError(errorText(error)))
+                    }}
+                  >
                     {session.pinned && <Pin size={11} />}
                     <span>{session.title || '新对话'}</span>
                     {w.busy && session.id === w.runningSessionId && <Loader2 className="w2-spin" size={13} />}
@@ -802,14 +825,14 @@ export function Web2() {
                   {sessionMenu === session.id && <div className="w2-session-menu">
                     <button disabled={currentWriteLocked(session.id)} onClick={() => { setRenameTitle(session.title || '新对话'); setRenameSessionId(session.id); setDialog('rename'); setSessionMenu(null) }}><Pencil />修改名称</button>
                     <button disabled={w.mutating} onClick={() => { void w.pinSession(session.id, !session.pinned); setSessionMenu(null) }}>{session.pinned ? <PinOff /> : <Pin />}{session.pinned ? '取消置顶' : '置顶'}</button>
-                    <button disabled={currentWriteLocked(session.id)} onClick={() => { void w.duplicateSession(session.id); setSessionMenu(null) }}><CopyPlus />复制会话</button>
-                    <button disabled={!platform.openInExplorer} onClick={() => { openPath('explorer'); setSessionMenu(null) }}><FolderOpen />在资源管理器中打开</button>
-                    <button disabled={!platform.openInTerminal} onClick={() => { openPath('terminal'); setSessionMenu(null) }}><Terminal />在终端中打开</button>
+                    <button disabled={!active || currentWriteLocked(session.id)} title={active ? undefined : '切换到该项目后可复制会话'} onClick={() => { void w.duplicateSession(session.id); setSessionMenu(null) }}><CopyPlus />复制会话</button>
+                    <button disabled={!platform.openInExplorer} onClick={() => { void platform.openInExplorer?.(project.path).catch(error => w.setError(errorText(error))); setSessionMenu(null) }}><FolderOpen />在资源管理器中打开</button>
+                    <button disabled={!platform.openInTerminal} onClick={() => { void platform.openInTerminal?.(project.path).catch(error => w.setError(errorText(error))); setSessionMenu(null) }}><Terminal />在终端中打开</button>
                     <button disabled={currentWriteLocked(session.id)} onClick={() => { void w.archiveSession(session.id); setSessionMenu(null) }}><Archive />归档</button>
                   </div>}
                 </div>
               ))}
-              {!filteredSessions.length && (
+              {active && !projectSessionItems.length && (
                 <div className="w2-sidebar-empty">
                   {query
                     ? '没有匹配的会话'
@@ -818,8 +841,7 @@ export function Web2() {
                       : '暂无历史会话'}
                 </div>
               )}
-                </div>
-              )}
+              </div>
             </Fragment>
           })}
         </div>

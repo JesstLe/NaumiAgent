@@ -133,12 +133,20 @@ class _FakeSessionStore:
         title: str | None = None,
         model: str | None = None,
         system_prompt: str | None = None,
+        workspace_root: str | None = None,
+        git_branch: str | None = None,
     ):
         if self.create_session_error is not None:
             raise self.create_session_error
         self.exists = True
         self.created_sessions.append(
-            {"title": title, "model": model, "system_prompt": system_prompt}
+            {
+                "title": title,
+                "model": model,
+                "system_prompt": system_prompt,
+                "workspace_root": workspace_root,
+                "git_branch": git_branch,
+            }
         )
         return SimpleNamespace(
             id="sess-created",
@@ -150,6 +158,8 @@ class _FakeSessionStore:
             total_tokens=0,
             total_cost_usd=0.0,
             status="active",
+            workspace_root=workspace_root or "",
+            git_branch=git_branch or "",
         )
 
     async def list_sessions(
@@ -1920,6 +1930,23 @@ class _FakeEngine:
         self.load_session_results = load_session_results or {}
         self.load_session_error = load_session_error
         self.loaded: list[str] = []
+
+    def current_git_branch(self) -> str:
+        return "codex/project-workspaces"
+
+    async def create_session(
+        self,
+        title: str | None = None,
+        model: str | None = None,
+        system_prompt: str | None = None,
+    ):
+        return await self.session_store.create_session(
+            title=title,
+            model=model,
+            system_prompt=system_prompt,
+            workspace_root=str(self.workspace_root),
+            git_branch=self.current_git_branch(),
+        )
 
     async def load_session(self, session_id: str) -> bool:
         self.loaded.append(session_id)
@@ -6380,6 +6407,8 @@ async def test_create_workbench_session_returns_selected_bootstrap_snapshot() ->
             "title": "Mac 工作台",
             "model": "kimi-for-coding",
             "system_prompt": "中文优先",
+            "workspace_root": str(engine.workspace_root),
+            "git_branch": "codex/project-workspaces",
         }
     ]
     assert response.selected_session_id == "sess-created"
@@ -6443,6 +6472,8 @@ async def test_create_workbench_session_reports_runtime_session_load_failure() -
             "title": "Mac 工作台",
             "model": None,
             "system_prompt": None,
+            "workspace_root": str(engine.workspace_root),
+            "git_branch": "codex/project-workspaces",
         }
     ]
     assert engine.loaded == ["sess-created"]
@@ -6485,6 +6516,8 @@ def test_create_workbench_session_route_accepts_json_body() -> None:
             "title": "Mac 工作台",
             "model": "kimi-for-coding",
             "system_prompt": "中文优先",
+            "workspace_root": str(engine.workspace_root),
+            "git_branch": "codex/project-workspaces",
         }
     ]
     body = response.json()
