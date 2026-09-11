@@ -56,6 +56,7 @@ import { TodoPanel } from './TodoPanel'
 import { GoalPanel } from './GoalPanel'
 import { DiffPanel } from './DiffPanel'
 import { ThinkingState } from './beautiful/ThinkingState'
+import { MessageContent } from './rich/MessageContent'
 import { SelectionActions } from './beautiful/SelectionActions'
 import { ContextCards } from './beautiful/ContextCards'
 import { Flowchart } from './beautiful/Flowchart'
@@ -170,28 +171,6 @@ function CopyButton({ text }: { text: string }) {
     </IconButton>
   )
 }
-function MessageContent({ content }: { content: string }) {
-  return (
-    <>
-      {content.split(/(```[\s\S]*?```)/g).map((part, index) => {
-        if (part.startsWith('```')) {
-          const newline = part.indexOf('\n')
-          return (
-            <pre key={index}>
-              <code>{part.slice(newline === -1 ? 3 : newline + 1, -3)}</code>
-            </pre>
-          )
-        }
-        return (
-          <div className="w2-prose" key={index}>
-            {part}
-          </div>
-        )
-      })}
-    </>
-  )
-}
-
 function SchedulePanel() {
   const w = useWorkspace()
   const [jobs, setJobs] = useState<ScheduleJob[]>([])
@@ -661,7 +640,7 @@ export function Web2() {
                       && (!liveRunId || !run || liveRunId === run.id)
                     return <Fragment key={message.id}>
                       <article className={`w2-message ${message.role}`}>
-                        <MessageContent content={message.content} />
+                        <MessageContent content={message.content} plain={message.role === 'user'} />
                         <div className="w2-message-actions">
                           <CopyButton text={message.content} />
                         </div>
