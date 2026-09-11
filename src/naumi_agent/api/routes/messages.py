@@ -41,7 +41,12 @@ from naumi_agent.api.schemas import (
 from naumi_agent.harness.coordinator import ReconciliationCoordinatorOutcome
 from naumi_agent.runs.public_activity import progress_summary
 from naumi_agent.runs.recovery import restore_tool_previews
-from naumi_agent.runs.store import ChatRunRecord, ChatRunStore, SourceReferenceRecord
+from naumi_agent.runs.store import (
+    ChatRunRecord,
+    ChatRunStepRecord,
+    ChatRunStore,
+    SourceReferenceRecord,
+)
 from naumi_agent.runs.tool_evidence import tool_end_status, tool_metadata, tool_output
 from naumi_agent.streaming.events import EventType, StreamEvent, StreamEventSink
 
@@ -243,6 +248,14 @@ async def send_message(
         engine.set_runtime_mode(body.runtime_mode)
         try:
             result = await engine.run(body.content, turn_context=turn_context)
+            if not str(result.response or "").strip():
+                raise HTTPException(
+                    status_code=502,
+                    detail=(
+                        str(result.error or "").strip()
+                        or "任务结束但未返回可显示结果，请重试"
+                    ),
+                )
             workbench_metadata = await _create_workbench_issue_from_message(
                 engine, session_id, body
             )
@@ -548,6 +561,7 @@ async def _stream_response(
     runtime_mode: str = "default",
 ):
     queue: asyncio.Queue[StreamEvent | None] = asyncio.Queue()
+    received_visible_content = False
     store = getattr(request.app.state, "chat_run_store", None)
     engine_manages_run = store is not None and getattr(engine, "chat_run_store", None) is store
     run = (
@@ -592,7 +606,15 @@ async def _stream_response(
     await attach_artifacts()
 
     async def on_stream_event(stream_event: StreamEvent) -> None:
-        nonlocal run
+        nonlocal received_visible_content, run
+        if stream_event.type is EventType.TOKEN_DELTA:
+            token = str(
+                stream_event.data.get("token")
+                or stream_event.data.get("content")
+                or ""
+            )
+            if token.strip():
+                received_visible_content = True
         event_run_id = stream_event.run_id
         if engine_manages_run and run is None and event_run_id:
             run = await store.get_run(session_id, event_run_id)
@@ -625,6 +647,18 @@ async def _stream_response(
                     )
                 finally:
                     engine.set_runtime_mode(previous_runtime_mode)
+                response_content = str(result.response or "")
+                if result.status in {"completed", "completed_unverified"}:
+                    if not response_content.strip():
+                        raise RuntimeError("任务结束但未返回可显示结果，请重试")
+                    if not received_visible_content:
+                        await on_stream_event(
+                            StreamEvent(
+                                type=EventType.TOKEN_DELTA,
+                                data={"token": response_content},
+                                session_id=session_id,
+                            )
+                        )
                 terminal_event = StreamEvent(
                     type=EventType.AGENT_END,
                     data={
@@ -802,12 +836,32 @@ async def _restore_legacy_tool_previews(
 
 
 def _chat_run_to_response(run: ChatRunRecord) -> ChatRunResponse:
+    legacy_empty_response = (
+        run.status == "completed"
+        and run.receipt is not None
+        and run.receipt.summary.strip() in {"", "本轮运行已结束。"}
+        and not any(step.stage == "response" for step in run.steps)
+    )
+    steps = list(run.steps)
+    if legacy_empty_response:
+        steps.append(
+            ChatRunStepRecord(
+                sequence=max((step.sequence for step in steps), default=0) + 1,
+                stage="response",
+                status="failed",
+                summary="生成答复",
+                detail="任务结束但未返回可显示结果，请重试",
+                event_id=f"{run.id}:legacy-empty-response",
+                started_at=run.completed_at or run.updated_at,
+                completed_at=run.completed_at or run.updated_at,
+            )
+        )
     return ChatRunResponse(
         id=run.id,
         session_id=run.session_id,
         user_message_id=run.user_message_id,
         assistant_message_id=run.assistant_message_id,
-        status=run.status,
+        status="failed" if legacy_empty_response else run.status,
         started_at=run.started_at,
         updated_at=run.updated_at,
         completed_at=run.completed_at,
@@ -823,7 +877,7 @@ def _chat_run_to_response(run: ChatRunRecord) -> ChatRunResponse:
                 completed_at=step.completed_at,
                 metadata=step.metadata,
             )
-            for step in run.steps
+            for step in steps
         ],
         artifacts=[
             ChatArtifactResponse(

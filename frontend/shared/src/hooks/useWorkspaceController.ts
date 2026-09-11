@@ -111,6 +111,16 @@ export function useWorkspaceController() {
     setSessions(all)
     return all
   }, [api])
+  const fetchAllMessages = useCallback(async (id: string) => {
+    const first = await api.fetchMessages(id, 1, 200)
+    let allMessages = first.messages
+    for (let page = 2; allMessages.length < first.total; page++) {
+      const next = await api.fetchMessages(id, page, 200)
+      if (!next.messages.length) break
+      allMessages = [...allMessages, ...next.messages]
+    }
+    return allMessages
+  }, [api])
 
   const select = useCallback(
     async (id: string | null) => {
@@ -141,7 +151,7 @@ export function useWorkspaceController() {
       }
       setLoading(true)
       const results = await Promise.allSettled([
-        api.fetchMessages(id, 1, 200),
+        fetchAllMessages(id),
         api.fetchChatEnvironment(id),
         api.runs(id),
         api.fetchSnapshot(id),
@@ -149,19 +159,7 @@ export function useWorkspaceController() {
       if (current !== generation.current) return
       const [history, environment, records, state] = results
       if (history.status === 'fulfilled') {
-        let allMessages = history.value.messages
-        const total = history.value.total
-        try {
-          for (let page = 2; allMessages.length < total; page++) {
-            const next = await api.fetchMessages(id, page, 200)
-            if (current !== generation.current) return
-            if (!next.messages.length) break
-            allMessages = [...allMessages, ...next.messages]
-          }
-          setMessages(allMessages)
-        } catch (e) {
-          if (current === generation.current) setError(errorText(e))
-        }
+        setMessages(history.value)
       }
       if (current !== generation.current) return
       if (environment.status === 'fulfilled')
@@ -173,7 +171,7 @@ export function useWorkspaceController() {
         setError(`部分会话内容未加载：${errorText(failure.reason)}`)
       setLoading(false)
     },
-    [api],
+    [api, fetchAllMessages],
   )
 
   const connect = useCallback(async () => {
@@ -352,6 +350,11 @@ export function useWorkspaceController() {
     const replacedAssistant = replaceAssistantMessageId
       ? messages.find((message) => message.id === replaceAssistantMessageId)
       : undefined
+    const assistantSnapshot = new Map(
+      messages
+        .filter((message) => message.role === 'assistant')
+        .map((message) => [message.id, message.content]),
+    )
     const startedAt = new Date().toISOString()
     let completed = false
     let failure = ''
@@ -482,8 +485,23 @@ export function useWorkspaceController() {
       if (failure) throw new Error(failure)
       if (!completed && !stopped.current)
         throw new Error('响应连接已中断，请检查执行记录后重试')
-      if (replacingAssistant && !receivedAssistantContent)
-        throw new Error('重新生成未返回内容，请重试')
+      if (!receivedAssistantContent && !stopped.current) {
+        const persistedMessages = await fetchAllMessages(id)
+        const finalMessage = persistedMessages.at(-1)
+        if (
+          finalMessage?.role === 'assistant' &&
+          finalMessage.content.trim() &&
+          (
+            !assistantSnapshot.has(finalMessage.id) ||
+            assistantSnapshot.get(finalMessage.id) !== finalMessage.content
+          )
+        ) {
+          receivedAssistantContent = true
+          if (activeId.current === id) setMessages(persistedMessages)
+        }
+      }
+      if (!receivedAssistantContent)
+        throw new Error('任务结束但未返回可显示结果，请重试')
       if (!replacingAssistant) setSelectedSources([])
       succeeded = true
       setMessages((previous) =>

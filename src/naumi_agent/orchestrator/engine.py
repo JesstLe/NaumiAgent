@@ -900,6 +900,13 @@ _OUTPUT_TRUNCATED_FINISH_REASONS = {
 }
 _MAX_OUTPUT_CONTINUATIONS = 2
 _TOOL_TEXT_GUARD_CHARS = 24
+_EMPTY_RESPONSE_RETRY_PROMPT = (
+    "上一次模型调用没有返回可展示的正文或工具调用。"
+    "请继续完成用户任务，并返回非空的用户可见答复；不要只返回隐藏推理。"
+)
+_EMPTY_RESPONSE_ERROR = (
+    "模型连续两次未返回可显示内容，本次任务未完成，请重试。"
+)
 _OUTPUT_CONTINUATION_PROMPT = (
     "你的上一条回答因为输出上限被截断。请从截断处直接继续，"
     "不要重写已经说过的内容，不要添加开场白。"
@@ -5223,6 +5230,10 @@ class AgentEngine:
         while i < len(messages):
             msg = messages[i]
             role = msg.get("role", "")
+            content = msg.get("content")
+            has_visible_content = (
+                bool(content.strip()) if isinstance(content, str) else bool(content)
+            )
 
             if role == "assistant" and msg.get("tool_calls"):
                 tool_call_ids = []
@@ -5256,6 +5267,11 @@ class AgentEngine:
                         })
 
                 i = j
+            elif role == "assistant" and not has_visible_content:
+                # Some providers reject an assistant message whose content is
+                # blank and which has no tool call. Old empty-success runs can
+                # leave exactly this shape in durable session history.
+                i += 1
             elif role == "tool":
                 # Orphan tool result without preceding assistant tool_calls — skip
                 i += 1
@@ -6316,13 +6332,14 @@ class AgentEngine:
     ) -> list[dict[str, Any]]:
         """Return model-ready messages with inline visual payloads summarized."""
         sanitized, replacements = self._compactor.sanitize_visual_payloads(messages)
+        sanitized = self._sanitize_messages(sanitized)
         if replacements:
             logger.info(
                 "Sanitized %d inline visual payloads before model call",
                 replacements,
             )
-            if update_engine_context:
-                self._messages = sanitized
+        if update_engine_context and sanitized != self._messages:
+            self._messages = sanitized
         return sanitized
 
     async def _build_compaction_runtime_snapshot(self) -> tuple[str, list[str], list[str]]:
@@ -7899,6 +7916,7 @@ class AgentEngine:
         max_turns = self._config.safety.max_turns
         tool_call_history: list[str] = []
         todo_reconciliation_attempted = False
+        empty_response_retry_attempted = False
 
         # Inject plan as guidance to prevent approach oscillation
         if plan:
@@ -8013,6 +8031,23 @@ class AgentEngine:
                     partial_content=response.content,
                     tier=ModelTier.CAPABLE,
                 )
+            if not final_content.strip():
+                if not empty_response_retry_attempted:
+                    empty_response_retry_attempted = True
+                    self._append_message(
+                        {"role": "system", "content": _EMPTY_RESPONSE_RETRY_PROMPT}
+                    )
+                    continue
+                await self._fire_agent_stop(
+                    status="failed",
+                    response=_EMPTY_RESPONSE_ERROR,
+                    reason="empty_model_response",
+                )
+                return AgentResult(
+                    status="failed",
+                    error=_EMPTY_RESPONSE_ERROR,
+                    usage=self._usage,
+                )
             safe_content = self._output_guardrail.redact(final_content)
             self._append_message({"role": "assistant", "content": final_content})
             final_status = (
@@ -8062,6 +8097,7 @@ class AgentEngine:
         session_id = self._session.id if self._session else ""
         tool_call_history: list[str] = []
         todo_reconciliation_attempted = False
+        empty_response_retry_attempted = False
 
         # Inject plan as guidance to prevent approach oscillation
         if plan:
@@ -8478,6 +8514,47 @@ class AgentEngine:
                         turn=turn + 1,
                     )
                 text_content = continued_content
+
+            if not text_content.strip():
+                pending_text_parts.clear()
+                if not empty_response_retry_attempted:
+                    empty_response_retry_attempted = True
+                    await events.publish(
+                        RuntimeEventType.PHASE_SUMMARY,
+                        {
+                            "items": [
+                                {
+                                    "action": (
+                                        "检测到模型未返回可显示内容，"
+                                        "已自动重新请求最终答复"
+                                    ),
+                                    "status": "completed",
+                                }
+                            ]
+                        },
+                        turn=turn + 1,
+                    )
+                    self._append_message(
+                        {"role": "system", "content": _EMPTY_RESPONSE_RETRY_PROMPT}
+                    )
+                    continue
+                await events.publish(
+                    RuntimeEventType.ERROR,
+                    {"message": _EMPTY_RESPONSE_ERROR},
+                    turn=turn + 1,
+                )
+                await self._fire_agent_stop(
+                    status="failed",
+                    response=_EMPTY_RESPONSE_ERROR,
+                    reason="empty_model_response",
+                    streaming=True,
+                    events=events,
+                )
+                return AgentResult(
+                    status="failed",
+                    error=_EMPTY_RESPONSE_ERROR,
+                    usage=self._usage,
+                )
 
             if got_response:
                 await events.publish(
