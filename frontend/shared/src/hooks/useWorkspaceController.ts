@@ -53,6 +53,9 @@ export function useWorkspaceController() {
   const [selectedSources, setSelectedSources] = useState<string[]>([])
   const [runs, setRuns] = useState<Run[]>([])
   const [snapshot, setSnapshot] = useState<WorkbenchSnapshot | null>(null)
+  const [snapshotLoading, setSnapshotLoading] = useState(false)
+  const [snapshotError, setSnapshotError] = useState('')
+  const snapshotRevision = useRef(0)
   const [diff, setDiff] = useState<GitDiffResponse | null>(null)
   const [diffLoading, setDiffLoading] = useState(false)
   const [diffError, setDiffError] = useState('')
@@ -115,6 +118,9 @@ export function useWorkspaceController() {
       diffRevision.current++
       setDiffError(''); setDiffLoading(false); setDiffUpdatedAt('')
       setSnapshot(null)
+      snapshotRevision.current++
+      setSnapshotLoading(false)
+      setSnapshotError('')
       setPermissions([])
       setLiveEvents([])
       setError('')
@@ -506,6 +512,22 @@ export function useWorkspaceController() {
       if (revision === diffRevision.current) setDiffLoading(false)
     }
   }
+  const refreshSnapshot = async () => {
+    const id = activeId.current
+    if (!id || !daemon) return
+    const current = generation.current
+    const revision = ++snapshotRevision.current
+    setSnapshotLoading(true)
+    setSnapshotError('')
+    try {
+      const next = await api.fetchSnapshot(id)
+      if (current === generation.current && revision === snapshotRevision.current) setSnapshot(next)
+    } catch (error) {
+      if (current === generation.current && revision === snapshotRevision.current) setSnapshotError(errorText(error))
+    } finally {
+      if (revision === snapshotRevision.current) setSnapshotLoading(false)
+    }
+  }
   const changeModel = async (value: string) => {
     if (operation.current) return
     operation.current = true
@@ -604,6 +626,9 @@ export function useWorkspaceController() {
     setSelectedSources,
     runs,
     snapshot,
+    snapshotLoading,
+    snapshotError,
+    refreshSnapshot,
     diff,
     diffLoading,
     diffError,
