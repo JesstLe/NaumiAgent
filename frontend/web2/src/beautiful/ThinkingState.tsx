@@ -7,6 +7,7 @@ import {
   runExecutionTimeline,
   type ToolTimelineStep,
 } from '@naumi/shared/api/activity'
+import type { Run } from '@naumi/shared/api/WorkbenchRuntimeClient'
 import Primitive from './upstream/components/primitives/ThinkingState'
 import { activityNames } from './ToolChips'
 
@@ -58,16 +59,25 @@ const elapsedLabel = (startedAt: string, completedAt: string | undefined, now: n
   return `用时 ${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`
 }
 
-export function ThinkingState() {
+export function ThinkingState({
+  run,
+  live = false,
+  objective,
+}: {
+  run?: Run
+  live?: boolean
+  objective?: string
+}) {
   const w = useWorkspace()
-  const latest = w.runs[0]
-  const objective = [...w.messages].reverse().find(message => message.role === 'user')?.content
   const workspace = w.daemon?.workspace_root
-  const liveRun = w.liveEvents.at(-1)?.run_id || w.liveEvents.at(-1)?.data.run_id
-  const useSaved = !w.busy && latest && (!w.liveEvents.length || liveRun === latest.id)
+  const useLive = live && (w.busy || !run)
   const steps = useMemo(
-    () => useSaved ? runExecutionTimeline(latest, { objective, workspace }) : liveExecutionTimeline(w.liveEvents, w.busy, { objective, workspace }),
-    [latest, useSaved, w.busy, w.liveEvents, objective, workspace],
+    () => useLive
+      ? liveExecutionTimeline(w.liveEvents, w.busy, { objective, workspace })
+      : run
+        ? runExecutionTimeline(run, { objective, workspace })
+        : [],
+    [run, useLive, w.busy, w.liveEvents, objective, workspace],
   )
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
@@ -82,15 +92,15 @@ export function ThinkingState() {
     : typeof terminal?.data.status === 'string'
       ? activityState(terminal.data.status)
       : 'unknown'
-  const status = w.busy ? 'running' : useSaved && latest ? activityState(latest.status) : liveStatus
+  const status = useLive && w.busy ? 'running' : run && !useLive ? activityState(run.status) : liveStatus
   const firstEvent = w.liveEvents.find(event => event.timestamp)
-  const done = useSaved && latest
-    ? `${elapsedLabel(latest.started_at, latest.completed_at, now)} · ${activityNames[status]}`
+  const done = run && !useLive
+    ? `${elapsedLabel(run.started_at, run.completed_at, now)} · ${activityNames[status]}`
     : firstEvent
       ? `${elapsedLabel(firstEvent.timestamp || '', terminal?.timestamp, now)} · ${activityNames[status]}`
       : activityNames[status]
-  return <div className="bui-root bui-execution" aria-label="执行过程" key={w.sessionId}>
-    <Primitive active="正在推理" done={done} working={w.busy} settledExpanded rows={[]}>
+  return <div className="bui-root bui-execution" aria-label="执行过程" data-run-id={run?.id || 'live'}>
+    <Primitive active="正在推理" done={done} working={useLive && w.busy} settledExpanded rows={[]}>
       <div className="bui-timeline" aria-label="执行时间线">
         {steps.map(step => step.kind === 'reasoning'
           ? <p key={step.id} style={{ whiteSpace: 'pre-line' }} className={step.state === 'running' ? 'is-running' : ''}>{step.label}</p>

@@ -33,6 +33,8 @@ export interface GoalSnapshot { current_goal_id: string; goals: WorkspaceGoal[];
 export interface SlashCommand { command: string; description: string; aliases: string[]; readonly: boolean; arguments: { syntax: string; required: boolean } }
 export interface Run {
   id: string
+  user_message_id?: string
+  assistant_message_id?: string
   status: string
   started_at: string
   completed_at?: string
@@ -182,7 +184,7 @@ export class WorkbenchRuntimeClient extends WorkbenchApiClient {
     ).json()
   }
   async runs(id: string): Promise<{ runs: Run[] }> {
-    return (await this.fetch(`/sessions/${encodeURIComponent(id)}/runs`)).json()
+    return (await this.fetch(`/sessions/${encodeURIComponent(id)}/runs?limit=200`)).json()
   }
   async cancel(id: string, runId: string) {
     await this.fetch(

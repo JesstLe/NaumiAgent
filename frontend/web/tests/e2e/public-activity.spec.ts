@@ -12,7 +12,7 @@ test('concrete actions, task progress and compaction remain visible after reload
     { sequence: 5, stage: 'tool', status: 'completed', summary: 'browser_observe', detail: '页面元素已读取', metadata: { public_action: '查看页面元素与布局' } },
     { sequence: 6, stage: 'activity', status: 'completed', summary: '已压缩上下文：120 → 30 条消息；归档 2 条工具结果', detail: '' },
   ]
-  await page.route('**/sessions/*/runs', route => route.fulfill({ json: { runs: finished ? [{ id: 'public', status: 'completed', started_at: '2026-09-11T00:00:00Z', completed_at: '2026-09-11T00:00:28Z', steps }] : [] } }))
+  await page.route('**/sessions/*/runs*', route => route.fulfill({ json: { runs: finished ? [{ id: 'public', status: 'completed', started_at: '2026-09-11T00:00:00Z', completed_at: '2026-09-11T00:00:28Z', steps }] : [] } }))
   await page.route('**/sessions/*/messages', async route => {
     if (route.request().method() !== 'POST') return route.fallback()
     finished = true
