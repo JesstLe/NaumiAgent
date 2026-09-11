@@ -28,7 +28,7 @@ const daemonStatus = {
   auth_mode: 'api_key',
 }
 
-const snapshot = {
+export const snapshot = {
   version: 1 as const,
   session_id: SESSION_ID,
   summary: {
