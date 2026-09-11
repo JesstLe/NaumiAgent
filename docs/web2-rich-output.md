@@ -8,6 +8,9 @@
 
 采用 react-markdown、GFM、remark-math、KaTeX 和语法高亮；支持表格、任务列表、引用、链接、代码复制下载、图片预览。原始 HTML 不直接进入父页面 DOM。用户输入继续显示原文，助手回复使用富渲染。
 
+2026-09-11 排版修正：remark-math 将同一行的 `$$…$$` 解析为 inlineMath，导致独立求和公式采用紧凑分数。新增 AST 转换按实际双美元定界符标记 display math，保持单美元公式、代码块和代码行不变。独立公式采用 1.25em 字号及上下留白，分数内部间距使用 KaTeX 自身 display 排版规则。
+验收：5 项正文单测、实际 Kimi 历史消息页面/刷新测试和生产构建通过；截图 `.naumi/data/rich-math-fraction.png` 已人工检查。
+
 验证：4 项正文单测通过，生产构建通过，Markdown/LaTeX 页面及刷新测试通过。实际使用 Kimi 返回包含表格和公式的回复，保存到 SQLite 会话 `97e3d5b4a2e8`，由现有 8765 API 读取并在 Web2 渲染、刷新验收通过（模型调用使用新配置的独立 Router，既有 API 进程未重启）。截图 `.naumi/data/rich-kimi-real.png`。现有移动端左栏会覆盖正文，已交由并行布局任务处理；生产包存在大 chunk 提示，后续组件按需加载。
 
 ### 模块二：富组件（已验证）

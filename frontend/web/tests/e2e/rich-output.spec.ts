@@ -28,11 +28,16 @@ test('real Kimi response renders from SQLite through the running backend', async
   test.skip(!session, '需要真实 Kimi 消息会话')
   await page.addInitScript(id => localStorage.setItem('naumi:workspace:session', id!), session)
   await page.goto('http://127.0.0.1:5174/web2')
-  await expect(page.locator('.rich-content .katex').first()).toBeVisible()
+  await expect(page.locator('.rich-content .katex-display .mfrac')).toBeVisible()
   await expect(page.locator('.rich-content table').first()).toBeVisible()
   await page.reload()
   await expect(page.locator('.rich-content .katex').first()).toBeVisible()
   await page.screenshot({ path: '../../.naumi/data/rich-kimi-real.png', fullPage: true })
+  const formula = page.locator('.rich-content .katex-display').first()
+  await formula.scrollIntoViewIfNeeded()
+  await page.evaluate(() => document.fonts.ready)
+  await expect(formula.locator('math')).toHaveAttribute('display', 'block')
+  await formula.screenshot({ path: '../../.naumi/data/rich-math-fraction.png' })
 })
 
 test('interactive charts, tables and isolated HTML work and recover after reload', async ({ page }) => {
