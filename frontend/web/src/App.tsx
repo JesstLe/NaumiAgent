@@ -25,7 +25,8 @@ function LocaleInitializer() {
     }
   }, [platform, initializeLocale])
 
-  return location.pathname === '/web2' || location.pathname.startsWith('/web2/') ? <Web2 /> : <ConnectionBootstrap />
+  const launchedView = new URLSearchParams(location.search).get('naumiView')
+  return launchedView === 'web2' || location.pathname === '/web2' || location.pathname.startsWith('/web2/') ? <Web2 /> : <ConnectionBootstrap />
 }
 
 function App() {
