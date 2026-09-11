@@ -87,8 +87,11 @@ try {
     throw new Error(`执行过程没有展示文件工具：${latestProcessText}`)
   }
   if (!pageText.includes(fileName)) throw new Error('最终页面没有展示生成文件名')
-  if (!/已完成/.test(latestProcessText)) {
-    throw new Error(`最新执行过程没有完成：${latestProcessText}`)
+  if ((latestProcessText.match(/任务已完成/g) || []).length !== 1) {
+    throw new Error(`任务终态没有唯一收口：${latestProcessText}`)
+  }
+  if (/执行进度已更新\s*·\s*已完成/.test(latestProcessText)) {
+    throw new Error(`中间阶段仍错误显示任务完成：${latestProcessText}`)
   }
 
   result = {

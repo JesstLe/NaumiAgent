@@ -922,6 +922,7 @@ _ACTION_EVIDENCE_RETRY_PROMPT = (
 _ACTION_EVIDENCE_ERROR = (
     "模型没有执行用户要求的工作区修改，本次任务未完成，请重试。"
 )
+_MAX_ACTION_EVIDENCE_CORRECTIONS = 2
 _WORKSPACE_MUTATION_TOOLS = {
     "file_write",
     "file_edit",
@@ -1269,7 +1270,7 @@ class _ActionEvidenceState:
     successful_tools: list[str] = field(default_factory=list)
     target_paths: set[str] = field(default_factory=set)
     broad_mutation: bool = False
-    correction_attempted: bool = False
+    correction_attempts: int = 0
     force_tool_choice: bool = False
 
 
@@ -7048,8 +7049,8 @@ class AgentEngine:
         )
         if tool_evidence and path_evidence and target_evidence:
             return "satisfied", changed_paths
-        if not state.correction_attempted:
-            state.correction_attempted = True
+        if state.correction_attempts < _MAX_ACTION_EVIDENCE_CORRECTIONS:
+            state.correction_attempts += 1
             state.force_tool_choice = True
             return "needs_correction", changed_paths
         return "blocked", changed_paths
@@ -7087,6 +7088,7 @@ class AgentEngine:
                 await events.publish(
                     RuntimeEventType.PHASE_SUMMARY,
                     {
+                        "phase_kind": "recovery",
                         "items": [
                             {
                                 "action": (
@@ -8381,9 +8383,10 @@ class AgentEngine:
                 if not empty_response_retry_attempted:
                     empty_response_retry_attempted = True
                     await self._recover_empty_response_context()
-                    self._messages.append(
-                        {"role": "system", "content": _EMPTY_RESPONSE_RETRY_PROMPT}
-                    )
+                    retry_prompt = _EMPTY_RESPONSE_RETRY_PROMPT
+                    if self._active_action_evidence is not None:
+                        retry_prompt += _ACTION_EVIDENCE_RETRY_PROMPT
+                    self._messages.append({"role": "system", "content": retry_prompt})
                     continue
                 await self._fire_agent_stop(
                     status="failed",
@@ -8852,6 +8855,7 @@ class AgentEngine:
                     await events.publish(
                         RuntimeEventType.PHASE_SUMMARY,
                         {
+                            "phase_kind": "recovery",
                             "items": [
                                 {
                                     "action": (
@@ -8868,9 +8872,10 @@ class AgentEngine:
                         events=events,
                         streaming=True,
                     )
-                    self._messages.append(
-                        {"role": "system", "content": _EMPTY_RESPONSE_RETRY_PROMPT}
-                    )
+                    retry_prompt = _EMPTY_RESPONSE_RETRY_PROMPT
+                    if self._active_action_evidence is not None:
+                        retry_prompt += _ACTION_EVIDENCE_RETRY_PROMPT
+                    self._messages.append({"role": "system", "content": retry_prompt})
                     continue
                 await events.publish(
                     RuntimeEventType.ERROR,

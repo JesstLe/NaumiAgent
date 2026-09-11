@@ -89,6 +89,18 @@ def test_progress_requires_facts_and_uses_message_counts():
         )
         == "本阶段执行存在 1 项失败：读取文件：README.md；执行命令：pnpm build。"
     )
+    assert (
+        progress_summary(
+            "phase_summary",
+            {
+                "phase_kind": "recovery",
+                "items": [
+                    {"action": "检测到模型未执行写入，已继续调用工具", "status": "completed"}
+                ],
+            },
+        )
+        == "执行恢复：检测到模型未执行写入，已继续调用工具。"
+    )
     assert progress_summary("phase_summary", {"items": [{"status": "success"}]}) == ""
 
 

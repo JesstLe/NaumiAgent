@@ -76,6 +76,30 @@ describe('public execution activity', () => {
     expect(stages[0].notes.map(note => note.label)).toContain('本阶段已完成：读取文件：README.md。')
     expect(isTimelineEvent({ id: '4', type: 'phase_summary', data: {} })).toBe(true)
   })
+  it('merges adjacent recovery-only turns and states the task only once', () => {
+    const timeline = liveExecutionTimeline([
+      { id: '1', type: 'turn_start', turn: 1, sequence: 1, data: {} },
+      { id: '2', type: 'context_compacted', turn: 1, sequence: 2, data: { activity_summary: '已压缩上下文：41 → 4 条消息' } },
+      { id: '3', type: 'phase_summary', turn: 1, sequence: 3, data: { activity_summary: '本阶段已完成：已要求继续调用写入工具。' } },
+      { id: '4', type: 'turn_start', turn: 2, sequence: 4, data: {} },
+      { id: '5', type: 'phase_summary', turn: 2, sequence: 5, data: { activity_summary: '本阶段已完成：已自动压缩上下文并重新执行。' } },
+      { id: '6', type: 'turn_start', turn: 3, sequence: 6, data: {} },
+      { id: '7', type: 'thinking_start', turn: 3, sequence: 7, data: {} },
+    ], true, { objective: '创建高级页面', workspace: 'E:/Workspace/NaumiAgent' })
+
+    const stages = executionStages(timeline)
+    expect(stages).toHaveLength(1)
+    expect(stages[0].state).toBe('running')
+    expect(stages[0].notes.map(note => note.label)).toEqual([
+      '本次任务：创建高级页面\n工作目录：E:/Workspace/NaumiAgent',
+      '已压缩上下文：41 → 4 条消息',
+      '本阶段已完成：已要求继续调用写入工具。',
+      '第 2 轮 · 继续处理本次任务',
+      '本阶段已完成：已自动压缩上下文并重新执行。',
+      '第 3 轮 · 继续处理本次任务',
+    ])
+    expect(stages[0].notes.map(note => note.label).join('\n').match(/本次任务：/g)).toHaveLength(1)
+  })
   it('shows concrete task, command, result status, and compaction without raw thinking', () => {
     const events = [
       { id: '1', type: 'turn_start', turn: 1, data: {} },
