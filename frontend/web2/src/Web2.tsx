@@ -45,6 +45,8 @@ import { SettingsPage } from './SettingsPage'
 import { TodoPanel } from './TodoPanel'
 import { GoalPanel } from './GoalPanel'
 import { DiffPanel } from './DiffPanel'
+import { ThinkingState } from './beautiful/ThinkingState'
+import './beautiful/beautiful.css'
 import { useCommandCompletion } from '@naumi/shared/hooks/useCommandCompletion'
 
 type Panel = 'home' | 'review' | 'files' | 'browser' | 'tools' | 'tasks'
@@ -476,6 +478,7 @@ export function Web2() {
                       </div>
                     </article>
                   ))}
+                  <ThinkingState />
                   {w.busy && (
                     <div role="status" className="w2-working">
                       <Loader2 className="w2-spin" size={15} />
