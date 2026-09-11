@@ -92,6 +92,27 @@ def test_progress_requires_facts_and_uses_message_counts():
     assert progress_summary("phase_summary", {"items": [{"status": "success"}]}) == ""
 
 
+def test_harness_correction_becomes_visible_phase_summary():
+    runtime = RuntimeEvent(
+        id="correction-1",
+        type=RuntimeEventType.HARNESS_COMPLETION_CORRECTION,
+        data={"message": "动作型请求尚未产生工作区文件变更，已继续执行。"},
+        timestamp="2026-09-11T00:00:00Z",
+        session_id="s",
+        run_id="r",
+        sequence=2,
+        turn=1,
+    )
+
+    transport = runtime_event_to_stream_event(runtime)
+
+    assert transport.type.value == "phase_summary"
+    assert transport.data["items"][0]["action"] == (
+        "动作型请求尚未产生工作区文件变更，已继续执行。"
+    )
+    assert "activity_summary" in transport.data
+
+
 @pytest.mark.asyncio
 async def test_public_summary_survives_transport_both_recorders_and_reopen(tmp_path):
     store = ChatRunStore(tmp_path / "runs.db")

@@ -41,6 +41,7 @@ from naumi_agent.harness.completion import (
     HarnessEvidenceRef,
     HarnessRunState,
     build_completion_contract,
+    infer_completion_task_kind,
     render_completion_contract_context,
 )
 from naumi_agent.harness.context import (
@@ -2105,8 +2106,9 @@ class HarnessService:
             run_id=validate_run_id(run_id),
             session_id=session_id,
             profile_digest=status.profile_digest,
-            task_kind=HarnessTaskKind.ANALYSIS,
+            task_kind=infer_completion_task_kind(task),
             objective=task,
+            require_change_evidence=profile.completion.require_change_evidence,
             correction_attempts=profile.completion.correction_attempts,
             unverified_status=profile.completion.unverified_status,
             source_refs=("user:current",),

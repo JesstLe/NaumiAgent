@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Literal
@@ -14,6 +15,50 @@ from naumi_agent.harness.models import (
     HarnessCompletionContract,
     HarnessTaskKind,
 )
+
+_DIRECT_CHANGE_PREFIX_RE = re.compile(
+    r"^\s*(?:(?:请|请你|帮我|麻烦|现在|直接|开始|继续|立刻|马上)\s*)*"
+    r"(?:创建|新建|生成|写|写入|编写|制作|搭建|开发|实现|"
+    r"新增|添加|修改|编辑|更新|修复|重构|改造|删除|移除|"
+    r"create|build|write|implement|add|update|edit|modify|fix|refactor|remove|delete)"
+    r"(?:\b|\s|一个|一份|一张|一下)",
+    re.IGNORECASE,
+)
+_WORKSPACE_ARTIFACT_RE = re.compile(
+    r"(?:页面|网页|网站|界面|UI|HTML|CSS|JavaScript|TypeScript|Python|"
+    r"代码|源码|文件|组件|模块|项目|仓库|脚本|文档|README|配置|接口|API|"
+    r"测试|函数|功能|Bug|缺陷|图片|图像|SVG|PNG|PDF|CSV|JSON|Markdown|LaTeX|"
+    r"[A-Za-z0-9_./\\-]+\.(?:html?|css|jsx?|tsx?|py|md|json|ya?ml|toml|"
+    r"svg|png|jpe?g|webp|pdf|csv|txt))",
+    re.IGNORECASE,
+)
+_INFORMATION_ONLY_PREFIX_RE = re.compile(
+    r"^\s*(?:如何|怎么|为什么|解释|说明|分析|评审|审查|比较|讨论|告诉我|"
+    r"how\s+to\b|why\b|explain\b|describe\b|review\b|analy[sz]e\b)",
+    re.IGNORECASE,
+)
+_NO_WORKSPACE_CHANGE_RE = re.compile(
+    r"(?:不要|无需|不需要).{0,16}(?:创建|新建|生成|写入|修改|编辑|改动|调用工具|"
+    r"create|write|modify|edit|change|use\s+tools?)",
+    re.IGNORECASE,
+)
+
+
+def infer_completion_task_kind(task: str) -> HarnessTaskKind:
+    """Classify direct workspace mutation requests without consulting the model."""
+    normalized = " ".join(str(task or "").strip().split())
+    if not normalized:
+        return HarnessTaskKind.ANALYSIS
+    if _INFORMATION_ONLY_PREFIX_RE.search(normalized):
+        return HarnessTaskKind.ANALYSIS
+    if _NO_WORKSPACE_CHANGE_RE.search(normalized):
+        return HarnessTaskKind.ANALYSIS
+    if (
+        _DIRECT_CHANGE_PREFIX_RE.search(normalized)
+        and _WORKSPACE_ARTIFACT_RE.search(normalized)
+    ):
+        return HarnessTaskKind.CHANGE
+    return HarnessTaskKind.ANALYSIS
 
 
 class _CompletionModel(BaseModel):
@@ -230,6 +275,21 @@ class CompletionGate:
                     ),
                 )
             )
+        if (
+            contract.task_kind is HarnessTaskKind.CHANGE
+            and contract.require_change_evidence
+            and not facts.changed_paths
+        ):
+            issues.append(
+                _GateIssue(
+                    code="change_evidence_missing",
+                    message=(
+                        "动作型请求尚未产生工作区文件变更。请调用实际写入或编辑工具"
+                        "完成任务；仅描述方案不能作为完成结果。"
+                    ),
+                    hard_block=True,
+                )
+            )
         for path in facts.changed_paths:
             normalized = _safe_changed_path(path)
             if normalized is None:
@@ -431,6 +491,12 @@ def render_completion_contract_context(
     """Render an ephemeral, non-persistent contract instruction for the model."""
     available = "、".join(available_check_ids) or "无"
     required = "、".join(contract.required_checks) or "尚未选择"
+    change_requirement = (
+        "本任务要求产生真实工作区变更；仅返回计划、设计描述或代码建议不能视为完成。\n"
+        if contract.task_kind is HarnessTaskKind.CHANGE
+        and contract.require_change_evidence
+        else ""
+    )
     return (
         "<naumi_harness_completion_contract>\n"
         f"run_id: {contract.run_id}\n"
@@ -438,6 +504,7 @@ def render_completion_contract_context(
         f"objective: {contract.objective}\n"
         f"available_checks: {available}\n"
         f"required_checks: {required}\n"
+        f"{change_requirement}"
         "在声称完成前，必须满足 Harness 完成门禁。若门禁要求检查，"
         "只能调用 harness_run_check，并原样传入上述 run_id 与 check_id；"
         "不得把旧运行、旧工作树或旧 Profile 的结果当作当前证据。\n"

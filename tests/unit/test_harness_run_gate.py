@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from naumi_agent.harness.models import HarnessTaskKind
 from naumi_agent.harness.service import HarnessService
 from naumi_agent.harness.trust import HarnessTrustStore
 
@@ -55,6 +56,8 @@ async def test_run_gate_requires_check_then_verifies_same_tree(tmp_path: Path) -
         session_id="session-1",
     )
     assert state is not None
+    assert state.contract.task_kind is HarnessTaskKind.CHANGE
+    assert state.contract.require_change_evidence is True
     assert "harness_run_check" in state.context
     assert "unit" in state.context
     (service.workspace_root / "source.py").write_text("VALUE = 2\n", encoding="utf-8")
