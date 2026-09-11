@@ -92,7 +92,7 @@ def _build_commands() -> list[CommandMeta]:
         CommandMeta("/quit", "退出", readonly=False, category="基础"),
         CommandMeta("/exit", "退出", readonly=False, category="基础"),
         CommandMeta("/tools", "列出可用工具", readonly=True, category="基础"),
-        CommandMeta("/output", "返回图片或数据文件；无参数查看富组件格式", takes_arg=True, arg_hint="[文件路径]", readonly=False, category="基础"),
+        CommandMeta("/output", "返回图片或数据文件；支持 retention-preview/retention-run", takes_arg=True, arg_hint="[文件路径|retention-preview|retention-run]", readonly=False, category="基础"),
         CommandMeta("/model", "显示模型配置", readonly=True, category="基础"),
         CommandMeta("/models", "列出 provider 可用模型", takes_arg=True, arg_hint="[provider] [--refresh]", readonly=True, category="基础"),
         CommandMeta("/version", "显示版本号", readonly=True, category="基础"),

@@ -2452,11 +2452,50 @@ async def _handle_command(engine: Any, cmd: str) -> None:
         case "/output":
             from naumi_agent.cli.commands_meta import _execute_tool_result
 
-            result = await _execute_tool_result(
-                engine, "output_publish", {"path": arg.strip().strip('"')},
-            )
+            output_arg = arg.strip()
+            parts = output_arg.split()
+            subcommand = parts[0].lower() if parts else ""
+            if subcommand in {"retention-preview", "retention_preview"}:
+                if len(parts) > 2 or any(not value.isdecimal() for value in parts[1:]):
+                    console.print(
+                        "用法：/output retention-preview [最小保留秒数]",
+                        style="yellow",
+                    )
+                    return
+                arguments = {}
+                if len(parts) > 1:
+                    arguments["minimum_age_seconds"] = int(parts[1])
+                result = await _execute_tool_result(
+                    engine, "output_asset_retention_preview", arguments,
+                )
+            elif subcommand in {"retention-run", "retention_run"}:
+                if len(parts) > 3 or any(not value.isdecimal() for value in parts[1:]):
+                    console.print(
+                        "用法：/output retention-run [最小保留秒数] [单次删除上限]",
+                        style="yellow",
+                    )
+                    return
+                arguments = {}
+                if len(parts) > 1:
+                    arguments["minimum_age_seconds"] = int(parts[1])
+                if len(parts) > 2:
+                    arguments["delete_limit"] = int(parts[2])
+                result = await _execute_tool_result(
+                    engine, "output_asset_retention_run", arguments,
+                )
+            else:
+                result = await _execute_tool_result(
+                    engine, "output_publish", {"path": output_arg.strip('"')},
+                )
             content = result.content
-            if result.status == "success" and arg.strip():
+            if (
+                result.status == "success"
+                and output_arg
+                and subcommand not in {
+                    "retention-preview", "retention_preview",
+                    "retention-run", "retention_run",
+                }
+            ):
                 content = json.loads(content)["markdown"]
             console.print(content, markup=False, highlight=False, soft_wrap=True)
         case "/tools" | "/t":

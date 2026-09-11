@@ -2478,6 +2478,10 @@ class AgentEngine:
         from naumi_agent.tools.extensions import ExtensionDiscoveryTool
         from naumi_agent.tools.feedback import create_feedback_tools
         from naumi_agent.tools.output_publish import OutputPublishTool
+        from naumi_agent.tools.output_retention import (
+            OutputAssetRetentionPreviewTool,
+            OutputAssetRetentionRunTool,
+        )
         from naumi_agent.tools.runtime import create_runtime_tools
         from naumi_agent.tools.search import create_tool_search_tools
         from naumi_agent.tools.session import create_session_tools
@@ -2490,6 +2494,8 @@ class AgentEngine:
         self._tool_registry.register(ExtensionDiscoveryTool(self))
         self._tool_registry.register(RequestUserInputTool(self))
         self._tool_registry.register(OutputPublishTool(self))
+        self._tool_registry.register(OutputAssetRetentionPreviewTool(self))
+        self._tool_registry.register(OutputAssetRetentionRunTool(self))
         for tool in create_feedback_tools(self, self.feedback_intake_service):
             self._tool_registry.register(tool)
         for tool in create_evolution_review_tools(self, self.evolution_review_service):
