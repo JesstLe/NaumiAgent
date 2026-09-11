@@ -317,6 +317,7 @@ export function Web2() {
   const [workspaceMenu, setWorkspaceMenu] = useState(false)
   const [gitState, setGitState] = useState<GitBranchesResponse | null>(null)
   const [workspaceSwitching, setWorkspaceSwitching] = useState(false)
+  const [workspaceOpening, setWorkspaceOpening] = useState(false)
   const [workspaceTarget, setWorkspaceTarget] = useState('')
   const [projectDialogOpen, setProjectDialogOpen] = useState(false)
   const [projects, setProjects] = useState<WorkspaceProject[]>([])
@@ -357,6 +358,10 @@ export function Web2() {
   const messageRuns = useMemo(
     () => runsByUserMessage(messages, w.runs),
     [messages, w.runs],
+  )
+  const currentSessionBusy = w.busy && w.runningSessionId === w.sessionId
+  const detachedLiveRun = currentSessionBusy && !messages.some(
+    (message) => message.id === w.runningUserMessageId,
   )
   const composerLocked = w.busy || w.uploading || w.loading || w.connecting
   const uploadLocked = w.busy || w.uploading || !w.daemon
@@ -448,7 +453,37 @@ export function Web2() {
     setPanel(next)
     setRight(true)
   }
+  const daemonConfigFor = async (path: string) => {
+    if (!platform.getDaemonLaunchConfig)
+      throw new Error('打开工作目录需要 NaumiAgent 桌面版')
+    const previous = await platform.getDaemonLaunchConfig()
+    return {
+      ...(previous ?? { executable: null, args: [], working_dir: null, port: null, env_vars: {} }),
+      working_dir: path,
+    }
+  }
+  const openWorkspaceInNewWindow = async (
+    path: string,
+    sessionId?: string,
+    preparedConfig?: Awaited<ReturnType<typeof daemonConfigFor>>,
+  ) => {
+    if (!platform.openWorkspaceWindow)
+      throw new Error('并行工作窗口需要更新后的 NaumiAgent 桌面版')
+    const config = preparedConfig ?? await daemonConfigFor(path)
+    await platform.openWorkspaceWindow(config, { session_id: sessionId || null, view: 'web2' })
+  }
   const newChat = () => {
+    if (w.busy && workspaceRoot) {
+      setWorkspaceOpening(true)
+      setWorkspaceTarget(workspaceRoot)
+      void openWorkspaceInNewWindow(workspaceRoot)
+        .catch((error) => w.setError(errorText(error)))
+        .finally(() => {
+          setWorkspaceOpening(false)
+          setWorkspaceTarget('')
+        })
+      return
+    }
     void w.select(null)
     textarea.current?.focus()
   }
@@ -480,12 +515,27 @@ export function Web2() {
       if (sessionId) await w.select(sessionId)
       return
     }
-    setWorkspaceSwitching(true)
+    const opensNewWindow = w.busy
+    if (opensNewWindow) setWorkspaceOpening(true)
+    else setWorkspaceSwitching(true)
     setWorkspaceTarget(path)
     try {
-      const previous = await platform.getDaemonLaunchConfig()
-      const config = previous ?? { executable: null, args: [], working_dir: null, port: null, env_vars: {} }
-      config.working_dir = path
+      const config = await daemonConfigFor(path)
+      if (w.busy) {
+        await openWorkspaceInNewWindow(path, sessionId, config)
+        try {
+          const nextProjects = await saveWorkspaceProject(platform, {
+            name: name || directoryName(path) || '未命名项目',
+            path,
+            location: 'local',
+          })
+          setProjects(nextProjects)
+        } catch (error) {
+          void platform.log('warn', '项目名称未能保存：' + errorText(error))
+        }
+        setProjectDialogOpen(false)
+        return
+      }
       await platform.setDaemonLaunchConfig?.(config)
       const status = await platform.startDaemon(config)
       if (!status.running || !status.url) throw new Error(status.last_error || '新工作目录启动失败')
@@ -521,9 +571,11 @@ export function Web2() {
       setProjectDialogOpen(false)
       window.location.reload()
     } catch (error) {
-      setWorkspaceSwitching(false)
-      setWorkspaceTarget('')
       throw error
+    } finally {
+      if (opensNewWindow) setWorkspaceOpening(false)
+      else setWorkspaceSwitching(false)
+      setWorkspaceTarget('')
     }
   }
   const chooseWorkspace = async () => {
@@ -642,7 +694,7 @@ export function Web2() {
       <ProjectCreationDialog
         open={projectDialogOpen}
         canSelectLocal={!!platform.selectWorkspaceDirectory && !!platform.startDaemon}
-        busy={workspaceSwitching}
+        busy={workspaceSwitching || workspaceOpening}
         initialPath={workspaceRoot}
         onClose={() => setProjectDialogOpen(false)}
         onSelectDirectory={(initialPath) =>
@@ -655,8 +707,8 @@ export function Web2() {
           { label: '文件', actions: [
             { label: '新建对话', run: newChat },
             { label: '新建侧边聊天', run: () => { void w.createSidebarSession() }, disabled: !w.daemon || w.mutating },
-            { label: '创建项目', run: () => setProjectDialogOpen(true), disabled: workspaceSwitching || w.busy },
-            { label: '打开新的工作目录', run: () => { void chooseWorkspace() }, disabled: !platform.selectWorkspaceDirectory || workspaceSwitching || w.busy },
+            { label: '创建项目', run: () => setProjectDialogOpen(true), disabled: workspaceSwitching || workspaceOpening },
+            { label: '打开新的工作目录', run: () => { void chooseWorkspace() }, disabled: !platform.selectWorkspaceDirectory || workspaceSwitching || workspaceOpening },
             { label: '添加文件', run: () => fileInput.current?.click(), disabled: uploadLocked },
             { label: '导出对话', disabled: !messages.length, run: () => {
               const blob = new Blob([messages.map(item => `## ${item.role === 'user' ? '用户' : 'NaumiAgent'}\n\n${item.content}`).join('\n\n')], { type: 'text/markdown;charset=utf-8' })
@@ -714,7 +766,7 @@ export function Web2() {
               <button disabled={!platform.openInExplorer} onClick={() => openPath('explorer')}>资源管理器</button>
               <button disabled={!platform.openInTerminal} onClick={() => openPath('terminal')}>终端</button>
             </div>
-            <button className="w2-workspace-open" disabled={!platform.selectWorkspaceDirectory || workspaceSwitching || w.busy} onClick={() => void chooseWorkspace()}>{workspaceSwitching ? '正在切换…' : '打开新的工作目录'}</button>
+            <button className="w2-workspace-open" disabled={!platform.selectWorkspaceDirectory || workspaceSwitching || workspaceOpening} onClick={() => void chooseWorkspace()}>{workspaceSwitching || workspaceOpening ? '正在打开…' : '打开新的工作目录'}</button>
           </div>}
         </div>
         <div className="w2-title-end">
@@ -773,14 +825,14 @@ export function Web2() {
         )}
         <div className="w2-project-label">
           项目
-          <IconButton label="创建项目" disabled={workspaceSwitching || w.busy} onClick={() => setProjectDialogOpen(true)}>
+          <IconButton label="创建项目" disabled={workspaceSwitching || workspaceOpening} onClick={() => setProjectDialogOpen(true)}>
             <Plus />
           </IconButton>
         </div>
         <div className="w2-project-scroll">
           {visibleProjects.map((project) => {
             const active = workspaceProjectMatches(project, workspaceRoot)
-            const switching = workspaceSwitching && workspaceProjectMatches(project, workspaceTarget)
+            const switching = (workspaceSwitching || workspaceOpening) && workspaceProjectMatches(project, workspaceTarget)
             const projectSessionItems = workspaceProjectSessions(
               project,
               filteredSessions,
@@ -791,7 +843,7 @@ export function Web2() {
             return <Fragment key={project.id}>
               <button
                 className={`w2-project ${active ? 'active' : ''}`}
-                disabled={!active && (workspaceSwitching || !platform.startDaemon)}
+                disabled={!active && (workspaceSwitching || (workspaceOpening && switching) || !platform.startDaemon)}
                 onClick={() => {
                   if (!active) void activateWorkspace(project.path, project.name).catch((error) => w.setError(errorText(error)))
                 }}
@@ -823,6 +875,14 @@ export function Web2() {
                   </button>
                   <IconButton label={`会话操作 ${session.title || '新对话'}`} active={sessionMenu === session.id} onClick={() => setSessionMenu(value => value === session.id ? null : session.id)}><MoreHorizontal /></IconButton>
                   {sessionMenu === session.id && <div className="w2-session-menu">
+                    <button disabled={!platform.openWorkspaceWindow || workspaceSwitching || workspaceOpening} onClick={() => {
+                      setSessionMenu(null)
+                      setWorkspaceOpening(true)
+                      setWorkspaceTarget(project.path)
+                      void openWorkspaceInNewWindow(project.path, session.id)
+                        .catch(error => w.setError(errorText(error)))
+                        .finally(() => { setWorkspaceOpening(false); setWorkspaceTarget('') })
+                    }}><ArrowUpRight />在新窗口打开</button>
                     <button disabled={currentWriteLocked(session.id)} onClick={() => { setRenameTitle(session.title || '新对话'); setRenameSessionId(session.id); setDialog('rename'); setSessionMenu(null) }}><Pencil />修改名称</button>
                     <button disabled={w.mutating} onClick={() => { void w.pinSession(session.id, !session.pinned); setSessionMenu(null) }}>{session.pinned ? <PinOff /> : <Pin />}{session.pinned ? '取消置顶' : '置顶'}</button>
                     <button disabled={!active || currentWriteLocked(session.id)} title={active ? undefined : '切换到该项目后可复制会话'} onClick={() => { void w.duplicateSession(session.id); setSessionMenu(null) }}><CopyPlus />复制会话</button>
@@ -922,7 +982,7 @@ export function Web2() {
                     el.scrollHeight - el.scrollTop - el.clientHeight < 80
               }}
             >
-              {!messages.length && !w.loading && !w.busy && !w.runs.length && !w.liveEvents.length ? (
+              {!messages.length && !w.loading && !currentSessionBusy && !w.runs.length && !w.liveEvents.length ? (
                 <div className="w2-welcome">
                   <Logo className="w2-welcome-logo" />
                   <h1>
@@ -940,7 +1000,7 @@ export function Web2() {
                       : undefined
                     const live = message.role === 'user'
                       && message.id === w.runningUserMessageId
-                      && (w.busy || w.liveEvents.length > 0)
+                      && (currentSessionBusy || w.liveEvents.length > 0)
                     return <Fragment key={message.id}>
                       <article className={`w2-message ${message.role}`}>
                         <MessageContent content={message.content} plain={message.role === 'user'} />
@@ -964,10 +1024,13 @@ export function Web2() {
                       )}
                     </Fragment>
                   })}
-                  {!messages.some(message => message.role === 'user') && (w.runs[0] || w.busy || w.liveEvents.length > 0) && (
+                  {(detachedLiveRun || (
+                    !messages.some(message => message.role === 'user')
+                    && (w.runs[0] || currentSessionBusy || w.liveEvents.length > 0)
+                  )) && (
                     <ThinkingState
-                      run={w.runs[0]}
-                      live={w.busy || (!w.runs[0] && w.liveEvents.length > 0)}
+                      run={detachedLiveRun ? undefined : w.runs[0]}
+                      live={currentSessionBusy || (!w.runs[0] && w.liveEvents.length > 0)}
                     />
                   )}
                 </div>
@@ -1033,7 +1096,7 @@ export function Web2() {
                 size="md"
                 colorVariant="colorful"
                 theme="light"
-                active={w.busy}
+                active={currentSessionBusy}
                 borderRadius={15}
                 brightness={1.05}
                 saturation={0.72}
@@ -1161,15 +1224,15 @@ export function Web2() {
                   </div>
                   <button
                     className="w2-send"
-                    aria-label={w.busy ? '停止执行' : '发送消息'}
-                    title={w.busy ? '停止执行' : '发送消息'}
+                    aria-label={currentSessionBusy ? '停止执行' : '发送消息'}
+                    title={currentSessionBusy ? '停止执行' : w.busy ? '当前窗口正在执行，请新建并行对话' : '发送消息'}
                     disabled={
-                      !w.busy &&
+                      !currentSessionBusy &&
                       (!w.draft.trim() || !w.daemon || composerLocked)
                     }
-                    onClick={() => void (w.busy ? w.stop() : w.send())}
+                    onClick={() => void (currentSessionBusy ? w.stop() : w.send())}
                   >
-                    {w.busy ? (
+                    {currentSessionBusy ? (
                       <Square size={13} fill="currentColor" />
                     ) : (
                       <ArrowUp size={18} />
