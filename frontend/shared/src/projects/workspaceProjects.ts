@@ -11,6 +11,18 @@ export interface WorkspaceProject {
   lastOpenedAt: string
 }
 
+export interface WorkspaceProjectCandidate {
+  name?: string
+  path: string
+  location?: WorkspaceProjectLocation
+  openedAt?: string
+}
+
+export interface WorkspaceSessionReference {
+  workspace_root?: string
+  updated_at?: string
+}
+
 const STORAGE_KEY = 'workspace-projects-v1'
 
 function trimWorkspacePath(path: string): string {
@@ -24,12 +36,59 @@ function trimWorkspacePath(path: string): string {
 export function normalizeWorkspacePath(path: string): string {
   const trimmed = trimWorkspacePath(path)
   return /^[A-Za-z]:/.test(trimmed) || trimmed.startsWith('\\\\')
-    ? trimmed.toLowerCase()
+    ? trimmed.replaceAll('/', String.fromCharCode(92)).toLowerCase()
     : trimmed
 }
 
 function projectId(location: WorkspaceProjectLocation, path: string) {
   return `${location}:${normalizeWorkspacePath(path)}`
+}
+
+function directoryName(path: string) {
+  const normalized = trimWorkspacePath(path).replaceAll(String.fromCharCode(92), '/')
+  return normalized.split('/').filter(Boolean).at(-1) || normalized || '未命名项目'
+}
+
+export function workspacePathsMatch(left: string | undefined, right: string | undefined) {
+  return !!left && !!right && normalizeWorkspacePath(left) === normalizeWorkspacePath(right)
+}
+
+export function mergeWorkspaceProjects(
+  projects: WorkspaceProject[],
+  candidates: WorkspaceProjectCandidate[],
+): WorkspaceProject[] {
+  const merged = new Map(projects.map((project) => [project.id, project]))
+  for (const candidate of candidates) {
+    const path = trimWorkspacePath(candidate.path)
+    if (!path) continue
+    const location = candidate.location ?? 'local'
+    const id = projectId(location, path)
+    const previous = merged.get(id)
+    const openedAt = [candidate.openedAt || '', previous?.lastOpenedAt || ''].sort().at(-1) || ''
+    merged.set(id, {
+      id,
+      name: previous?.name || candidate.name?.trim() || directoryName(path),
+      path,
+      location,
+      createdAt: previous?.createdAt || openedAt,
+      lastOpenedAt: openedAt,
+    })
+  }
+  return [...merged.values()].sort((left, right) =>
+    right.lastOpenedAt.localeCompare(left.lastOpenedAt),
+  )
+}
+
+export function workspaceProjectSessions<T extends WorkspaceSessionReference>(
+  project: WorkspaceProject,
+  sessions: T[],
+  unboundWorkspaceRoot?: string,
+) {
+  return sessions.filter((session) =>
+    session.workspace_root
+      ? workspacePathsMatch(session.workspace_root, project.path)
+      : workspacePathsMatch(unboundWorkspaceRoot, project.path),
+  )
 }
 
 function validProject(value: unknown): value is WorkspaceProject {
@@ -107,5 +166,5 @@ export function workspaceProjectMatches(
   project: WorkspaceProject,
   path: string | undefined,
 ) {
-  return !!path && normalizeWorkspacePath(project.path) === normalizeWorkspacePath(path)
+  return workspacePathsMatch(project.path, path)
 }

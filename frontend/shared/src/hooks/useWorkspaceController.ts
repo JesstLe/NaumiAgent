@@ -3,6 +3,7 @@ import { usePlatform } from '@naumi/shared/platform'
 import { isTimelineEvent } from '@naumi/shared/api/activity'
 import { useWorkspaceTasks } from './useWorkspaceTasks'
 import { useWorkspaceGoals } from './useWorkspaceGoals'
+import { workspacePathsMatch } from '@naumi/shared/projects/workspaceProjects'
 import type {
   ChatSource,
   DaemonStatusResponse,
@@ -44,10 +45,12 @@ export function useWorkspaceController() {
     [base, platform],
   )
   const [daemon, setDaemon] = useState<DaemonStatusResponse | null>(null)
+  const daemonRef = useRef<DaemonStatusResponse | null>(null)
   const [config, setConfig] = useState<ModelConfig | null>(null)
   const [commands, setCommands] = useState<SlashCommand[]>([])
   const [commandsError, setCommandsError] = useState('')
   const [sessions, setSessions] = useState<Session[]>([])
+  const sessionsRef = useRef<Session[]>([])
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [messages, setMessages] = useState<MessageResponse[]>([])
   const [sources, setSources] = useState<ChatSource[]>([])
@@ -96,6 +99,9 @@ export function useWorkspaceController() {
   const stopped = useRef(false)
   const creatingSession = useRef<Promise<Session> | null>(null)
 
+  useEffect(() => { daemonRef.current = daemon }, [daemon])
+  useEffect(() => { sessionsRef.current = sessions }, [sessions])
+
   const setDraft = (value: string) => {
     setDraftState(value)
     savePreference(`draft:${activeId.current ?? 'new'}`, value)
@@ -108,12 +114,23 @@ export function useWorkspaceController() {
       all.push(...next.sessions)
       if (all.length >= next.total || !next.sessions.length) break
     }
+    sessionsRef.current = all
     setSessions(all)
     return all
   }, [api])
 
   const select = useCallback(
     async (id: string | null) => {
+      const target = id ? sessionsRef.current.find((item) => item.id === id) : undefined
+      const currentWorkspace = daemonRef.current?.workspace_root
+      if (
+        target?.workspace_root &&
+        currentWorkspace &&
+        !workspacePathsMatch(target.workspace_root, currentWorkspace)
+      ) {
+        setError(`该会话属于 ${target.workspace_root}，请先切换到对应项目`)
+        return
+      }
       const current = ++generation.current
       activeId.current = id
       setSessionId(id)
@@ -184,13 +201,26 @@ export function useWorkspaceController() {
       const status = await api.fetchDaemonStatus()
       if (current !== connectionGeneration.current) return
       setDaemon(status)
+      daemonRef.current = status
       api.commands().then(result => {
         if (current === connectionGeneration.current) { setCommands(result.commands ?? []); setCommandsError('') }
       }).catch(() => { if (current === connectionGeneration.current) setCommandsError('命令列表未加载，请重新连接') })
-      await refreshSessions()
+      const loadedSessions = await refreshSessions()
       if (current !== connectionGeneration.current) return
       const selected = readPreference('session')
-      if (selected) await select(selected)
+      const selectedSession = loadedSessions.find((item) => item.id === selected)
+      if (
+        selectedSession &&
+        (
+          !selectedSession.workspace_root ||
+          workspacePathsMatch(selectedSession.workspace_root, status.workspace_root)
+        )
+      ) {
+        await select(selected)
+      } else if (selected) {
+        savePreference('session', '')
+        await select(null)
+      }
       // Model discovery can be slower than local session loading.
       api
         .config()
@@ -212,6 +242,7 @@ export function useWorkspaceController() {
     } catch (e) {
       if (current === connectionGeneration.current) {
         setDaemon(null)
+        daemonRef.current = null
         setError(`无法连接本地服务：${errorText(e)}`)
       }
     } finally {
@@ -775,6 +806,7 @@ export function useWorkspaceController() {
       if (next === base) await connect()
       else {
         setDaemon(null)
+        daemonRef.current = null
         setConfig(null)
         setSessions([])
         await select(null)
