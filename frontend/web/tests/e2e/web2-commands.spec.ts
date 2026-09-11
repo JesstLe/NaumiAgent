@@ -12,6 +12,8 @@ test('slash completion uses command API and preserves rejected input', async ({ 
     return route.fulfill({ status: 422, json: { detail: '命令暂不可用' } })
   })
   await page.goto('/web2')
+  await expect(page.getByRole('button', { name: '冒烟测试会话', exact: true })).toBeVisible()
+  await expect(page.getByText('正在加载会话…')).toHaveCount(0)
   const composer = page.getByRole('textbox', { name: '消息', exact: true })
   await composer.fill('/v')
   await expect(page.getByRole('option', { name: '/version 查看版本' })).toBeVisible()

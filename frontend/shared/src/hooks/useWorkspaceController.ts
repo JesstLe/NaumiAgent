@@ -54,6 +54,10 @@ export function useWorkspaceController() {
   const [runs, setRuns] = useState<Run[]>([])
   const [snapshot, setSnapshot] = useState<WorkbenchSnapshot | null>(null)
   const [diff, setDiff] = useState<GitDiffResponse | null>(null)
+  const [diffLoading, setDiffLoading] = useState(false)
+  const [diffError, setDiffError] = useState('')
+  const [diffUpdatedAt, setDiffUpdatedAt] = useState('')
+  const diffRevision = useRef(0)
   const [error, setError] = useState('')
   const [connecting, setConnecting] = useState(true)
   const [loading, setLoading] = useState(false)
@@ -108,6 +112,8 @@ export function useWorkspaceController() {
       setSelectedSources([])
       setRuns([])
       setDiff(null)
+      diffRevision.current++
+      setDiffError(''); setDiffLoading(false); setDiffUpdatedAt('')
       setSnapshot(null)
       setPermissions([])
       setLiveEvents([])
@@ -485,13 +491,19 @@ export function useWorkspaceController() {
     }
     if (!activeId.current && operation.current) return
     const current = generation.current
+    const revision = ++diffRevision.current
+    setDiffLoading(true)
+    setDiffError('')
     try {
       const id = await ensureSession()
       const next = await api.fetchGitDiff(id)
-      if (current === generation.current && activeId.current === id)
-        setDiff(next)
+      if (current === generation.current && activeId.current === id && revision === diffRevision.current) {
+        setDiff(next); setDiffUpdatedAt(new Date().toISOString())
+      }
     } catch (e) {
-      if (current === generation.current) setError(errorText(e))
+      if (current === generation.current && revision === diffRevision.current) setDiffError(errorText(e))
+    } finally {
+      if (revision === diffRevision.current) setDiffLoading(false)
     }
   }
   const changeModel = async (value: string) => {
@@ -593,6 +605,9 @@ export function useWorkspaceController() {
     runs,
     snapshot,
     diff,
+    diffLoading,
+    diffError,
+    diffUpdatedAt,
     error,
     setError,
     connecting,

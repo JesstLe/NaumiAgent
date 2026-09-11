@@ -15,20 +15,19 @@ import {
   Globe2,
   HelpCircle,
   Loader2,
+  ListTodo,
   Maximize2,
   Minimize2,
   PanelBottom,
   PanelLeft,
   PanelRight,
   Plus,
-  RefreshCw,
   Search,
   Settings2,
   ShieldCheck,
   Square,
   SquarePen,
   Terminal,
-  Trash2,
   Workflow,
   X,
 } from 'lucide-react'
@@ -45,9 +44,10 @@ import { MenuBar } from './MenuBar'
 import { SettingsPage } from './SettingsPage'
 import { TodoPanel } from './TodoPanel'
 import { GoalPanel } from './GoalPanel'
+import { DiffPanel } from './DiffPanel'
 import { useCommandCompletion } from '@naumi/shared/hooks/useCommandCompletion'
 
-type Panel = 'home' | 'review' | 'files' | 'browser' | 'tools' | 'tasks' | 'todos' | 'goal'
+type Panel = 'home' | 'review' | 'files' | 'browser' | 'tools' | 'tasks'
 const panelNames: Record<Panel, string> = {
   home: '工作区',
   review: '审查',
@@ -55,8 +55,6 @@ const panelNames: Record<Panel, string> = {
   browser: '浏览器',
   tools: '工具与扩展',
   tasks: '任务',
-  todos: '待办',
-  goal: '目标',
 }
 
 function Logo({ className = '' }: { className?: string }) {
@@ -164,6 +162,7 @@ export function Web2() {
     () => readPreference('terminal', 'true') === 'true',
   )
   const [panel, setPanel] = useState<Panel>('home')
+  const [summary, setSummary] = useState<'todos' | 'goal' | null>(null)
   const [expanded, setExpanded] = useState(true)
   const [searching, setSearching] = useState(false)
   const [query, setQuery] = useState('')
@@ -172,7 +171,6 @@ export function Web2() {
   const [dialog, setDialog] = useState<'settings' | 'help' | 'delete' | null>(
     null,
   )
-  const [diffLoading, setDiffLoading] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
   const dialogRef = useRef<HTMLDialogElement>(null)
   const textarea = useRef<HTMLTextAreaElement>(null)
@@ -205,15 +203,15 @@ export function Web2() {
       savePreference('terminal', String(!value))
       return !value
     })
-  const review = async () => {
-    setDiffLoading(true)
-    await w.loadDiff()
-    setDiffLoading(false)
-  }
+  const panelControls = (
+    <div className="w2-panel-controls" role="group" aria-label="面板显示控制">
+      <IconButton label="切换执行面板" active={terminal} onClick={toggleTerminal}><PanelBottom /></IconButton>
+      <IconButton label="切换右侧面板" active={right} onClick={toggleRight}><PanelRight /></IconButton>
+    </div>
+  )
   const openPanel = (next: Panel) => {
     setPanel(next)
     setRight(true)
-    if (next === 'review') void review()
   }
   const newChat = () => {
     void w.select(null)
@@ -291,6 +289,7 @@ export function Web2() {
               setTimeout(() => URL.revokeObjectURL(url), 1000)
             } },
             { label: '设置', run: () => setDialog('settings') },
+            { label: '删除当前会话', disabled: !current || locked, run: () => setDialog('delete') },
           ] },
           { label: '编辑', actions: [
             { label: '编辑消息', run: () => textarea.current?.focus() },
@@ -304,8 +303,9 @@ export function Web2() {
             { label: terminal ? '隐藏执行记录' : '显示执行记录', shortcut: 'Ctrl+J', run: toggleTerminal },
             { label: '代码更改', shortcut: 'Ctrl+Shift+G', run: () => openPanel('review') },
             { label: '会话文件', run: () => openPanel('files') },
-            { label: '待办', run: () => openPanel('todos') },
-            { label: '目标', run: () => openPanel('goal') },
+            { label: '待办', run: () => setSummary('todos') },
+            { label: '目标', run: () => setSummary('goal') },
+            { label: '任务记录', run: () => openPanel('tasks') },
             { label: fullscreen ? '退出全屏' : '进入全屏', run: () => { void (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()).catch(() => w.setError('浏览器暂不支持全屏')) } },
           ] },
           { label: '帮助', actions: [
@@ -339,25 +339,9 @@ export function Web2() {
           </IconButton>
         </div>
         <nav className="w2-nav" aria-label="主导航">
-          <button className={panel === 'goal' ? 'selected' : ''} onClick={() => openPanel('goal')}><Workflow />目标{w.goalSnapshot?.current_goal_id && <span className="w2-nav-hint">1</span>}</button>
-          <button className={panel === 'todos' ? 'selected' : ''} onClick={() => openPanel('todos')}><Check />待办<span className="w2-nav-hint">{w.todos.filter(todo => todo.status !== 'completed').length || ''}</span></button>
           <button disabled={locked} onClick={newChat}>
             <SquarePen />
             新对话<span className="w2-nav-hint">＋</span>
-          </button>
-          <button
-            onClick={() => openPanel('review')}
-            className={panel === 'review' ? 'selected' : ''}
-          >
-            <GitPullRequest />
-            代码审查
-          </button>
-          <button
-            onClick={() => openPanel('tasks')}
-            className={panel === 'tasks' ? 'selected' : ''}
-          >
-            <Clock3 />
-            任务
           </button>
           <button
             onClick={() => openPanel('tools')}
@@ -446,39 +430,21 @@ export function Web2() {
 
       <main className={`w2-main ${terminal ? 'has-terminal' : ''}`}>
         <div className="w2-workspace">
-          <div className="w2-mobile-tools">
-            <IconButton label="打开文件面板" onClick={() => openPanel('files')}>
-              <FolderClosed />
-            </IconButton>
-            <IconButton
-              label="打开浏览器面板"
-              onClick={() => openPanel('browser')}
-            >
-              <Globe2 />
-            </IconButton>
-            <IconButton
-              label="切换执行面板"
-              active={terminal}
-              onClick={toggleTerminal}
-            >
-              <PanelBottom />
-            </IconButton>
-          </div>
           <section className="w2-chat" aria-label="对话">
             <div className="w2-chat-heading">
-              {current && (
-                <>
-                  <span>{current.title || '新对话'}</span>
-                  <IconButton
-                    label="删除当前会话"
-                    disabled={locked}
-                    onClick={() => setDialog('delete')}
-                  >
-                    <Trash2 />
-                  </IconButton>
-                </>
-              )}
+              <span>{current?.title || '新对话'}</span>
+              <IconButton label="切换对话摘要" active={summary !== null} onClick={() => setSummary(value => value ? null : 'todos')}><ListTodo /></IconButton>
+              <div className="w2-mobile-tools"><IconButton label="打开文件面板" onClick={() => openPanel('files')}><FolderClosed /></IconButton></div>
+              <div className={`w2-chat-panel-controls ${right ? 'right-open' : ''}`}>{panelControls}</div>
             </div>
+            {summary && <section className="w2-chat-summary" aria-label="对话摘要">
+              <div className="w2-summary-heading">
+                <button aria-pressed={summary === 'todos'} onClick={() => setSummary('todos')}>待办</button>
+                <button aria-pressed={summary === 'goal'} onClick={() => setSummary('goal')}>目标</button>
+                <IconButton label="收起对话摘要" onClick={() => setSummary(null)}><X /></IconButton>
+              </div>
+              {summary === 'todos' ? <TodoPanel key={w.sessionId || 'new'} /> : <GoalPanel />}
+            </section>}
             <div
               className="w2-conversation"
               ref={scroll}
@@ -520,7 +486,7 @@ export function Web2() {
               )}
             </div>
             <div className="w2-composer-wrap">
-              <TodoPanel compact />
+              {!summary && <TodoPanel compact onExpand={() => setSummary('todos')} />}
               {w.error && (
                 <div className="w2-error" role="alert">
                   <span>{w.error}</span>
@@ -584,7 +550,7 @@ export function Web2() {
                   aria-activedescendant={completion.items.length ? `w2-command-${completion.index}` : undefined}
                   placeholder="描述任务，或输入 / 使用命令"
                   value={w.draft}
-                  disabled={w.busy}
+                  disabled={w.busy || w.loading || w.connecting}
                   onChange={(event) => w.setDraft(event.target.value)}
                   onKeyDown={(event) => {
                     if (completion.onKeyDown(event)) return
@@ -731,25 +697,12 @@ export function Web2() {
                 >
                   {fullscreen ? <Minimize2 /> : <Maximize2 />}
                 </IconButton>
-                <IconButton
-                  label="切换执行面板"
-                  active={terminal}
-                  onClick={toggleTerminal}
-                >
-                  <PanelBottom />
-                </IconButton>
-                <IconButton
-                  label="切换右侧面板"
-                  active={right}
-                  onClick={toggleRight}
-                >
-                  <PanelRight />
-                </IconButton>
+                {panelControls}
               </div>
             </header>
             {panel === 'home' ? (
               <div className="w2-launcher">
-                <button onClick={() => openPanel('review')}>
+                <button aria-label="审查" onClick={() => openPanel('review')}>
                   <GitPullRequest />
                   <span>审查</span>
                   <kbd>Ctrl+Shift+G</kbd>
@@ -771,67 +724,7 @@ export function Web2() {
               </div>
             ) : (
               <div className="w2-panel-content">
-                {panel === 'todos' && <TodoPanel />}
-                {panel === 'goal' && <GoalPanel />}
-                {panel === 'review' && (
-                  <>
-                    <div className="w2-section-heading">
-                      <span>{w.diff?.branch || '当前更改'}</span>
-                      <IconButton
-                        label="刷新代码更改"
-                        disabled={diffLoading}
-                        onClick={() => void review()}
-                      >
-                        <RefreshCw className={diffLoading ? 'w2-spin' : ''} />
-                      </IconButton>
-                    </div>
-                    {diffLoading ? (
-                      <p className="w2-muted">正在读取 Git 更改…</p>
-                    ) : w.diff ? (
-                      <>
-                        {w.diff.error && <p role="alert">{w.diff.error}</p>}
-                        {!w.diff.files.length && (
-                          <p className="w2-muted">
-                            {w.diff.available
-                              ? '工作区没有未提交的更改'
-                              : '当前工作区无法读取 Git 信息'}
-                          </p>
-                        )}
-                        {w.diff.files.map((file, index) => (
-                          <details
-                            className="w2-diff"
-                            key={`${file.path}-${index}`}
-                          >
-                            <summary>
-                              <File size={14} />
-                              <span>{file.path}</span>
-                              <b>+{file.additions}</b>
-                              <em>−{file.deletions}</em>
-                            </summary>
-                            <pre>
-                              {file.patch.split('\n').map((line, i) => (
-                                <div
-                                  key={i}
-                                  className={
-                                    line.startsWith('+')
-                                      ? 'added'
-                                      : line.startsWith('-')
-                                        ? 'removed'
-                                        : ''
-                                  }
-                                >
-                                  {line || ' '}
-                                </div>
-                              ))}
-                            </pre>
-                          </details>
-                        ))}
-                      </>
-                    ) : (
-                      <p className="w2-muted">开始对话后查看项目更改</p>
-                    )}
-                  </>
-                )}
+                {panel === 'review' && <DiffPanel />}
                 {panel === 'files' && (
                   <>
                     <div className="w2-section-heading">
@@ -974,20 +867,6 @@ export function Web2() {
               </div>
             )}
           </section>
-          {!right && (
-            <div className="w2-collapsed-tools">
-              <IconButton label="打开右侧面板" onClick={toggleRight}>
-                <PanelRight />
-              </IconButton>
-              <IconButton
-                label="切换执行面板"
-                active={terminal}
-                onClick={toggleTerminal}
-              >
-                <PanelBottom />
-              </IconButton>
-            </div>
-          )}
         </div>
         {terminal && (
           <section className="w2-terminal" aria-label="终端执行记录">

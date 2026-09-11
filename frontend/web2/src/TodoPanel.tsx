@@ -4,7 +4,7 @@ import { useWorkspace } from '@naumi/shared/hooks/WorkspaceProvider'
 import type { Todo } from '@naumi/shared/api/WorkbenchRuntimeClient'
 
 const statusNames: Record<Todo['status'], string> = { pending: '待处理', in_progress: '进行中', blocked: '受阻', completed: '已完成' }
-export function TodoPanel({ compact = false }: { compact?: boolean }) {
+export function TodoPanel({ compact = false, onExpand }: { compact?: boolean; onExpand?: () => void }) {
   const w = useWorkspace()
   const [subject, setSubject] = useState('')
   const [dependencies, setDependencies] = useState('')
@@ -20,7 +20,7 @@ export function TodoPanel({ compact = false }: { compact?: boolean }) {
       {Object.entries(statusNames).map(([value, text]) => <option key={value} value={value}>{text}</option>)}
     </select>}
   </div>)}</>
-  if (compact) return <details className="w2-todo-inline" open><summary><ListChecks size={15} />待办进度 <span>{done} / {w.todos.length}</span></summary>{rows}</details>
+  if (compact) return <button className="w2-todo-inline w2-todo-progress" onClick={onExpand}><ListChecks size={15} />待办进度 <span>{done} / {w.todos.length}</span></button>
   return <div className="w2-todos">
     <div className="w2-section-heading"><span>待办 <small>{done} / {w.todos.length}</small></span><button aria-label="刷新待办" disabled={w.tasksLoading || w.tasksMutating} onClick={() => void w.refreshTasks()}><RefreshCw size={15} /></button></div>
     <progress aria-label="待办完成进度" max={w.todos.length || 1} value={done} />

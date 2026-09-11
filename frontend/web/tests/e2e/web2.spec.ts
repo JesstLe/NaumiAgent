@@ -33,7 +33,7 @@ test('review, keyboard controls, file empty state and draft reload', async ({
   await expect(
     page.getByRole('button', { name: '冒烟测试会话', exact: true }),
   ).toBeVisible()
-  await page.getByRole('button', { name: '代码审查', exact: true }).click()
+  await page.getByLabel('工作区面板').getByRole('button', { name: '审查', exact: true }).click()
   await expect(page.getByText('src/main.py', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: '返回工作区' }).click()
   await page.getByLabel('工作区面板').getByRole('button', { name: '文件', exact: true }).click()
