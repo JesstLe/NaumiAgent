@@ -27,7 +27,7 @@ export function AiMessage({
   const [copied, setCopied] = useState(false)
   const [vote, setVote] = useState<Vote | null>(null)
   const label = from === 'assistant' ? 'NaumiAgent' : '你'
-  return <article className={`community-message ${from}`}>
+  return <article className={`w2-message community-message ${from}`}>
     {from === 'assistant' && <AgentAvatar seed={seed} size={27} />}
     <div className="community-message-body">
       <header>
