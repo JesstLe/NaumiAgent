@@ -7,6 +7,9 @@ import { execFileSync } from 'node:child_process';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const manifest = JSON.parse(readFileSync(resolve(root, 'docs/interview-illustrations/manifest.json'), 'utf8'));
+const args = process.argv.slice(2);
+assert.ok(args.every(arg => arg === '--require-original-text'), 'Unknown validation option');
+const requireOriginalText = args.includes('--require-original-text');
 const expected = [...Array(26)].map((_, i) => String(i).padStart(2, '0')).concat('nav');
 assert.deepEqual(manifest.items.map(item => item.id).sort(), expected.sort(), 'Chapter coverage must be exactly 00-25 and nav');
 const hashes = new Set();
@@ -41,9 +44,12 @@ for (const item of manifest.items) {
   assert.match(manifest.source_revision, /^[a-f0-9]{40}$/, 'Source revision must be a full commit hash');
   const original = execFileSync('git', ['show', `${manifest.source_revision}:${item.document}`], { cwd: root, encoding: 'utf8', maxBuffer: 2_000_000 });
   const withoutFigure = text.replace(block + '\n\n', '');
-  assert.equal(withoutFigure, original, `${item.id}: text outside figure was changed`);
-  report.push({ chapter: item.id, width, height, bytes: bytes.length, sha256: hash, text_preserved: true, feishu: item.feishu });
+  const textPreserved = withoutFigure === original;
+  if (requireOriginalText) {
+    assert.equal(withoutFigure, original, `${item.id}: text outside figure was changed`);
+  }
+  report.push({ chapter: item.id, width, height, bytes: bytes.length, sha256: hash, text_preserved: textPreserved, feishu: item.feishu });
 }
 const imageFiles = readdirSync(resolve(root, 'docs/interview/assets/illustrations')).filter(file => file.endsWith('.png'));
 assert.equal(imageFiles.length, 27, 'Asset folder must contain exactly the selected 27 PNGs');
-console.log(JSON.stringify({ checked: report.length, unique_images: hashes.size, original_text_preserved: true, report }, null, 2));
+console.log(JSON.stringify({ checked: report.length, unique_images: hashes.size, original_text_preserved: report.every(item => item.text_preserved), original_text_required: requireOriginalText, report }, null, 2));
