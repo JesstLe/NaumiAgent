@@ -94,7 +94,9 @@ def progress_summary(event: str, data: dict[str, Any]) -> str:
             return ""
         shown = actions[:3]
         suffix = f"；另有 {len(actions) - len(shown)} 项" if len(actions) > len(shown) else ""
-        if failed:
+        if data.get("phase_kind") == "recovery":
+            lead = "执行恢复"
+        elif failed:
             lead = f"本阶段执行存在 {failed} 项失败"
         elif stopped:
             lead = f"本阶段有 {stopped} 项未执行完成"

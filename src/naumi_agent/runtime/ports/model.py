@@ -57,6 +57,7 @@ class ModelPort(Protocol):
         temperature: float | None = None,
         response_format: str | dict[str, Any] | None = None,
         thinking: dict[str, str] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> ModelResponse: ...
     def stream(
         self,
@@ -68,6 +69,7 @@ class ModelPort(Protocol):
         max_tokens: int | None = None,
         temperature: float | None = None,
         thinking: dict[str, str] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> AsyncIterator[StreamChunk]: ...
 
 

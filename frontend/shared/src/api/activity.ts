@@ -152,6 +152,7 @@ const reasoningLabel = (turn: number, context: ActivityContext, previous?: ToolT
     const outcome = { completed: '已完成', running: '仍在执行', failed: '执行失败', cancelled: '已取消', unknown: '结果未确认' }[previous.state]
     return `第 ${turn} 轮 · 上一步${outcome}：${previous.action || previous.label}`
   }
+  if (turn > 1) return `第 ${turn} 轮 · 继续处理本次任务`
   const objective = excerpt(context.objective)
   const workspace = excerpt(context.workspace)
   return `${objective ? `本次任务：${objective}` : `第 ${turn} 轮 · 等待具体操作或答复`}${workspace ? `\n工作目录：${workspace}` : ''}`
@@ -183,6 +184,13 @@ function progressLabel(type: string, data: Record<string, unknown>): string {
   return ''
 }
 
+const phaseSummaryLabel = (value: unknown): string => {
+  const label = excerpt(value, 500)
+  return /^本阶段已完成：检测到模型/.test(label)
+    ? label.replace(/^本阶段已完成：/, '执行恢复：')
+    : label
+}
+
 /** Build the public, ordered execution trace. Raw model reasoning is intentionally absent. */
 export function liveExecutionTimeline(
   events: StreamEvent[],
@@ -204,7 +212,7 @@ export function liveExecutionTimeline(
     seen.add(event.id)
     const turn = eventTurn(event)
     if (event.type === 'phase_summary') {
-      const label = excerpt(event.data.activity_summary, 500)
+      const label = phaseSummaryLabel(event.data.activity_summary)
       if (label) rows.push({ id: `activity:${event.id}`, kind: 'reasoning', label, state: 'completed', turn })
       continue
     }
@@ -277,10 +285,22 @@ export function runExecutionTimeline(run: Run, context: ActivityContext = {}): E
   let previous: ToolTimelineStep | undefined
   let currentTurn = 1
   return run.steps
-    .filter(step => ['analysis', 'tool', 'approval', 'activity'].includes(step.stage))
+    .filter(step =>
+      ['analysis', 'tool', 'approval', 'activity'].includes(step.stage)
+      || (step.stage === 'response' && activityState(step.status) === 'failed'),
+    )
     .map((step): ExecutionTimelineStep => {
       if (step.stage === 'activity') {
-        return { id: `${run.id}:activity:${step.sequence}`, kind: 'reasoning', label: excerpt(step.summary, 500), state: activityState(step.status), turn: currentTurn }
+        return { id: `${run.id}:activity:${step.sequence}`, kind: 'reasoning', label: phaseSummaryLabel(step.summary), state: activityState(step.status), turn: currentTurn }
+      }
+      if (step.stage === 'response') {
+        return {
+          id: `${run.id}:response:${step.sequence}`,
+          kind: 'reasoning',
+          label: excerpt(step.detail, 500) || '任务结束但未返回可显示结果，请重试',
+          state: 'failed',
+          turn: currentTurn,
+        }
       }
       if (step.stage === 'analysis') {
         const match = step.summary.match(/(\d+)/)
@@ -337,5 +357,19 @@ export function executionStages(rows: ExecutionTimelineStep[]): ExecutionStage[]
     } else stage.tools.push(row)
     stage.state = stageState([...stage.notes, ...stage.tools])
   }
-  return stages
+  // A provider recovery can span multiple model turns without executing a
+  // tool. Present those adjacent notes as one evolving phase so the UI does
+  // not announce several apparently finished tasks while the run is active.
+  const compacted: ExecutionStage[] = []
+  for (const stage of stages) {
+    const previous = compacted.at(-1)
+    if (previous && !previous.tools.length && !stage.tools.length) {
+      previous.notes.push(...stage.notes)
+      previous.summary ||= stage.summary
+      previous.state = stageState(previous.notes)
+      continue
+    }
+    compacted.push(stage)
+  }
+  return compacted
 }

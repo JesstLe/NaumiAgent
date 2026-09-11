@@ -1111,6 +1111,7 @@ class ModelRouter:
         temperature: float | None = None,
         response_format: str | dict | None = None,
         thinking: dict[str, str] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> ModelResponse:
         """非流式调用."""
         resolved = model or self.resolve_model(tier)
@@ -1132,6 +1133,8 @@ class ModelRouter:
         }
         if tools:
             kwargs["tools"] = tools
+            if tool_choice is not None:
+                kwargs["tool_choice"] = tool_choice
         if response_format == "json":
             kwargs["response_format"] = {"type": "json_object"}
 
@@ -1177,6 +1180,7 @@ class ModelRouter:
         max_tokens: int | None = None,
         temperature: float | None = None,
         thinking: dict[str, str] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """流式调用，yield StreamChunk."""
         resolved = model or self.resolve_model(tier)
@@ -1201,6 +1205,8 @@ class ModelRouter:
         }
         if tools:
             kwargs["tools"] = tools
+            if tool_choice is not None:
+                kwargs["tool_choice"] = tool_choice
 
         kwargs.update(transport_kwargs)
 
