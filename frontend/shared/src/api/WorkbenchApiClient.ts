@@ -163,6 +163,24 @@ export class WorkbenchApiClient {
     })
   }
 
+  async archiveSession(sessionId: string): Promise<void> {
+    try {
+      await this.request<void>({
+        method: 'POST',
+        url: `/sessions/${encodeURIComponent(sessionId)}/archive`,
+      })
+    } catch (error) {
+      if (error instanceof ApiException && error.status === 404) {
+        const response = (error.cause as AxiosError<{ detail?: string }>)?.response
+        const message = response?.data?.detail === 'Session not found'
+          ? '会话不存在，请刷新会话列表后重试'
+          : '当前后端未提供归档接口，请更新并重启后端服务后重试'
+        throw new ApiException('InvalidUrl', message, 404, error)
+      }
+      throw error
+    }
+  }
+
   async fetchMessages(sessionId: string, page = 1, pageSize = 50): Promise<MessageListResponse> {
     return this.request<MessageListResponse>({
       method: 'GET',
