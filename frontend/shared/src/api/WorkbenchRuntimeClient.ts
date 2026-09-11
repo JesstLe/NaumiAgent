@@ -15,6 +15,21 @@ export interface Todo {
   blocked_by: string[]
   updated_at: string
 }
+export interface WorkspaceGoal {
+  goal_id: string
+  objective: string
+  status: 'active' | 'paused' | 'blocked' | 'completed' | 'cancelled'
+  note: string
+  session_id: string
+  pursuit_run_id: string
+  updated_at: string
+  pursuit: null | {
+    status: string; phase: string; iteration: number; criteria_total: number; criteria_verified: number
+    blocked_reason: string; next_action: string
+    evidence: { kind: string; source: string; summary: string; is_hard: boolean }[]
+  }
+}
+export interface GoalSnapshot { current_goal_id: string; goals: WorkspaceGoal[]; warnings: string[]; truncated: boolean }
 export interface Run {
   id: string
   status: string
@@ -134,6 +149,13 @@ export class WorkbenchRuntimeClient extends WorkbenchApiClient {
   }
   async todos(session: string): Promise<{ todos: Todo[] }> {
     return (await this.fetch(`/sessions/${encodeURIComponent(session)}/todos`)).json()
+  }
+  async goals(): Promise<GoalSnapshot> { return (await this.fetch('/goals')).json() }
+  async createGoal(session: string, objective: string): Promise<GoalSnapshot> {
+    return (await this.fetch(`/sessions/${encodeURIComponent(session)}/goals`, { method: 'POST', body: JSON.stringify({ objective }) })).json()
+  }
+  async updateGoal(goal: string, status: WorkspaceGoal['status'], note: string): Promise<GoalSnapshot> {
+    return (await this.fetch(`/goals/${encodeURIComponent(goal)}`, { method: 'PATCH', body: JSON.stringify({ status, note }) })).json()
   }
   async createTodo(session: string, body: { subject: string; blocked_by: string[] }): Promise<{ todos: Todo[] }> {
     return (await this.fetch(`/sessions/${encodeURIComponent(session)}/todos`, { method: 'POST', body: JSON.stringify(body) })).json()

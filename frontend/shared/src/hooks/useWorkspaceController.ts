@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { usePlatform } from '@naumi/shared/platform'
 import { useWorkspaceTasks } from './useWorkspaceTasks'
+import { useWorkspaceGoals } from './useWorkspaceGoals'
 import type {
   ChatSource,
   DaemonStatusResponse,
@@ -565,7 +566,9 @@ export function useWorkspaceController() {
     }
   }
   const taskState = useWorkspaceTasks(api, sessionId, !!daemon, ensureSession)
+  const goalState = useWorkspaceGoals(api, !!daemon, ensureSession)
   return {
+    ...goalState,
     ...taskState,
     api,
     base,
