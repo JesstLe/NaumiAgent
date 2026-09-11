@@ -30,6 +30,7 @@ export interface WorkspaceGoal {
   }
 }
 export interface GoalSnapshot { current_goal_id: string; goals: WorkspaceGoal[]; warnings: string[]; truncated: boolean }
+export interface SlashCommand { command: string; description: string; aliases: string[]; readonly: boolean; arguments: { syntax: string; required: boolean } }
 export interface Run {
   id: string
   status: string
@@ -147,6 +148,7 @@ export class WorkbenchRuntimeClient extends WorkbenchApiClient {
   async config(): Promise<ModelConfig> {
     return (await this.fetch('/config')).json()
   }
+  async commands(): Promise<{ commands: SlashCommand[] }> { return (await this.fetch('/commands')).json() }
   async todos(session: string): Promise<{ todos: Todo[] }> {
     return (await this.fetch(`/sessions/${encodeURIComponent(session)}/todos`)).json()
   }
@@ -189,11 +191,12 @@ export class WorkbenchRuntimeClient extends WorkbenchApiClient {
     onEvent: (event: StreamEvent) => void,
     signal: AbortSignal,
   ) {
+    const command = message.content.trim().startsWith('/')
     const response = await this.fetch(
-      `/sessions/${encodeURIComponent(id)}/messages`,
+      `/sessions/${encodeURIComponent(id)}/${command ? 'commands' : 'messages'}`,
       {
         method: 'POST',
-        body: JSON.stringify({ ...message, stream: true }),
+        body: JSON.stringify(command ? { command: message.content, runtime_mode: message.runtime_mode || 'default' } : { ...message, stream: true }),
         signal,
       },
     )

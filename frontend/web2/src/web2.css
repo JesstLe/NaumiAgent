@@ -1260,3 +1260,10 @@
 .w2-goal-confirm > div { display: flex; justify-content: flex-end; gap: 8px; }
 .w2-pursuit { font-size: 12px; padding: 14px 0; } .w2-pursuit progress { width: 100%; height: 4px; accent-color: #81956d; }
 .w2-goal-link { font-size: 12px; text-decoration: underline; color: #869475; }
+
+.w2-composer { position: relative; }
+.w2-command-list { position: absolute; bottom: calc(100% + 9px); left: 0; right: 0; max-height: 310px; overflow: auto; background: #fff; border: 1px solid #e2e6dc; border-radius: 9px; box-shadow: 0 6px 30px #18251016; padding: 5px; z-index: 8; }
+.w2-command-list button { display: grid; grid-template-columns: 90px minmax(0,1fr); gap: 3px 10px; width: 100%; text-align: left; padding: 9px 10px; font-size: 12px; border-radius: 4px; }
+.w2-command-list button[aria-selected=true], .w2-command-list button:hover { background: #f0f3ea; }
+.w2-command-list strong { font-weight: 500; } .w2-command-list span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #7a8470; }
+.w2-command-list small { grid-column: 2; color: #a1a797; font-size: 10px; }
