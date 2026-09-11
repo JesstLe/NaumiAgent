@@ -12,6 +12,7 @@ import {
   ArrowUp,
   ArrowUpRight,
   Check,
+  Copy,
   ChevronDown,
   ChevronRight,
   Clock3,
@@ -64,9 +65,9 @@ import { DiffPanel } from './DiffPanel'
 import { ThinkingState } from './beautiful/ThinkingState'
 import { MessageContent } from './rich/MessageContent'
 import { WorkspaceFileTree } from './community/WorkspaceFileTree'
-import { AiMessage } from './community/AiMessage'
 import { AiSources, messageSources } from './community/AiSources'
 import { BorderBeam } from './community/border-beam'
+import { MessageActionBar } from './community/MessageActionBar'
 import { SelectionActions } from './beautiful/SelectionActions'
 import { ContextCards } from './beautiful/ContextCards'
 import { Flowchart } from './beautiful/Flowchart'
@@ -182,6 +183,16 @@ function IconButton({
       {children}
     </button>
   )
+}
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  const w = useWorkspace()
+  return <IconButton label={copied ? '已复制' : '复制消息'} onClick={() => {
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1600)
+    }).catch(() => w.setError('复制失败，请选中文字复制'))
+  }}>{copied ? <Check /> : <Copy />}</IconButton>
 }
 function SchedulePanel() {
   const w = useWorkspace()
@@ -786,21 +797,31 @@ export function Web2() {
                   {messages.map((message, index) => {
                     const run = message.role === 'user' ? messageRuns.get(message.id) : undefined
                     const sources = message.role === 'assistant' ? messageSources(message) : []
+                    const retryPrompt = message.role === 'assistant'
+                      ? [...messages.slice(0, index)].reverse().find(item => item.role === 'user')?.content || ''
+                      : ''
                     const live = message.role === 'user'
                       && index === latestUserIndex
                       && (w.busy || w.liveEvents.length > 0)
                       && (!liveRunId || !run || liveRunId === run.id)
                     return <Fragment key={message.id}>
-                      <AiMessage
-                        from={message.role as 'user' | 'assistant'}
-                        timestamp={message.timestamp}
-                        seed={`assistant:${w.sessionId || 'new'}`}
-                        copyText={message.content}
-                        onCopyError={() => w.setError('复制失败，请选中文字复制')}
-                      >
+                      <article className={`w2-message ${message.role}`}>
                         <MessageContent content={message.content} plain={message.role === 'user'} />
                         {message.role === 'assistant' && <AiSources sources={sources} />}
-                      </AiMessage>
+                        {message.role === 'assistant'
+                          ? <MessageActionBar
+                              messageId={message.id}
+                              timestamp={message.timestamp}
+                              text={message.content}
+                              onCopyError={() => w.setError('复制失败，请选中文字复制')}
+                              retryDisabled={!retryPrompt || composerLocked}
+                              onRetry={() => {
+                                if (!retryPrompt) return
+                                void w.send(retryPrompt)
+                              }}
+                            />
+                          : <div className="w2-message-actions"><CopyButton text={message.content} /></div>}
+                      </article>
                       {message.role === 'user' && (run || live) && (
                         <ThinkingState run={run} live={live} objective={message.content} />
                       )}

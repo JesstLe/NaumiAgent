@@ -323,13 +323,14 @@ export function useWorkspaceController() {
     savePreference('draft:new', '')
     return session.id
   }
-  const send = async () => {
-    if (!draft.trim() || operation.current || !daemon || loading) return
+  const send = async (contentOverride?: string) => {
+    const requestedContent = contentOverride ?? draft
+    if (!requestedContent.trim() || operation.current || !daemon || loading) return
     operation.current = true
     stopped.current = false
     setBusy(true)
     setError('')
-    const content = draft.trim()
+    const content = requestedContent.trim()
     const messageId = `stream-${crypto.randomUUID()}`
     const optimisticUserId = `user-${messageId}`
     let completed = false
