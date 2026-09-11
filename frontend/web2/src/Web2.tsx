@@ -1,4 +1,13 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from 'react'
 import {
   ArrowUp,
   ArrowUpRight,
@@ -16,7 +25,6 @@ import {
   Globe2,
   HelpCircle,
   Loader2,
-  ListTodo,
   Lightbulb,
   MoreHorizontal,
   Maximize2,
@@ -36,7 +44,6 @@ import {
   Square,
   SquarePen,
   Terminal,
-  Target,
   Workflow,
   X,
 } from 'lucide-react'
@@ -79,8 +86,6 @@ type Panel =
   | 'browser'
   | 'tools'
   | 'tasks'
-  | 'todos'
-  | 'goal'
   | 'context'
   | 'flow'
   | 'insights'
@@ -93,13 +98,34 @@ const panelNames: Record<Panel, string> = {
   browser: '浏览器',
   tools: '工具与扩展',
   tasks: '任务',
-  todos: '待办',
-  goal: '目标',
   context: '上下文',
   flow: '依赖',
   insights: '洞察',
   schedules: '定时任务',
   plugins: '插件',
+}
+
+const MIN_LEFT_WIDTH = 200
+const MAX_LEFT_WIDTH = 420
+const MIN_RIGHT_WIDTH = 280
+const MAX_RIGHT_WIDTH = 720
+
+function defaultLeftWidth() {
+  return window.innerWidth <= 1100 ? 215 : 240
+}
+
+function minimumChatWidth() {
+  return window.innerWidth <= 1100 ? 330 : 420
+}
+
+function defaultRightWidth(leftWidth = defaultLeftWidth()) {
+  const available = window.innerWidth - leftWidth - minimumChatWidth() - 6
+  return Math.max(MIN_RIGHT_WIDTH, Math.min(480, available))
+}
+
+function storedWidth(key: string, fallback: number) {
+  const value = Number(readPreference(key, String(fallback)))
+  return Number.isFinite(value) ? value : fallback
 }
 
 function Logo({ className = '' }: { className?: string }) {
@@ -256,6 +282,14 @@ export function Web2() {
   const [terminal, setTerminal] = useState(
     () => readPreference('terminal', 'true') === 'true',
   )
+  const [leftWidth, setLeftWidth] = useState(() =>
+    Math.min(MAX_LEFT_WIDTH, Math.max(MIN_LEFT_WIDTH, storedWidth('sidebar-width', defaultLeftWidth()))),
+  )
+  const [rightWidth, setRightWidth] = useState(() =>
+    Math.min(MAX_RIGHT_WIDTH, Math.max(MIN_RIGHT_WIDTH, storedWidth('right-width', defaultRightWidth()))),
+  )
+  const [resizing, setResizing] = useState<'left' | 'right' | null>(null)
+  const [summaryOpen, setSummaryOpen] = useState(false)
   const [panel, setPanel] = useState<Panel>('home')
   const [expanded, setExpanded] = useState(true)
   const [searching, setSearching] = useState(false)
@@ -273,6 +307,14 @@ export function Web2() {
   const [workspaceSwitching, setWorkspaceSwitching] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
   const dialogRef = useRef<HTMLDialogElement>(null)
+  const summaryRef = useRef<HTMLDivElement>(null)
+  const resizeRef = useRef<{
+    side: 'left' | 'right'
+    pointerId: number
+    startX: number
+    startWidth: number
+    width: number
+  } | null>(null)
   const textarea = useRef<HTMLTextAreaElement>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const scroll = useRef<HTMLDivElement>(null)
@@ -301,6 +343,62 @@ export function Web2() {
   const filteredSessions = w.sessions.filter((item) =>
     (item.title || item.id).toLowerCase().includes(query.trim().toLowerCase()),
   )
+  const layoutStyle = {
+    '--w2-sidebar-width': `${leftWidth}px`,
+    '--w2-right-width': `${rightWidth}px`,
+  } as CSSProperties
+
+  const clampPaneWidth = (side: 'left' | 'right', value: number) => {
+    if (side === 'left') {
+      const rightSpace = right ? rightWidth + 6 : 0
+      const available = window.innerWidth - rightSpace - minimumChatWidth()
+      return Math.round(Math.min(MAX_LEFT_WIDTH, Math.max(MIN_LEFT_WIDTH, available), Math.max(MIN_LEFT_WIDTH, value)))
+    }
+    const leftSpace = sidebar ? leftWidth : 0
+    const available = window.innerWidth - leftSpace - minimumChatWidth() - 6
+    const maximum = Math.max(MIN_RIGHT_WIDTH, Math.min(MAX_RIGHT_WIDTH, available))
+    return Math.round(Math.min(maximum, Math.max(MIN_RIGHT_WIDTH, value)))
+  }
+
+  const setPaneWidth = (side: 'left' | 'right', value: number, persist = false) => {
+    const next = clampPaneWidth(side, value)
+    if (side === 'left') setLeftWidth(next)
+    else setRightWidth(next)
+    if (persist) savePreference(`${side === 'left' ? 'sidebar' : 'right'}-width`, String(next))
+    return next
+  }
+
+  const startResize = (side: 'left' | 'right') => (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (window.matchMedia('(max-width: 820px)').matches) return
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    const width = side === 'left' ? leftWidth : rightWidth
+    resizeRef.current = { side, pointerId: event.pointerId, startX: event.clientX, startWidth: width, width }
+    setResizing(side)
+  }
+
+  const moveResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = resizeRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    const delta = event.clientX - drag.startX
+    drag.width = setPaneWidth(drag.side, drag.startWidth + (drag.side === 'left' ? delta : -delta))
+  }
+
+  const finishResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = resizeRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+    savePreference(`${drag.side === 'left' ? 'sidebar' : 'right'}-width`, String(drag.width))
+    resizeRef.current = null
+    setResizing(null)
+  }
+
+  const resizeWithKeyboard = (side: 'left' | 'right', direction: number, large: boolean) => {
+    if (window.matchMedia('(max-width: 820px)').matches) return
+    const delta = (large ? 40 : 16) * direction
+    const currentWidth = side === 'left' ? leftWidth : rightWidth
+    setPaneWidth(side, currentWidth + delta * (side === 'left' ? 1 : -1), true)
+  }
 
   const toggleSidebar = () =>
     setSidebar((value) => {
@@ -389,9 +487,29 @@ export function Web2() {
     followOutput.current = true
   }, [w.sessionId])
   useEffect(() => {
+    if (!summaryOpen) return
+    const closeOutside = (event: PointerEvent) => {
+      if (!summaryRef.current?.contains(event.target as Node)) setSummaryOpen(false)
+    }
+    document.addEventListener('pointerdown', closeOutside)
+    return () => document.removeEventListener('pointerdown', closeOutside)
+  }, [summaryOpen])
+  useEffect(() => {
+    const fitPanes = () => {
+      if (window.innerWidth <= 820) return
+      const nextRight = clampPaneWidth('right', rightWidth)
+      if (nextRight !== rightWidth) setRightWidth(nextRight)
+      const nextLeft = clampPaneWidth('left', leftWidth)
+      if (nextLeft !== leftWidth) setLeftWidth(nextLeft)
+    }
+    window.addEventListener('resize', fitPanes)
+    return () => window.removeEventListener('resize', fitPanes)
+  })
+  useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setSearching(false)
+        setSummaryOpen(false)
         return
       }
       if (!(event.ctrlKey || event.metaKey) || dialog) return
@@ -420,7 +538,8 @@ export function Web2() {
 
   return (
     <div
-      className={`web2 ${sidebar ? '' : 'w2-sidebar-hidden'} ${right ? '' : 'w2-right-hidden'}`}
+      className={`web2 ${sidebar ? '' : 'w2-sidebar-hidden'} ${right ? '' : 'w2-right-hidden'} ${resizing ? `w2-resizing-${resizing}` : ''}`}
+      style={layoutStyle}
     >
       <SelectionActions focusComposer={() => textarea.current?.focus()} />
       <header className="w2-titlebar">
@@ -452,8 +571,7 @@ export function Web2() {
             { label: terminal ? '隐藏执行记录' : '显示执行记录', shortcut: 'Ctrl+J', run: toggleTerminal },
             { label: '代码更改', shortcut: 'Ctrl+Shift+G', run: () => openPanel('review') },
             { label: '会话文件', run: () => openPanel('files') },
-            { label: '待办', run: () => openPanel('todos') },
-            { label: '目标', run: () => openPanel('goal') },
+            { label: '置顶摘要', run: () => setSummaryOpen(true) },
             { label: '上下文快照', run: () => openPanel('context') },
             { label: '任务依赖图', run: () => openPanel('flow') },
             { label: '会话洞察', run: () => openPanel('insights') },
@@ -603,12 +721,59 @@ export function Web2() {
         </footer>
       </aside>
 
+      <div
+        className="w2-pane-resizer w2-sidebar-resizer"
+        role="separator"
+        aria-label="调整左侧栏宽度"
+        aria-orientation="vertical"
+        aria-valuemin={MIN_LEFT_WIDTH}
+        aria-valuemax={MAX_LEFT_WIDTH}
+        aria-valuenow={leftWidth}
+        tabIndex={0}
+        onPointerDown={startResize('left')}
+        onPointerMove={moveResize}
+        onPointerUp={finishResize}
+        onPointerCancel={finishResize}
+        onDoubleClick={() => setPaneWidth('left', defaultLeftWidth(), true)}
+        onKeyDown={event => {
+          if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return
+          event.preventDefault()
+          resizeWithKeyboard('left', event.key === 'ArrowRight' ? 1 : -1, event.shiftKey)
+        }}
+      />
+
       <main className={`w2-main ${terminal ? 'has-terminal' : ''}`}>
         <div className="w2-workspace">
           <section className="w2-chat" aria-label="对话">
             <div className="w2-chat-heading">
               <span>{current?.title || '新对话'}</span>
-              <IconButton label="打开待办面板" active={panel === 'todos' && right} onClick={() => openPanel('todos')}><ListTodo /></IconButton>
+              <div className="w2-summary-anchor" ref={summaryRef}>
+                <button
+                  type="button"
+                  className="w2-summary-trigger"
+                  aria-label="置顶摘要"
+                  aria-expanded={summaryOpen}
+                  onClick={() => setSummaryOpen(value => !value)}
+                >
+                  <Pin />
+                  <span>置顶摘要</span>
+                </button>
+                {summaryOpen && (
+                  <div className="w2-summary-popover" role="region" aria-label="置顶摘要">
+                    <header>
+                      <strong>置顶摘要</strong>
+                      <IconButton label="关闭置顶摘要" onClick={() => setSummaryOpen(false)}><X /></IconButton>
+                    </header>
+                    <section aria-label="待办摘要">
+                      <TodoPanel key={w.sessionId || 'new'} />
+                    </section>
+                    <hr />
+                    <section aria-label="目标摘要">
+                      <GoalPanel />
+                    </section>
+                  </div>
+                )}
+              </div>
               <div className="w2-mobile-tools"><IconButton label="打开文件面板" onClick={() => openPanel('files')}><FolderClosed /></IconButton></div>
               <div className={`w2-chat-panel-controls ${right ? 'right-open' : ''}`}>{panelControls}</div>
             </div>
@@ -846,6 +1011,27 @@ export function Web2() {
             </div>
           </section>
 
+          <div
+            className="w2-pane-resizer w2-right-resizer"
+            role="separator"
+            aria-label="调整右侧栏宽度"
+            aria-orientation="vertical"
+            aria-valuemin={MIN_RIGHT_WIDTH}
+            aria-valuemax={MAX_RIGHT_WIDTH}
+            aria-valuenow={rightWidth}
+            tabIndex={0}
+            onPointerDown={startResize('right')}
+            onPointerMove={moveResize}
+            onPointerUp={finishResize}
+            onPointerCancel={finishResize}
+            onDoubleClick={() => setPaneWidth('right', defaultRightWidth(leftWidth), true)}
+            onKeyDown={event => {
+              if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return
+              event.preventDefault()
+              resizeWithKeyboard('right', event.key === 'ArrowRight' ? 1 : -1, event.shiftKey)
+            }}
+          />
+
           <section className="w2-right" aria-label="工作区面板">
             <header className="w2-panel-toolbar">
               <span>{panel !== 'home' && panelNames[panel]}</span>
@@ -873,8 +1059,6 @@ export function Web2() {
               </div>
             </header>
             <nav className="w2-right-nav" aria-label="会话详情导航">
-              <button className={panel === 'todos' ? 'selected' : ''} onClick={() => openPanel('todos')}><ListTodo />待办</button>
-              <button className={panel === 'goal' ? 'selected' : ''} onClick={() => openPanel('goal')}><Target />目标</button>
               <button className={panel === 'context' ? 'selected' : ''} onClick={() => openPanel('context')}><File />上下文</button>
               <button className={panel === 'flow' ? 'selected' : ''} onClick={() => openPanel('flow')}><Workflow />依赖</button>
               <button className={panel === 'insights' ? 'selected' : ''} onClick={() => openPanel('insights')}><Lightbulb />洞察</button>
@@ -906,11 +1090,12 @@ export function Web2() {
             ) : (
               <div className="w2-panel-content">
                 {panel === 'review' && <DiffPanel />}
-                {panel === 'todos' && <TodoPanel key={w.sessionId || 'new'} />}
-                {panel === 'goal' && <GoalPanel />}
                 {panel === 'context' && <ContextCards />}
                 {panel === 'flow' && <Flowchart key={w.sessionId || 'new'} />}
-                {panel === 'insights' && <InsightCards onInspect={key => openPanel(key === 'context' ? 'context' : 'todos')} />}
+                {panel === 'insights' && <InsightCards onInspect={key => {
+                  if (key === 'context') openPanel('context')
+                  else setSummaryOpen(true)
+                }} />}
                 {panel === 'schedules' && <SchedulePanel />}
                 {panel === 'plugins' && <PluginPanel />}
                 {panel === 'files' && (
