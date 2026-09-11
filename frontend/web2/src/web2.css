@@ -1226,3 +1226,20 @@
 .w2-about { display: grid; grid-template-columns: 85px minmax(0,1fr); gap: 24px 10px; font-size: 13px; }
 .w2-about dt { color: #92998b; } .w2-about dd { margin: 0; }
 @media(max-width:580px) { .w2-settings { grid-template-columns: 1fr; } .w2-settings nav { display: flex; flex-wrap: wrap; gap: 3px; padding: 8px; border-right: 0; border-bottom: 1px solid var(--w2-line); } .w2-settings nav button { width: auto; padding: 8px; } .w2-settings-legacy { margin: 8px; } .w2-settings section { padding: 20px; } .w2-setting-row { flex-wrap: wrap; gap: 8px; } }
+
+.w2-todos progress { width: 100%; height: 4px; accent-color: #788f67; margin-bottom: 20px; }
+.w2-todo { display: flex; gap: 10px; align-items: flex-start; padding: 13px 0; border-bottom: 1px solid #eff0ec; font-size: 13px; }
+.w2-todo > svg { margin-top: 3px; color: #9a9e93; flex-shrink: 0; }
+.w2-todo > div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.w2-todo small { display: block; color: #969b8f; font-size: 11px; line-height: 1.8; }
+.w2-todo span small { display: inline; }
+.w2-todo.completed { color: #9b9e96; } .w2-todo.completed > svg { color: #839674; }
+.w2-todo select { background: #f6f7f4; border: 0; border-radius: 4px; padding: 4px; font-size: 11px; }
+.w2-todo-form { display: grid; gap: 12px; margin-top: 24px; }
+.w2-todo-form label { display: grid; gap: 7px; font-size: 12px; color: #89907f; }
+.w2-todo-form input, .w2-goal-form textarea { width: 100%; border: 1px solid #e3e7de; border-radius: 5px; background: #fff; padding: 9px; font-size: 13px; }
+.w2-todo-form .w2-primary { display: flex; gap: 5px; align-items: center; justify-content: center; width: auto; justify-self: end; }
+.w2-todo-inline { border: 1px solid #e8ebe4; border-radius: 7px; margin-bottom: 12px; padding: 9px 12px; max-height: 165px; overflow: auto; }
+.w2-todo-inline summary { display: flex; gap: 8px; align-items: center; cursor: pointer; font-size: 12px; }
+.w2-todo-inline summary span { margin-left: auto; color: #9b9f93; }
+.w2-todo-inline .w2-todo { font-size: 12px; padding: 7px 0; }

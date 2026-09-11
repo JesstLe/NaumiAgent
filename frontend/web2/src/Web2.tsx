@@ -43,8 +43,9 @@ import { errorText } from '@naumi/shared/hooks/useWorkspaceController'
 import './web2.css'
 import { MenuBar } from './MenuBar'
 import { SettingsPage } from './SettingsPage'
+import { TodoPanel } from './TodoPanel'
 
-type Panel = 'home' | 'review' | 'files' | 'browser' | 'tools' | 'tasks'
+type Panel = 'home' | 'review' | 'files' | 'browser' | 'tools' | 'tasks' | 'todos'
 const panelNames: Record<Panel, string> = {
   home: '工作区',
   review: '审查',
@@ -52,6 +53,7 @@ const panelNames: Record<Panel, string> = {
   browser: '浏览器',
   tools: '工具与扩展',
   tasks: '任务',
+  todos: '待办',
 }
 
 function Logo({ className = '' }: { className?: string }) {
@@ -298,6 +300,7 @@ export function Web2() {
             { label: terminal ? '隐藏执行记录' : '显示执行记录', shortcut: 'Ctrl+J', run: toggleTerminal },
             { label: '代码更改', shortcut: 'Ctrl+Shift+G', run: () => openPanel('review') },
             { label: '会话文件', run: () => openPanel('files') },
+            { label: '待办', run: () => openPanel('todos') },
             { label: fullscreen ? '退出全屏' : '进入全屏', run: () => { void (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()).catch(() => w.setError('浏览器暂不支持全屏')) } },
           ] },
           { label: '帮助', actions: [
@@ -331,6 +334,7 @@ export function Web2() {
           </IconButton>
         </div>
         <nav className="w2-nav" aria-label="主导航">
+          <button className={panel === 'todos' ? 'selected' : ''} onClick={() => openPanel('todos')}><Check />待办<span className="w2-nav-hint">{w.todos.filter(todo => todo.status !== 'completed').length || ''}</span></button>
           <button disabled={locked} onClick={newChat}>
             <SquarePen />
             新对话<span className="w2-nav-hint">＋</span>
@@ -510,6 +514,7 @@ export function Web2() {
               )}
             </div>
             <div className="w2-composer-wrap">
+              <TodoPanel compact />
               {w.error && (
                 <div className="w2-error" role="alert">
                   <span>{w.error}</span>
@@ -750,6 +755,7 @@ export function Web2() {
               </div>
             ) : (
               <div className="w2-panel-content">
+                {panel === 'todos' && <TodoPanel />}
                 {panel === 'review' && (
                   <>
                     <div className="w2-section-heading">

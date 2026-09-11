@@ -6,6 +6,15 @@ export interface ModelConfig {
   tools: { name: string; description: string }[]
   model_warnings: string[]
 }
+export interface Todo {
+  id: string
+  subject: string
+  description: string
+  status: 'pending' | 'in_progress' | 'blocked' | 'completed'
+  active_form: string | null
+  blocked_by: string[]
+  updated_at: string
+}
 export interface Run {
   id: string
   status: string
@@ -122,6 +131,15 @@ export class WorkbenchRuntimeClient extends WorkbenchApiClient {
   }
   async config(): Promise<ModelConfig> {
     return (await this.fetch('/config')).json()
+  }
+  async todos(session: string): Promise<{ todos: Todo[] }> {
+    return (await this.fetch(`/sessions/${encodeURIComponent(session)}/todos`)).json()
+  }
+  async createTodo(session: string, body: { subject: string; blocked_by: string[] }): Promise<{ todos: Todo[] }> {
+    return (await this.fetch(`/sessions/${encodeURIComponent(session)}/todos`, { method: 'POST', body: JSON.stringify(body) })).json()
+  }
+  async updateTodo(session: string, task: string, status: Todo['status']): Promise<{ todos: Todo[] }> {
+    return (await this.fetch(`/sessions/${encodeURIComponent(session)}/todos/${encodeURIComponent(task)}`, { method: 'PATCH', body: JSON.stringify({ status }) })).json()
   }
   async sessions(page = 1): Promise<{ sessions: Session[]; total: number }> {
     return (await this.fetch(`/sessions?page=${page}&page_size=100`)).json()
