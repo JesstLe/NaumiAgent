@@ -1,5 +1,10 @@
 import { WorkbenchApiClient } from '@naumi/shared/api/WorkbenchApiClient'
-import type { MessageCreate, MessageResponse, Session } from '@naumi/shared/api/types'
+import type {
+  EnginesResponse,
+  MessageCreate,
+  MessageResponse,
+  Session,
+} from '@naumi/shared/api/types'
 
 export interface ModelConfig {
   models: { id: string; name: string; tier: string }[]
@@ -211,13 +216,16 @@ export class WorkbenchRuntimeClient extends WorkbenchApiClient {
   async sessions(page = 1): Promise<{ sessions: Session[]; total: number }> {
     return (await this.fetch(`/sessions?page=${page}&page_size=100`)).json()
   }
-  async create(title?: string, model?: string): Promise<Session> {
+  async create(title?: string, model?: string, engine?: string): Promise<Session> {
     return (
       await this.fetch('/sessions', {
         method: 'POST',
-        body: JSON.stringify({ title, model }),
+        body: JSON.stringify({ title, model, engine }),
       })
     ).json()
+  }
+  async engines(): Promise<EnginesResponse> {
+    return (await this.fetch('/engines')).json()
   }
   async runs(id: string): Promise<{ runs: Run[] }> {
     return (await this.fetch(`/sessions/${encodeURIComponent(id)}/runs?limit=200`)).json()
