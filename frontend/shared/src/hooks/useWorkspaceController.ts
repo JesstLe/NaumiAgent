@@ -58,6 +58,11 @@ export function useWorkspaceController() {
   const [draft, setDraftState] = useState(() => readPreference('draft:new'))
   const [model, setModel] = useState('')
   const [mode, setMode] = useState<'default' | 'plan' | 'bypass'>('default')
+  const [sendKey, setSendKeyState] = useState(() => readPreference('send-key', 'enter'))
+  const setSendKey = (value: string) => {
+    setSendKeyState(value)
+    savePreference('send-key', value)
+  }
   const [createIssue, setCreateIssue] = useState(false)
   const [permissions, setPermissions] = useState<Permission[]>([])
   const [liveEvents, setLiveEvents] = useState<StreamEvent[]>([])
@@ -541,8 +546,9 @@ export function useWorkspaceController() {
         parsed.password
       )
         throw new Error('请输入有效的 API 地址')
-      await platform.setToken(token)
       const next = parsed.href.replace(/\/$/, '')
+      await new WorkbenchRuntimeClient(next, async () => token || null).fetchDaemonStatus()
+      await platform.setToken(token)
       savePreference('api', next)
       if (next === base) await connect()
       else {
@@ -581,6 +587,8 @@ export function useWorkspaceController() {
     setDraft,
     model,
     mode,
+    sendKey,
+    setSendKey,
     setMode,
     permissions,
     liveEvents,

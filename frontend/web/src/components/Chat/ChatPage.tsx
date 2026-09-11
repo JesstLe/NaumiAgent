@@ -83,6 +83,7 @@ export function ChatPage() {
           onKeyDown={(e) => {
             if (
               e.key === 'Enter' &&
+              (w.sendKey === 'enter' || e.ctrlKey || e.metaKey) &&
               !e.shiftKey &&
               !e.nativeEvent.isComposing &&
               e.keyCode !== 229
