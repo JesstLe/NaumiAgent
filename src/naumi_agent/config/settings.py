@@ -395,6 +395,35 @@ class UIConfig(BaseSettings):
     show_reasoning: bool = True
 
 
+class PiEngineConfig(BaseSettings):
+    """Process-level settings for the external pi coding agent engine."""
+
+    model_config = SettingsConfigDict(env_prefix="NAUMI_ENGINE__PI__")
+
+    binary: str = "pi"
+    provider: str | None = None
+    model: str | None = None
+    extra_args: list[str] = Field(default_factory=list)
+    # Extra environment variables for the pi child process. Values may
+    # reference an existing variable with "{env:NAME}" so keys never land in
+    # the YAML file itself.
+    env: dict[str, str] = Field(default_factory=dict)
+
+
+class EngineConfig(BaseSettings):
+    """Which agent engine powers interactive terminal sessions.
+
+    ``naumi`` keeps the built-in AgentEngine as the conversation backend;
+    ``pi`` drives the external pi coding agent through its RPC protocol while
+    the NaumiAgent frontends stay unchanged.
+    """
+
+    model_config = SettingsConfigDict(env_prefix="NAUMI_ENGINE__")
+
+    provider: Literal["naumi", "pi"] = "naumi"
+    pi: PiEngineConfig = Field(default_factory=PiEngineConfig)
+
+
 class RuntimeHeartbeatRetentionConfig(BaseSettings):
     """Safe bounded retention for terminal runtime heartbeat records."""
 
@@ -962,6 +991,7 @@ class AppConfig(BaseSettings):
     browser: BrowserAutomationConfig = Field(default_factory=BrowserAutomationConfig)
     search: SearchConfig = Field(default_factory=SearchConfig)
     ui: UIConfig = Field(default_factory=UIConfig)
+    engine: EngineConfig = Field(default_factory=EngineConfig)
     harness: HarnessConfig = Field(default_factory=HarnessConfig)
     keybindings: dict[str, str | list[str]] = Field(default_factory=dict)
     workspace_root: str = Field(default_factory=lambda: str(Path.cwd()))

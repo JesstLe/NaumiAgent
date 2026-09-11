@@ -41,6 +41,7 @@ class Session:
     workspace_root: str = ""
     git_branch: str = ""
     summary: str = ""
+    engine: str = "naumi"
 
     def add_message(self, role: str, content: str, **metadata: Any) -> None:
         msg: dict[str, Any] = {
@@ -69,6 +70,7 @@ class Session:
             "workspace_root": self.workspace_root,
             "git_branch": self.git_branch,
             "summary": self.summary,
+            "engine": self.engine,
         }
 
     @classmethod
@@ -101,6 +103,7 @@ class Session:
             workspace_root=row.get("workspace_root", ""),
             git_branch=row.get("git_branch", ""),
             summary=row.get("summary", ""),
+            engine=row.get("engine") or "naumi",
         )
 
 
@@ -120,7 +123,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     total_cost_usd REAL NOT NULL DEFAULT 0.0,
     workspace_root TEXT NOT NULL DEFAULT '',
     git_branch TEXT NOT NULL DEFAULT '',
-    summary TEXT NOT NULL DEFAULT ''
+    summary TEXT NOT NULL DEFAULT '',
+    engine TEXT NOT NULL DEFAULT 'naumi'
 )
 """
 
@@ -128,10 +132,10 @@ _UPSERT = """
 INSERT INTO sessions
     (
         id, title, model, messages, created_at, updated_at, status, total_tokens,
-        total_cost_usd, workspace_root, git_branch, summary,
+        total_cost_usd, workspace_root, git_branch, summary, engine,
         last_accessed_at, archived_at, pinned_at
     )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
     title = excluded.title,
     model = excluded.model,
@@ -147,6 +151,7 @@ ON CONFLICT(id) DO UPDATE SET
     workspace_root = excluded.workspace_root,
     git_branch = excluded.git_branch,
     summary = excluded.summary,
+    engine = excluded.engine,
     last_accessed_at = CASE
         WHEN sessions.status = 'archived' AND excluded.status = 'active'
         THEN sessions.last_accessed_at ELSE excluded.last_accessed_at END,
@@ -167,6 +172,7 @@ _EXTRA_COLUMNS = {
     "workspace_root": "TEXT NOT NULL DEFAULT ''",
     "git_branch": "TEXT NOT NULL DEFAULT ''",
     "summary": "TEXT NOT NULL DEFAULT ''",
+    "engine": "TEXT NOT NULL DEFAULT 'naumi'",
     "last_accessed_at": "TEXT",
     "archived_at": "TEXT",
     "pinned_at": "TEXT",
@@ -234,10 +240,16 @@ class SessionStore:
         title: str | None = None,
         model: str | None = None,
         system_prompt: str | None = None,
+        workspace_root: str | None = None,
+        git_branch: str | None = None,
+        engine: str | None = None,
     ) -> Session:
         session = Session(
             title=title or "新会话",
             model=model or "kimi-for-coding",
+            workspace_root=str(workspace_root or "").strip(),
+            git_branch=str(git_branch or "").strip(),
+            engine=engine or "naumi",
         )
         if system_prompt:
             session.add_message("system", system_prompt)
@@ -267,6 +279,7 @@ class SessionStore:
                 row["workspace_root"],
                 row["git_branch"],
                 row["summary"],
+                row["engine"],
                 row["last_accessed_at"],
                 row["archived_at"],
                 row["pinned_at"],

@@ -262,6 +262,26 @@ describe('one shared workspace for two presentation shells', () => {
     )
     expect(localStorage.getItem('naumi:workspace:draft:one')).toBe('one 草稿')
   })
+  it('does not restore a session that belongs to another project workspace', async () => {
+    savePreference('session', 'foreign')
+    server.use(
+      http.get(`${base}/workbench/daemon/status`, () => HttpResponse.json({
+        workspace_root: 'E:\\Workspace\\Current',
+        workspace_name: 'Current',
+        event_stream_url_template: '',
+      })),
+      http.get(`${base}/sessions`, () => HttpResponse.json({
+        sessions: [{ ...session('foreign'), workspace_root: 'E:\\Workspace\\Other' }],
+        total: 1,
+      })),
+    )
+
+    setup()
+    await waitFor(() => expect(screen.getByTestId('web-connected')).toHaveTextContent('connected'))
+    await waitFor(() => expect(screen.getByTestId('web-session')).toBeEmptyDOMElement())
+    expect(screen.getByTestId('web-messages')).toBeEmptyDOMElement()
+    expect(localStorage.getItem('naumi:workspace:session')).toBe('')
+  })
   it('keeps the original draft and retries the failed send for both views', async () => {
     let attempts = 0
     const bodies: Record<string, unknown>[] = []

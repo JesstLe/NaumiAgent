@@ -1,5 +1,10 @@
 import { WorkbenchApiClient } from '@naumi/shared/api/WorkbenchApiClient'
-import type { MessageCreate, MessageResponse, Session } from '@naumi/shared/api/types'
+import type {
+  EnginesResponse,
+  MessageCreate,
+  MessageResponse,
+  Session,
+} from '@naumi/shared/api/types'
 
 export interface ModelConfig {
   models: { id: string; name: string; tier: string }[]
@@ -57,16 +62,48 @@ export interface StreamEvent {
   data: Record<string, unknown>
 }
 
+function preferenceNamespace(): string {
+  try {
+    return new URLSearchParams(location.search).get('naumiWindow')?.trim() || ''
+  } catch {
+    return ''
+  }
+}
+
+function preferenceStorageKey(key: string): string {
+  const namespace = preferenceNamespace()
+  return `naumi:workspace:${namespace ? `${namespace}:` : ''}${key}`
+}
+
+function launchPreference(key: string): string | null {
+  try {
+    const params = new URLSearchParams(location.search)
+    if (key === 'api') return params.get('naumiApi')
+    if (key === 'session') return params.get('naumiSession')
+  } catch {
+    /* The browser URL is unavailable in isolated tests. */
+  }
+  return null
+}
+
 export function readPreference(key: string, fallback = ''): string {
   try {
-    return localStorage.getItem(`naumi:workspace:${key}`) ?? fallback
+    const storageKey = preferenceStorageKey(key)
+    const stored = localStorage.getItem(storageKey)
+    if (stored !== null) return stored
+    const launched = launchPreference(key)
+    if (launched !== null) {
+      localStorage.setItem(storageKey, launched)
+      return launched
+    }
+    return fallback
   } catch {
     return fallback
   }
 }
 export function savePreference(key: string, value: string) {
   try {
-    localStorage.setItem(`naumi:workspace:${key}`, value)
+    localStorage.setItem(preferenceStorageKey(key), value)
   } catch {
     /* Storage can be unavailable in private sessions. */
   }
@@ -179,13 +216,16 @@ export class WorkbenchRuntimeClient extends WorkbenchApiClient {
   async sessions(page = 1): Promise<{ sessions: Session[]; total: number }> {
     return (await this.fetch(`/sessions?page=${page}&page_size=100`)).json()
   }
-  async create(title?: string, model?: string): Promise<Session> {
+  async create(title?: string, model?: string, engine?: string): Promise<Session> {
     return (
       await this.fetch('/sessions', {
         method: 'POST',
-        body: JSON.stringify({ title, model }),
+        body: JSON.stringify({ title, model, engine }),
       })
     ).json()
+  }
+  async engines(): Promise<EnginesResponse> {
+    return (await this.fetch('/engines')).json()
   }
   async runs(id: string): Promise<{ runs: Run[] }> {
     return (await this.fetch(`/sessions/${encodeURIComponent(id)}/runs?limit=200`)).json()

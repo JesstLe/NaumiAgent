@@ -1,10 +1,17 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   consumeEvents,
+  readPreference,
   safeWebUrl,
+  savePreference,
   WorkbenchRuntimeClient,
   type StreamEvent,
 } from '@naumi/shared/api/WorkbenchRuntimeClient'
+
+beforeEach(() => {
+  localStorage.clear()
+  window.history.replaceState({}, '', '/')
+})
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -88,5 +95,36 @@ describe('browser URL validation', () => {
     ]) {
       expect(() => safeWebUrl(url)).toThrow()
     }
+  })
+})
+
+describe('workspace window preferences', () => {
+  it('seeds an auxiliary window from launch parameters and keeps later changes', () => {
+    window.history.replaceState({}, '', '/?naumiWindow=workspace-1&naumiApi=http%3A%2F%2F127.0.0.1%3A8770%2Fapi%2Fv1&naumiSession=session-one')
+
+    expect(readPreference('api')).toBe('http://127.0.0.1:8770/api/v1')
+    expect(readPreference('session')).toBe('session-one')
+    savePreference('session', 'session-two')
+    expect(readPreference('session')).toBe('session-two')
+  })
+
+  it('isolates drafts and API addresses between desktop windows', () => {
+    window.history.replaceState({}, '', '/?naumiWindow=workspace-1')
+    savePreference('draft:new', '第一个窗口')
+    savePreference('api', 'http://127.0.0.1:8770/api/v1')
+
+    window.history.replaceState({}, '', '/?naumiWindow=workspace-2')
+    expect(readPreference('draft:new')).toBe('')
+    expect(readPreference('api', 'fallback')).toBe('fallback')
+    savePreference('draft:new', '第二个窗口')
+
+    window.history.replaceState({}, '', '/?naumiWindow=workspace-1')
+    expect(readPreference('draft:new')).toBe('第一个窗口')
+    expect(readPreference('api')).toBe('http://127.0.0.1:8770/api/v1')
+  })
+
+  it('preserves the existing primary-window storage keys', () => {
+    savePreference('api', 'http://127.0.0.1:8765/api/v1')
+    expect(localStorage.getItem('naumi:workspace:api')).toBe('http://127.0.0.1:8765/api/v1')
   })
 })

@@ -224,6 +224,11 @@ def _default_command(
     ctx: typer.Context,
     config: str = typer.Option(DEFAULT_CONFIG_PATH, "--config", "-c", help="配置文件路径"),
     tui: bool = typer.Option(False, "--tui", help="显式启动 Textual TUI fallback"),
+    engine: str = typer.Option(
+        None,
+        "--engine",
+        help="选择会话引擎：naumi（内置）或 pi（外部 pi coding agent）",
+    ),
     version: bool = typer.Option(False, "--version", "-v", help="显示版本"),
     runtime_health_check: bool = typer.Option(
         False,
@@ -297,7 +302,7 @@ def _default_command(
         if tui:
             _launch_tui(config)
             return
-        _exit_after_terminal_ui(config)
+        _exit_after_terminal_ui(config, engine=engine)
 
 
 def _build_ui_style_from_config(config: Any):
@@ -635,13 +640,18 @@ def chat(
         "-t",
         help="显式启动 Textual TUI fallback",
     ),
+    engine: str = typer.Option(
+        None,
+        "--engine",
+        help="选择会话引擎：naumi（内置）或 pi（外部 pi coding agent）",
+    ),
 ) -> None:
     """兼容入口：启动新一代终端 UI。"""
     _ensure_onboarding_ready(config)
     if tui:
         _launch_tui(config)
     else:
-        _exit_after_terminal_ui(config)
+        _exit_after_terminal_ui(config, engine=engine)
 
 
 @app.command("tui")
@@ -661,6 +671,11 @@ def terminal_ui(
         "--legacy",
         help="弃用别名：显式启动 Textual TUI fallback",
     ),
+    engine: str = typer.Option(
+        None,
+        "--engine",
+        help="选择会话引擎：naumi（内置）或 pi（外部 pi coding agent）",
+    ),
 ) -> None:
     """兼容入口：启动新一代终端 UI。"""
     _ensure_onboarding_ready(config)
@@ -668,19 +683,20 @@ def terminal_ui(
         console.print("[yellow]“--legacy” 已弃用，请改用 “naumi tui”。[/yellow]")
         _launch_tui(config)
         return
-    _exit_after_terminal_ui(config)
+    _exit_after_terminal_ui(config, engine=engine)
 
 
-def _exit_after_terminal_ui(config: str) -> None:
+def _exit_after_terminal_ui(config: str, *, engine: str | None = None) -> None:
     """Launch the preferred interactive UI and translate its exit for Typer."""
-    raise typer.Exit(_launch_interactive_ui(config))
+    raise typer.Exit(_launch_interactive_ui(config, engine=engine))
 
 
-def _launch_interactive_ui(config_path: str) -> int:
+def _launch_interactive_ui(config_path: str, *, engine: str | None = None) -> int:
     """Launch the Node UI and fall back once to Textual on failure."""
+    engine_provider = _resolve_terminal_engine_provider(config_path, engine)
     failure: str
     try:
-        returncode = _launch_terminal_ui(config_path)
+        returncode = _launch_terminal_ui(config_path, engine_provider=engine_provider)
     except (TerminalUiLaunchError, OSError) as exc:
         failure = _safe_launch_error(exc)
     else:
@@ -720,9 +736,36 @@ def naumiagent_entry(
     _exit_after_terminal_ui(config)
 
 
-def _launch_terminal_ui(config_path: str, *, cwd: Path | None = None) -> int:
+def _resolve_terminal_engine_provider(
+    config_path: str,
+    engine_override: str | None,
+) -> str:
+    """Resolve which engine the terminal UI bridge should run on."""
+    if engine_override is not None:
+        value = engine_override.strip().lower()
+        if value not in {"naumi", "pi"}:
+            console.print(
+                f"[red]未知引擎 “{engine_override}”，可用值：naumi / pi。[/red]"
+            )
+            raise typer.Exit(2)
+        return value
+    try:
+        from naumi_agent.config.settings import AppConfig
+
+        provider = AppConfig.from_yaml(config_path).engine.provider
+    except Exception:
+        return "naumi"
+    return provider if provider in {"naumi", "pi"} else "naumi"
+
+
+def _launch_terminal_ui(
+    config_path: str,
+    *,
+    engine_provider: str = "naumi",
+    cwd: Path | None = None,
+) -> int:
     """Launch the next-generation JS terminal UI from the Python CLI."""
-    cmd = _build_terminal_ui_command(config_path)
+    cmd = _build_terminal_ui_command(config_path, engine_provider=engine_provider)
     return subprocess.run(cmd, cwd=str(cwd or Path.cwd()), check=False).returncode
 
 
@@ -756,6 +799,7 @@ def _resolve_terminal_ui_frontend_dir(
 def _build_terminal_ui_command(
     config_path: str,
     *,
+    engine_provider: str = "naumi",
     frontend_dir: Path | None = None,
     terminal_ui_executable: Path | None = None,
     frozen_backend_executable: Path | None = None,
@@ -765,10 +809,17 @@ def _build_terminal_ui_command(
     package_root: Path | None = None,
 ) -> list[str]:
     """Build the direct Node command for the next-generation terminal UI."""
+    bridge_module = (
+        "naumi_agent.pi_engine" if engine_provider == "pi" else "naumi_agent.ui.bridge"
+    )
     packaged_ui = _resolve_packaged_terminal_ui(
         terminal_ui_executable=terminal_ui_executable,
     )
     if packaged_ui is not None:
+        if engine_provider == "pi":
+            raise TerminalUiLaunchError(
+                "冻结发行版暂不支持 pi 引擎，请使用源码安装或 naumi 引擎。"
+            )
         backend = frozen_backend_executable or Path(sys.executable)
         bridge_command = [
             str(backend),
@@ -799,7 +850,7 @@ def _build_terminal_ui_command(
     bridge_command = [
         bridge_python_executable or sys.executable,
         "-m",
-        "naumi_agent.ui.bridge",
+        bridge_module,
         "--config",
         config_path,
     ]

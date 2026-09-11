@@ -59,10 +59,14 @@ router = APIRouter(tags=["sessions", "messages"])
 @router.post("/sessions", response_model=SessionResponse, status_code=201)
 async def create_session(body: SessionCreate, request: Request, auth: str = AuthDep):
     engine = request.app.state.engine
-    session = await engine.session_store.create_session(
+    selected_engine = body.engine or _default_engine_provider(request)
+    if selected_engine == "pi" and not _pi_engine_available(request):
+        raise HTTPException(status_code=400, detail="pi 引擎不可用：未找到 pi 可执行文件。")
+    session = await engine.create_session(
         title=body.title,
         model=body.model,
         system_prompt=body.system_prompt,
+        engine=selected_engine,
     )
     return _session_to_response(session)
 
@@ -207,6 +211,12 @@ async def send_message(
     session = await engine.session_store.load(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    engine, is_pi = _conversation_engine_for(session, request)
+    if is_pi and body.edit_message_id:
+        raise HTTPException(
+            status_code=400,
+            detail="pi 引擎会话暂不支持编辑历史消息，请新建对话后重新发送。",
+        )
     if body.edit_message_id:
         if not body.content.strip():
             raise HTTPException(status_code=400, detail="编辑后的消息不能为空")
@@ -216,6 +226,14 @@ async def send_message(
         ):
             raise HTTPException(status_code=409, detail="任务仍在执行，结束后才能编辑消息")
         _message_revision_index(session.messages, body.edit_message_id)
+    if is_pi and body.workbench_issue is not None:
+        raise HTTPException(
+            status_code=400, detail="pi 引擎会话暂不支持同步创建 Issue。"
+        )
+    if is_pi and (body.source_ids or body.linked_issue_id):
+        raise HTTPException(
+            status_code=400, detail="pi 引擎会话暂不支持附带资料源或关联 Issue。"
+        )
     if body.source_ids or body.linked_issue_id:
         turn_context, source_records, linked_issue = await _build_turn_context(
             engine=engine,
@@ -759,6 +777,7 @@ def _session_to_response(session) -> SessionResponse:
         workspace_root=session.workspace_root,
         git_branch=session.git_branch,
         summary=session.summary,
+        engine=getattr(session, "engine", "naumi") or "naumi",
     )
 
 
@@ -768,6 +787,41 @@ def _engine_lock(request: Request):
         lock = asyncio.Lock()
         request.app.state.engine_lock = lock
     return lock
+
+
+def _default_engine_provider(request: Request) -> str:
+    config = getattr(request.app.state, "config", None)
+    provider = getattr(getattr(config, "engine", None), "provider", "naumi")
+    return provider if provider in {"naumi", "pi"} else "naumi"
+
+
+def _pi_engine_available(request: Request) -> bool:
+    import shutil
+
+    config = getattr(request.app.state, "config", None)
+    binary_name = getattr(getattr(config, "engine", None), "pi", None)
+    binary_name = getattr(binary_name, "binary", "pi") or "pi"
+    return shutil.which(binary_name) is not None
+
+
+def _pi_web_engine(request: Request):
+    facade = getattr(request.app.state, "pi_web_engine", None)
+    if facade is None:
+        from naumi_agent.pi_engine.web_facade import PiWebEngine
+
+        config = getattr(request.app.state, "config", None)
+        if config is None:
+            raise HTTPException(status_code=500, detail="服务缺少配置，无法启动 pi 引擎。")
+        facade = PiWebEngine(config, request.app.state.engine.session_store)
+        request.app.state.pi_web_engine = facade
+    return facade
+
+
+def _conversation_engine_for(session, request: Request):
+    """Return the engine-like object that should drive this session."""
+    if (getattr(session, "engine", "naumi") or "naumi") != "pi":
+        return request.app.state.engine, False
+    return _pi_web_engine(request), True
 
 
 def _chat_run_store(request: Request) -> ChatRunStore:

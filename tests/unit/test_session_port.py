@@ -77,9 +77,17 @@ class _RecordingSessionPort:
         title: str | None = None,
         model: str | None = None,
         system_prompt: str | None = None,
+        workspace_root: str | None = None,
+        git_branch: str | None = None,
     ) -> Session:
         self.calls.append("create_session")
-        return await self.delegate.create_session(title, model, system_prompt)
+        return await self.delegate.create_session(
+            title=title,
+            model=model,
+            system_prompt=system_prompt,
+            workspace_root=workspace_root,
+            git_branch=git_branch,
+        )
 
     async def save(self, session: Session) -> None:
         self.calls.append("save")
@@ -165,11 +173,53 @@ async def test_agent_engine_uses_injected_port_and_exposes_legacy_alias(
     try:
         assert engine.session_store is port
         assert await engine.get_or_create_session(title="Port 注入") is engine._session
-        assert port.calls == ["create_session"]
+        assert port.calls == ["create_session", "save"]
     finally:
         await engine.shutdown()
 
     assert port.close_count == 1
+
+
+@pytest.mark.asyncio
+async def test_new_engine_session_is_bound_to_its_workspace_immediately(
+    tmp_path: Path,
+) -> None:
+    engine = create_agent_engine(_config(tmp_path))
+
+    try:
+        session = await engine.get_or_create_session(title="目录绑定")
+        persisted = await engine.session_store.load(session.id)
+        assert persisted is not None
+        assert Path(persisted.workspace_root) == tmp_path.resolve()
+        assert persisted.git_branch == engine.current_git_branch()
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_engine_refuses_to_load_a_session_bound_to_another_workspace(
+    tmp_path: Path,
+) -> None:
+    current = tmp_path / "current"
+    foreign = tmp_path / "foreign"
+    current.mkdir()
+    foreign.mkdir()
+    config = _config(current)
+    store = SessionStore(config.memory)
+    session = await store.create_session(
+        title="其他项目会话",
+        workspace_root=str(foreign),
+    )
+    engine = AgentEngine(config, session_port=store)
+
+    try:
+        assert await engine.load_session(session.id) is False
+        assert engine._session is None
+        persisted = await store.load(session.id)
+        assert persisted is not None
+        assert Path(persisted.workspace_root) == foreign.resolve()
+    finally:
+        await engine.shutdown()
 
 
 @pytest.mark.asyncio
@@ -221,6 +271,7 @@ async def test_all_engine_session_operations_route_through_injected_port(
 
         assert port.calls == [
             "create_session",
+            "save",
             "save",
             "load",
             "list_sessions",
