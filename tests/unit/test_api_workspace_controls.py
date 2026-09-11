@@ -1,6 +1,7 @@
 """Exercise workspace controls with real session and task databases."""
 
 import asyncio
+import subprocess
 from types import SimpleNamespace
 
 import httpx
@@ -12,6 +13,9 @@ from naumi_agent.config.settings import MemoryConfig
 from naumi_agent.memory.session import SessionStore
 from naumi_agent.orchestrator.goal_store import GoalStore
 from naumi_agent.orchestrator.pursuit_store import PursuitStore
+from naumi_agent.scheduler.runner import SchedulerRunner
+from naumi_agent.scheduler.store import SchedulerStore
+from naumi_agent.skills.loader import SkillLoader, build_skill_sources
 from naumi_agent.tasks.store import TaskStore
 
 
@@ -22,8 +26,22 @@ async def controls(tmp_path):
     second = await sessions.create_session(title="隔离会话")
     app = FastAPI()
     app.include_router(router)
+    skill_root = tmp_path / ".naumi" / "skills" / "demo"
+    skill_root.mkdir(parents=True)
+    (skill_root / "SKILL.md").write_text(
+        "---\nname: demo\ndescription: 真实扩展\n---\n# Demo\n",
+        encoding="utf-8",
+    )
+    skill_loader = SkillLoader(
+        sources=build_skill_sources(workspace_root=tmp_path, configured_paths=[], home=tmp_path)
+    )
+    skill_loader.load_all()
     app.state.engine = SimpleNamespace(
-        session_store=sessions, task_store=TaskStore(str(tmp_path / "tasks.db"))
+        session_store=sessions,
+        task_store=TaskStore(str(tmp_path / "tasks.db")),
+        scheduler_runner=SchedulerRunner(SchedulerStore(tmp_path / "scheduler.json")),
+        skill_loader=skill_loader,
+        workspace_root=tmp_path,
     )
     app.state.engine_lock = asyncio.Lock()
     app.state.engine.goal_store = GoalStore(tmp_path / "goals")
@@ -109,3 +127,52 @@ async def test_goal_completion_persists_and_cannot_reopen(controls):
     assert (await client.patch(f"/goals/{goal_id}", json={"status": "active"})).status_code == 409
     restored = GoalStore(app.state.engine.goal_store.base_dir).get(goal_id)
     assert restored.status == "completed" and restored.note == "已核对结果"
+
+
+async def test_schedule_and_extension_controls_use_real_runtime_stores(controls):
+    client, _, _, _ = controls
+    assert (await client.get("/schedules")).json()["schedules"] == []
+    created = await client.post(
+        "/schedules",
+        json={
+            "kind": "cron",
+            "expression": "*/15 * * * *",
+            "prompt": "检查构建状态",
+        },
+    )
+    assert created.status_code == 201
+    schedule_id = created.json()["id"]
+    assert (await client.post(f"/schedules/{schedule_id}/pause")).json()["status"] == "paused"
+    assert (await client.post(f"/schedules/{schedule_id}/resume")).json()["status"] == "active"
+    assert (await client.post(f"/schedules/{schedule_id}/cancel")).json()["status"] == "cancelled"
+
+    extensions = (await client.get("/extensions/skills")).json()
+    assert extensions["summary"]["selected"] == 1
+    assert extensions["skills"][0]["name"] == "demo"
+    assert extensions["skills"][0]["state"] == "selected"
+
+
+async def test_git_branch_control_refuses_dirty_workspace(controls, tmp_path):
+    client, app, _, _ = controls
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+    (repo / "tracked.txt").write_text("one", encoding="utf-8")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "branch", "feature"], cwd=repo, check=True)
+    app.state.engine.workspace_root = repo
+
+    state = (await client.get("/workspace/git/branches")).json()
+    assert state["available"] is True
+    assert "feature" in state["branches"]
+    switched = await client.post("/workspace/git/branch", json={"branch": "feature"})
+    assert switched.status_code == 200
+    assert switched.json()["current"] == "feature"
+
+    (repo / "tracked.txt").write_text("dirty", encoding="utf-8")
+    refused = await client.post("/workspace/git/branch", json={"branch": "master"})
+    assert refused.status_code == 409
+    assert "未提交修改" in refused.json()["detail"]

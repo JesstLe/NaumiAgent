@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import uuid
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -33,6 +34,7 @@ class Session:
     updated_at: datetime = field(default_factory=datetime.now)
     last_accessed_at: datetime = field(default_factory=datetime.now)
     archived_at: datetime | None = None
+    pinned_at: datetime | None = None
     status: str = "active"
     total_tokens: int = 0
     total_cost_usd: float = 0.0
@@ -60,6 +62,7 @@ class Session:
             "updated_at": self.updated_at.isoformat(),
             "last_accessed_at": self.last_accessed_at.isoformat(),
             "archived_at": self.archived_at.isoformat() if self.archived_at else None,
+            "pinned_at": self.pinned_at.isoformat() if self.pinned_at else None,
             "status": self.status,
             "total_tokens": self.total_tokens,
             "total_cost_usd": self.total_cost_usd,
@@ -87,6 +90,11 @@ class Session:
                 if row.get("archived_at")
                 else None
             ),
+            pinned_at=(
+                datetime.fromisoformat(row["pinned_at"])
+                if row.get("pinned_at")
+                else None
+            ),
             status=row["status"],
             total_tokens=row.get("total_tokens", 0),
             total_cost_usd=row.get("total_cost_usd", 0.0),
@@ -106,6 +114,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     updated_at TEXT NOT NULL,
     last_accessed_at TEXT,
     archived_at TEXT,
+    pinned_at TEXT,
     status TEXT NOT NULL DEFAULT 'active',
     total_tokens INTEGER NOT NULL DEFAULT 0,
     total_cost_usd REAL NOT NULL DEFAULT 0.0,
@@ -120,9 +129,9 @@ INSERT INTO sessions
     (
         id, title, model, messages, created_at, updated_at, status, total_tokens,
         total_cost_usd, workspace_root, git_branch, summary,
-        last_accessed_at, archived_at
+        last_accessed_at, archived_at, pinned_at
     )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
     title = excluded.title,
     model = excluded.model,
@@ -143,7 +152,8 @@ ON CONFLICT(id) DO UPDATE SET
         THEN sessions.last_accessed_at ELSE excluded.last_accessed_at END,
     archived_at = CASE
         WHEN sessions.status = 'archived' AND excluded.status = 'active'
-        THEN sessions.archived_at ELSE excluded.archived_at END
+        THEN sessions.archived_at ELSE excluded.archived_at END,
+    pinned_at = excluded.pinned_at
 """
 
 _GET = "SELECT * FROM sessions WHERE id = ?"
@@ -159,6 +169,7 @@ _EXTRA_COLUMNS = {
     "summary": "TEXT NOT NULL DEFAULT ''",
     "last_accessed_at": "TEXT",
     "archived_at": "TEXT",
+    "pinned_at": "TEXT",
 }
 
 _PAYLOAD_BYTES_SQL = """
@@ -167,6 +178,7 @@ length(CAST(id AS BLOB)) + length(CAST(title AS BLOB))
 + length(CAST(created_at AS BLOB)) + length(CAST(updated_at AS BLOB))
 + length(CAST(COALESCE(last_accessed_at, '') AS BLOB))
 + length(CAST(COALESCE(archived_at, '') AS BLOB))
++ length(CAST(COALESCE(pinned_at, '') AS BLOB))
 + length(CAST(status AS BLOB)) + length(CAST(total_tokens AS BLOB))
 + length(CAST(total_cost_usd AS BLOB))
 + length(CAST(COALESCE(workspace_root, '') AS BLOB))
@@ -257,6 +269,7 @@ class SessionStore:
                 row["summary"],
                 row["last_accessed_at"],
                 row["archived_at"],
+                row["pinned_at"],
             ),
         )
         await db.commit()
@@ -386,7 +399,9 @@ class SessionStore:
         total = (await cursor.fetchone())[0]
 
         cursor = await db.execute(
-            f"SELECT * FROM sessions WHERE {where} ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+            f"SELECT * FROM sessions WHERE {where} "
+            "ORDER BY (pinned_at IS NOT NULL) DESC, pinned_at DESC, updated_at DESC "
+            "LIMIT ? OFFSET ?",
             (*params, page_size, offset),
         )
         rows = await cursor.fetchall()
@@ -416,6 +431,38 @@ class SessionStore:
         cursor = await db.execute(_ARCHIVE, (timestamp, timestamp, session_id))
         await db.commit()
         return cursor.rowcount > 0
+
+    async def set_pinned(self, session_id: str, pinned: bool) -> bool:
+        db = await self._get_db()
+        pinned_at = datetime.now().isoformat() if pinned else None
+        cursor = await db.execute(
+            "UPDATE sessions SET pinned_at = ? WHERE id = ?",
+            (pinned_at, session_id),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
+    async def duplicate(self, session_id: str) -> Session | None:
+        source = await self.load(session_id)
+        if source is None:
+            return None
+        now = datetime.now()
+        duplicate = Session(
+            title=f"{source.title or '新会话'} 副本",
+            model=source.model,
+            messages=deepcopy(source.messages),
+            created_at=now,
+            updated_at=now,
+            last_accessed_at=now,
+            status="active",
+            total_tokens=source.total_tokens,
+            total_cost_usd=source.total_cost_usd,
+            workspace_root=source.workspace_root,
+            git_branch=source.git_branch,
+            summary=source.summary,
+        )
+        await self.save(duplicate)
+        return duplicate
 
     async def close(self) -> None:
         if self._db:
