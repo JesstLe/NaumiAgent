@@ -4,6 +4,12 @@
 
 ## 实验要解决的问题
 
+<!-- teaching-figure:25:start -->
+![五个实验都通过，不等于五项业务都成功：章节教学示意图](../assets/illustrations/25-teaching-v2.png)
+
+读图：逐行对照数据库状态、真实文件与两列布尔结果。pending 场景的文件内容正确但任务未收口；stale 场景是遗留进行中任务转为受阻且没有文件，不是文件过期。只有 complete 达成业务目标，五个场景都可满足教学预期。
+<!-- teaching-figure:25:end -->
+
 Agent 在界面上说“完成了”，数据库里的 Todo 也都变成 completed，用户要求的文件却不存在。这不是少写一句提示词的问题，而是把“执行者报告的状态”和“独立核验的交付物”混成了一件事。本实验让你亲自看到这两个事实怎样分离，并检查只看 Todo 对账会遗漏什么。
 
 实验复用项目真实的 [TaskStore](../../../src/naumi_agent/tasks/store.py) 和 [reconcile_todos](../../../src/naumi_agent/tasks/reconciliation.py)，实际创建 SQLite 数据库、写草稿、重新打开数据库和读取文件。没有 mock 存储，没有请求模型，也没有注册一个新产品工具或修改 engine。它是确定性的运行机制实验，不是独立 Agent，更不是完整端到端模型评测。

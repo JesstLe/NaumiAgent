@@ -169,3 +169,18 @@ browser:
   run_history_limit: 200
 
 log_level: "INFO"
+
+# 会话引擎：naumi（内置 AgentEngine，默认）或 pi（外部 pi coding agent，
+# 需要 `npm install -g @earendil-works/pi-coding-agent`）。
+# 运行时可用 `naumi --engine pi` 临时覆盖。
+engine:
+  provider: naumi
+  pi:
+    # pi 可执行文件名或绝对路径。
+    binary: pi
+    # pi 的 provider/model，例如 zai-coding-cn / glm-4.7。
+    provider: null
+    model: null
+    # 传给 pi 子进程的环境变量；值可用 "{env:NAME}" 引用现有变量，
+    # 避免把密钥写进配置文件。
+    env: {}

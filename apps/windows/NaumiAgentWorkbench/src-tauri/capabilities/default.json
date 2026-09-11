@@ -2,9 +2,10 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default capabilities for the NaumiAgent Workbench desktop shell",
-  "windows": ["main"],
+  "windows": ["*"],
   "permissions": [
     "core:default",
+    "core:window:allow-close",
     "log:default"
   ],
   "commands": {
@@ -21,8 +22,10 @@
       "stop_daemon",
       "get_daemon_status",
       "get_daemon_logs",
+      "open_workspace_window",
       "open_in_explorer",
-      "open_in_terminal"
+      "open_in_terminal",
+      "select_workspace_directory"
     ]
   }
 }

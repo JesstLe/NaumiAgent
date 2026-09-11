@@ -707,7 +707,7 @@ async def create_workbench_session(
     engine = request.app.state.engine
     title = body.title.strip() or "Mac 工作台"
     try:
-        session = await engine.session_store.create_session(
+        session = await engine.create_session(
             title=title,
             model=body.model,
             system_prompt=body.system_prompt,

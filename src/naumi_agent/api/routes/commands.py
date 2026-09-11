@@ -117,6 +117,11 @@ async def run_command(
     if not session:
         raise HTTPException(404, "会话不存在")
     if body.edit_message_id:
+        if (getattr(session, "engine", "naumi") or "naumi") == "pi":
+            raise HTTPException(
+                400,
+                "pi 引擎会话暂不支持编辑历史消息，请新建对话后重新发送。",
+            )
         _message_revision_index(session.messages, body.edit_message_id)
     if _engine_lock(request).locked():
         raise HTTPException(409, "Agent 正在执行，请等待完成后重试命令")

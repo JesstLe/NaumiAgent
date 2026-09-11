@@ -11,7 +11,7 @@ export function GoalPanel() {
   const [note, setNote] = useState('')
   const [history, setHistory] = useState(false)
   const current = w.goalSnapshot?.goals?.find(goal => goal.goal_id === w.goalSnapshot?.current_goal_id)
-  const locked = w.busy || w.uploading || w.goalsMutating || !w.daemon
+  const locked = (w.busy && w.runningSessionId === w.sessionId) || w.uploading || w.goalsMutating || !w.daemon
   const goals = (w.goalSnapshot?.goals ?? []).filter(goal => history || goal.goal_id === current?.goal_id)
   return <div className="w2-goals">
     <div className="w2-section-heading"><span>持久目标</span><button aria-label="刷新目标" disabled={w.goalsMutating} onClick={() => void w.refreshGoals()}><RefreshCw size={15} /></button></div>

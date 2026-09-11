@@ -1,6 +1,12 @@
 import { invoke } from '@tauri-apps/api/core'
 import { BrowserPlatformAdapter } from './BrowserPlatformAdapter'
-import type { DaemonLaunchConfig, DaemonStatus, PlatformAdapter } from './PlatformAdapter'
+import type {
+  DaemonLaunchConfig,
+  DaemonStatus,
+  OpenWorkspaceWindowOptions,
+  OpenWorkspaceWindowResult,
+  PlatformAdapter,
+} from './PlatformAdapter'
 
 // Rust serializes camelCase via serde rename, but the Tauri commands use plain
 // snake_case struct fields. We pass camelCase objects that mirror DaemonLaunchConfig
@@ -71,6 +77,16 @@ export class TauriPlatformAdapter extends BrowserPlatformAdapter implements Plat
 
   async getDaemonLogs(limit: number): Promise<string[]> {
     return invoke<string[]>('get_daemon_logs', { limit })
+  }
+
+  async openWorkspaceWindow(
+    config: DaemonLaunchConfig,
+    options: OpenWorkspaceWindowOptions = {},
+  ): Promise<OpenWorkspaceWindowResult> {
+    return invoke<OpenWorkspaceWindowResult>('open_workspace_window', {
+      config,
+      options,
+    })
   }
 
   async openInExplorer(path: string): Promise<void> {

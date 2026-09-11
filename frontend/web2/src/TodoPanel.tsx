@@ -9,7 +9,7 @@ export function TodoPanel({ compact = false, onExpand }: { compact?: boolean; on
   const [subject, setSubject] = useState('')
   const [dependencies, setDependencies] = useState('')
   const done = w.todos.filter(todo => todo.status === 'completed').length
-  const locked = w.busy || w.uploading || w.tasksMutating || !w.daemon
+  const locked = (w.busy && w.runningSessionId === w.sessionId) || w.uploading || w.tasksMutating || !w.daemon
   if (compact && !w.todos.length) return null
   const rows = <>{w.todos.map(todo => <div className={`w2-todo ${todo.status}`} key={todo.id}>
     {todo.status === 'completed' ? <CheckCircle2 size={16} /> : todo.status === 'in_progress' ? <CircleDashed size={16} className="w2-spin" /> : <Circle size={16} />}

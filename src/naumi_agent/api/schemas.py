@@ -13,6 +13,7 @@ class SessionCreate(BaseModel):
     title: str | None = None
     system_prompt: str | None = None
     model: str | None = None
+    engine: Literal["naumi", "pi"] | None = None
 
 
 class SessionUpdate(BaseModel):
@@ -35,6 +36,7 @@ class SessionResponse(BaseModel):
     workspace_root: str = ""
     git_branch: str = ""
     summary: str = ""
+    engine: str = "naumi"
 
 
 class SessionPinUpdate(BaseModel):

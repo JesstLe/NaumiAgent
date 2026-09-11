@@ -3,9 +3,11 @@ import { usePlatform } from '@naumi/shared/platform'
 import { isTimelineEvent } from '@naumi/shared/api/activity'
 import { useWorkspaceTasks } from './useWorkspaceTasks'
 import { useWorkspaceGoals } from './useWorkspaceGoals'
+import { workspacePathsMatch } from '@naumi/shared/projects/workspaceProjects'
 import type {
   ChatSource,
   DaemonStatusResponse,
+  EngineInfo,
   GitDiffResponse,
   MessageResponse,
   Session,
@@ -22,6 +24,7 @@ import {
 } from '@naumi/shared/api/WorkbenchRuntimeClient'
 
 export interface Permission {
+  sessionId: string
   callId: string
   name: string
   reason: string
@@ -44,10 +47,12 @@ export function useWorkspaceController() {
     [base, platform],
   )
   const [daemon, setDaemon] = useState<DaemonStatusResponse | null>(null)
+  const daemonRef = useRef<DaemonStatusResponse | null>(null)
   const [config, setConfig] = useState<ModelConfig | null>(null)
   const [commands, setCommands] = useState<SlashCommand[]>([])
   const [commandsError, setCommandsError] = useState('')
   const [sessions, setSessions] = useState<Session[]>([])
+  const sessionsRef = useRef<Session[]>([])
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [messages, setMessages] = useState<MessageResponse[]>([])
   const [sources, setSources] = useState<ChatSource[]>([])
@@ -84,17 +89,29 @@ export function useWorkspaceController() {
     savePreference('send-key', value)
   }
   const [createIssue, setCreateIssue] = useState(false)
+  const [engine, setEngineState] = useState<'naumi' | 'pi'>('naumi')
+  const [engines, setEngines] = useState<EngineInfo[]>([
+    { id: 'naumi', name: 'NaumiAgent 引擎', available: true, default: true },
+  ])
   const [permissions, setPermissions] = useState<Permission[]>([])
   const [liveEvents, setLiveEvents] = useState<StreamEvent[]>([])
   const controller = useRef<AbortController | null>(null)
   const runId = useRef('')
   const runningSessionId = useRef<string | null>(null)
+  const [visibleRunningSessionId, setVisibleRunningSessionId] = useState<string | null>(null)
   const activeId = useRef<string | null>(null)
   const operation = useRef(false)
   const generation = useRef(0)
   const connectionGeneration = useRef(0)
   const stopped = useRef(false)
   const creatingSession = useRef<Promise<Session> | null>(null)
+
+  useEffect(() => { daemonRef.current = daemon }, [daemon])
+  const engineRef = useRef<'naumi' | 'pi'>('naumi')
+  useEffect(() => { engineRef.current = engine }, [engine])
+  const busyRef = useRef(false)
+  useEffect(() => { busyRef.current = busy }, [busy])
+  useEffect(() => { sessionsRef.current = sessions }, [sessions])
 
   const setDraft = (value: string) => {
     setDraftState(value)
@@ -108,6 +125,7 @@ export function useWorkspaceController() {
       all.push(...next.sessions)
       if (all.length >= next.total || !next.sessions.length) break
     }
+    sessionsRef.current = all
     setSessions(all)
     return all
   }, [api])
@@ -124,9 +142,20 @@ export function useWorkspaceController() {
 
   const select = useCallback(
     async (id: string | null) => {
+      const target = id ? sessionsRef.current.find((item) => item.id === id) : undefined
+      const currentWorkspace = daemonRef.current?.workspace_root
+      if (
+        target?.workspace_root &&
+        currentWorkspace &&
+        !workspacePathsMatch(target.workspace_root, currentWorkspace)
+      ) {
+        setError(`该会话属于 ${target.workspace_root}，请先切换到对应项目`)
+        return
+      }
       const current = ++generation.current
       activeId.current = id
       setSessionId(id)
+      setEngineState(target?.engine === 'pi' ? 'pi' : 'naumi')
       savePreference('session', id ?? '')
       setMessages([])
       setSources([])
@@ -139,7 +168,9 @@ export function useWorkspaceController() {
       snapshotRevision.current++
       setSnapshotLoading(false)
       setSnapshotError('')
-      setPermissions([])
+      setPermissions((previous) => previous.filter(
+        (permission) => permission.sessionId === runningSessionId.current,
+      ))
       setLiveEvents([])
       setRunningUserMessageId(null)
       setError('')
@@ -182,13 +213,31 @@ export function useWorkspaceController() {
       const status = await api.fetchDaemonStatus()
       if (current !== connectionGeneration.current) return
       setDaemon(status)
+      daemonRef.current = status
       api.commands().then(result => {
         if (current === connectionGeneration.current) { setCommands(result.commands ?? []); setCommandsError('') }
       }).catch(() => { if (current === connectionGeneration.current) setCommandsError('命令列表未加载，请重新连接') })
-      await refreshSessions()
+      api.engines().then(result => {
+        if (current !== connectionGeneration.current) return
+        setEngines(result.engines ?? [])
+        if (!readPreference('engine')) setEngineState(result.default === 'pi' ? 'pi' : 'naumi')
+      }).catch(() => {})
+      const loadedSessions = await refreshSessions()
       if (current !== connectionGeneration.current) return
       const selected = readPreference('session')
-      if (selected) await select(selected)
+      const selectedSession = loadedSessions.find((item) => item.id === selected)
+      if (
+        selectedSession &&
+        (
+          !selectedSession.workspace_root ||
+          workspacePathsMatch(selectedSession.workspace_root, status.workspace_root)
+        )
+      ) {
+        await select(selected)
+      } else if (selected) {
+        savePreference('session', '')
+        await select(null)
+      }
       // Model discovery can be slower than local session loading.
       api
         .config()
@@ -210,6 +259,7 @@ export function useWorkspaceController() {
     } catch (e) {
       if (current === connectionGeneration.current) {
         setDaemon(null)
+        daemonRef.current = null
         setError(`无法连接本地服务：${errorText(e)}`)
       }
     } finally {
@@ -306,11 +356,25 @@ export function useWorkspaceController() {
     return () => window.removeEventListener('beforeunload', warn)
   }, [busy])
 
+  const switchEngine = useCallback(
+    (next: 'naumi' | 'pi') => {
+      if (next === engineRef.current) return
+      if (busyRef.current) {
+        setError('任务运行中，请等待完成后再切换引擎。')
+        return
+      }
+      setEngineState(next)
+      savePreference('engine', next)
+      void select(null)
+    },
+    [select],
+  )
+
   const ensureSession = async () => {
     if (activeId.current) return activeId.current
     const current = generation.current
     if (!creatingSession.current)
-      creatingSession.current = api.create(undefined, model || undefined)
+      creatingSession.current = api.create(undefined, model || undefined, engineRef.current)
     let session: Session
     try {
       session = await creatingSession.current
@@ -430,6 +494,7 @@ export function useWorkspaceController() {
       const id = await ensureSession()
       sentSessionId = id
       runningSessionId.current = id
+      setVisibleRunningSessionId(id)
       sessionReady = true
       if (!replacingAssistant && !editingBranch) savePreference(`draft:${id}`, '')
       if (stopped.current) return false
@@ -489,6 +554,7 @@ export function useWorkspaceController() {
                 ...(event.data.status === 'needs_confirmation'
                   ? [
                       {
+                        sessionId: id,
                         callId,
                         name: String(event.data.tool_name ?? '工具执行'),
                         reason: String(event.data.reason ?? ''),
@@ -600,6 +666,7 @@ export function useWorkspaceController() {
       setBusy(false)
       setRunningUserMessageId(null)
       runningSessionId.current = null
+      setVisibleRunningSessionId(null)
       operation.current = false
       void taskState.refreshTasks()
       void goalState.refreshGoals()
@@ -835,9 +902,9 @@ export function useWorkspaceController() {
     permission: Permission,
     decision: 'allow' | 'deny',
   ) => {
-    if (!sessionId) return
+    if (!permission.sessionId) return
     try {
-      await api.resolvePermission(sessionId, permission.callId, { decision })
+      await api.resolvePermission(permission.sessionId, permission.callId, { decision })
       setPermissions((previous) =>
         previous.filter((item) => item.callId !== permission.callId),
       )
@@ -862,6 +929,7 @@ export function useWorkspaceController() {
       if (next === base) await connect()
       else {
         setDaemon(null)
+        daemonRef.current = null
         setConfig(null)
         setSessions([])
         await select(null)
@@ -906,16 +974,19 @@ export function useWorkspaceController() {
     loading,
     busy,
     runningUserMessageId,
-    runningSessionId: runningSessionId.current,
+    runningSessionId: visibleRunningSessionId,
     uploading,
     draft,
     setDraft,
     model,
+    engine,
+    engines,
+    switchEngine,
     mode,
     sendKey,
     setSendKey,
     setMode,
-    permissions,
+    permissions: permissions.filter((permission) => permission.sessionId === sessionId),
     liveEvents,
     select,
     connect,
