@@ -1,4 +1,5 @@
 import type { Run, StreamEvent } from './WorkbenchRuntimeClient'
+import type { MessageResponse } from './types'
 
 export type ActivityState = 'running' | 'completed' | 'failed' | 'cancelled' | 'unknown'
 export interface ActivityStep { id: string; label: string; state: ActivityState; input: string; output: string; outputRecorded?: boolean; outputTruncated?: boolean }
@@ -15,6 +16,58 @@ export interface ToolTimelineStep extends ActivityStep {
 }
 export type ExecutionTimelineStep = ReasoningStep | ToolTimelineStep
 const stringify = (value: unknown): string => value == null ? '' : typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+
+const normalizedText = (value: unknown): string => typeof value === 'string'
+  ? value.replace(/\s+/g, ' ').trim()
+  : ''
+
+const runRequest = (run: Run): string => normalizedText(
+  run.steps.find(step => step.stage === 'request')?.summary
+  ?? run.steps.find(step => step.stage === 'command')?.summary,
+)
+
+/** Associate each durable execution with the user turn that started it. */
+export function runsByUserMessage(
+  messages: MessageResponse[],
+  runs: Run[],
+): Map<string, Run> {
+  const users = messages.filter(message => message.role === 'user')
+  const userIds = new Set(users.map(message => message.id))
+  const assigned = new Map<string, Run>()
+  const usedRuns = new Set<string>()
+
+  for (const run of runs) {
+    if (run.user_message_id && userIds.has(run.user_message_id) && !assigned.has(run.user_message_id)) {
+      assigned.set(run.user_message_id, run)
+      usedRuns.add(run.id)
+    }
+  }
+
+  const remainingUsers = users.filter(message => !assigned.has(message.id))
+  const remainingRuns = runs
+    .filter(run => !usedRuns.has(run.id))
+    .sort((left, right) => left.started_at.localeCompare(right.started_at) || left.id.localeCompare(right.id))
+  let userCursor = remainingUsers.length - 1
+
+  for (let runIndex = remainingRuns.length - 1; runIndex >= 0 && userCursor >= 0; runIndex--) {
+    const run = remainingRuns[runIndex]
+    const request = runRequest(run)
+    let match = -1
+    if (request) {
+      for (let index = userCursor; index >= 0; index--) {
+        const content = normalizedText(remainingUsers[index].content)
+        if (content.startsWith(request) || request.startsWith(content.slice(0, 160))) {
+          match = index
+          break
+        }
+      }
+    }
+    if (match < 0) match = userCursor
+    assigned.set(remainingUsers[match].id, run)
+    userCursor = match - 1
+  }
+  return assigned
+}
 export function activityState(status: string): ActivityState {
   if (['completed', 'success', 'passed'].includes(status)) return 'completed'
   if (['failed', 'error'].includes(status)) return 'failed'

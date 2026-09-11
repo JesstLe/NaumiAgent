@@ -5,7 +5,7 @@ test('tool output survives run completion and reload with multiline detail', asy
   await mockWorkbenchApi(page)
   let finished = false
   const output = '第一行：读取成功\n第二行：共 3 条配置'
-  await page.route('**/sessions/*/runs', route => route.fulfill({ json: { runs: finished ? [{ id: 'r', status: 'completed', started_at: '2026-09-11T04:00:00Z', completed_at: '2026-09-11T04:00:02Z', steps: [
+  await page.route('**/sessions/*/runs*', route => route.fulfill({ json: { runs: finished ? [{ id: 'r', status: 'completed', started_at: '2026-09-11T04:00:00Z', completed_at: '2026-09-11T04:00:02Z', steps: [
     { sequence: 1, stage: 'request', status: 'completed', summary: '继续', detail: '' },
     { sequence: 2, stage: 'analysis', status: 'completed', summary: '分析请求', detail: '' },
     { sequence: 3, stage: 'tool', status: 'completed', summary: 'read', detail: output, metadata: { tool_call_id: 'a', output_recorded: true } },
@@ -74,4 +74,45 @@ test('reasoning appears immediately and tools stay at their turn position', asyn
   ])
   const order = await page.locator('.w2-message-list > *').evaluateAll(nodes => nodes.map(node => node.className))
   expect(order.findIndex(value => String(value).includes('bui-execution'))).toBeLessThan(order.findLastIndex(value => String(value).includes('assistant')))
+})
+
+test('saved execution timelines remain attached to every historical turn', async ({ page }) => {
+  await mockWorkbenchApi(page)
+  const history = {
+    messages: [
+      { id: 'u1', role: 'user', content: '读取 README', timestamp: '2026-09-11T01:00:00Z', metadata: {} },
+      { id: 'a1', role: 'assistant', content: '第一轮完成', timestamp: '2026-09-11T01:00:02Z', metadata: {} },
+      { id: 'u2', role: 'user', content: '检查配置', timestamp: '2026-09-11T01:01:00Z', metadata: {} },
+      { id: 'a2', role: 'assistant', content: '第二轮完成', timestamp: '2026-09-11T01:01:02Z', metadata: {} },
+    ],
+    total: 4,
+  }
+  const runs = [
+    { id: 'r2', user_message_id: 'u2', status: 'completed', started_at: '2026-09-11T01:01:00Z', completed_at: '2026-09-11T01:01:02Z', steps: [
+      { sequence: 1, stage: 'request', status: 'completed', summary: '检查配置', detail: '' },
+      { sequence: 2, stage: 'analysis', status: 'completed', summary: '分析请求', detail: '' },
+      { sequence: 3, stage: 'tool', status: 'completed', summary: 'read_file', detail: '配置正常', metadata: { public_action: '读取文件：config.yaml' } },
+    ] },
+    { id: 'r1', user_message_id: 'legacy-random-id', status: 'completed', started_at: '2026-09-11T01:00:00Z', completed_at: '2026-09-11T01:00:02Z', steps: [
+      { sequence: 1, stage: 'request', status: 'completed', summary: '读取 README', detail: '' },
+      { sequence: 2, stage: 'analysis', status: 'completed', summary: '分析请求', detail: '' },
+      { sequence: 3, stage: 'tool', status: 'completed', summary: 'read_file', detail: '读取成功', metadata: { public_action: '读取文件：README.md' } },
+    ] },
+  ]
+  await page.route('**/sessions/*/messages*', route => route.fulfill({ json: history }))
+  await page.route('**/sessions/*/runs*', route => route.fulfill({ json: { runs, total: 2 } }))
+  await page.goto('/web2')
+
+  const traces = page.getByLabel('执行过程', { exact: true })
+  await expect(traces).toHaveCount(2)
+  await expect(traces.nth(0)).toHaveAttribute('data-run-id', 'r1')
+  await expect(traces.nth(1)).toHaveAttribute('data-run-id', 'r2')
+  await traces.nth(0).scrollIntoViewIfNeeded()
+  await expect(traces.nth(0).getByText('读取文件：README.md', { exact: true })).toBeVisible()
+
+  const order = await page.locator('.w2-message-list > *').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-run-id') || node.className))
+  expect(order).toEqual(['w2-message user', 'r1', 'w2-message assistant', 'w2-message user', 'r2', 'w2-message assistant'])
+
+  await page.reload()
+  await expect(page.getByLabel('执行过程', { exact: true })).toHaveCount(2)
 })

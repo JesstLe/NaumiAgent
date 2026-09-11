@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   ArrowUp,
   ArrowUpRight,
@@ -48,6 +48,7 @@ import {
   savePreference,
 } from '@naumi/shared/api/WorkbenchRuntimeClient'
 import { errorText } from '@naumi/shared/hooks/useWorkspaceController'
+import { runsByUserMessage } from '@naumi/shared/api/activity'
 import './web2.css'
 import { MenuBar } from './MenuBar'
 import { SettingsPage } from './SettingsPage'
@@ -305,6 +306,13 @@ export function Web2() {
   const latestUserIndex = messages.reduce(
     (latest, item, index) => item.role === 'user' ? index : latest,
     -1,
+  )
+  const messageRuns = useMemo(
+    () => runsByUserMessage(messages, w.runs),
+    [messages, w.runs],
+  )
+  const liveRunId = String(
+    w.liveEvents.at(-1)?.run_id || w.liveEvents.at(-1)?.data.run_id || '',
   )
   const composerLocked = w.busy || w.uploading || w.loading || w.connecting
   const uploadLocked = w.busy || w.uploading || !w.daemon
@@ -646,6 +654,11 @@ export function Web2() {
                 <div className="w2-message-list">
                   {w.loading && <p className="w2-muted">正在加载会话…</p>}
                   {messages.map((message, index) => {
+                    const run = message.role === 'user' ? messageRuns.get(message.id) : undefined
+                    const live = message.role === 'user'
+                      && index === latestUserIndex
+                      && (w.busy || w.liveEvents.length > 0)
+                      && (!liveRunId || !run || liveRunId === run.id)
                     return <Fragment key={message.id}>
                       <article className={`w2-message ${message.role}`}>
                         <MessageContent content={message.content} />
@@ -653,10 +666,17 @@ export function Web2() {
                           <CopyButton text={message.content} />
                         </div>
                       </article>
-                      {index === latestUserIndex && <ThinkingState />}
+                      {message.role === 'user' && (run || live) && (
+                        <ThinkingState run={run} live={live} objective={message.content} />
+                      )}
                     </Fragment>
                   })}
-                  {!messages.some(message => message.role === 'user') && <ThinkingState />}
+                  {!messages.some(message => message.role === 'user') && (w.runs[0] || w.busy || w.liveEvents.length > 0) && (
+                    <ThinkingState
+                      run={w.runs[0]}
+                      live={w.busy || (!w.runs[0] && w.liveEvents.length > 0)}
+                    />
+                  )}
                 </div>
               )}
             </div>

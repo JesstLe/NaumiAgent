@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isTimelineEvent, liveExecutionTimeline, runActivity, runExecutionTimeline, toolActivity } from '../../src/api/activity'
+import { isTimelineEvent, liveExecutionTimeline, runActivity, runExecutionTimeline, runsByUserMessage, toolActivity } from '../../src/api/activity'
 
 describe('public execution activity', () => {
   it('pairs concurrent calls by id and retains the correct input and failure', () => {
@@ -107,5 +107,24 @@ describe('public execution activity', () => {
       { id: '2', type: 'runtime_event', data: { event: 'task_snapshot', data: { items: [{ status: 'in_progress', subject: '核对布局' }], completed_count: 0 } } },
     ], false)
     expect(rows.map(row => row.label)).toEqual(['已压缩上下文：80 → 20 条消息；归档 1 条工具结果', '执行计划 · 进行中：核对布局；已完成 0 项'])
+  })
+  it('binds every durable run to its own user turn, including legacy random ids', () => {
+    const messages = [
+      { id: 'u1', role: 'user', content: '读取 README', timestamp: '', metadata: {} },
+      { id: 'a1', role: 'assistant', content: '已读取', timestamp: '', metadata: {} },
+      { id: 'u2', role: 'user', content: '检查配置', timestamp: '', metadata: {} },
+      { id: 'a2', role: 'assistant', content: '已检查', timestamp: '', metadata: {} },
+    ]
+    const runs = [
+      { id: 'r2', user_message_id: 'legacy-random-2', status: 'completed', started_at: '2026-09-11T00:02:00Z', steps: [
+        { sequence: 1, stage: 'request', status: 'completed', summary: '检查配置', detail: '' },
+      ] },
+      { id: 'r1', user_message_id: 'legacy-random-1', status: 'completed', started_at: '2026-09-11T00:01:00Z', steps: [
+        { sequence: 1, stage: 'request', status: 'completed', summary: '读取 README', detail: '' },
+      ] },
+    ]
+    const assigned = runsByUserMessage(messages, runs)
+    expect(assigned.get('u1')?.id).toBe('r1')
+    expect(assigned.get('u2')?.id).toBe('r2')
   })
 })

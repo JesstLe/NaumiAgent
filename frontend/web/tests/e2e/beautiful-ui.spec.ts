@@ -44,7 +44,7 @@ test('selection toolbar expands on narrow screens and accepts a custom instructi
 test('execution trace restores real run steps and exposes output on demand', async ({ page }) => {
   await mockWorkbenchApi(page)
   await page.route('**/sessions/*/messages?*', route => route.fulfill({ json: { messages: [{ id: 'm', role: 'assistant', content: '已检查文件', metadata: {} }], total: 1 } }))
-  await page.route('**/sessions/*/runs', route => route.fulfill({ json: { runs: [{ id: 'r', started_at: '2026-09-11T01:00:00Z', status: 'failed', steps: [{ sequence: 1, stage: 'tool', status: 'failed', summary: 'read missing.txt', detail: '文件不存在' }] }] } }))
+  await page.route('**/sessions/*/runs*', route => route.fulfill({ json: { runs: [{ id: 'r', started_at: '2026-09-11T01:00:00Z', status: 'failed', steps: [{ sequence: 1, stage: 'tool', status: 'failed', summary: 'read missing.txt', detail: '文件不存在' }] }] } }))
   await page.goto('/web2')
   const trace = page.getByLabel('执行过程', { exact: true })
   await expect(trace.getByRole('button', { name: /用时 .*失败/ })).toBeVisible()
