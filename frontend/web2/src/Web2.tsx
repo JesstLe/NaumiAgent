@@ -65,6 +65,7 @@ import { ThinkingState } from './beautiful/ThinkingState'
 import { MessageContent } from './rich/MessageContent'
 import { WorkspaceFileTree } from './community/WorkspaceFileTree'
 import { AiMessage } from './community/AiMessage'
+import { AiSources, messageSources } from './community/AiSources'
 import { SelectionActions } from './beautiful/SelectionActions'
 import { ContextCards } from './beautiful/ContextCards'
 import { Flowchart } from './beautiful/Flowchart'
@@ -783,6 +784,7 @@ export function Web2() {
                   {w.loading && <p className="w2-muted">正在加载会话…</p>}
                   {messages.map((message, index) => {
                     const run = message.role === 'user' ? messageRuns.get(message.id) : undefined
+                    const sources = message.role === 'assistant' ? messageSources(message) : []
                     const live = message.role === 'user'
                       && index === latestUserIndex
                       && (w.busy || w.liveEvents.length > 0)
@@ -796,6 +798,7 @@ export function Web2() {
                         onCopyError={() => w.setError('复制失败，请选中文字复制')}
                       >
                         <MessageContent content={message.content} plain={message.role === 'user'} />
+                        {message.role === 'assistant' && <AiSources sources={sources} />}
                       </AiMessage>
                       {message.role === 'user' && (run || live) && (
                         <ThinkingState run={run} live={live} objective={message.content} />
