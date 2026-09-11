@@ -1090,6 +1090,30 @@ export function Web2() {
                     {branch}
                   </span>
                 )}
+                <span
+                  className="w2-engine-toggle"
+                  title="会话引擎：切换后开始新对话，已有会话保持原引擎"
+                >
+                  {(['naumi', 'pi'] as const).map((id) => {
+                    const info = w.engines.find((item) => item.id === id)
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        className={w.engine === id ? 'on' : ''}
+                        disabled={!info?.available || w.busy || w.connecting}
+                        title={
+                          info?.available === false
+                            ? 'pi 引擎不可用：未检测到 pi 可执行文件'
+                            : (info?.description ?? id)
+                        }
+                        onClick={() => w.switchEngine(id)}
+                      >
+                        {id}
+                      </button>
+                    )
+                  })}
+                </span>
               </div>
               <BorderBeam
                 className="community-composer-beam"

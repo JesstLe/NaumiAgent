@@ -7,6 +7,7 @@ import { workspacePathsMatch } from '@naumi/shared/projects/workspaceProjects'
 import type {
   ChatSource,
   DaemonStatusResponse,
+  EngineInfo,
   GitDiffResponse,
   MessageResponse,
   Session,
@@ -88,6 +89,10 @@ export function useWorkspaceController() {
     savePreference('send-key', value)
   }
   const [createIssue, setCreateIssue] = useState(false)
+  const [engine, setEngineState] = useState<'naumi' | 'pi'>('naumi')
+  const [engines, setEngines] = useState<EngineInfo[]>([
+    { id: 'naumi', name: 'NaumiAgent 引擎', available: true, default: true },
+  ])
   const [permissions, setPermissions] = useState<Permission[]>([])
   const [liveEvents, setLiveEvents] = useState<StreamEvent[]>([])
   const controller = useRef<AbortController | null>(null)
@@ -102,6 +107,10 @@ export function useWorkspaceController() {
   const creatingSession = useRef<Promise<Session> | null>(null)
 
   useEffect(() => { daemonRef.current = daemon }, [daemon])
+  const engineRef = useRef<'naumi' | 'pi'>('naumi')
+  useEffect(() => { engineRef.current = engine }, [engine])
+  const busyRef = useRef(false)
+  useEffect(() => { busyRef.current = busy }, [busy])
   useEffect(() => { sessionsRef.current = sessions }, [sessions])
 
   const setDraft = (value: string) => {
@@ -146,6 +155,7 @@ export function useWorkspaceController() {
       const current = ++generation.current
       activeId.current = id
       setSessionId(id)
+      setEngineState(target?.engine === 'pi' ? 'pi' : 'naumi')
       savePreference('session', id ?? '')
       setMessages([])
       setSources([])
@@ -207,6 +217,11 @@ export function useWorkspaceController() {
       api.commands().then(result => {
         if (current === connectionGeneration.current) { setCommands(result.commands ?? []); setCommandsError('') }
       }).catch(() => { if (current === connectionGeneration.current) setCommandsError('命令列表未加载，请重新连接') })
+      api.engines().then(result => {
+        if (current !== connectionGeneration.current) return
+        setEngines(result.engines ?? [])
+        if (!readPreference('engine')) setEngineState(result.default === 'pi' ? 'pi' : 'naumi')
+      }).catch(() => {})
       const loadedSessions = await refreshSessions()
       if (current !== connectionGeneration.current) return
       const selected = readPreference('session')
@@ -341,11 +356,25 @@ export function useWorkspaceController() {
     return () => window.removeEventListener('beforeunload', warn)
   }, [busy])
 
+  const switchEngine = useCallback(
+    (next: 'naumi' | 'pi') => {
+      if (next === engineRef.current) return
+      if (busyRef.current) {
+        setError('任务运行中，请等待完成后再切换引擎。')
+        return
+      }
+      setEngineState(next)
+      savePreference('engine', next)
+      void select(null)
+    },
+    [select],
+  )
+
   const ensureSession = async () => {
     if (activeId.current) return activeId.current
     const current = generation.current
     if (!creatingSession.current)
-      creatingSession.current = api.create(undefined, model || undefined)
+      creatingSession.current = api.create(undefined, model || undefined, engineRef.current)
     let session: Session
     try {
       session = await creatingSession.current
@@ -881,6 +910,9 @@ export function useWorkspaceController() {
     draft,
     setDraft,
     model,
+    engine,
+    engines,
+    switchEngine,
     mode,
     sendKey,
     setSendKey,

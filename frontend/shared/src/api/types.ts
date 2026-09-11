@@ -316,6 +316,22 @@ export interface Session {
   workspace_root?: string
   git_branch?: string
   summary?: string
+  engine?: string
+}
+
+export interface EngineInfo {
+  id: 'naumi' | 'pi'
+  name: string
+  available: boolean
+  default: boolean
+  provider?: string
+  model?: string
+  description?: string
+}
+
+export interface EnginesResponse {
+  engines: EngineInfo[]
+  default: 'naumi' | 'pi'
 }
 
 export interface ScheduleJob {
