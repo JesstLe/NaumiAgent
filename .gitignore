@@ -24,6 +24,7 @@ chroma/
 .claude/.naumi/
 .naumi/terminal-ui-state.json
 .naumi/shell-output/
+.naumi/uploads/
 
 # Local agent workflow scratch state (PID files, previews, review caches)
 .superpowers/

@@ -400,7 +400,6 @@ async def upload_chat_source(
         kind=source.kind,
         title=source.title,
         path=source.path,
-        run_id=source.run_id,
         created_at=source.created_at,
     )
 

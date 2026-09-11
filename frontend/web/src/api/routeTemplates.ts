@@ -8,6 +8,7 @@ export const defaultRouteTemplates: Record<string, string> = {
   capabilities: '/workbench/capabilities',
   bootstrap: '/workbench/bootstrap',
   sessions: '/workbench/sessions',
+  session: '/sessions/{session_id}',
   create_session: '/workbench/sessions',
   snapshot: '/workbench/sessions/{session_id}/snapshot',
   missions: '/workbench/sessions/{session_id}/missions',

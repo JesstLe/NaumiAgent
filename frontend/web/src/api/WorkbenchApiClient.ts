@@ -57,6 +57,7 @@ export class WorkbenchApiClient {
   ) {
     this.client = axios.create({
       baseURL,
+      timeout: 20000,
       headers: { 'Content-Type': 'application/json' },
     })
     this.templates = { ...defaultRouteTemplates }
@@ -150,7 +151,7 @@ export class WorkbenchApiClient {
   async updateSession(sessionId: string, body: SessionUpdate): Promise<Session> {
     return this.request<Session>({
       method: 'PATCH',
-      url: this.route('sessions', { session_id: sessionId }),
+      url: this.route('session', { session_id: sessionId }),
       data: body,
     })
   }
@@ -158,7 +159,7 @@ export class WorkbenchApiClient {
   async deleteSession(sessionId: string): Promise<unknown> {
     return this.request<unknown>({
       method: 'DELETE',
-      url: this.route('sessions', { session_id: sessionId }),
+      url: this.route('session', { session_id: sessionId }),
     })
   }
 

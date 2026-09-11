@@ -245,12 +245,18 @@ const gitDiff = {
  * does not hang.
  */
 export async function mockWorkbenchApi(page: Page): Promise<void> {
+  await page.addInitScript(() => localStorage.setItem('naumi:workspace:session', 'smoke-session-001'))
   // Use a catch-all first: any request to the daemon port that is not
   // matched by a more specific handler below returns an empty 200 so a
   // real backend running on 127.0.0.1:8765 cannot leak 404s into the test.
-  await page.route('http://127.0.0.1:8765/**', (route: Route) => {
+  await page.route('**/api/v1/**', (route: Route) => {
     const url = route.request().url()
     const method = route.request().method()
+    const pathname = new URL(url).pathname
+    if (pathname.endsWith('/config')) return route.fulfill({ json: { models: [{ id: 'kimi', name: 'Kimi', tier: 'capable' }], tools: [{ name: 'read_file', description: '读取文件' }], model_warnings: [] } })
+    if (pathname.endsWith('/runs')) return route.fulfill({ json: { runs: [], total: 0 } })
+    if (pathname.endsWith('/sessions') && method === 'GET') return route.fulfill({ json: { sessions: bootstrap.sessions, total: 1, page: 1, page_size: 100 } })
+    if (pathname.endsWith('/sessions') && method === 'POST') return route.fulfill({ json: bootstrap.sessions[0] })
 
     if (url.includes('/workbench/daemon/status')) {
       return route.fulfill({ status: 200, json: daemonStatus })
@@ -268,6 +274,7 @@ export async function mockWorkbenchApi(page: Page): Promise<void> {
       return route.fulfill({ status: 200, json: { session_id: SESSION_ID, snapshot } })
     }
     if (url.includes('/sessions/') && url.includes('/messages')) {
+      if (method === 'POST') return route.fulfill({ contentType: 'text/event-stream', body: 'data: {"id":"one","type":"token_delta","data":{"token":"共享工作区测试回复"}}\n\ndata: {"id":"two","type":"agent_end","data":{"status":"completed"}}\n\n' })
       return route.fulfill({ status: 200, json: messages })
     }
     if (url.includes('/sessions/') && url.includes('/environment')) {
