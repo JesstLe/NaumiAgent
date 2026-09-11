@@ -359,6 +359,41 @@ describe('one shared workspace for two presentation shells', () => {
     )
     expect(resolved).toEqual({ decision: 'allow' })
   })
+  it('allows navigation while a run continues and keeps streamed output with its session', async () => {
+    let output: ReadableStreamDefaultController<Uint8Array>
+    server.use(
+      http.post(
+        `${base}/sessions/one/messages`,
+        () => new HttpResponse(new ReadableStream({
+          start(controller) {
+            output = controller
+            controller.enqueue(new TextEncoder().encode(
+              'data: {"id":"thinking","type":"thinking_start","data":{}}\n\n',
+            ))
+          },
+        }), { headers: { 'Content-Type': 'text/event-stream' } }),
+      ),
+    )
+    setup()
+    await waitFor(() => expect(screen.getByTestId('web-connected')).toHaveTextContent('connected'))
+    fireEvent.click(screen.getByText('选择 web one'))
+    await waitFor(() => expect(screen.getByTestId('web-messages')).toHaveTextContent('历史-one'))
+    fireEvent.change(screen.getByLabelText('web-draft'), { target: { value: '后台继续执行' } })
+    fireEvent.click(screen.getByText('发送 web'))
+    await waitFor(() => expect(screen.getByTestId('web-busy')).toHaveTextContent('true'))
+
+    fireEvent.click(screen.getByText('选择 web2 two'))
+    await waitFor(() => expect(screen.getByTestId('web-messages')).toHaveTextContent('历史-two'))
+    expect(screen.getByLabelText('web2-draft')).toBeEnabled()
+
+    output.enqueue(new TextEncoder().encode(
+      'data: {"id":"answer","type":"token_delta","data":{"token":"原会话答复"}}\n\ndata: {"id":"end","type":"agent_end","data":{"status":"completed"}}\n\n',
+    ))
+    output.close()
+    await waitFor(() => expect(screen.getByTestId('web-busy')).toHaveTextContent('false'))
+    expect(screen.getByTestId('web-messages')).toHaveTextContent('历史-two')
+    expect(screen.getByTestId('web-messages')).not.toHaveTextContent('原会话答复')
+  })
   it('stops the server run from the other shell and clears the busy state', async () => {
     let output: ReadableStreamDefaultController<Uint8Array>
     let cancelled = false

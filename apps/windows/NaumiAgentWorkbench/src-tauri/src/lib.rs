@@ -32,6 +32,7 @@ pub fn run() {
             daemon::get_daemon_logs,
             shell::open_in_explorer,
             shell::open_in_terminal,
+            shell::select_workspace_directory,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

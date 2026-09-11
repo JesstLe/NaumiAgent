@@ -44,4 +44,5 @@ export interface PlatformAdapter {
 
   openInExplorer?(path: string): Promise<void>
   openInTerminal?(path: string): Promise<void>
+  selectWorkspaceDirectory?(initialPath?: string): Promise<string | null>
 }

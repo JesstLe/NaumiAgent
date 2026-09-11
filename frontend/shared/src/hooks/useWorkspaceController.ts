@@ -80,6 +80,7 @@ export function useWorkspaceController() {
   const [liveEvents, setLiveEvents] = useState<StreamEvent[]>([])
   const controller = useRef<AbortController | null>(null)
   const runId = useRef('')
+  const runningSessionId = useRef<string | null>(null)
   const activeId = useRef<string | null>(null)
   const operation = useRef(false)
   const generation = useRef(0)
@@ -105,7 +106,6 @@ export function useWorkspaceController() {
 
   const select = useCallback(
     async (id: string | null) => {
-      if (operation.current) return
       const current = ++generation.current
       activeId.current = id
       setSessionId(id)
@@ -334,6 +334,7 @@ export function useWorkspaceController() {
     let completed = false
     let failure = ''
     let sessionReady = false
+    let sentSessionId = ''
     setMessages((previous) => [
       ...previous,
       {
@@ -355,6 +356,8 @@ export function useWorkspaceController() {
     }])
     try {
       const id = await ensureSession()
+      sentSessionId = id
+      runningSessionId.current = id
       sessionReady = true
       savePreference(`draft:${id}`, '')
       if (stopped.current) return
@@ -378,6 +381,7 @@ export function useWorkspaceController() {
         (event) => {
           if (event.run_id || event.data.run_id)
             runId.current = String(event.run_id || event.data.run_id)
+          if (activeId.current !== id) return
           if (event.type === 'token_delta') {
             const token = String(event.data.token ?? event.data.content ?? '')
             setMessages((previous) => {
@@ -456,13 +460,15 @@ export function useWorkspaceController() {
     } finally {
       controller.current = null
       setPermissions([])
-      const id = activeId.current
-      if (id) {
+      if (sentSessionId) {
         const results = await Promise.allSettled([
-          api.runs(id),
+          api.runs(sentSessionId),
           refreshSessions(),
         ])
-        if (results[0].status === 'fulfilled') setRuns(results[0].value.runs)
+        if (
+          results[0].status === 'fulfilled' &&
+          activeId.current === sentSessionId
+        ) setRuns(results[0].value.runs)
         for (const result of results)
           if (result.status === 'rejected')
             setError(
@@ -471,6 +477,7 @@ export function useWorkspaceController() {
             )
       }
       setBusy(false)
+      runningSessionId.current = null
       operation.current = false
       void taskState.refreshTasks()
       void goalState.refreshGoals()
@@ -479,8 +486,8 @@ export function useWorkspaceController() {
   const stop = async () => {
     stopped.current = true
     try {
-      if (activeId.current && runId.current)
-        await api.cancel(activeId.current, runId.current)
+      if (runningSessionId.current && runId.current)
+        await api.cancel(runningSessionId.current, runId.current)
       controller.current?.abort()
     } catch (e) {
       stopped.current = false
@@ -551,8 +558,7 @@ export function useWorkspaceController() {
     }
   }
   const changeModel = async (value: string) => {
-    if (operation.current) return
-    operation.current = true
+    if (mutating) return
     setMutating(true)
     try {
       if (sessionId) {
@@ -565,13 +571,11 @@ export function useWorkspaceController() {
     } catch (e) {
       setError(errorText(e))
     } finally {
-      operation.current = false
       setMutating(false)
     }
   }
   const deleteSession = async (id: string) => {
-    if (operation.current) return
-    operation.current = true
+    if (mutating) return
     setMutating(true)
     try {
       const result = (await api.deleteSession(id)) as
@@ -579,12 +583,86 @@ export function useWorkspaceController() {
       if (result?.status === 'retry_scheduled')
         throw new Error('会话正在清理中，请稍后刷新')
       setSessions((previous) => previous.filter((item) => item.id !== id))
-      operation.current = false
       if (id === activeId.current) await select(null)
     } catch (e) {
       setError(errorText(e))
     } finally {
-      operation.current = false
+      setMutating(false)
+    }
+  }
+  const renameSession = async (id: string, title: string) => {
+    const normalized = title.trim()
+    if (!normalized || mutating) return false
+    setMutating(true)
+    try {
+      const updated = await api.updateSession(id, { title: normalized })
+      setSessions(previous => previous.map(item => item.id === id ? updated : item))
+      return true
+    } catch (e) {
+      setError(errorText(e))
+      return false
+    } finally {
+      setMutating(false)
+    }
+  }
+  const pinSession = async (id: string, pinned: boolean) => {
+    if (mutating) return false
+    setMutating(true)
+    try {
+      const updated = await api.pinSession(id, pinned)
+      setSessions(previous => [
+        updated,
+        ...previous.filter(item => item.id !== id),
+      ].sort((a, b) => Number(b.pinned) - Number(a.pinned)))
+      return true
+    } catch (e) {
+      setError(errorText(e))
+      return false
+    } finally {
+      setMutating(false)
+    }
+  }
+  const archiveSession = async (id: string) => {
+    if (mutating) return false
+    setMutating(true)
+    try {
+      await api.archiveSession(id)
+      setSessions(previous => previous.filter(item => item.id !== id))
+      if (activeId.current === id) await select(null)
+      return true
+    } catch (e) {
+      setError(errorText(e))
+      return false
+    } finally {
+      setMutating(false)
+    }
+  }
+  const duplicateSession = async (id: string) => {
+    if (mutating) return null
+    setMutating(true)
+    try {
+      const duplicate = await api.duplicateSession(id)
+      setSessions(previous => [duplicate, ...previous])
+      await select(duplicate.id)
+      return duplicate
+    } catch (e) {
+      setError(errorText(e))
+      return null
+    } finally {
+      setMutating(false)
+    }
+  }
+  const createSidebarSession = async () => {
+    if (!daemon || mutating) return null
+    setMutating(true)
+    try {
+      const created = await api.create('新对话', model || undefined)
+      setSessions(previous => [created, ...previous])
+      return created
+    } catch (e) {
+      setError(errorText(e))
+      return null
+    } finally {
       setMutating(false)
     }
   }
@@ -660,6 +738,7 @@ export function useWorkspaceController() {
     connecting,
     loading,
     busy,
+    runningSessionId: runningSessionId.current,
     uploading,
     draft,
     setDraft,
@@ -683,5 +762,10 @@ export function useWorkspaceController() {
     setCreateIssue,
     mutating,
     deleteSession,
+    renameSession,
+    pinSession,
+    archiveSession,
+    duplicateSession,
+    createSidebarSession,
   }
 }

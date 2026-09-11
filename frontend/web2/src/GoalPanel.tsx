@@ -21,7 +21,7 @@ export function GoalPanel() {
     {goals.map(goal => <article className="w2-goal-card" key={goal.goal_id}>
       <header><Target size={16} /><span>{names[goal.status]}</span><time>{new Date(goal.updated_at).toLocaleString('zh-CN')}</time></header>
       <h3>{goal.objective}</h3>{goal.note && <p>{goal.note}</p>}
-      {goal.session_id && goal.session_id !== w.sessionId && <button className="w2-goal-link" disabled={locked} onClick={() => void w.select(goal.session_id)}>打开关联会话</button>}
+      {goal.session_id && goal.session_id !== w.sessionId && <button className="w2-goal-link" onClick={() => void w.select(goal.session_id)}>打开关联会话</button>}
       {goal.pursuit && <div className="w2-pursuit">
         <div>已验证标准 {goal.pursuit.criteria_verified} / {goal.pursuit.criteria_total} · 第 {goal.pursuit.iteration} 轮</div>
         <progress max={goal.pursuit.criteria_total || 1} value={goal.pursuit.criteria_verified} />

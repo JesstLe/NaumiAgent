@@ -94,3 +94,38 @@ test('offline shell preserves input and exposes recovery settings', async ({
     page.getByRole('textbox', { name: '消息', exact: true }),
   ).toHaveValue('离线草稿')
 })
+
+test('places task context in the right panel and keeps navigation active during a run', async ({ page }) => {
+  await page.route('**/sessions/*/messages', async route => {
+    if (route.request().method() !== 'POST') return route.fallback()
+    await new Promise(resolve => setTimeout(resolve, 1200))
+    return route.fulfill({ contentType: 'text/event-stream', body: 'data: {"id":"end","type":"agent_end","data":{"status":"completed"}}\n\n' })
+  })
+  await page.goto('/web2')
+  await expect(page.locator('.w2-chat-summary')).toHaveCount(0)
+  await page.getByRole('button', { name: '打开待办面板' }).click()
+  await expect(page.getByText('待办', { exact: true }).last()).toBeVisible()
+  await page.getByRole('button', { name: '上下文', exact: true }).click()
+  await expect(page.getByText('当前会话暂无上下文快照')).toBeVisible()
+
+  await page.getByRole('textbox', { name: '消息', exact: true }).fill('运行时仍能导航')
+  await page.getByRole('button', { name: '发送消息' }).click()
+  await expect(page.getByRole('button', { name: '停止执行' })).toBeVisible()
+  await page.getByRole('button', { name: '插件', exact: true }).first().click()
+  await expect(page.getByText('demo-skill', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '搜索会话' }).click()
+  await expect(page.getByRole('textbox', { name: '搜索历史会话' })).toBeEnabled()
+})
+
+test('session menu exposes durable conversation actions', async ({ page }) => {
+  await page.goto('/web2')
+  await page.getByRole('button', { name: '会话操作 冒烟测试会话' }).click()
+  await expect(page.getByRole('button', { name: '修改名称' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '置顶' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '复制会话' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '归档' })).toBeVisible()
+  await page.getByRole('button', { name: '修改名称' }).click()
+  await page.getByLabel('会话名称').fill('新的会话名称')
+  await page.getByRole('button', { name: '保存' }).click()
+  await expect(page.getByRole('button', { name: '新的会话名称', exact: true })).toBeVisible()
+})
