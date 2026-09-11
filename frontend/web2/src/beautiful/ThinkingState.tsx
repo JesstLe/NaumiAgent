@@ -2,12 +2,109 @@ import { useEffect, useMemo, useState } from 'react'
 import { useWorkspace } from '@naumi/shared/hooks/WorkspaceProvider'
 import {
   activityState,
+  executionStages,
   liveExecutionTimeline,
   runExecutionTimeline,
+  type ExecutionStage,
+  type ToolTimelineStep,
 } from '@naumi/shared/api/activity'
 import type { Run } from '@naumi/shared/api/WorkbenchRuntimeClient'
 import { activityNames, ToolChips } from './ToolChips'
+import Primitive, { type ThinkingRow } from './upstream/components/primitives/ThinkingState'
 import { AgentAvatar } from '../community/AgentAvatar'
+import { MessageContent } from '../rich/MessageContent'
+
+const webTools = /^(web_fetch|fetch|browser_goto|browser_observe|browser_screenshot|browser_evaluate|web_search)$/
+const splitAction = (step: ToolTimelineStep) => {
+  const action = step.action || step.label
+  const separator = action.indexOf('：')
+  return {
+    operation: separator >= 0 ? action.slice(0, separator) : action,
+    target: separator >= 0 ? action.slice(separator + 1) : '',
+  }
+}
+
+const stageVariant = (stage: ExecutionStage) => {
+  if (!stage.tools.length) return stage.notes.some(note => /执行计划|压缩上下文/.test(note.label)) ? 'Steps' : 'Reasoning'
+  return stage.tools.every(step => webTools.test(step.label)) ? 'Search' : 'Coding'
+}
+
+const stageRows = (stage: ExecutionStage, variant: string): ThinkingRow[] => {
+  if (variant === 'Steps' || variant === 'Reasoning') {
+    return stage.notes.map(note => ({ primary: note.label }))
+  }
+  return stage.tools.map(step => {
+    const { operation, target } = splitAction(step)
+    return {
+      primary: operation.replace(/^调用工具 /, ''),
+      secondary: target,
+      mono: Boolean(target),
+      href: variant === 'Search' && /^https?:\/\//.test(target) ? target : undefined,
+    }
+  })
+}
+
+const stageSummary = (stage: ExecutionStage) => {
+  const actions = stage.tools.map(step => step.action || step.label)
+  const visible = actions.slice(0, 3)
+  const remaining = actions.length > visible.length ? `；另有 ${actions.length - visible.length} 项` : ''
+  const facts = `${visible.join('；')}${remaining}`
+  const progress = stage.notes
+    .map(note => note.label)
+    .filter(label => /^(执行计划|已压缩上下文)/.test(label))
+  const recorded = stage.notes.map(note => note.label).find(label => /^本阶段/.test(label))
+  if (recorded) return [recorded, ...progress].join('\n\n')
+  if (!actions.length) return progress.join('\n\n')
+  const lead = stage.state === 'running'
+    ? '本阶段正在执行'
+    : stage.state === 'failed'
+      ? '本阶段执行存在失败'
+      : stage.state === 'cancelled'
+        ? '本阶段已停止'
+        : stage.state === 'unknown'
+          ? '本阶段结果仍待确认'
+          : '本阶段已完成'
+  return [`${lead}：${facts}。`, ...progress].join('\n\n')
+}
+
+function StageTrace({ stage, status, working }: { stage: ExecutionStage; status: string; working: boolean }) {
+  const variant = stageVariant(stage)
+  const rows = stageRows(stage, variant)
+  const summary = stageSummary(stage)
+  const active = variant === 'Search'
+    ? '正在查看参考与页面'
+    : variant === 'Steps'
+      ? '正在更新执行步骤'
+      : variant === 'Reasoning'
+        ? '正在推理'
+        : `正在调用 ${stage.tools.length} 个工具`
+  const doneLabel = variant === 'Search'
+    ? `已查看 ${stage.tools.length} 项参考`
+    : variant === 'Steps'
+      ? '执行进度已更新'
+      : variant === 'Reasoning'
+        ? '任务已整理'
+        : `${stage.tools.length} 次工具调用`
+  const done = `${doneLabel} · ${status}`
+  const query = variant === 'Search'
+    ? stage.tools.map(splitAction).find(item => item.target)?.target
+    : undefined
+  return <section className="bui-stage" data-turn={stage.turn} data-variant={variant}>
+    <Primitive
+      variant={variant}
+      rows={variant === 'Coding' ? [] : rows}
+      query={query}
+      active={active}
+      done={done}
+      working={working}
+      settledExpanded
+      compact
+    >
+      {variant === 'Coding' && <ToolChips steps={stage.tools} status={status} working={working} showHeader={false} />}
+    </Primitive>
+    {summary && stage.tools.length > 0 && <div className="bui-stage-summary"><MessageContent content={summary} plain /></div>}
+  </section>
+}
 
 const elapsedLabel = (startedAt: string, completedAt: string | undefined, now: number) => {
   const start = Date.parse(startedAt)
@@ -38,13 +135,14 @@ export function ThinkingState({
         : [],
     [run, useLive, w.busy, w.liveEvents, objective, workspace],
   )
+  const stages = useMemo(() => executionStages(steps), [steps])
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
     if (!w.busy) return
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(timer)
   }, [w.busy])
-  if (!steps.length) return null
+  if (!stages.length) return null
   const terminal = [...w.liveEvents].reverse().find(event => ['agent_end', 'agent_error'].includes(event.type))
   const liveStatus = terminal?.type === 'agent_error'
     ? 'failed'
@@ -61,7 +159,12 @@ export function ThinkingState({
   return <div className="bui-root bui-execution" aria-label="执行过程" data-run-id={run?.id || 'live'}>
     <AgentAvatar seed={run?.id || `live:${w.sessionId || 'new'}`} size={25} working={useLive && w.busy} />
     <div className="bui-execution-body">
-      <ToolChips steps={steps} status={done} working={useLive && w.busy} />
+      {stages.map((stage, index) => <StageTrace
+        key={stage.id}
+        stage={stage}
+        status={index === stages.length - 1 ? done : activityNames[stage.state]}
+        working={useLive && w.busy && index === stages.length - 1}
+      />)}
     </div>
   </div>
 }

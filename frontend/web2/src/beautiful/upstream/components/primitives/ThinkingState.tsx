@@ -13,7 +13,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
  * The trace runs once, settles, and remains expandable.
  * ───────────────────────────────────────────────────────── */
 
-type Row = {
+export type ThinkingRow = {
   primary: string;
   secondary?: string;
   mono?: boolean;
@@ -24,7 +24,7 @@ type Row = {
 
 const VARIANTS: Record<
   string,
-  { active: string; done: string; rows: Row[]; query?: string }
+  { active: string; done: string; rows: ThinkingRow[]; query?: string }
 > = {
   Steps: {
     active: "Thinking",
@@ -88,11 +88,14 @@ export default function ThinkingState({
   working = false,
   settledExpanded = false,
   children,
+  query,
+  moreCount = 0,
+  compact = false,
 }: {
   variant?: string;
   onSettled?: () => void;
   /** override the built-in trace content (keeps the primitive reusable) */
-  rows?: Row[];
+  rows?: ThinkingRow[];
   active?: string;
   done?: string;
   /** override the header glyph (defaults to the sparkle) */
@@ -101,6 +104,9 @@ export default function ThinkingState({
   /** keep the completed trace open until the user collapses it */
   settledExpanded?: boolean;
   children?: ReactNode;
+  query?: string;
+  moreCount?: number;
+  compact?: boolean;
 }) {
   const stage = working ? 2 : 4;
   const [manualExpanded, setManualExpanded] = useState<boolean | null>(null);
@@ -111,6 +117,7 @@ export default function ThinkingState({
     rows: rows ?? base.rows,
     active: active ?? base.active,
     done: done ?? base.done,
+    query: query ?? (rows ? undefined : base.query),
   };
   const autoExpanded = stage >= 1 && (stage < 4 || settledExpanded);
   const expanded = manualExpanded ?? autoExpanded;
@@ -140,7 +147,7 @@ export default function ThinkingState({
       key={variant}
       className="flex w-full max-w-95 flex-col"
       style={{
-        minHeight: working || expanded ? 176 : undefined,
+        minHeight: compact ? undefined : working || expanded ? 176 : undefined,
         transition: "min-height 400ms cubic-bezier(0.23,1,0.32,1)",
       }}
     >
@@ -195,14 +202,17 @@ export default function ThinkingState({
 
       {/* expandable trace */}
       <div
-        className="grid transition-[grid-template-rows,opacity] duration-400"
+        className="grid overflow-hidden transition-[grid-template-rows,opacity] duration-400"
+        inert={!expanded}
         style={{
           gridTemplateRows: expanded ? "1fr" : "0fr",
           opacity: expanded ? 1 : 0,
+          visibility: expanded ? "visible" : "hidden",
+          contentVisibility: expanded ? "visible" : "hidden",
           transitionTimingFunction: "cubic-bezier(0.23, 1, 0.32, 1)",
         }}
       >
-        <div className="overflow-hidden">
+        <div className="min-h-0 overflow-hidden">
           <div className="relative mt-1 ml-[5px] pl-4">
             <span
               aria-hidden
@@ -253,6 +263,13 @@ export default function ThinkingState({
               const animation = { animation: `fade-up 320ms cubic-bezier(0.23,1,0.32,1) ${i * 120}ms both` };
 
               if (variant === "Search") {
+                if (!row.href) {
+                  return (
+                    <div key={row.primary} className={rowClass} style={animation}>
+                      {content}
+                    </div>
+                  );
+                }
                 return (
                   <a
                     key={row.primary}
@@ -289,9 +306,9 @@ export default function ThinkingState({
                 </div>
               );
             })}
-            {variant === "Search" && stage >= 3 && (
+            {variant === "Search" && stage >= 3 && moreCount > 0 && (
               <span className="text-[12px] text-ink-3" style={{ animation: "fade-in 300ms ease-out both" }}>
-                +7 more
+                +{moreCount} more
               </span>
             )}
             </div>

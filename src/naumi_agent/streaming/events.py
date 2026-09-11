@@ -36,6 +36,7 @@ class EventType(StrEnum):
     PLAN_STEP_START = "plan_step_start"
     PLAN_STEP_UPDATE = "plan_step_update"
     PLAN_STEP_END = "plan_step_end"
+    PHASE_SUMMARY = "phase_summary"
 
     # 记忆
     MEMORY_STORED = "memory_stored"
@@ -119,6 +120,7 @@ _RUNTIME_EVENT_TYPE_MAP: dict[RuntimeEventType, EventType | None] = {
     RuntimeEventType.HOOK_TRACE: None,
     RuntimeEventType.LATENCY_METRIC: None,
     RuntimeEventType.PERF_PHASE: None,
+    RuntimeEventType.PHASE_SUMMARY: EventType.PHASE_SUMMARY,
     RuntimeEventType.PERMISSION_BUBBLE: EventType.PERMISSION_REQUEST,
     RuntimeEventType.RECOVERY_EVENT: None,
     RuntimeEventType.RESPONSE_END: EventType.AGENT_END,

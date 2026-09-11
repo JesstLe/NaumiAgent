@@ -13,8 +13,17 @@ export interface ReasoningStep {
 export interface ToolTimelineStep extends ActivityStep {
   kind: 'tool' | 'approval'
   action?: string
+  turn: number
 }
 export type ExecutionTimelineStep = ReasoningStep | ToolTimelineStep
+export interface ExecutionStage {
+  id: string
+  turn: number
+  state: ActivityState
+  summary: string
+  tools: ToolTimelineStep[]
+  notes: ReasoningStep[]
+}
 const stringify = (value: unknown): string => value == null ? '' : typeof value === 'string' ? value : JSON.stringify(value, null, 2)
 
 const normalizedText = (value: unknown): string => typeof value === 'string'
@@ -150,7 +159,7 @@ const reasoningLabel = (turn: number, context: ActivityContext, previous?: ToolT
 
 export function isTimelineEvent(event: StreamEvent): boolean {
   return ['turn_start', 'thinking_start', 'thinking_end', 'tool_call_start', 'tool_call_end',
-    'tool_call_error', 'permission_request', 'agent_end', 'agent_error', 'context_compacted'].includes(event.type)
+    'tool_call_error', 'permission_request', 'agent_end', 'agent_error', 'context_compacted', 'phase_summary'].includes(event.type)
     || (event.type === 'runtime_event' && event.data.event === 'task_snapshot')
 }
 
@@ -194,6 +203,11 @@ export function liveExecutionTimeline(
     if (seen.has(event.id)) continue
     seen.add(event.id)
     const turn = eventTurn(event)
+    if (event.type === 'phase_summary') {
+      const label = excerpt(event.data.activity_summary, 500)
+      if (label) rows.push({ id: `activity:${event.id}`, kind: 'reasoning', label, state: 'completed', turn })
+      continue
+    }
     if (event.type === 'context_compacted' || (event.type === 'runtime_event' && event.data.event === 'task_snapshot')) {
       const data = event.type === 'runtime_event' ? event.data.data : event.data
       if (data && typeof data === 'object' && !Array.isArray(data)) {
@@ -242,6 +256,7 @@ export function liveExecutionTimeline(
         String(event.data.name ?? event.data.tool_name ?? previous?.label ?? '工具'),
         event.data.arguments ?? event.data.args ?? previous?.input,
       ),
+      turn,
     }
     upsert(positionId, () => next, () => next)
   }
@@ -260,15 +275,17 @@ export function runExecutionTimeline(run: Run, context: ActivityContext = {}): E
   const request = run.steps.find(step => step.stage === 'request')
   const runContext = { ...context, objective: request?.summary || context.objective }
   let previous: ToolTimelineStep | undefined
+  let currentTurn = 1
   return run.steps
     .filter(step => ['analysis', 'tool', 'approval', 'activity'].includes(step.stage))
     .map((step): ExecutionTimelineStep => {
       if (step.stage === 'activity') {
-        return { id: `${run.id}:activity:${step.sequence}`, kind: 'reasoning', label: excerpt(step.summary, 500), state: activityState(step.status), turn: 0 }
+        return { id: `${run.id}:activity:${step.sequence}`, kind: 'reasoning', label: excerpt(step.summary, 500), state: activityState(step.status), turn: currentTurn }
       }
       if (step.stage === 'analysis') {
         const match = step.summary.match(/(\d+)/)
         const turn = match ? Number(match[1]) : 1
+        currentTurn = turn
         return {
           id: `${run.id}:reasoning:${step.sequence}`,
           kind: 'reasoning',
@@ -287,7 +304,38 @@ export function runExecutionTimeline(run: Run, context: ActivityContext = {}): E
         outputRecorded: step.metadata?.output_recorded,
         outputTruncated: step.metadata?.output_truncated,
         action: excerpt(step.metadata?.public_action) || legacyAction(step.summary, step.metadata?.input),
+        turn: currentTurn,
       }
       return previous
     })
+}
+
+const stageState = (rows: ExecutionTimelineStep[]): ActivityState => {
+  if (rows.some(row => row.state === 'failed')) return 'failed'
+  if (rows.some(row => row.state === 'running')) return 'running'
+  if (rows.some(row => row.state === 'cancelled')) return 'cancelled'
+  if (rows.some(row => row.state === 'unknown')) return 'unknown'
+  return 'completed'
+}
+
+/** Group the ordered public trace by ReAct turn without exposing model reasoning. */
+export function executionStages(rows: ExecutionTimelineStep[]): ExecutionStage[] {
+  const stages: ExecutionStage[] = []
+  const positions = new Map<number, number>()
+  for (const row of rows) {
+    const turn = row.turn > 0 ? row.turn : Math.max(1, stages.at(-1)?.turn ?? 1)
+    let position = positions.get(turn)
+    if (position === undefined) {
+      position = stages.length
+      positions.set(turn, position)
+      stages.push({ id: `turn:${turn}`, turn, state: row.state, summary: '', tools: [], notes: [] })
+    }
+    const stage = stages[position]
+    if (row.kind === 'reasoning') {
+      stage.notes.push(row)
+      if (!stage.summary) stage.summary = row.label
+    } else stage.tools.push(row)
+    stage.state = stageState([...stage.notes, ...stage.tools])
+  }
+  return stages
 }

@@ -671,6 +671,9 @@
 .bui-root .p-3 {
     padding: calc(var(--spacing) * 3);
   }
+.bui-root .px-0 {
+    padding-inline: 0;
+  }
 .bui-root .px-0\.5 {
     padding-inline: calc(var(--spacing) * 0.5);
   }

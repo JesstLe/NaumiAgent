@@ -116,6 +116,7 @@ export default function ToolChips({
   onOpenChange,
   onToggleRow,
   headerLabel,
+  showHeader = true,
 }: {
   /** Accepted for gallery/registry parity; ToolChips has no visual variants. */
   variant?: string;
@@ -127,6 +128,7 @@ export default function ToolChips({
   onOpenChange?: (open: boolean) => void;
   onToggleRow?: (label: string, open: boolean) => void;
   headerLabel?: string;
+  showHeader?: boolean;
 } = {}) {
   const copy = { ...DEFAULT_LABELS, ...labels };
   const step = steps.length + 1;
@@ -168,7 +170,7 @@ export default function ToolChips({
   return (
     <div className={`bui-tool-chips w-full max-w-80 pb-1${className ? ` ${className}` : ""}`}>
       {/* collapsed run header */}
-      <button
+      {showHeader && <button
         type="button"
         aria-expanded={open}
         aria-label={headerLabel}
@@ -184,7 +186,7 @@ export default function ToolChips({
           <path d="M6 9l6 6 6-6" />
         </svg>
         <span className="tabular-nums">{copy.header}</span>
-      </button>
+      </button>}
 
       {/* tool call rows */}
       <div className="grid transition-[grid-template-rows,opacity] duration-300" style={{ gridTemplateRows: open ? "1fr" : "0fr", opacity: open ? 1 : 0, visibility: open ? 'visible' : 'hidden' }}>
@@ -222,8 +224,8 @@ export default function ToolChips({
                 <span title={row.label} className="bui-operation min-w-0 max-w-[60%] truncate text-[12.5px] font-medium text-ink">{row.label}</span>
                 <span
                   title={row.chip}
-                  className={`bui-action-summary inline-flex h-5.5 min-w-0 flex-1 cursor-pointer items-center truncate rounded-chip bg-field px-1.5
-                    text-[11.5px] text-ink-2 shadow-hairline transition-colors duration-100 hover:bg-hover-2
+                  className={`bui-action-summary inline-flex h-5.5 min-w-0 flex-1 cursor-pointer items-center truncate px-0
+                    text-[11.5px] text-ink-2 transition-colors duration-100
                     ${row.mono ? "font-mono" : ""}`}
                 >
                   {row.chip}

@@ -1,8 +1,13 @@
 /* Host placement only. Primitive appearance comes from upstream.generated.css. */
 .bui-root { --font-inter: 'Inter Variable'; --font-mono-face: 'JetBrains Mono Variable'; font-family: 'Inter Variable', 'Microsoft YaHei', sans-serif; color: var(--ink); font-feature-settings: 'cv11', 'ss01'; font-size: 14px; letter-spacing: -.01em; line-height: 1.5; min-width: 0; }
 .bui-execution { display: flex; align-items: flex-start; gap: 10px; margin: 10px 0 22px; }
-.bui-execution-body { flex: 1; min-width: 0; }
+.bui-execution-body { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 13px; }
 .bui-execution-body > div { max-width: none; min-height: 0 !important; }
+.bui-stage { width: min(100%, 720px); }
+.bui-stage > div:first-child { max-width: 540px; }
+.bui-stage-summary { max-width: 680px; margin: 7px 0 0; color: var(--ink-2); font-size: 13px; line-height: 1.75; }
+.bui-stage-summary .rich-content > :first-child { margin-top: 0; }
+.bui-stage-summary .rich-content > :last-child { margin-bottom: 0; }
 .bui-root .bui-execution-body > .bui-tool-chips { width: 100%; max-width: 540px; }
 .bui-chip-rows > div > button { height: 28px; }
 .bui-chip-rows .bui-operation { flex-shrink: 0; max-width: 48%; }
