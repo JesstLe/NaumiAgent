@@ -4,6 +4,7 @@ import { mockWorkbenchApi } from './mocks'
 test('workspace tree and AI sources use real response data', async ({ page }) => {
   await mockWorkbenchApi(page)
   let retried = ''
+  let regenerated = false
   await page.route('**/api/v1/workspace/tree', route => route.fulfill({ json: {
     workspace_root: 'E:/Workspace/NaumiAgent',
     root_id: '.',
@@ -26,8 +27,12 @@ test('workspace tree and AI sources use real response data', async ({ page }) =>
   await page.route('**/sessions/*/messages', route => {
     if (route.request().method() !== 'POST') return route.fallback()
     retried = (route.request().postDataJSON() as { content?: string }).content || ''
-    return route.fulfill({ contentType: 'text/event-stream', body: 'data: {"id":"end","type":"agent_end","data":{"status":"completed"}}\n\n' })
+    regenerated = true
+    return route.fulfill({ contentType: 'text/event-stream', body: 'data: {"id":"token","type":"token_delta","run_id":"new-run","data":{"token":"重新生成后的答复。"}}\n\ndata: {"id":"end","type":"agent_end","run_id":"new-run","data":{"status":"completed"}}\n\n' })
   })
+  await page.route('**/sessions/*/runs?*', route => route.fulfill({ json: { runs: regenerated
+    ? [{ id: 'new-run', user_message_id: 'legacy-new', status: 'completed', started_at: '2026-09-11T10:01:00+08:00', completed_at: '2026-09-11T10:01:04+08:00', steps: [{ sequence: 1, stage: 'request', status: 'completed', summary: '核对来源', detail: '' }, { sequence: 2, stage: 'analysis', status: 'completed', summary: '第 1 轮分析', detail: '' }] }]
+    : [{ id: 'old-run', user_message_id: 'legacy-old', status: 'completed', started_at: '2026-09-11T09:59:55+08:00', completed_at: '2026-09-11T10:00:00+08:00', steps: [{ sequence: 1, stage: 'request', status: 'completed', summary: '核对来源', detail: '' }, { sequence: 2, stage: 'analysis', status: 'completed', summary: '第 1 轮分析', detail: '' }] }], total: 1 } }))
 
   await page.goto('/web2')
   const assistant = page.locator('.w2-message.assistant')
@@ -36,9 +41,13 @@ test('workspace tree and AI sources use real response data', async ({ page }) =>
   const actions = assistant.getByLabel('助手消息操作')
   await expect(actions).toContainText('10:00')
   await expect(actions.getByRole('button')).toHaveCount(4)
+  await expect(page.locator('[data-run-id="old-run"]')).toContainText('用时 5 秒 · 已完成')
   await actions.getByRole('button', { name: '重新生成' }).click()
   await expect.poll(() => retried).toBe('核对来源')
-  await page.getByRole('button', { name: '来源' }).click()
+  await expect(assistant).toContainText('重新生成后的答复。')
+  await expect(actions).not.toContainText('10:00')
+  await expect(page.locator('[data-run-id="new-run"]')).toContainText('用时 4 秒 · 已完成')
+  await page.getByRole('button', { name: '来源 1', exact: true }).click()
   await expect(page.getByRole('link', { name: /官方文档/ })).toHaveAttribute('href', 'https://example.com/docs')
   await page.getByRole('button', { name: '展开来源摘要：官方文档' }).click()
   await expect(page.getByText('这是服务端返回的真实来源摘要。')).toBeVisible()

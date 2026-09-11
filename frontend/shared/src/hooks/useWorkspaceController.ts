@@ -67,10 +67,12 @@ export function useWorkspaceController() {
     content: string
     error: string
     userMessageId?: string
+    assistantMessageId?: string
   } | null>(null)
   const [connecting, setConnecting] = useState(true)
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [runningUserMessageId, setRunningUserMessageId] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
   const [mutating, setMutating] = useState(false)
   const [draft, setDraftState] = useState(() => readPreference('draft:new'))
@@ -129,6 +131,7 @@ export function useWorkspaceController() {
       setSnapshotError('')
       setPermissions([])
       setLiveEvents([])
+      setRunningUserMessageId(null)
       setError('')
       setFailedSend(null)
       setDraftState(readPreference(`draft:${id ?? 'new'}`))
@@ -332,6 +335,7 @@ export function useWorkspaceController() {
   const send = async (
     contentOverride?: string,
     retryUserMessageId?: string,
+    replaceAssistantMessageId?: string,
   ) => {
     const requestedContent = contentOverride ?? draft
     if (!requestedContent.trim() || operation.current || !daemon || loading) return
@@ -342,14 +346,22 @@ export function useWorkspaceController() {
     setFailedSend(null)
     const sendGeneration = generation.current
     const content = requestedContent.trim()
-    const messageId = `stream-${crypto.randomUUID()}`
+    const messageId = replaceAssistantMessageId ?? `stream-${crypto.randomUUID()}`
     const optimisticUserId = retryUserMessageId ?? `user-${messageId}`
+    const replacingAssistant = Boolean(replaceAssistantMessageId)
+    const replacedAssistant = replaceAssistantMessageId
+      ? messages.find((message) => message.id === replaceAssistantMessageId)
+      : undefined
+    const startedAt = new Date().toISOString()
     let completed = false
     let failure = ''
+    let receivedAssistantContent = false
+    let succeeded = false
     let sessionReady = false
     let sentSessionId = ''
-    setMessages((previous) =>
-      retryUserMessageId
+    setRunningUserMessageId(optimisticUserId)
+    setMessages((previous) => {
+      const next = retryUserMessageId
         ? previous.map((message) =>
             message.id === retryUserMessageId
               ? { ...message, metadata: { ...message.metadata, pending: true } }
@@ -364,9 +376,21 @@ export function useWorkspaceController() {
               timestamp: new Date().toISOString(),
               metadata: { pending: true },
             },
-          ],
-    )
-    setDraft('')
+          ]
+      return replaceAssistantMessageId
+        ? next.map((message) =>
+            message.id === replaceAssistantMessageId
+              ? {
+                  ...message,
+                  content: '',
+                  timestamp: startedAt,
+                  metadata: { ...message.metadata, pending: true },
+                }
+              : message,
+          )
+        : next
+    })
+    if (!replacingAssistant) setDraft('')
     setLiveEvents([{
       id: `local-${messageId}`,
       type: 'turn_start',
@@ -380,7 +404,7 @@ export function useWorkspaceController() {
       sentSessionId = id
       runningSessionId.current = id
       sessionReady = true
-      savePreference(`draft:${id}`, '')
+      if (!replacingAssistant) savePreference(`draft:${id}`, '')
       if (stopped.current) return
       controller.current = new AbortController()
       runId.current = ''
@@ -389,9 +413,9 @@ export function useWorkspaceController() {
         {
           content,
           runtime_mode: mode,
-          source_ids: selectedSources,
+          source_ids: replacingAssistant ? [] : selectedSources,
           workbench_issue:
-            createIssue && snapshot?.missions[0]
+            !replacingAssistant && createIssue && snapshot?.missions[0]
               ? {
                   mission_id: snapshot.missions[0].id,
                   title: content.slice(0, 80),
@@ -405,6 +429,7 @@ export function useWorkspaceController() {
           if (activeId.current !== id) return
           if (event.type === 'token_delta') {
             const token = String(event.data.token ?? event.data.content ?? '')
+            if (token) receivedAssistantContent = true
             setMessages((previous) => {
               const exists = previous.some((item) => item.id === messageId)
               return exists
@@ -457,10 +482,13 @@ export function useWorkspaceController() {
       if (failure) throw new Error(failure)
       if (!completed && !stopped.current)
         throw new Error('响应连接已中断，请检查执行记录后重试')
-      setSelectedSources([])
+      if (replacingAssistant && !receivedAssistantContent)
+        throw new Error('重新生成未返回内容，请重试')
+      if (!replacingAssistant) setSelectedSources([])
+      succeeded = true
       setMessages((previous) =>
         previous.map((message) =>
-          message.id === optimisticUserId
+          message.id === optimisticUserId || message.id === messageId
             ? { ...message, metadata: { ...message.metadata, pending: false } }
             : message,
         ),
@@ -473,17 +501,32 @@ export function useWorkspaceController() {
         const message = errorText(e)
         if (!sessionReady)
           setMessages(previous => previous.filter(message => message.id !== optimisticUserId))
+        if (replacedAssistant)
+          setMessages(previous => previous.map(message =>
+            message.id === replaceAssistantMessageId ? replacedAssistant : message,
+          ))
         setError(message)
         setFailedSend({
           content,
           error: message,
           userMessageId: sessionReady ? optimisticUserId : undefined,
+          assistantMessageId: replaceAssistantMessageId,
         })
-        setDraft(content)
+        if (!replacingAssistant) setDraft(content)
       }
     } finally {
       controller.current = null
       setPermissions([])
+      if (
+        !succeeded &&
+        stopped.current &&
+        replacedAssistant &&
+        sendGeneration === generation.current
+      ) {
+        setMessages(previous => previous.map(message =>
+          message.id === replaceAssistantMessageId ? replacedAssistant : message,
+        ))
+      }
       if (sentSessionId) {
         const results = await Promise.allSettled([
           api.runs(sentSessionId),
@@ -501,6 +544,7 @@ export function useWorkspaceController() {
             )
       }
       setBusy(false)
+      setRunningUserMessageId(null)
       runningSessionId.current = null
       operation.current = false
       void taskState.refreshTasks()
@@ -510,8 +554,13 @@ export function useWorkspaceController() {
   const retryFailedSend = async () => {
     const failed = failedSend
     if (!failed || failed.error !== error || operation.current || !daemon || loading) return
-    await send(failed.content, failed.userMessageId)
+    await send(failed.content, failed.userMessageId, failed.assistantMessageId)
   }
+  const regenerate = async (
+    content: string,
+    userMessageId: string,
+    assistantMessageId: string,
+  ) => send(content, userMessageId, assistantMessageId)
   const stop = async () => {
     stopped.current = true
     try {
@@ -769,6 +818,7 @@ export function useWorkspaceController() {
     connecting,
     loading,
     busy,
+    runningUserMessageId,
     runningSessionId: runningSessionId.current,
     uploading,
     draft,
@@ -783,6 +833,7 @@ export function useWorkspaceController() {
     select,
     connect,
     send,
+    regenerate,
     stop,
     upload,
     loadDiff,

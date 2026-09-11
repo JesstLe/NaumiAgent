@@ -46,15 +46,14 @@ export function runsByUserMessage(
   const remainingUsers = users.filter(message => !assigned.has(message.id))
   const remainingRuns = runs
     .filter(run => !usedRuns.has(run.id))
-    .sort((left, right) => left.started_at.localeCompare(right.started_at) || left.id.localeCompare(right.id))
-  let userCursor = remainingUsers.length - 1
+    .sort((left, right) => right.started_at.localeCompare(left.started_at) || right.id.localeCompare(left.id))
 
-  for (let runIndex = remainingRuns.length - 1; runIndex >= 0 && userCursor >= 0; runIndex--) {
-    const run = remainingRuns[runIndex]
+  for (const run of remainingRuns) {
     const request = runRequest(run)
     let match = -1
     if (request) {
-      for (let index = userCursor; index >= 0; index--) {
+      for (let index = remainingUsers.length - 1; index >= 0; index--) {
+        if (assigned.has(remainingUsers[index].id)) continue
         const content = normalizedText(remainingUsers[index].content)
         if (content.startsWith(request) || request.startsWith(content.slice(0, 160))) {
           match = index
@@ -62,9 +61,16 @@ export function runsByUserMessage(
         }
       }
     }
-    if (match < 0) match = userCursor
+    if (match < 0) {
+      for (let index = remainingUsers.length - 1; index >= 0; index--) {
+        if (!assigned.has(remainingUsers[index].id)) {
+          match = index
+          break
+        }
+      }
+    }
+    if (match < 0) continue
     assigned.set(remainingUsers[match].id, run)
-    userCursor = match - 1
   }
   return assigned
 }
