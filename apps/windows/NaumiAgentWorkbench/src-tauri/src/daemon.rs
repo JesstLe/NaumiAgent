@@ -314,7 +314,7 @@ pub async fn start_daemon(config: DaemonLaunchConfig) -> Result<DaemonStatus, St
     // Persist the effective launch configuration for later inspection.
     let persisted = DaemonLaunchConfig {
         executable: Some(resolved_executable.clone()),
-        args: args.clone(),
+        args: config.args.clone(),
         working_dir: config.working_dir.clone(),
         port: Some(port),
         env_vars: config.env_vars.clone(),

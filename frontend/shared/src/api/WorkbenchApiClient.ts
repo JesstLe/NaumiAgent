@@ -38,6 +38,9 @@ import type {
   ChatEnvironmentResponse,
   SessionUpdate,
   GitDiffResponse,
+  GitBranchesResponse,
+  ScheduleJob,
+  SkillExtensionsResponse,
 } from './types'
 
 export type TokenProvider = () => Promise<string | null>
@@ -163,6 +166,14 @@ export class WorkbenchApiClient {
     })
   }
 
+  async pinSession(sessionId: string, pinned: boolean): Promise<Session> {
+    return this.request<Session>({
+      method: 'POST',
+      url: `/sessions/${encodeURIComponent(sessionId)}/pin`,
+      data: { pinned },
+    })
+  }
+
   async archiveSession(sessionId: string): Promise<void> {
     try {
       await this.request<void>({
@@ -179,6 +190,51 @@ export class WorkbenchApiClient {
       }
       throw error
     }
+  }
+
+  async duplicateSession(sessionId: string): Promise<Session> {
+    return this.request<Session>({
+      method: 'POST',
+      url: `/sessions/${encodeURIComponent(sessionId)}/duplicate`,
+    })
+  }
+
+  async schedules(): Promise<{ schedules: ScheduleJob[] }> {
+    return this.request({ method: 'GET', url: '/schedules' })
+  }
+
+  async createSchedule(body: {
+    kind: 'once' | 'cron'
+    expression: string
+    prompt: string
+  }): Promise<ScheduleJob> {
+    return this.request({ method: 'POST', url: '/schedules', data: body })
+  }
+
+  async controlSchedule(
+    scheduleId: string,
+    action: 'pause' | 'resume' | 'cancel',
+  ): Promise<ScheduleJob> {
+    return this.request({
+      method: 'POST',
+      url: `/schedules/${encodeURIComponent(scheduleId)}/${action}`,
+    })
+  }
+
+  async skillExtensions(): Promise<SkillExtensionsResponse> {
+    return this.request({ method: 'GET', url: '/extensions/skills' })
+  }
+
+  async gitBranches(): Promise<GitBranchesResponse> {
+    return this.request({ method: 'GET', url: '/workspace/git/branches' })
+  }
+
+  async switchGitBranch(branch: string): Promise<GitBranchesResponse> {
+    return this.request({
+      method: 'POST',
+      url: '/workspace/git/branch',
+      data: { branch },
+    })
   }
 
   async fetchMessages(sessionId: string, page = 1, pageSize = 50): Promise<MessageListResponse> {

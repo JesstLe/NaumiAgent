@@ -312,6 +312,54 @@ export interface Session {
   total_tokens: number
   total_cost_usd: number
   status: string
+  pinned?: boolean
+  workspace_root?: string
+  git_branch?: string
+  summary?: string
+}
+
+export interface ScheduleJob {
+  id: string
+  kind: 'once' | 'cron'
+  expression: string
+  prompt: string
+  target: string
+  status: 'active' | 'paused' | 'cancelled' | 'completed'
+  next_fire_at: string
+  created_at: string
+  last_fired_at: string
+  fired_count: number
+}
+
+export interface SkillExtension {
+  name: string
+  manifest_path: string
+  source_scope: string
+  source_priority: number
+  state: 'selected' | 'shadowed' | 'invalid'
+  reason_code: string
+  selected_manifest_path: string
+}
+
+export interface SkillExtensionsResponse {
+  summary: { selected: number; shadowed: number; invalid: number }
+  sources: Array<{
+    scope: string
+    path: string
+    priority: number
+    available: boolean
+    requires_trust_gate: boolean
+  }>
+  skills: SkillExtension[]
+}
+
+export interface GitBranchesResponse {
+  available: boolean
+  workspace_root: string
+  current: string
+  branches: string[]
+  dirty: boolean
+  error: string
 }
 
 export interface SessionListResponse {

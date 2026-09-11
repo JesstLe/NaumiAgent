@@ -80,4 +80,10 @@ export class TauriPlatformAdapter extends BrowserPlatformAdapter implements Plat
   async openInTerminal(path: string): Promise<void> {
     await invoke('open_in_terminal', { path })
   }
+
+  async selectWorkspaceDirectory(initialPath?: string): Promise<string | null> {
+    return invoke<string | null>('select_workspace_directory', {
+      initialPath: initialPath || null,
+    })
+  }
 }

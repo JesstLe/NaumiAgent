@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Clock3,
   Copy,
+  CopyPlus,
   File,
   FolderClosed,
   FolderOpen,
@@ -16,18 +17,26 @@ import {
   HelpCircle,
   Loader2,
   ListTodo,
+  Lightbulb,
+  MoreHorizontal,
   Maximize2,
   Minimize2,
   PanelBottom,
   PanelLeft,
   PanelRight,
   Plus,
+  Pin,
+  PinOff,
+  Archive,
+  Pencil,
+  Plug,
   Search,
   Settings2,
   ShieldCheck,
   Square,
   SquarePen,
   Terminal,
+  Target,
   Workflow,
   X,
 } from 'lucide-react'
@@ -55,8 +64,26 @@ import './beautiful/beautiful.css'
 import '@fontsource-variable/inter'
 import '@fontsource-variable/jetbrains-mono'
 import { useCommandCompletion } from '@naumi/shared/hooks/useCommandCompletion'
+import type {
+  GitBranchesResponse,
+  ScheduleJob,
+  SkillExtensionsResponse,
+} from '@naumi/shared/api/types'
 
-type Panel = 'home' | 'review' | 'files' | 'browser' | 'tools' | 'tasks'
+type Panel =
+  | 'home'
+  | 'review'
+  | 'files'
+  | 'browser'
+  | 'tools'
+  | 'tasks'
+  | 'todos'
+  | 'goal'
+  | 'context'
+  | 'flow'
+  | 'insights'
+  | 'schedules'
+  | 'plugins'
 const panelNames: Record<Panel, string> = {
   home: '工作区',
   review: '审查',
@@ -64,6 +91,13 @@ const panelNames: Record<Panel, string> = {
   browser: '浏览器',
   tools: '工具与扩展',
   tasks: '任务',
+  todos: '待办',
+  goal: '目标',
+  context: '上下文',
+  flow: '依赖',
+  insights: '洞察',
+  schedules: '定时任务',
+  plugins: '插件',
 }
 
 function Logo({ className = '' }: { className?: string }) {
@@ -157,6 +191,78 @@ function MessageContent({ content }: { content: string }) {
   )
 }
 
+function SchedulePanel() {
+  const w = useWorkspace()
+  const [jobs, setJobs] = useState<ScheduleJob[]>([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [kind, setKind] = useState<'once' | 'cron'>('once')
+  const [expression, setExpression] = useState('')
+  const [prompt, setPrompt] = useState('')
+  const load = async () => {
+    setLoading(true)
+    try {
+      setJobs((await w.api.schedules()).schedules)
+    } catch (error) {
+      w.setError(errorText(error))
+    } finally {
+      setLoading(false)
+    }
+  }
+  useEffect(() => { void load() }, [])
+  const control = async (id: string, action: 'pause' | 'resume' | 'cancel') => {
+    try {
+      const updated = await w.api.controlSchedule(id, action)
+      setJobs(previous => previous.map(job => job.id === id ? updated : job))
+    } catch (error) {
+      w.setError(errorText(error))
+    }
+  }
+  return <div className="w2-resource-panel">
+    <div className="w2-section-heading"><span>定时任务 <small>{jobs.length}</small></span><button disabled={loading} onClick={() => void load()}>刷新</button></div>
+    <form className="w2-resource-form" onSubmit={async event => {
+      event.preventDefault(); setSaving(true)
+      try {
+        const created = await w.api.createSchedule({ kind, expression, prompt })
+        setJobs(previous => [created, ...previous]); setExpression(''); setPrompt('')
+      } catch (error) { w.setError(errorText(error)) } finally { setSaving(false) }
+    }}>
+      <div><select aria-label="定时类型" value={kind} onChange={event => setKind(event.target.value as 'once' | 'cron')}><option value="once">单次</option><option value="cron">周期</option></select>
+        <input aria-label="执行时间" required value={expression} onChange={event => setExpression(event.target.value)} placeholder={kind === 'once' ? '2026-09-12T09:00:00+08:00' : '*/15 * * * *'} /></div>
+      <textarea aria-label="提醒内容" required value={prompt} onChange={event => setPrompt(event.target.value)} placeholder="触发时要继续处理什么？" />
+      <button className="w2-primary" disabled={saving || !expression.trim() || !prompt.trim()}>{saving ? '创建中…' : '创建定时任务'}</button>
+    </form>
+    {!jobs.length && <p className="w2-muted">{loading ? '正在读取定时任务…' : '暂无定时任务'}</p>}
+    {jobs.map(job => <article className="w2-resource-card" key={job.id}>
+      <header><Clock3 size={15} /><strong>{job.kind === 'cron' ? '周期任务' : '单次任务'}</strong><span>{({ active: '启用', paused: '暂停', cancelled: '已取消', completed: '已完成' } as Record<string, string>)[job.status]}</span></header>
+      <p>{job.prompt}</p><code>{job.expression}</code>{job.next_fire_at && <small>下次执行 {new Date(job.next_fire_at).toLocaleString('zh-CN')}</small>}
+      <div>{job.status === 'active' && <button onClick={() => void control(job.id, 'pause')}>暂停</button>}{job.status === 'paused' && <button onClick={() => void control(job.id, 'resume')}>恢复</button>}{!['cancelled', 'completed'].includes(job.status) && <button onClick={() => void control(job.id, 'cancel')}>取消</button>}</div>
+    </article>)}
+  </div>
+}
+
+function PluginPanel() {
+  const w = useWorkspace()
+  const [data, setData] = useState<SkillExtensionsResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+  const load = async () => {
+    setLoading(true)
+    try { setData(await w.api.skillExtensions()) }
+    catch (error) { w.setError(errorText(error)) }
+    finally { setLoading(false) }
+  }
+  useEffect(() => { void load() }, [])
+  return <div className="w2-resource-panel">
+    <div className="w2-section-heading"><span>插件与 Skills {data && <small>{data.summary.selected} 个生效</small>}</span><button disabled={loading} onClick={() => void load()}>刷新</button></div>
+    {!data?.skills.length && <p className="w2-muted">{loading ? '正在扫描插件…' : '没有发现 Skill 插件'}</p>}
+    {data?.skills.map(skill => <article className={`w2-resource-card ${skill.state}`} key={`${skill.source_scope}:${skill.manifest_path}`}>
+      <header><Plug size={15} /><strong>{skill.name}</strong><span>{skill.state === 'selected' ? '已启用' : skill.state === 'shadowed' ? '已被覆盖' : '无效'}</span></header>
+      <p>{skill.manifest_path}</p><small>{skill.source_scope} · 优先级 {skill.source_priority + 1}</small>
+    </article>)}
+    {!!data?.sources.length && <details className="w2-plugin-sources"><summary>插件来源</summary>{data.sources.map(source => <p key={source.path}>{source.priority + 1}. {source.path} · {source.available ? '可用' : '目录不存在'}</p>)}</details>}
+  </div>
+}
+
 export function Web2() {
   const w = useWorkspace()
   const platform = usePlatform()
@@ -171,15 +277,20 @@ export function Web2() {
     () => readPreference('terminal', 'true') === 'true',
   )
   const [panel, setPanel] = useState<Panel>('home')
-  const [summary, setSummary] = useState<'todos' | 'goal' | 'context' | 'flow' | 'insights' | null>(null)
   const [expanded, setExpanded] = useState(true)
   const [searching, setSearching] = useState(false)
   const [query, setQuery] = useState('')
   const [toolQuery, setToolQuery] = useState('')
   const [browserUrl, setBrowserUrl] = useState('')
-  const [dialog, setDialog] = useState<'settings' | 'help' | 'delete' | null>(
+  const [dialog, setDialog] = useState<'settings' | 'help' | 'delete' | 'rename' | null>(
     null,
   )
+  const [renameTitle, setRenameTitle] = useState('')
+  const [renameSessionId, setRenameSessionId] = useState('')
+  const [sessionMenu, setSessionMenu] = useState<string | null>(null)
+  const [workspaceMenu, setWorkspaceMenu] = useState(false)
+  const [gitState, setGitState] = useState<GitBranchesResponse | null>(null)
+  const [workspaceSwitching, setWorkspaceSwitching] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
   const dialogRef = useRef<HTMLDialogElement>(null)
   const textarea = useRef<HTMLTextAreaElement>(null)
@@ -195,7 +306,10 @@ export function Web2() {
     (latest, item, index) => item.role === 'user' ? index : latest,
     -1,
   )
-  const locked = w.busy || w.uploading || w.mutating
+  const composerLocked = w.busy || w.uploading || w.loading || w.connecting
+  const uploadLocked = w.busy || w.uploading || !w.daemon
+  const currentWriteLocked = (id: string) =>
+    w.mutating || (w.busy && w.runningSessionId === id)
   const branch = w.diff?.branch || w.snapshot?.worktrees[0]?.branch
   const filteredSessions = w.sessions.filter((item) =>
     (item.title || item.id).toLowerCase().includes(query.trim().toLowerCase()),
@@ -218,8 +332,8 @@ export function Web2() {
     })
   const panelControls = (
     <div className="w2-panel-controls" role="group" aria-label="面板显示控制">
-      <IconButton label="切换执行面板" active={terminal} onClick={toggleTerminal}><PanelBottom /></IconButton>
       <IconButton label="切换右侧面板" active={right} onClick={toggleRight}><PanelRight /></IconButton>
+      <IconButton label="切换执行面板" active={terminal} onClick={toggleTerminal}><PanelBottom /></IconButton>
     </div>
   )
   const openPanel = (next: Panel) => {
@@ -229,6 +343,38 @@ export function Web2() {
   const newChat = () => {
     void w.select(null)
     textarea.current?.focus()
+  }
+  const loadGitState = async () => {
+    try { setGitState(await w.api.gitBranches()) }
+    catch (error) { w.setError(errorText(error)) }
+  }
+  const openWorkspaceMenu = () => {
+    setWorkspaceMenu(value => !value)
+    if (!workspaceMenu) void loadGitState()
+  }
+  const openPath = (mode: 'explorer' | 'terminal') => {
+    const path = w.daemon?.workspace_root
+    const action = mode === 'explorer' ? platform.openInExplorer : platform.openInTerminal
+    if (!path || !action) return
+    void action.call(platform, path).catch(error => w.setError(errorText(error)))
+  }
+  const chooseWorkspace = async () => {
+    if (!platform.selectWorkspaceDirectory || !platform.getDaemonLaunchConfig || !platform.startDaemon) return
+    const path = await platform.selectWorkspaceDirectory(w.daemon?.workspace_root)
+    if (!path) return
+    setWorkspaceSwitching(true)
+    try {
+      const previous = await platform.getDaemonLaunchConfig()
+      const config = previous ?? { executable: null, args: [], working_dir: null, port: null, env_vars: {} }
+      config.working_dir = path
+      await platform.setDaemonLaunchConfig?.(config)
+      const status = await platform.startDaemon(config)
+      if (!status.running || !status.url) throw new Error(status.last_error || '新工作目录启动失败')
+      savePreference('api', status.url)
+      window.location.reload()
+    } catch (error) {
+      w.setError(errorText(error)); setWorkspaceSwitching(false)
+    }
   }
 
   useEffect(() => {
@@ -293,8 +439,10 @@ export function Web2() {
       <header className="w2-titlebar">
         <MenuBar menus={[
           { label: '文件', actions: [
-            { label: '新建对话', run: newChat, disabled: locked },
-            { label: '添加文件', run: () => fileInput.current?.click(), disabled: locked || !w.daemon },
+            { label: '新建对话', run: newChat },
+            { label: '新建侧边聊天', run: () => { void w.createSidebarSession() }, disabled: !w.daemon || w.mutating },
+            { label: '打开新的工作目录', run: () => { void chooseWorkspace() }, disabled: !platform.selectWorkspaceDirectory || workspaceSwitching || w.busy },
+            { label: '添加文件', run: () => fileInput.current?.click(), disabled: uploadLocked },
             { label: '导出对话', disabled: !messages.length, run: () => {
               const blob = new Blob([messages.map(item => `## ${item.role === 'user' ? '用户' : 'NaumiAgent'}\n\n${item.content}`).join('\n\n')], { type: 'text/markdown;charset=utf-8' })
               const url = URL.createObjectURL(blob)
@@ -303,7 +451,7 @@ export function Web2() {
               setTimeout(() => URL.revokeObjectURL(url), 1000)
             } },
             { label: '设置', run: () => setDialog('settings') },
-            { label: '删除当前会话', disabled: !current || locked, run: () => setDialog('delete') },
+            { label: '删除当前会话', disabled: !current || currentWriteLocked(current.id), run: () => setDialog('delete') },
           ] },
           { label: '编辑', actions: [
             { label: '编辑消息', run: () => textarea.current?.focus() },
@@ -317,18 +465,20 @@ export function Web2() {
             { label: terminal ? '隐藏执行记录' : '显示执行记录', shortcut: 'Ctrl+J', run: toggleTerminal },
             { label: '代码更改', shortcut: 'Ctrl+Shift+G', run: () => openPanel('review') },
             { label: '会话文件', run: () => openPanel('files') },
-            { label: '待办', run: () => setSummary('todos') },
-            { label: '目标', run: () => setSummary('goal') },
-            { label: '上下文快照', run: () => setSummary('context') },
-            { label: '任务依赖图', run: () => setSummary('flow') },
-            { label: '会话洞察', run: () => setSummary('insights') },
+            { label: '待办', run: () => openPanel('todos') },
+            { label: '目标', run: () => openPanel('goal') },
+            { label: '上下文快照', run: () => openPanel('context') },
+            { label: '任务依赖图', run: () => openPanel('flow') },
+            { label: '会话洞察', run: () => openPanel('insights') },
+            { label: '定时任务', run: () => openPanel('schedules') },
+            { label: '插件', run: () => openPanel('plugins') },
             { label: '任务记录', run: () => openPanel('tasks') },
             { label: fullscreen ? '退出全屏' : '进入全屏', run: () => { void (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()).catch(() => w.setError('浏览器暂不支持全屏')) } },
           ] },
           { label: '帮助', actions: [
             { label: '快捷键', run: () => setDialog('help') },
             { label: '工具与扩展', run: () => openPanel('tools') },
-            { label: '重新连接', disabled: locked || w.connecting, run: () => { void w.connect() } },
+            { label: '重新连接', disabled: w.connecting, run: () => { void w.connect() } },
           ] },
         ]} />
         <IconButton label="切换侧栏" onClick={toggleSidebar}>
@@ -336,7 +486,23 @@ export function Web2() {
         </IconButton>
         <span>NaumiAgent</span>
         <span className="w2-title-divider">/</span>
-        <span>{workspace}</span>
+        <div className="w2-workspace-switcher">
+          <button aria-label="工作目录与运行环境" aria-expanded={workspaceMenu} onClick={openWorkspaceMenu}>{workspace}<ChevronDown size={12} /></button>
+          {workspaceMenu && <div className="w2-workspace-menu">
+            <header><FolderClosed size={15} /><div><strong>{workspace}</strong><small>{w.daemon?.workspace_root || '未连接工作目录'}</small></div></header>
+            <label>运行位置<select aria-label="运行位置" value="local" onChange={() => {}}><option value="local">本地</option><option value="cloud" disabled>云端（尚未连接）</option></select></label>
+            {gitState?.available && <label>Git 分支<select aria-label="Git 分支" value={gitState.current} disabled={w.busy || gitState.dirty} onChange={async event => {
+              try { setGitState(await w.api.switchGitBranch(event.target.value)); void w.loadDiff() }
+              catch (error) { w.setError(errorText(error)) }
+            }}>{gitState.branches.map(name => <option value={name} key={name}>{name}</option>)}</select>{gitState.dirty && <small>工作区有未提交修改，暂不能切换</small>}</label>}
+            {gitState && !gitState.available && <p>{gitState.error}</p>}
+            <div className="w2-workspace-actions">
+              <button disabled={!platform.openInExplorer} onClick={() => openPath('explorer')}>资源管理器</button>
+              <button disabled={!platform.openInTerminal} onClick={() => openPath('terminal')}>终端</button>
+            </div>
+            <button className="w2-workspace-open" disabled={!platform.selectWorkspaceDirectory || workspaceSwitching || w.busy} onClick={() => void chooseWorkspace()}>{workspaceSwitching ? '正在切换…' : '打开新的工作目录'}</button>
+          </div>}
+        </div>
         <div className="w2-title-end">
           <span className={`w2-connection-dot ${w.daemon ? 'online' : ''}`} />
           {w.connecting ? '连接中' : w.daemon ? '本地工作区' : '未连接'}
@@ -344,7 +510,7 @@ export function Web2() {
       </header>
       <aside className="w2-sidebar" aria-label="项目侧栏">
         <div className="w2-brand">
-          <button onClick={newChat} disabled={locked}>
+          <button onClick={openWorkspaceMenu}>
             <span>NaumiAgent</span>
             <ChevronDown size={14} />
           </button>
@@ -356,7 +522,7 @@ export function Web2() {
           </IconButton>
         </div>
         <nav className="w2-nav" aria-label="主导航">
-          <button disabled={locked} onClick={newChat}>
+          <button onClick={newChat}>
             <SquarePen />
             新对话<span className="w2-nav-hint">＋</span>
           </button>
@@ -367,6 +533,8 @@ export function Web2() {
             <Workflow />
             工具与扩展
           </button>
+          <button onClick={() => openPanel('schedules')} className={panel === 'schedules' ? 'selected' : ''}><Clock3 />定时任务</button>
+          <button onClick={() => openPanel('plugins')} className={panel === 'plugins' ? 'selected' : ''}><Plug />插件</button>
         </nav>
         {searching && (
           <div className="w2-search">
@@ -391,7 +559,7 @@ export function Web2() {
         )}
         <div className="w2-project-label">
           项目
-          <IconButton label="新建对话" disabled={locked} onClick={newChat}>
+          <IconButton label="新建侧边聊天" disabled={!w.daemon || w.mutating} onClick={() => { void w.createSidebarSession() }}>
             <Plus />
           </IconButton>
         </div>
@@ -408,19 +576,22 @@ export function Web2() {
           {expanded && (
             <div className="w2-session-list">
               {filteredSessions.map((session) => (
-                <button
-                  key={session.id}
-                  className={session.id === w.sessionId ? 'selected' : ''}
-                  aria-current={session.id === w.sessionId ? 'page' : undefined}
-                  title={session.title || '新对话'}
-                  disabled={locked}
-                  onClick={() => void w.select(session.id)}
-                >
-                  <span>{session.title || '新对话'}</span>
-                  {w.busy && session.id === w.sessionId && (
-                    <Loader2 className="w2-spin" size={13} />
-                  )}
-                </button>
+                <div className={`w2-session-row ${session.id === w.sessionId ? 'selected' : ''}`} key={session.id}>
+                  <button className="w2-session-open" aria-current={session.id === w.sessionId ? 'page' : undefined} title={session.title || '新对话'} onClick={() => void w.select(session.id)}>
+                    {session.pinned && <Pin size={11} />}
+                    <span>{session.title || '新对话'}</span>
+                    {w.busy && session.id === w.runningSessionId && <Loader2 className="w2-spin" size={13} />}
+                  </button>
+                  <IconButton label={`会话操作 ${session.title || '新对话'}`} active={sessionMenu === session.id} onClick={() => setSessionMenu(value => value === session.id ? null : session.id)}><MoreHorizontal /></IconButton>
+                  {sessionMenu === session.id && <div className="w2-session-menu">
+                    <button disabled={currentWriteLocked(session.id)} onClick={() => { setRenameTitle(session.title || '新对话'); setRenameSessionId(session.id); setDialog('rename'); setSessionMenu(null) }}><Pencil />修改名称</button>
+                    <button disabled={w.mutating} onClick={() => { void w.pinSession(session.id, !session.pinned); setSessionMenu(null) }}>{session.pinned ? <PinOff /> : <Pin />}{session.pinned ? '取消置顶' : '置顶'}</button>
+                    <button disabled={currentWriteLocked(session.id)} onClick={() => { void w.duplicateSession(session.id); setSessionMenu(null) }}><CopyPlus />复制会话</button>
+                    <button disabled={!platform.openInExplorer} onClick={() => { openPath('explorer'); setSessionMenu(null) }}><FolderOpen />在资源管理器中打开</button>
+                    <button disabled={!platform.openInTerminal} onClick={() => { openPath('terminal'); setSessionMenu(null) }}><Terminal />在终端中打开</button>
+                    <button disabled={currentWriteLocked(session.id)} onClick={() => { void w.archiveSession(session.id); setSessionMenu(null) }}><Archive />归档</button>
+                  </div>}
+                </div>
               ))}
               {!filteredSessions.length && (
                 <div className="w2-sidebar-empty">
@@ -450,25 +621,10 @@ export function Web2() {
           <section className="w2-chat" aria-label="对话">
             <div className="w2-chat-heading">
               <span>{current?.title || '新对话'}</span>
-              <IconButton label="切换对话摘要" active={summary !== null} onClick={() => setSummary(value => value ? null : 'todos')}><ListTodo /></IconButton>
+              <IconButton label="打开待办面板" active={panel === 'todos' && right} onClick={() => openPanel('todos')}><ListTodo /></IconButton>
               <div className="w2-mobile-tools"><IconButton label="打开文件面板" onClick={() => openPanel('files')}><FolderClosed /></IconButton></div>
               <div className={`w2-chat-panel-controls ${right ? 'right-open' : ''}`}>{panelControls}</div>
             </div>
-            {summary && <section className="w2-chat-summary" aria-label="对话摘要">
-              <div className="w2-summary-heading">
-                <button aria-pressed={summary === 'todos'} onClick={() => setSummary('todos')}>待办</button>
-                <button aria-pressed={summary === 'goal'} onClick={() => setSummary('goal')}>目标</button>
-                <button aria-pressed={summary === 'context'} onClick={() => setSummary('context')}>上下文</button>
-                <button aria-pressed={summary === 'flow'} onClick={() => setSummary('flow')}>依赖</button>
-                <button aria-pressed={summary === 'insights'} onClick={() => setSummary('insights')}>洞察</button>
-                <IconButton label="收起对话摘要" onClick={() => setSummary(null)}><X /></IconButton>
-              </div>
-              {summary === 'todos' && <TodoPanel key={w.sessionId || 'new'} />}
-              {summary === 'goal' && <GoalPanel />}
-              {summary === 'context' && <ContextCards />}
-              {summary === 'flow' && <Flowchart key={w.sessionId || 'new'} />}
-              {summary === 'insights' && <InsightCards onInspect={key => setSummary(key === 'context' ? 'context' : 'todos')} />}
-            </section>}
             <div
               className="w2-conversation"
               ref={scroll}
@@ -505,7 +661,6 @@ export function Web2() {
               )}
             </div>
             <div className="w2-composer-wrap">
-              {!summary && <TodoPanel compact onExpand={() => setSummary('todos')} />}
               {w.error && (
                 <div className="w2-error" role="alert">
                   <span>{w.error}</span>
@@ -559,7 +714,7 @@ export function Web2() {
                 }}
                 onDrop={(event) => {
                   event.preventDefault()
-                  if (!locked) void w.upload(event.dataTransfer.files)
+                  if (!uploadLocked) void w.upload(event.dataTransfer.files)
                 }}
               >
                 <textarea
@@ -569,7 +724,7 @@ export function Web2() {
                   aria-activedescendant={completion.items.length ? `w2-command-${completion.index}` : undefined}
                   placeholder="描述任务，或输入 / 使用命令"
                   value={w.draft}
-                  disabled={w.busy || w.loading || w.connecting}
+                  disabled={w.loading || w.connecting}
                   onChange={(event) => w.setDraft(event.target.value)}
                   onKeyDown={(event) => {
                     if (completion.onKeyDown(event)) return
@@ -602,7 +757,6 @@ export function Web2() {
                           {source.title}
                           <IconButton
                             label={`移除附件 ${source.title}`}
-                            disabled={w.busy}
                             onClick={() =>
                               w.setSelectedSources(
                                 w.selectedSources.filter(
@@ -630,7 +784,7 @@ export function Web2() {
                   />
                   <IconButton
                     label="添加附件"
-                    disabled={locked || !w.daemon}
+                    disabled={uploadLocked}
                     onClick={() => fileInput.current?.click()}
                   >
                     {w.uploading ? <Loader2 className="w2-spin" /> : <Plus />}
@@ -640,7 +794,7 @@ export function Web2() {
                     <select
                       aria-label="执行模式"
                       value={w.mode}
-                      disabled={locked}
+                      disabled={w.uploading}
                       onChange={(event) =>
                         w.setMode(event.target.value as typeof w.mode)
                       }
@@ -654,7 +808,7 @@ export function Web2() {
                     <select
                       aria-label="模型"
                       value={w.model}
-                      disabled={locked || !w.daemon}
+                      disabled={!w.daemon || w.uploading || (w.busy && w.sessionId === w.runningSessionId)}
                       onChange={(event) =>
                         void w.changeModel(event.target.value)
                       }
@@ -678,7 +832,7 @@ export function Web2() {
                     title={w.busy ? '停止执行' : '发送消息'}
                     disabled={
                       !w.busy &&
-                      (!w.draft.trim() || !w.daemon || locked || w.loading)
+                      (!w.draft.trim() || !w.daemon || composerLocked)
                     }
                     onClick={() => void (w.busy ? w.stop() : w.send())}
                   >
@@ -719,6 +873,13 @@ export function Web2() {
                 {panelControls}
               </div>
             </header>
+            <nav className="w2-right-nav" aria-label="会话详情导航">
+              <button className={panel === 'todos' ? 'selected' : ''} onClick={() => openPanel('todos')}><ListTodo />待办</button>
+              <button className={panel === 'goal' ? 'selected' : ''} onClick={() => openPanel('goal')}><Target />目标</button>
+              <button className={panel === 'context' ? 'selected' : ''} onClick={() => openPanel('context')}><File />上下文</button>
+              <button className={panel === 'flow' ? 'selected' : ''} onClick={() => openPanel('flow')}><Workflow />依赖</button>
+              <button className={panel === 'insights' ? 'selected' : ''} onClick={() => openPanel('insights')}><Lightbulb />洞察</button>
+            </nav>
             {panel === 'home' ? (
               <div className="w2-launcher">
                 <button aria-label="审查" onClick={() => openPanel('review')}>
@@ -740,16 +901,25 @@ export function Web2() {
                   <FolderClosed />
                   <span>文件</span>
                 </button>
+                <button onClick={() => openPanel('schedules')}><Clock3 /><span>定时任务</span></button>
+                <button onClick={() => openPanel('plugins')}><Plug /><span>插件</span></button>
               </div>
             ) : (
               <div className="w2-panel-content">
                 {panel === 'review' && <DiffPanel />}
+                {panel === 'todos' && <TodoPanel key={w.sessionId || 'new'} />}
+                {panel === 'goal' && <GoalPanel />}
+                {panel === 'context' && <ContextCards />}
+                {panel === 'flow' && <Flowchart key={w.sessionId || 'new'} />}
+                {panel === 'insights' && <InsightCards onInspect={key => openPanel(key === 'context' ? 'context' : 'todos')} />}
+                {panel === 'schedules' && <SchedulePanel />}
+                {panel === 'plugins' && <PluginPanel />}
                 {panel === 'files' && (
                   <>
                     <div className="w2-section-heading">
                       <span>会话文件</span>
                       <button
-                        disabled={locked || !w.daemon}
+                        disabled={uploadLocked}
                         onClick={() => fileInput.current?.click()}
                       >
                         <Plus size={14} />
@@ -769,7 +939,7 @@ export function Web2() {
                         <input
                           type="checkbox"
                           aria-label={`附加 ${source.title}`}
-                          disabled={locked}
+                          disabled={w.uploading}
                           checked={w.selectedSources.includes(source.id)}
                           onChange={(event) =>
                             w.setSelectedSources(
@@ -972,6 +1142,8 @@ export function Web2() {
             <h2>
               {dialog === 'settings'
                 ? '设置'
+                : dialog === 'rename'
+                  ? '修改会话名称'
                 : dialog === 'delete'
                   ? '删除会话'
                   : '帮助与快捷键'}
@@ -981,6 +1153,10 @@ export function Web2() {
             </IconButton>
           </header>
           {dialog === 'settings' && <SettingsPage />}
+          {dialog === 'rename' && <form className="w2-rename-form" onSubmit={async event => {
+            event.preventDefault()
+            if (await w.renameSession(renameSessionId, renameTitle)) setDialog(null)
+          }}><label>会话名称<input autoFocus maxLength={120} required value={renameTitle} onChange={event => setRenameTitle(event.target.value)} /></label><div className="w2-dialog-actions"><button type="button" onClick={() => setDialog(null)}>取消</button><button className="w2-primary" disabled={w.mutating || !renameTitle.trim()}>保存</button></div></form>}
           {dialog === 'help' && (
             <div className="w2-shortcuts">
               <p>
@@ -1013,7 +1189,7 @@ export function Web2() {
                 <button onClick={() => setDialog(null)}>取消</button>
                 <button
                   className="w2-danger"
-                  disabled={locked}
+                  disabled={!current || currentWriteLocked(current.id)}
                   onClick={() => {
                     if (w.sessionId) void w.deleteSession(w.sessionId)
                     setDialog(null)

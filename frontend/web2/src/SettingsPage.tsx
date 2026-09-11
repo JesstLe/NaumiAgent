@@ -20,7 +20,7 @@ export function SettingsPage() {
   const [saving, setSaving] = useState(false)
   const [notice, setNotice] = useState('')
   const [failed, setFailed] = useState(false)
-  const locked = w.busy || w.uploading || w.mutating || saving
+  const connectionLocked = w.busy || w.uploading || w.mutating || saving
   useEffect(() => {
     let active = true
     platform.getToken().then(value => { if (active) setToken(value || '') }).catch(() => {
@@ -46,20 +46,20 @@ export function SettingsPage() {
         <label>API 地址<input required value={url} onChange={event => setUrl(event.target.value)} /></label>
         <label>连接令牌<input type="password" autoComplete="off" value={token} onChange={event => setToken(event.target.value)} placeholder="未启用认证时留空" /></label>
         <div className="w2-setting-row"><span>本地服务</span><span>{w.connecting ? '连接中' : w.daemon ? '已连接' : '未连接'}</span></div>
-        <button className="w2-primary" disabled={locked}>{saving ? '正在连接…' : '保存并连接'}</button>
+        <button className="w2-primary" disabled={connectionLocked}>{saving ? '正在连接…' : '保存并连接'}</button>
       </form>}
       {tab === 'chat' && <>
         <label className="w2-setting-row"><span>发送快捷键</span><select aria-label="发送快捷键" value={w.sendKey} onChange={event => w.setSendKey(event.target.value)}>
           <option value="enter">Enter 发送</option><option value="mod-enter">Ctrl / ⌘ + Enter 发送</option>
         </select></label>
-        <label className="w2-setting-row"><span>{w.sessionId ? '当前会话模型' : '新对话模型'}</span><select aria-label="设置模型" value={w.model} disabled={locked || !w.config} onChange={event => void w.changeModel(event.target.value)}>
+        <label className="w2-setting-row"><span>{w.sessionId ? '当前会话模型' : '新对话模型'}</span><select aria-label="设置模型" value={w.model} disabled={w.uploading || w.mutating || !w.config || (w.busy && w.sessionId === w.runningSessionId)} onChange={event => void w.changeModel(event.target.value)}>
           {!w.config?.models.some(model => model.id === w.model) && <option value={w.model}>{w.model || '默认模型'}</option>}
           {w.config?.models.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
         </select></label>
         {w.config?.model_warnings.map(message => <p className="w2-muted" key={message}>{message}</p>)}
       </>}
       {tab === 'permissions' && <>
-        <label className="w2-setting-row"><span>当前执行模式</span><select aria-label="设置执行模式" value={w.mode} disabled={locked} onChange={event => w.setMode(event.target.value as typeof w.mode)}>
+        <label className="w2-setting-row"><span>当前执行模式</span><select aria-label="设置执行模式" value={w.mode} disabled={w.uploading} onChange={event => w.setMode(event.target.value as typeof w.mode)}>
           <option value="default">默认权限</option><option value="plan">计划模式</option><option value="bypass">跳过审批</option>
         </select></label>
         <p className="w2-setting-description">{w.mode === 'bypass' ? '跳过审批会允许 Agent 直接执行工具操作。' : w.mode === 'plan' ? '以计划模式发送下一条消息，具体工具权限由服务端控制。' : '工具操作按照本地服务的权限规则请求确认。'}</p>

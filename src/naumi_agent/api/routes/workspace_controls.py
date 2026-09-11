@@ -299,12 +299,11 @@ def _git_branches(engine) -> dict[str, object]:
         "for-each-ref",
         "--format=%(refname:short)",
         "refs/heads",
-        "refs/remotes/origin",
     )
     branches = []
     for branch in refs.stdout.splitlines():
         name = branch.strip()
-        if name and name != "origin/HEAD" and name not in branches:
+        if name and name not in branches:
             branches.append(name)
     dirty = bool(_git(workspace, "status", "--porcelain").stdout.strip())
     return {

@@ -257,6 +257,13 @@ export async function mockWorkbenchApi(page: Page): Promise<void> {
     if (pathname.endsWith('/runs')) return route.fulfill({ json: { runs: [], total: 0 } })
     if (pathname.endsWith('/sessions') && method === 'GET') return route.fulfill({ json: { sessions: bootstrap.sessions, total: 1, page: 1, page_size: 100 } })
     if (pathname.endsWith('/sessions') && method === 'POST') return route.fulfill({ json: bootstrap.sessions[0] })
+    if (/\/sessions\/[^/]+$/.test(pathname) && method === 'PATCH') return route.fulfill({ json: { ...bootstrap.sessions[0], ...(route.request().postDataJSON() as object) } })
+    if (pathname.endsWith('/pin') && method === 'POST') return route.fulfill({ json: { ...bootstrap.sessions[0], pinned: Boolean((route.request().postDataJSON() as { pinned?: boolean }).pinned) } })
+    if (pathname.endsWith('/duplicate') && method === 'POST') return route.fulfill({ status: 201, json: { ...bootstrap.sessions[0], id: 'smoke-copy-001', title: '冒烟测试会话 副本' } })
+    if (pathname.endsWith('/archive') && method === 'POST') return route.fulfill({ status: 204 })
+    if (pathname.endsWith('/schedules') && method === 'GET') return route.fulfill({ json: { schedules: [] } })
+    if (pathname.endsWith('/extensions/skills') && method === 'GET') return route.fulfill({ json: { summary: { selected: 1, shadowed: 0, invalid: 0 }, sources: [], skills: [{ name: 'demo-skill', manifest_path: '.naumi/skills/demo/SKILL.md', source_scope: 'workspace', source_priority: 0, state: 'selected', reason_code: '', selected_manifest_path: '' }] } })
+    if (pathname.endsWith('/workspace/git/branches') && method === 'GET') return route.fulfill({ json: { available: true, workspace_root: '.', current: 'main', branches: ['main', 'feature'], dirty: false, error: '' } })
 
     if (url.includes('/workbench/daemon/status')) {
       return route.fulfill({ status: 200, json: daemonStatus })
