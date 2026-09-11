@@ -17,4 +17,12 @@
 - AI Message 接管 Web2 用户／助手消息外壳，保留原有 Markdown、公式、图片、文件和富组件渲染。消息头与操作在 hover 或键盘聚焦时出现；当前只显示已有真实实现的复制操作。组件保留 `onRetry`、`onVote` 接口，后端具备真实语义后才会在产品界面显示。
 - Agent Avatar 使用 Canvas 生成 7×7 镜像像素图；seed 决定配色和像素，同一会话稳定一致。助手消息和执行时间线共用该组件，执行时轻微呼吸；高 DPI 清晰绘制并支持 reduced motion。
 
-后续模块：AI Sources、Border Beam。
+## 2026-09-11：AI Sources
+
+- 来源：21st.dev `@educalvolpz/ai-sources`，公开页面标注 MIT，依赖 `lucide-react` 与 `framer-motion`。
+- 获取边界与上两个组件相同：依据公开 Usage 和行为说明独立适配。
+- 接入位置：每条助手消息正文下方。优先读取消息 metadata 中真实的 `sources`、`citations` 或 `references`；不存在结构化来源时，仅提取回复正文中已经出现的 HTTP(S) 链接。
+- 交互：来源列表折叠、计数、域名、外链与单条摘要原位展开；动效使用 Framer Motion，系统开启 reduced motion 时由浏览器和 CSS 降低动态效果。
+- 安全：拒绝非 HTTP(S)、带 URL 用户名或密码的地址；不生成、补写或暗示不存在的来源。
+
+后续模块：Border Beam。
