@@ -100,7 +100,7 @@ export function MessageBubble({ message, onEdit }: MessageBubbleProps) {
                 <div className="space-y-2">
                   <img
                     src={imageUrl}
-                    alt="generated"
+                    alt="生成的图片"
                     className="max-w-full max-h-80 rounded-md border border-neutral-200"
                     loading="lazy"
                   />
@@ -110,7 +110,7 @@ export function MessageBubble({ message, onEdit }: MessageBubbleProps) {
                 <div className="whitespace-pre-wrap">{message.content}</div>
               )}
               <div className={`mt-1 flex items-center gap-2 text-[10px] ${isUser ? 'text-blue-100' : 'text-neutral-400'}`}>
-                <span>{new Date(message.timestamp).toLocaleString()}</span>
+                {message.timestamp && !Number.isNaN(Date.parse(message.timestamp)) && <span>{new Date(message.timestamp).toLocaleString()}</span>}
                 {message.model && <span>· {message.model}</span>}
               </div>
             </>

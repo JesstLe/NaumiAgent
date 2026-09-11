@@ -16,6 +16,7 @@ import { isApiException } from '@/api/ApiException'
 import { formatRelativeTime } from '@/utils/formatDate'
 import { GroupPanel } from './GroupPanel'
 import type { Session } from '@/api/types'
+import { useWorkspace } from '@/hooks/WorkspaceProvider'
 
 type ProjectView = 'projects' | 'groups'
 
@@ -25,12 +26,11 @@ interface ProjectGroup {
 }
 
 export function ProjectPanel() {
+  const workspace = useWorkspace()
   const { t } = useTranslation()
   const { client, selectSession, status } = useWorkbenchConnection()
   const sessions = useSessionStore((state) => state.sessions)
   const currentSessionId = useSessionStore((state) => state.currentSessionId)
-  const setSessions = useSessionStore((state) => state.setSessions)
-  const setCurrentSessionId = useSessionStore((state) => state.setCurrentSessionId)
   const setSessionError = useSessionStore((state) => state.setError)
 
   const [view, setView] = useState<ProjectView>('projects')
@@ -87,28 +87,23 @@ export function ProjectPanel() {
     if (!client) return
     setCreating(true)
     try {
-      const result = await client.createSession(t('session.newTitle'))
-      setSessions([result.sessions[0], ...sessions])
-      const sessionId = result.selected_session_id ?? result.sessions[0].id
-      await selectSession(sessionId)
-      setCurrentSessionId(sessionId)
+      await workspace.select(null)
     } catch (error) {
       setSessionError(isApiException(error) ? error.message : String(error))
     } finally {
       setCreating(false)
     }
-  }, [client, sessions, selectSession, setSessions, setCurrentSessionId, setSessionError, t])
+  }, [client, workspace.select, setSessionError])
 
   const handleSelectSession = useCallback(
     async (sessionId: string) => {
       try {
         await selectSession(sessionId)
-        setCurrentSessionId(sessionId)
       } catch (error) {
         setSessionError(isApiException(error) ? error.message : String(error))
       }
     },
-    [selectSession, setCurrentSessionId, setSessionError],
+    [selectSession, setSessionError],
   )
 
   const handleDeleteSession = useCallback(async () => {
@@ -118,15 +113,13 @@ export function ProjectPanel() {
     if (!window.confirm(t('project.deleteConfirm', { title }))) return
     setDeleting(true)
     try {
-      await client.deleteSession(currentSessionId)
-      setSessions(sessions.filter((s) => s.id !== currentSessionId))
-      setCurrentSessionId(null)
+      await workspace.deleteSession(currentSessionId)
     } catch (error) {
       setSessionError(isApiException(error) ? error.message : String(error))
     } finally {
       setDeleting(false)
     }
-  }, [client, currentSessionId, sessions, setSessions, setCurrentSessionId, setSessionError, t])
+  }, [client, currentSessionId, sessions, workspace.deleteSession, setSessionError, t])
 
   const TabButton = ({
     active,
@@ -213,7 +206,7 @@ export function ProjectPanel() {
       <button
         type="button"
         onClick={() => void handleCreateSession()}
-        disabled={!client || creating}
+        disabled={!client || creating || workspace.busy || workspace.uploading}
         className="mx-2 mt-2 flex items-center gap-2 rounded-md px-3 py-2 text-sm text-accent hover:bg-accent/10 disabled:opacity-50 text-left transition-colors"
       >
         <Plus className="w-4 h-4" />

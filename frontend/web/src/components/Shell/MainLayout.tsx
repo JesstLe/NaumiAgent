@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react'
+import { type ReactNode } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
@@ -16,15 +16,15 @@ import {
   Folder,
 } from 'lucide-react'
 import { useAppStore, type AppRoute } from '@/stores/appStore'
-import { useSessionStore } from '@/stores/sessionStore'
-import { useWorkbenchConnection } from '@/hooks/useWorkbenchConnection'
+import { useWorkspace } from '@/hooks/WorkspaceProvider'
+
 import { ProjectPanel } from './ProjectPanel'
 import { GroupPanel } from './GroupPanel'
 import { SkillPanel } from './SkillPanel'
 import { SearchPanel } from './SearchPanel'
 import { ReviewPanel } from './ReviewPanel'
 import { TopBar } from './TopBar'
-import { isApiException } from '@/api/ApiException'
+
 import type { ElementType } from 'react'
 
 type NavItem = { route: AppRoute; path: string; labelKey: string; icon: ElementType }
@@ -50,28 +50,7 @@ const toolItems: ToolItem[] = [
 export function MainLayout() {
   const { t } = useTranslation()
   const { activeSideTool, setCurrentRoute, setActiveSideTool } = useAppStore()
-  const setSessions = useSessionStore((state) => state.setSessions)
-  const setSessionError = useSessionStore((state) => state.setError)
-  const { client } = useWorkbenchConnection()
-
-  useEffect(() => {
-    if (!client) {
-      setSessions([])
-      return
-    }
-    let cancelled = false
-    client
-      .fetchSessions()
-      .then((response) => {
-        if (!cancelled) setSessions(response.sessions)
-      })
-      .catch((error) => {
-        if (!cancelled) setSessionError(isApiException(error) ? error.message : String(error))
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [client, setSessions, setSessionError])
+  const workspace = useWorkspace()
 
   const sidePanel: Record<typeof activeSideTool, ReactNode> = {
     projects: <ProjectPanel />,
@@ -92,7 +71,7 @@ export function MainLayout() {
           <button
             type="button"
             className="w-full flex items-center justify-center rounded-md py-2 text-accent hover:bg-accent/10"
-            title={t('action.newTask')}
+            title={t('action.newTask')} disabled={workspace.busy || workspace.uploading} onClick={() => void workspace.select(null)}
           >
             <Plus className="w-5 h-5" />
           </button>
@@ -143,6 +122,7 @@ export function MainLayout() {
         </div>
 
         <div className="p-1 border-t border-border">
+          <NavLink to="/web2" className="flex justify-center py-2 text-xs text-text-secondary hover:bg-bg-tertiary" title="打开 Web2">Web2</NavLink>
           <NavLink
             to="/settings"
             onClick={() => setCurrentRoute('settings')}

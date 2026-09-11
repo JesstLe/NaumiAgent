@@ -1,419 +1,153 @@
-import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
+import { useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Send, PlusCircle, Loader2, Brain, Cpu, Zap, Paperclip, X } from 'lucide-react'
-import { useWorkbenchConnection } from '@/hooks/useWorkbenchConnection'
-import { useSessionStore } from '@/stores/sessionStore'
-import { isApiException } from '@/api/ApiException'
+import { Paperclip, Send, Square } from 'lucide-react'
+import { useWorkspace } from '@/hooks/WorkspaceProvider'
 import { MessageBubble } from './MessageBubble'
-import type { RuntimeMode, ChatSource } from '@/api/types'
 
-const MODE_ICON: Record<RuntimeMode, typeof Brain> = {
-  default: Brain,
-  plan: Cpu,
-  bypass: Zap,
-}
-
-// Supported models exposed by the workbench. In a future phase this list
-// should come from the backend capabilities endpoint.
-const AVAILABLE_MODELS = [
-  { id: 'kimi-for-coding', label: 'Kimi Coding' },
-  { id: 'claude-sonnet-4-6', label: 'Claude Sonnet' },
-  { id: 'gpt-4o', label: 'GPT-4o' },
-]
-
+// The legacy shell is a presentation adapter over the shared workspace controller.
 export function ChatPage() {
   const { t } = useTranslation()
-  const { client, currentSessionId, snapshot } = useWorkbenchConnection()
-  const sessions = useSessionStore((state) => state.sessions)
-  const messages = useSessionStore((state) => state.messages)
-  const appendMessage = useSessionStore((state) => state.appendMessage)
-  const setMessages = useSessionStore((state) => state.setMessages)
-  const setError = useSessionStore((state) => state.setError)
-  const currentSession = useMemo(
-    () => sessions.find((s) => s.id === currentSessionId),
-    [sessions, currentSessionId],
-  )
-  const currentModel = currentSession?.model ?? 'kimi-for-coding'
-  const [selectedModel, setSelectedModel] = useState(currentModel)
-  const [savingModel, setSavingModel] = useState(false)
-
-  useEffect(() => {
-    setSelectedModel(currentModel)
-  }, [currentModel])
-
-  const [input, setInput] = useState('')
-  const [createIssue, setCreateIssue] = useState(false)
-  const [isSending, setIsSending] = useState(false)
-  const [isLoading, setIsLoading] = useState(false)
-  const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>('default')
-  const [sources, setSources] = useState<ChatSource[]>([])
-  const pendingPermissions = useSessionStore((state) => state.pendingPermissions)
-  const removePendingPermission = useSessionStore((state) => state.removePendingPermission)
-  const [resolvingId, setResolvingId] = useState<string | null>(null)
-
-  const handleResolvePermission = async (callId: string, decision: 'allow' | 'deny' | 'bypass') => {
-    if (!client || !currentSessionId || resolvingId) return
-    setResolvingId(callId)
-    try {
-      await client.resolvePermission(currentSessionId, callId, { decision })
-      removePendingPermission(callId)
-    } catch (error) {
-      setError(isApiException(error) ? error.message : String(error))
-    } finally {
-      setResolvingId(null)
-    }
-  }
-
-  const [uploading, setUploading] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const bottomRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!client || !currentSessionId) {
-      setMessages([])
-      return
-    }
-    let cancelled = false
-    setIsLoading(true)
-    client
-      .fetchMessages(currentSessionId, 1, 100)
-      .then((response) => {
-        if (!cancelled) {
-          setMessages(response.messages)
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setError(isApiException(error) ? error.message : String(error))
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setIsLoading(false)
-        }
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [client, currentSessionId, setMessages, setError])
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
-
-  useEffect(() => {
-    if (!client || !currentSessionId) {
-      setSources([])
-      return
-    }
-    let cancelled = false
-    client
-      .fetchChatEnvironment(currentSessionId)
-      .then((env) => {
-        if (!cancelled) setSources(env.sources)
-      })
-      .catch(() => {})
-    return () => {
-      cancelled = true
-    }
-  }, [client, currentSessionId])
-
-  const handleUpload = async (file: File) => {
-    if (!client || !currentSessionId) return
-    setUploading(true)
-    try {
-      const source = await client.uploadChatSource(currentSessionId, file)
-      setSources((prev) => [...prev, source])
-    } catch (error) {
-      setError(isApiException(error) ? error.message : String(error))
-    } finally {
-      setUploading(false)
-    }
-  }
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (file) void handleUpload(file)
-    e.target.value = ''
-  }
-
-  const handleRemoveSource = (sourceId: string) => {
-    setSources((prev) => prev.filter((s) => s.id !== sourceId))
-  }
-
-  const handleSend = useCallback(async () => {
-    if (!client || !currentSessionId || !input.trim() || isSending) return
-
-    const content = input.trim()
-    setInput('')
-    setIsSending(true)
-    setError(null)
-
-    const userMessage = {
-      id: `local-${Date.now()}`,
-      role: 'user',
-      content,
-      timestamp: new Date().toISOString(),
-      metadata: {},
-    }
-    appendMessage(userMessage)
-
-    try {
-      const response = await client.sendMessage(currentSessionId, {
-        content,
-        runtime_mode: runtimeMode,
-        source_ids: sources.map((s) => s.id),
-        workbench_issue: createIssue
-          ? {
-              mission_id: snapshot?.missions[0]?.id ?? 'default',
-              title: content.slice(0, 80),
-              description: content,
-            }
-          : undefined,
-      })
-      appendMessage(response)
-    } catch (error) {
-      setError(isApiException(error) ? error.message : String(error))
-    } finally {
-      setIsSending(false)
-    }
-  }, [client, currentSessionId, input, isSending, runtimeMode, createIssue, snapshot, appendMessage, setError])
-
-  const handleModelChange = async (modelId: string) => {
-    if (!client || !currentSessionId || savingModel) return
-    setSavingModel(true)
-    try {
-      const updated = await client.updateSession(currentSessionId, { model: modelId })
-      setSelectedModel(updated.model)
-    } catch (error) {
-      setError(isApiException(error) ? error.message : String(error))
-    } finally {
-      setSavingModel(false)
-    }
-  }
-
-  const handleEditMessage = async (message: { id: string; content: string }, newContent: string) => {
-    if (!client || !currentSessionId || newContent === message.content) return
-    // Truncate the conversation to just before this message, then resend the
-    // edited message. This is a frontend-driven edit: we drop everything after
-    // the edited user message and re-run the turn.
-    const index = messages.findIndex((m) => m.id === message.id)
-    if (index === -1) return
-    const keptMessages = messages.slice(0, index)
-    setMessages(keptMessages)
-    setInput(newContent)
-    // The user can press send to dispatch the edited message; this keeps the
-    // edit flow explicit and lets the user review before regenerating.
-    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
-  }
-
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === 'Enter' && !event.shiftKey) {
-      event.preventDefault()
-      void handleSend()
-    }
-  }
-
-  if (!currentSessionId) {
-    return (
-      <div className="flex h-full items-center justify-center text-neutral-500">
-        {t('chat.emptyState')}
-      </div>
-    )
-  }
-
+  const w = useWorkspace()
+  const file = useRef<HTMLInputElement>(null)
   return (
-    <div className="flex flex-col h-full">
-      <header className="px-6 py-3 border-b border-neutral-200 flex items-center justify-between bg-white">
-        <div>
-          <div className="font-medium text-neutral-900">{snapshot?.summary.current_mission_title || t('chat.title')}</div>
-          <div className="text-xs text-neutral-500">{currentSessionId}</div>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1 rounded-md border border-neutral-200 bg-neutral-50 px-2 py-1 text-xs text-neutral-600">
-            <span>{t('chat.model')}:</span>
-            {savingModel ? (
-              <Loader2 className="w-3 h-3 animate-spin text-neutral-500" />
-            ) : (
-              <select
-                value={selectedModel}
-                onChange={(e) => handleModelChange(e.target.value)}
-                disabled={savingModel}
-                className="bg-transparent font-medium text-neutral-900 focus:outline-none text-xs"
-              >
-                {AVAILABLE_MODELS.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
-          <button className="flex items-center gap-1 px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 rounded-md">
-            <PlusCircle className="w-4 h-4" /> {t('action.newMission')}
-          </button>
-        </div>
+    <div className="flex flex-col h-full min-h-0">
+      <header className="p-4 border-b border-neutral-200 flex justify-between">
+        <span>
+          {w.sessions.find((s) => s.id === w.sessionId)?.title ||
+            t('chat.title')}
+        </span>
+        <button
+          disabled={w.busy || w.uploading}
+          onClick={() => void w.select(null)}
+        >
+          {t('session.new')}
+        </button>
       </header>
-
-      <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-neutral-50">
-        {isLoading && messages.length === 0 && (
-          <div className="flex justify-center py-12">
-            <Loader2 className="h-6 w-6 animate-spin text-neutral-400" />
-          </div>
-        )}
-        {!isLoading && messages.length === 0 && (
-          <div className="text-center text-sm text-neutral-500 py-12">{t('chat.emptyState')}</div>
-        )}
-        {messages.map((message) => (
-          <MessageBubble
-            key={message.id}
-            message={message}
-            onEdit={message.role === 'user' ? handleEditMessage : undefined}
-          />
-        ))}
-        <div ref={bottomRef} />
-      </div>
-
-      <div className="p-4 border-t border-neutral-200 bg-white">
-        {pendingPermissions.length > 0 && (
-          <div className="mb-3 space-y-2">
-            {pendingPermissions.map((permission) => (
-              <div
-                key={permission.call_id}
-                className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm"
-              >
-                <div className="font-medium text-amber-900">
-                  {t('chat.permission')} · {permission.agent_name} / {permission.tool_name}
-                </div>
-                {permission.reason && (
-                  <div className="mt-1 text-amber-800">
-                    {t('chat.permissionReason')}: {permission.reason}
-                  </div>
-                )}
-                <div className="mt-2 flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void handleResolvePermission(permission.call_id, 'allow')}
-                    disabled={resolvingId === permission.call_id}
-                    className="rounded-md bg-success px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
-                  >
-                    {t('chat.permissionAllow')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleResolvePermission(permission.call_id, 'deny')}
-                    disabled={resolvingId === permission.call_id}
-                    className="rounded-md border border-danger px-3 py-1.5 text-xs font-medium text-danger hover:bg-danger/10 disabled:opacity-50"
-                  >
-                    {t('chat.permissionDeny')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleResolvePermission(permission.call_id, 'bypass')}
-                    disabled={resolvingId === permission.call_id}
-                    className="rounded-md border border-amber-300 px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-100 disabled:opacity-50"
-                  >
-                    {t('chat.permissionBypass')}
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div className="flex items-center gap-2 mb-2">
-          <span className="text-xs text-neutral-500">{t('chat.thinking')}:</span>
-          {(['default', 'plan', 'bypass'] as RuntimeMode[]).map((mode) => {
-            const Icon = MODE_ICON[mode]
-            const active = runtimeMode === mode
-            return (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => setRuntimeMode(mode)}
-                disabled={isSending}
-                className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs border transition-colors ${
-                  active
-                    ? 'bg-blue-50 border-blue-200 text-blue-700'
-                    : 'bg-white border-neutral-200 text-neutral-600 hover:bg-neutral-50'
-                } disabled:opacity-50`}
-              >
-                <Icon className="w-3 h-3" />
-                {t(`chat.thinking${mode.charAt(0).toUpperCase() + mode.slice(1)}` as const)}
-              </button>
-            )
-          })}
+      {w.error && (
+        <div role="alert" className="p-3 bg-amber-50 text-amber-900">
+          {w.error}
         </div>
-        <div className="flex items-start gap-3">
+      )}
+      <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-neutral-50">
+        {w.loading && <p>正在加载会话…</p>}
+        {w.messages
+          .filter((m) => ['user', 'assistant'].includes(m.role) && m.content)
+          .map((message) => (
+            <MessageBubble key={message.id} message={message} />
+          ))}
+        {w.busy && <p role="status">正在执行…</p>}
+      </div>
+      <div className="p-4 border-t border-neutral-200 space-y-3">
+        {w.permissions.map((p) => (
+          <div key={p.callId} className="p-3 bg-amber-50">
+            <p>
+              {p.name}：{p.reason}
+            </p>
+            <button onClick={() => void w.resolve(p, 'allow')}>允许本次</button>{' '}
+            · <button onClick={() => void w.resolve(p, 'deny')}>拒绝</button>
+          </div>
+        ))}
+        <div className="flex gap-3">
+          <select
+            aria-label="模型"
+            disabled={w.busy}
+            value={w.model}
+            onChange={(e) => void w.changeModel(e.target.value)}
+          >
+            {!w.config?.models.some((m) => m.id === w.model) && (
+              <option value={w.model}>{w.model || '默认模型'}</option>
+            )}
+            {w.config?.models.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name}
+              </option>
+            ))}
+          </select>
+          <select
+            aria-label="执行模式"
+            value={w.mode}
+            disabled={w.busy}
+            onChange={(e) => w.setMode(e.target.value as typeof w.mode)}
+          >
+            <option value="default">默认权限</option>
+            <option value="plan">计划模式</option>
+            <option value="bypass">跳过审批</option>
+          </select>
+        </div>
+        <textarea
+          value={w.draft}
+          onChange={(e) => w.setDraft(e.target.value)}
+          disabled={w.busy}
+          placeholder={t('chat.composerPlaceholder')}
+          className="w-full min-h-24 resize-none border border-neutral-200 rounded-md p-3"
+          onKeyDown={(e) => {
+            if (
+              e.key === 'Enter' &&
+              !e.shiftKey &&
+              !e.nativeEvent.isComposing &&
+              e.keyCode !== 229
+            ) {
+              e.preventDefault()
+              void w.send()
+            }
+          }}
+        />
+        <div className="flex gap-2 flex-wrap">
+          {w.sources.map((source) => (
+            <label key={source.id}>
+              <input
+                type="checkbox"
+                disabled={w.busy}
+                checked={w.selectedSources.includes(source.id)}
+                onChange={(e) =>
+                  w.setSelectedSources(
+                    e.target.checked
+                      ? [...w.selectedSources, source.id]
+                      : w.selectedSources.filter((id) => id !== source.id),
+                  )
+                }
+              />{' '}
+              {source.title}
+            </label>
+          ))}
+        </div>
+        <div className="flex items-center gap-3">
           <input
             type="file"
-            ref={fileInputRef}
-            onChange={handleFileChange}
-            className="hidden"
+            ref={file}
+            multiple
+            hidden
+            onChange={(e) => {
+              if (e.target.files) void w.upload(e.target.files)
+              e.target.value = ''
+            }}
           />
           <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-            title={t('chat.uploadFile')}
-            className="flex items-center justify-center w-9 h-9 rounded-md border border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50 disabled:opacity-50 shrink-0"
+            title="上传附件"
+            disabled={w.busy || w.uploading || !w.daemon}
+            onClick={() => file.current?.click()}
           >
-            {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Paperclip className="w-4 h-4" />}
+            <Paperclip size={18} />
           </button>
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={t('chat.composerPlaceholder')}
-            disabled={isSending}
-            className="flex-1 min-h-[80px] max-h-40 px-3 py-2 rounded-md border border-neutral-200 bg-white resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/50 disabled:opacity-50"
-          />
-        </div>
-
-        {sources.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-2">
-            <span className="text-xs text-neutral-500">{t('chat.sources')}:</span>
-            {sources.map((source) => (
-              <span
-                key={source.id}
-                className="inline-flex items-center gap-1 rounded-md bg-blue-50 px-2 py-0.5 text-xs text-blue-700 border border-blue-100"
-              >
-                {source.title}
-                <button
-                  type="button"
-                  onClick={() => handleRemoveSource(source.id)}
-                  className="text-blue-400 hover:text-blue-700"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
-
-        <div className="flex items-center justify-between mt-3">
-          <label className="flex items-center gap-2 text-sm text-neutral-600 cursor-pointer select-none">
+          <label className="flex-1">
             <input
               type="checkbox"
-              checked={createIssue}
-              onChange={(e) => setCreateIssue(e.target.checked)}
-              disabled={isSending}
-              className="rounded border-neutral-300 text-blue-600 focus:ring-blue-500"
-            />
+              checked={w.createIssue}
+              disabled={w.busy || !w.snapshot?.missions.length}
+              onChange={(e) => w.setCreateIssue(e.target.checked)}
+            />{' '}
             {t('action.createLinkedIssue')}
           </label>
           <button
-            type="button"
-            onClick={() => void handleSend()}
-            disabled={isSending || !input.trim()}
-            className="flex items-center gap-1 px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 disabled:opacity-50"
+            className="px-4 py-2 bg-blue-600 text-white rounded-md disabled:opacity-40"
+            disabled={
+              !w.busy &&
+              (!w.draft.trim() || w.uploading || !w.daemon || w.loading)
+            }
+            onClick={() => void (w.busy ? w.stop() : w.send())}
           >
-            {isSending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Send className="w-4 h-4" />
-            )}
-            {t('action.send')}
+            {w.busy ? <Square size={16} /> : <Send size={16} />}
+            {w.busy ? '停止执行' : t('action.send')}
           </button>
         </div>
       </div>

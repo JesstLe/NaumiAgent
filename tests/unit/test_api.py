@@ -2,10 +2,12 @@
 
 import asyncio
 import json
+from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import UploadFile
 from fastapi.testclient import TestClient
 
 import naumi_agent.api.routes.messages as message_routes
@@ -21,6 +23,7 @@ from naumi_agent.api.routes.messages import (
     list_chat_runs,
     list_messages,
     send_message,
+    upload_chat_source,
 )
 from naumi_agent.api.routes.ws import _run_streaming_to_websocket
 from naumi_agent.api.schemas import HealthResponse, MessageCreate, SessionCreate
@@ -761,6 +764,27 @@ class TestMessageRoutes:
         run = await store.get_run("sess_1", run_id)
         assert run is not None
         assert run.status == "cancelled"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("content", [b"", "验收标记：共享工作区".encode()])
+    async def test_upload_source_returns_real_persisted_reference(self, tmp_path, content):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        engine = _FakeEngine()
+        engine.workspace_root = workspace
+        store = ChatRunStore(tmp_path / "chat-runs.db")
+        response = await upload_chat_source(
+            "sess_1",
+            _fake_request(engine, store),
+            file=UploadFile(filename="note.txt", file=BytesIO(content)),
+            auth="test",
+        )
+        assert response.title == "note.txt"
+        assert response.run_id == ""
+        assert (workspace / response.path).read_bytes() == content
+        persisted = await store.list_sources("sess_1")
+        assert len(persisted) == 1
+        assert persisted[0].id == response.id
 
     @pytest.mark.asyncio
     async def test_add_chat_source_accepts_only_existing_workspace_file(
