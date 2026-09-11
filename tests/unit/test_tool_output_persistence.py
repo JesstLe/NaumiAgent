@@ -48,6 +48,31 @@ async def test_recorder_preserves_output_errors_inputs_and_terminal_steps(tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_recorder_preserves_reasoning_turn_order_without_private_content(tmp_path):
+    store = ChatRunStore(tmp_path / "runs.db")
+    recorder = await ChatRunRecorder.start(
+        store=store, workspace_root=tmp_path, session_id="s", task="检查"
+    )
+    await recorder.observe("turn_start", {"turn": 1})
+    await recorder.observe("thinking_start", {"turn": 1})
+    await recorder.observe("thinking_delta", {"turn": 1, "content": "private"})
+    await recorder.observe("thinking_end", {"turn": 1, "content": "private"})
+    await recorder.observe(
+        "tool_end", {"turn": 1, "call_id": "a", "name": "read", "status": "success"}
+    )
+    await recorder.observe("turn_start", {"turn": 2})
+    await recorder.finish("completed", "结束")
+    run = await store.get_run("s", recorder.run_id)
+    assert [(step.stage, step.summary) for step in run.steps] == [
+        ("request", "检查"),
+        ("analysis", "第 1 轮分析"),
+        ("tool", "read"),
+        ("analysis", "第 2 轮分析"),
+    ]
+    assert all("private" not in step.detail for step in run.steps)
+
+
+@pytest.mark.asyncio
 async def test_http_fallback_records_empty_output_and_archive_reference(tmp_path):
     store = ChatRunStore(tmp_path / "runs.db")
     run = await store.start_run(session_id="s", user_message_id="u")

@@ -86,6 +86,7 @@ export default function ThinkingState({
   done,
   icon,
   working = false,
+  settledExpanded = false,
   children,
 }: {
   variant?: string;
@@ -97,6 +98,8 @@ export default function ThinkingState({
   /** override the header glyph (defaults to the sparkle) */
   icon?: ReactNode;
   working?: boolean;
+  /** keep the completed trace open until the user collapses it */
+  settledExpanded?: boolean;
   children?: ReactNode;
 }) {
   const stage = working ? 2 : 4;
@@ -109,7 +112,7 @@ export default function ThinkingState({
     active: active ?? base.active,
     done: done ?? base.done,
   };
-  const autoExpanded = stage >= 1 && stage < 4;
+  const autoExpanded = stage >= 1 && (stage < 4 || settledExpanded);
   const expanded = manualExpanded ?? autoExpanded;
   const visible = v.rows.length;
   const traceRef = useRef<HTMLDivElement>(null);

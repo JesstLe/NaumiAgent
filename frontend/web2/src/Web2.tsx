@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   ArrowUp,
   ArrowUpRight,
@@ -190,6 +190,10 @@ export function Web2() {
   const current = w.sessions.find((item) => item.id === w.sessionId)
   const messages = w.messages.filter(
     (item) => ['user', 'assistant'].includes(item.role) && item.content,
+  )
+  const latestUserIndex = messages.reduce(
+    (latest, item, index) => item.role === 'user' ? index : latest,
+    -1,
   )
   const locked = w.busy || w.uploading || w.mutating
   const branch = w.diff?.branch || w.snapshot?.worktrees[0]?.branch
@@ -475,7 +479,7 @@ export function Web2() {
                     el.scrollHeight - el.scrollTop - el.clientHeight < 80
               }}
             >
-              {!messages.length && !w.loading && !w.runs.length && !w.liveEvents.length ? (
+              {!messages.length && !w.loading && !w.busy && !w.runs.length && !w.liveEvents.length ? (
                 <div className="w2-welcome">
                   <Logo className="w2-welcome-logo" />
                   <h1>
@@ -485,24 +489,18 @@ export function Web2() {
               ) : (
                 <div className="w2-message-list">
                   {w.loading && <p className="w2-muted">正在加载会话…</p>}
-                  {messages.map((message) => (
-                    <article
-                      key={message.id}
-                      className={`w2-message ${message.role}`}
-                    >
-                      <MessageContent content={message.content} />
-                      <div className="w2-message-actions">
-                        <CopyButton text={message.content} />
-                      </div>
-                    </article>
-                  ))}
-                  <ThinkingState />
-                  {w.busy && (
-                    <div role="status" className="w2-working">
-                      <Loader2 className="w2-spin" size={15} />
-                      {w.permissions.length ? '等待你的确认' : '正在执行…'}
-                    </div>
-                  )}
+                  {messages.map((message, index) => {
+                    return <Fragment key={message.id}>
+                      <article className={`w2-message ${message.role}`}>
+                        <MessageContent content={message.content} />
+                        <div className="w2-message-actions">
+                          <CopyButton text={message.content} />
+                        </div>
+                      </article>
+                      {index === latestUserIndex && <ThinkingState />}
+                    </Fragment>
+                  })}
+                  {!messages.some(message => message.role === 'user') && <ThinkingState />}
                 </div>
               )}
             </div>
