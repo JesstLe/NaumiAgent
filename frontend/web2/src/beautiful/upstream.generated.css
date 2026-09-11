@@ -300,6 +300,9 @@
 .bui-root .grid {
     display: grid;
   }
+.bui-root .hidden {
+    display: none;
+  }
 .bui-root .inline {
     display: inline;
   }
@@ -389,9 +392,6 @@
   }
 .bui-root .min-h-16 {
     min-height: calc(var(--spacing) * 16);
-  }
-.bui-root .min-h-\[220px\] {
-    min-height: 220px;
   }
 .bui-root .min-h-\[278px\] {
     min-height: 278px;

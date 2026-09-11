@@ -3,19 +3,20 @@
 .bui-execution { display: flex; align-items: flex-start; gap: 10px; margin: 10px 0 22px; }
 .bui-execution-body { flex: 1; min-width: 0; }
 .bui-execution-body > div { max-width: none; min-height: 0 !important; }
-.bui-timeline { display: flex; flex-direction: column; gap: 7px; width: min(100%, 760px); padding: 3px 0 5px; }
-.bui-timeline > p { margin: 0; padding: 3px 6px; color: var(--ink-2); font-size: 13px; line-height: 1.75; white-space: pre-wrap; }
-.bui-timeline > p.is-running { color: var(--ink); animation: fade-in 220ms ease-out both; }
-.bui-timeline-tool > button { display: flex; align-items: center; gap: 7px; min-height: 28px; max-width: 100%; padding: 3px 6px; color: var(--ink-3); font-size: 12.5px; text-align: left; border-radius: 6px; transition: background 100ms ease, color 100ms ease; }
-.bui-timeline-tool > button:hover { color: var(--ink-2); background: var(--hover-2); }
-.bui-timeline-tool > button > span { flex: none; }
-.bui-timeline-tool > button > .bui-action-summary { flex: 1; min-width: 0; color: var(--ink-2); white-space: normal; overflow-wrap: anywhere; line-height: 1.65; }
-.bui-timeline-tool > button > code { min-width: 0; overflow: hidden; color: var(--ink-2); font-family: var(--font-mono-face), monospace; text-overflow: ellipsis; white-space: nowrap; }
-.bui-timeline-tool > button > svg:last-child { width: 12px; height: 12px; flex: none; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; transition: transform 180ms ease; }
-.bui-timeline-tool-detail { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 240ms cubic-bezier(.23,1,.32,1), opacity 180ms ease; }
-.bui-timeline-tool-detail[data-open='true'] { grid-template-rows: 1fr; opacity: 1; }
-.bui-timeline-tool-detail > div { min-height: 0; overflow: hidden; }
-.bui-timeline-tool-detail pre { max-height: 320px; margin: 3px 0 7px 21px; padding: 7px 11px; overflow: auto; border-left: 1px solid var(--line); color: var(--ink-2); font: 11.5px/1.65 var(--font-mono-face), monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.bui-root .bui-execution-body > .bui-tool-chips { width: 100%; max-width: 540px; }
+.bui-chip-rows > div > button { height: 28px; }
+.bui-chip-rows .bui-operation { flex-shrink: 0; max-width: 48%; }
+.bui-chip-rows .bui-action-summary { display: block; line-height: 22px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bui-chip-rows [data-state='running'] .bui-operation { color: var(--ink); }
+.bui-chip-status { flex-shrink: 0; color: var(--ink-3); font-size: 10px; }
+.bui-tool-input { font-size: 11.5px; color: var(--ink-3); }
+.bui-tool-input summary { cursor: pointer; }
+.bui-tool-input pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; }
+.bui-chip-rows [data-state='failed'] .bui-chip-status { color: var(--red); }
+.bui-chip-rows button:focus-visible, .bui-tool-chips [data-diffchip] button:focus-visible { outline: 2px solid var(--ink-3); outline-offset: 2px; }
+.bui-tool-chips [data-diffchip] { max-width: 100%; }
+.bui-diff-preview { max-width: calc(100vw - 24px); max-height: min(440px, calc(100vh - 24px)); }
+.bui-diff-lines { max-height: 340px; overflow: auto; overscroll-behavior: contain; }
 .bui-root .bui-section-heading { display: flex; justify-content: space-between; align-items: center; margin: 5px 0 14px; font-size: 13px; }
 .bui-root .bui-section-heading small { color: var(--ink-3); margin-left: 5px; }
 .bui-root .bui-section-heading button { padding: 5px; border-radius: 6px; }

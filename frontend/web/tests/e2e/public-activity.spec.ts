@@ -40,7 +40,10 @@ test('concrete actions, task progress and compaction remain visible after reload
     await expect(trace).not.toContainText('PRIVATE_REASONING')
   }
   await page.setViewportSize({ width: 390, height: 844 })
-  await expect(trace.locator('.bui-action-summary').first()).toHaveCSS('white-space', 'normal')
+  await page.getByRole('button', { name: '切换侧栏', exact: true }).click()
+  await expect(trace.locator('.bui-action-summary').first()).toHaveCSS('white-space', 'nowrap')
+  await trace.getByRole('button', { name: 'file_edit 已完成', exact: true }).click()
+  await expect(trace.getByText('修改文件：frontend/shared/src/api/WorkbenchApiClient.ts', { exact: true })).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
 })
 

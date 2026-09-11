@@ -62,14 +62,14 @@ test('reasoning appears immediately and tools stay at their turn position', asyn
   await page.getByRole('button', { name: '发送消息' }).click()
   const trace = page.getByLabel('执行过程', { exact: true })
   await expect(trace.getByRole('button', { name: '正在推理' })).toBeVisible()
-  await expect(page.getByText('检查后修改', { exact: true })).toBeVisible()
+  await expect(trace.locator('.bui-action-summary', { hasText: '检查后修改' })).toBeVisible()
   release?.()
   await expect(page.getByText('处理完成', { exact: true })).toBeVisible()
-  const labels = await trace.locator('.bui-timeline > p, .bui-timeline-tool > button').allTextContents()
+  const labels = await trace.locator('.bui-chip-rows > div > button').allTextContents()
   expect(labels).toEqual([
-    expect.stringContaining('本次任务：检查后修改'),
+    expect.stringContaining('检查后修改'),
     expect.stringContaining('读取文件'),
-    '第 2 轮 · 上一步已完成：读取文件',
+    expect.stringContaining('第 2 轮 · 上一步已完成：读取文件'),
     expect.stringContaining('修改文件'),
   ])
   const order = await page.locator('.w2-message-list > *').evaluateAll(nodes => nodes.map(node => node.className))
@@ -108,6 +108,8 @@ test('saved execution timelines remain attached to every historical turn', async
   await expect(traces.nth(0)).toHaveAttribute('data-run-id', 'r1')
   await expect(traces.nth(1)).toHaveAttribute('data-run-id', 'r2')
   await traces.nth(0).scrollIntoViewIfNeeded()
+  await expect(traces.nth(0).locator('.bui-action-summary', { hasText: 'README.md' })).toBeVisible()
+  await traces.nth(0).getByRole('button', { name: 'read_file 已完成' }).click()
   await expect(traces.nth(0).getByText('读取文件：README.md', { exact: true })).toBeVisible()
 
   const order = await page.locator('.w2-message-list > *').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-run-id') || node.className))
