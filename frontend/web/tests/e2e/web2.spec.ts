@@ -36,7 +36,7 @@ test('review, keyboard controls, file empty state and draft reload', async ({
   await page.getByRole('button', { name: '代码审查', exact: true }).click()
   await expect(page.getByText('src/main.py', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: '返回工作区' }).click()
-  await page.getByRole('button', { name: '文件', exact: true }).click()
+  await page.getByLabel('工作区面板').getByRole('button', { name: '文件', exact: true }).click()
   await expect(page.getByText('还没有添加文件')).toBeVisible()
   await page
     .getByRole('textbox', { name: '消息', exact: true })

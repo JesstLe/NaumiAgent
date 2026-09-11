@@ -42,6 +42,7 @@ import {
 } from '@naumi/shared/api/WorkbenchRuntimeClient'
 import { errorText } from '@naumi/shared/hooks/useWorkspaceController'
 import './web2.css'
+import { MenuBar } from './MenuBar'
 
 type Panel = 'home' | 'review' | 'files' | 'browser' | 'tools' | 'tasks'
 const panelNames: Record<Panel, string> = {
@@ -282,6 +283,39 @@ export function Web2() {
       className={`web2 ${sidebar ? '' : 'w2-sidebar-hidden'} ${right ? '' : 'w2-right-hidden'}`}
     >
       <header className="w2-titlebar">
+        <MenuBar menus={[
+          { label: '文件', actions: [
+            { label: '新建对话', run: newChat, disabled: locked },
+            { label: '添加文件', run: () => fileInput.current?.click(), disabled: locked || !w.daemon },
+            { label: '导出对话', disabled: !messages.length, run: () => {
+              const blob = new Blob([messages.map(item => `## ${item.role === 'user' ? '用户' : 'NaumiAgent'}\n\n${item.content}`).join('\n\n')], { type: 'text/markdown;charset=utf-8' })
+              const url = URL.createObjectURL(blob)
+              const link = document.createElement('a')
+              link.href = url; link.download = `naumi-${w.sessionId || 'chat'}.md`; link.click()
+              setTimeout(() => URL.revokeObjectURL(url), 1000)
+            } },
+            { label: '设置', run: () => setDialog('settings') },
+          ] },
+          { label: '编辑', actions: [
+            { label: '编辑消息', run: () => textarea.current?.focus() },
+            { label: '全选消息草稿', disabled: !w.draft, run: () => { textarea.current?.focus(); textarea.current?.select() } },
+            { label: '复制消息草稿', disabled: !w.draft, run: () => { void navigator.clipboard.writeText(w.draft).catch(() => w.setError('复制失败，请选中文字复制')) } },
+            { label: '搜索会话', shortcut: 'Ctrl+K', run: () => { setSidebar(true); setSearching(true) } },
+          ] },
+          { label: '视图', actions: [
+            { label: sidebar ? '隐藏侧栏' : '显示侧栏', shortcut: 'Ctrl+B', run: toggleSidebar },
+            { label: right ? '隐藏右面板' : '显示右面板', run: toggleRight },
+            { label: terminal ? '隐藏执行记录' : '显示执行记录', shortcut: 'Ctrl+J', run: toggleTerminal },
+            { label: '代码更改', shortcut: 'Ctrl+Shift+G', run: () => openPanel('review') },
+            { label: '会话文件', run: () => openPanel('files') },
+            { label: fullscreen ? '退出全屏' : '进入全屏', run: () => { void (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()).catch(() => w.setError('浏览器暂不支持全屏')) } },
+          ] },
+          { label: '帮助', actions: [
+            { label: '快捷键', run: () => setDialog('help') },
+            { label: '工具与扩展', run: () => openPanel('tools') },
+            { label: '重新连接', disabled: locked || w.connecting, run: () => { void w.connect() } },
+          ] },
+        ]} />
         <IconButton label="切换侧栏" onClick={toggleSidebar}>
           <PanelLeft />
         </IconButton>
