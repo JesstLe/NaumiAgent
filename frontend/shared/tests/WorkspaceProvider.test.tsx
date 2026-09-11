@@ -114,6 +114,7 @@ function View({ label }: { label: string }) {
         {w.messages.map((message) => message.content).join('|')}
       </div>
       <div data-testid={`${label}-error`}>{w.error}</div>
+      <div data-testid={`${label}-failed-message`}>{w.failedMessage}</div>
       <input
         aria-label={`${label}-draft`}
         value={w.draft}
@@ -133,6 +134,12 @@ function View({ label }: { label: string }) {
         模型 {label}
       </button>
       <button onClick={() => void w.stop()}>停止 {label}</button>
+      <button
+        disabled={!w.failedMessage || w.busy}
+        onClick={() => void w.retryFailedSend()}
+      >
+        重试 {label}
+      </button>
       <button
         onClick={() => {
           const files = [new File(['真实附件内容'], 'note.txt', { type: 'text/plain' })]
@@ -247,11 +254,20 @@ describe('one shared workspace for two presentation shells', () => {
     )
     expect(localStorage.getItem('naumi:workspace:draft:one')).toBe('one 草稿')
   })
-  it('keeps the original draft after a failed send for both views', async () => {
+  it('keeps the original draft and retries the failed send for both views', async () => {
+    let attempts = 0
+    const bodies: Record<string, unknown>[] = []
     server.use(
-      http.post(`${base}/sessions/:id/messages`, () =>
-        HttpResponse.json({ detail: '服务暂不可用' }, { status: 503 }),
-      ),
+      http.post(`${base}/sessions/:id/messages`, async ({ request }) => {
+        attempts++
+        bodies.push((await request.json()) as Record<string, unknown>)
+        if (attempts === 1)
+          return HttpResponse.json({ detail: '服务暂不可用' }, { status: 503 })
+        return new HttpResponse(
+          'data: {"id":"t","type":"token_delta","data":{"token":"重试成功"}}\n\ndata: {"id":"e","type":"agent_end","data":{"status":"completed"}}\n\n',
+          { headers: { 'Content-Type': 'text/event-stream' } },
+        )
+      }),
     )
     setup()
     await waitFor(() =>
@@ -267,6 +283,23 @@ describe('one shared workspace for two presentation shells', () => {
       expect(screen.getByTestId('web-error')).toHaveTextContent('服务暂不可用'),
     )
     expect(screen.getByLabelText('web-draft')).toHaveValue('不要丢失这条任务')
+    expect(screen.getByTestId('web-failed-message')).toHaveTextContent('不要丢失这条任务')
+    expect(screen.getByTestId('web2-failed-message')).toHaveTextContent('不要丢失这条任务')
+
+    fireEvent.click(screen.getByText('重试 web'))
+    await waitFor(() =>
+      expect(screen.getByTestId('web2-messages')).toHaveTextContent('重试成功'),
+    )
+    expect(attempts).toBe(2)
+    expect(bodies[0].content).toBe('不要丢失这条任务')
+    expect(bodies[1].content).toBe('不要丢失这条任务')
+    expect(screen.getByTestId('web-error')).toBeEmptyDOMElement()
+    expect(screen.getByTestId('web2-failed-message')).toBeEmptyDOMElement()
+    expect(
+      screen
+        .getByTestId('web-messages')
+        .textContent?.match(/不要丢失这条任务/g),
+    ).toHaveLength(1)
   })
   it('does not mistake a response boundary for a completed server run', async () => {
     server.use(http.post(`${base}/sessions/:id/messages`, () => new HttpResponse('data: {"id":"boundary","type":"agent_end","data":{}}\n\n', { headers: { 'Content-Type': 'text/event-stream' } })))
