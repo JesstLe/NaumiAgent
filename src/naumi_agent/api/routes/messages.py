@@ -59,7 +59,7 @@ router = APIRouter(tags=["sessions", "messages"])
 @router.post("/sessions", response_model=SessionResponse, status_code=201)
 async def create_session(body: SessionCreate, request: Request, auth: str = AuthDep):
     engine = request.app.state.engine
-    session = await engine.session_store.create_session(
+    session = await engine.create_session(
         title=body.title,
         model=body.model,
         system_prompt=body.system_prompt,

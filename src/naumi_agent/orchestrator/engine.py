@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import re
 import time
 import uuid
@@ -899,6 +900,13 @@ class _ObservedRuntimeEventPublisher:
 type EngineEventPublisher = RuntimeEventPublisher | _ObservedRuntimeEventPublisher
 
 logger = logging.getLogger(__name__)
+
+
+def _workspace_roots_match(left: str | Path, right: str | Path) -> bool:
+    """Compare resolved workspaces using the host filesystem's case rules."""
+    return os.path.normcase(os.path.realpath(os.path.expanduser(os.fspath(left)))) == (
+        os.path.normcase(os.path.realpath(os.path.expanduser(os.fspath(right))))
+    )
 
 _OUTPUT_TRUNCATED_FINISH_REASONS = {
     "length",
@@ -5204,12 +5212,29 @@ class AgentEngine:
             content=f"权限拒绝：{reason}",
         )
 
+    async def create_session(
+        self,
+        title: str | None = None,
+        model: str | None = None,
+        system_prompt: str | None = None,
+    ) -> Session:
+        """Create and durably bind a session to this Engine workspace."""
+        session = await self._session_port.create_session(
+            title=title,
+            model=model,
+            system_prompt=system_prompt,
+        )
+        session.workspace_root = str(self.workspace_root)
+        session.git_branch = self._current_git_branch()
+        await self._session_port.save(session)
+        return session
+
     async def get_or_create_session(self, title: str | None = None) -> Session:
         """获取当前会话，不存在则创建."""
         if self._session is not None:
             return self._session
         default_prompt = self._build_system_prompt()
-        self._session = await self._session_port.create_session(
+        self._session = await self.create_session(
             title=title,
             model=self._model_port.resolve_model(ModelTier.CAPABLE),
             system_prompt=next(
@@ -5248,14 +5273,34 @@ class AgentEngine:
                     self._finish_session_transition("", transition_epoch)
                     transition_epoch = None
 
+                candidate = await self._session_port.load(session_id)
+                if candidate is None:
+                    return False
+                candidate_workspace = str(getattr(candidate, "workspace_root", "") or "")
+                if candidate_workspace and not _workspace_roots_match(
+                    candidate_workspace,
+                    self.workspace_root,
+                ):
+                    logger.warning(
+                        "Refused to load session %s from workspace %s into %s",
+                        session_id,
+                        candidate_workspace,
+                        self.workspace_root,
+                    )
+                    return False
+
                 resume = getattr(self._session_port, "resume", None)
                 session = (
                     await resume(session_id)
                     if callable(resume)
-                    else await self._session_port.load(session_id)
+                    else candidate
                 )
                 if session is None:
                     return False
+                if not str(getattr(session, "workspace_root", "") or ""):
+                    session.workspace_root = str(self.workspace_root)
+                    session.git_branch = self._current_git_branch()
+                    await self._session_port.save(session)
                 if previous_session_id != session.id:
                     if previous_session_id:
                         self._revoke_permission_grants_for_session(
@@ -6096,6 +6141,10 @@ class AgentEngine:
             ).strip()
         except Exception:
             return ""
+
+    def current_git_branch(self) -> str:
+        """Return the branch that new API-created sessions are bound to."""
+        return self._current_git_branch()
 
     @staticmethod
     def _build_session_summary(messages: list[dict[str, Any]], max_chars: int = 180) -> str:

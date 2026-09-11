@@ -20,6 +20,16 @@ export interface DaemonStatus {
   last_error: string | null
 }
 
+export interface OpenWorkspaceWindowOptions {
+  session_id?: string | null
+  view?: 'web2'
+}
+
+export interface OpenWorkspaceWindowResult {
+  label: string
+  daemon: DaemonStatus
+}
+
 export interface PlatformAdapter {
   getSetting(key: string): Promise<string | null>
   setSetting(key: string, value: string): Promise<void>
@@ -41,6 +51,10 @@ export interface PlatformAdapter {
   stopDaemon?(): Promise<DaemonStatus>
   getDaemonStatus?(): Promise<DaemonStatus>
   getDaemonLogs?(limit: number): Promise<string[]>
+  openWorkspaceWindow?(
+    config: DaemonLaunchConfig,
+    options?: OpenWorkspaceWindowOptions,
+  ): Promise<OpenWorkspaceWindowResult>
 
   openInExplorer?(path: string): Promise<void>
   openInTerminal?(path: string): Promise<void>
