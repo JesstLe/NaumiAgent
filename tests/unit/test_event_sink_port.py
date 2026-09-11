@@ -33,6 +33,7 @@ EXPECTED_RUNTIME_EVENT_TYPES = frozenset({
     "hook_trace",
     "latency_metric",
     "perf_phase",
+    "phase_summary",
     "permission_bubble",
     "recovery_event",
     "response_end",

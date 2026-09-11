@@ -77,6 +77,19 @@ def test_progress_requires_facts_and_uses_message_counts():
         )
         == "执行计划 · 进行中：修复归档接口；已完成 1 项"
     )
+    assert (
+        progress_summary(
+            "phase_summary",
+            {
+                "items": [
+                    {"action": "读取文件：README.md", "status": "success"},
+                    {"action": "执行命令：pnpm build", "status": "error"},
+                ]
+            },
+        )
+        == "本阶段执行存在 1 项失败：读取文件：README.md；执行命令：pnpm build。"
+    )
+    assert progress_summary("phase_summary", {"items": [{"status": "success"}]}) == ""
 
 
 @pytest.mark.asyncio
@@ -109,6 +122,10 @@ async def test_public_summary_survives_transport_both_recorders_and_reopen(tmp_p
             RuntimeEventType.TASK_SNAPSHOT,
             {"items": [{"status": "pending", "subject": "检查 UI 布局"}], "completed_count": 0},
         ),
+        (
+            RuntimeEventType.PHASE_SUMMARY,
+            {"items": [{"action": "读取文件：README.md", "status": "success"}]},
+        ),
     ]
     for index, (kind, data) in enumerate(events):
         runtime = RuntimeEvent(
@@ -136,5 +153,6 @@ async def test_public_summary_survives_transport_both_recorders_and_reopen(tmp_p
         assert activity == [
             "已压缩上下文：100 → 25 条消息；归档 1 条工具结果",
             "执行计划 · 待处理：检查 UI 布局；已完成 0 项",
+            "本阶段已完成：读取文件：README.md。",
         ]
         assert all("PRIVATE_REASONING" not in step.detail for step in run.steps)

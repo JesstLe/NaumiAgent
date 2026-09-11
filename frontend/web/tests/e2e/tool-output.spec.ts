@@ -39,8 +39,20 @@ test('tool output survives run completion and reload with multiline detail', asy
 
 test('reasoning appears immediately and tools stay at their turn position', async ({ page }) => {
   await mockWorkbenchApi(page)
+  let finished = false
   let release: (() => void) | undefined
   const gate = new Promise<void>(resolve => { release = resolve })
+  await page.route('**/sessions/*/runs*', route => route.fulfill({ json: { runs: finished ? [{
+    id: 'live', status: 'completed', started_at: '2026-09-11T01:00:00Z', completed_at: '2026-09-11T01:00:02Z', steps: [
+      { sequence: 1, stage: 'request', status: 'completed', summary: '检查后修改', detail: '' },
+      { sequence: 2, stage: 'analysis', status: 'completed', summary: '第 1 轮分析', detail: '' },
+      { sequence: 3, stage: 'tool', status: 'completed', summary: 'read_file', detail: '读取完成', metadata: { tool_call_id: 'a', public_action: '读取文件' } },
+      { sequence: 4, stage: 'activity', status: 'completed', summary: '本阶段已完成：读取文件。', detail: '' },
+      { sequence: 5, stage: 'analysis', status: 'completed', summary: '第 2 轮分析', detail: '' },
+      { sequence: 6, stage: 'tool', status: 'completed', summary: 'write_file', detail: '写入完成', metadata: { tool_call_id: 'b', public_action: '修改文件' } },
+      { sequence: 7, stage: 'activity', status: 'completed', summary: '本阶段已完成：修改文件。', detail: '' },
+    ],
+  }] : [] } }))
   await page.route('**/sessions/*/messages', async route => {
     await gate
     const events = [
@@ -55,6 +67,7 @@ test('reasoning appears immediately and tools stay at their turn position', asyn
       { id: '9', type: 'token_delta', run_id: 'live', turn: 2, sequence: 9, data: { token: '处理完成' } },
       { id: '10', type: 'agent_end', run_id: 'live', turn: 2, sequence: 10, data: { status: 'completed' } },
     ]
+    finished = true
     await route.fulfill({ contentType: 'text/event-stream', body: events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('') })
   })
   await page.goto('/web2')
@@ -62,16 +75,16 @@ test('reasoning appears immediately and tools stay at their turn position', asyn
   await page.getByRole('button', { name: '发送消息' }).click()
   const trace = page.getByLabel('执行过程', { exact: true })
   await expect(trace.getByRole('button', { name: '正在推理' })).toBeVisible()
-  await expect(trace.locator('.bui-action-summary', { hasText: '检查后修改' })).toBeVisible()
   release?.()
   await expect(page.getByText('处理完成', { exact: true })).toBeVisible()
   const labels = await trace.locator('.bui-chip-rows > div > button').allTextContents()
   expect(labels).toEqual([
-    expect.stringContaining('检查后修改'),
     expect.stringContaining('读取文件'),
-    expect.stringContaining('第 2 轮 · 上一步已完成：读取文件'),
     expect.stringContaining('修改文件'),
   ])
+  await expect(trace.locator('.bui-stage')).toHaveCount(2)
+  await expect(trace.locator('.bui-stage-summary').first()).toContainText('本阶段已完成：读取文件')
+  await expect(trace.locator('.bui-stage').nth(1)).toHaveAttribute('data-turn', '2')
   const order = await page.locator('.w2-message-list > *').evaluateAll(nodes => nodes.map(node => node.className))
   expect(order.findIndex(value => String(value).includes('bui-execution'))).toBeLessThan(order.findLastIndex(value => String(value).includes('assistant')))
 })

@@ -72,6 +72,35 @@ def tool_action(data: dict[str, Any]) -> str:
 
 
 def progress_summary(event: str, data: dict[str, Any]) -> str:
+    if event == "phase_summary":
+        items = data.get("items")
+        if not isinstance(items, (list, tuple)):
+            return ""
+        actions: list[str] = []
+        failed = 0
+        stopped = 0
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            action = public_excerpt(item.get("action"), 160)
+            if action and action not in actions:
+                actions.append(action)
+            status = str(item.get("status") or "").lower()
+            if status in {"error", "failed", "denied", "aborted"}:
+                failed += 1
+            elif status in {"skipped", "cancelled"}:
+                stopped += 1
+        if not actions:
+            return ""
+        shown = actions[:3]
+        suffix = f"；另有 {len(actions) - len(shown)} 项" if len(actions) > len(shown) else ""
+        if failed:
+            lead = f"本阶段执行存在 {failed} 项失败"
+        elif stopped:
+            lead = f"本阶段有 {stopped} 项未执行完成"
+        else:
+            lead = "本阶段已完成"
+        return f"{lead}：{'；'.join(shown)}{suffix}。"
     if event == "context_compacted":
         before, after = data.get("before"), data.get("after")
         text = "已压缩上下文"

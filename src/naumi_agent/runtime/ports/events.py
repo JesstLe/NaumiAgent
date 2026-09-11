@@ -39,6 +39,7 @@ class RuntimeEventType(StrEnum):
     HOOK_TRACE = "hook_trace"
     LATENCY_METRIC = "latency_metric"
     PERF_PHASE = "perf_phase"
+    PHASE_SUMMARY = "phase_summary"
     PERMISSION_BUBBLE = "permission_bubble"
     RECOVERY_EVENT = "recovery_event"
     RESPONSE_END = "response_end"

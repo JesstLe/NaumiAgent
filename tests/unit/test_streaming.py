@@ -13,6 +13,7 @@ _RUNTIME_TRANSPORT_TYPES = {
     RuntimeEventType.COMPLETION_RECEIPT: EventType.COMPLETION_RECEIPT,
     RuntimeEventType.CONTEXT_COMPACTED: EventType.CONTEXT_COMPACTED,
     RuntimeEventType.ERROR: EventType.AGENT_ERROR,
+    RuntimeEventType.PHASE_SUMMARY: EventType.PHASE_SUMMARY,
     RuntimeEventType.PERMISSION_BUBBLE: EventType.PERMISSION_REQUEST,
     RuntimeEventType.RESPONSE_END: EventType.AGENT_END,
     RuntimeEventType.RESPONSE_START: EventType.AGENT_START,
@@ -187,7 +188,7 @@ class TestStreamEventSink:
         runtime_event = _make_runtime_event(runtime_type)
         await StreamEventSink(collect).emit(runtime_event)
 
-        assert len(tuple(RuntimeEventType)) == 33
+        assert len(tuple(RuntimeEventType)) == 34
         assert len(received) == 1
         transport_event = received[0]
         assert transport_event.type is not EventType.TURN_END

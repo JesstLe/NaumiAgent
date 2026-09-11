@@ -486,6 +486,7 @@ from naumi_agent.orchestrator.tool_batches import (
 )
 from naumi_agent.release import ReleaseSlotStore, default_release_root
 from naumi_agent.runs.models import CompletionReceipt
+from naumi_agent.runs.public_activity import tool_action
 from naumi_agent.runs.recorder import ChatRunRecorder, ChatRunRecorderEventSink
 from naumi_agent.runtime.dependencies import RuntimePortOverrides, RuntimePorts
 from naumi_agent.runtime.paths import RuntimePaths
@@ -5593,6 +5594,43 @@ class AgentEngine:
                     "content": result.content,
                 }
             )
+
+        if events is not None:
+            phase_items = []
+            for index, result in outcomes.items():
+                call = parsed_calls.get(index)
+                raw_call = raw_calls[index]
+                function = raw_call.get("function")
+                function_data = function if isinstance(function, dict) else {}
+                name = (
+                    call.name
+                    if call is not None
+                    else str(
+                        function_data.get("name")
+                        or raw_call.get("name")
+                        or "invalid_tool_call"
+                    )
+                )
+                arguments = (
+                    call.arguments
+                    if call is not None
+                    else function_data.get(
+                        "arguments",
+                        raw_call.get("arguments", {}),
+                    )
+                )
+                phase_items.append(
+                    {
+                        "action": tool_action({"name": name, "args": arguments}),
+                        "status": result.status,
+                    }
+                )
+            if phase_items:
+                await events.publish(
+                    RuntimeEventType.PHASE_SUMMARY,
+                    {"items": phase_items},
+                    turn=turn,
+                )
 
         return signatures
 

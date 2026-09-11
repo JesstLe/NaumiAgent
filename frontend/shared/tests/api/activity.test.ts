@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isTimelineEvent, liveExecutionTimeline, runActivity, runExecutionTimeline, runsByUserMessage, toolActivity } from '../../src/api/activity'
+import { executionStages, isTimelineEvent, liveExecutionTimeline, runActivity, runExecutionTimeline, runsByUserMessage, toolActivity } from '../../src/api/activity'
 
 describe('public execution activity', () => {
   it('pairs concurrent calls by id and retains the correct input and failure', () => {
@@ -57,6 +57,24 @@ describe('public execution activity', () => {
       { sequence: 4, stage: 'analysis', status: 'completed', summary: '第 2 轮分析', detail: '' },
     ] })
     expect(rows.map(row => row.kind)).toEqual(['reasoning', 'tool', 'reasoning'])
+    expect(executionStages(rows).map(stage => ({ turn: stage.turn, tools: stage.tools.length }))).toEqual([
+      { turn: 1, tools: 1 },
+      { turn: 2, tools: 0 },
+    ])
+  })
+  it('groups phase summaries with their real turn and keeps tool state', () => {
+    const timeline = liveExecutionTimeline([
+      { id: '1', type: 'turn_start', turn: 1, sequence: 1, data: {} },
+      { id: '2', type: 'tool_call_start', turn: 1, sequence: 2, data: { call_id: 'a', name: 'read_file', activity_summary: '读取文件：README.md' } },
+      { id: '3', type: 'tool_call_end', turn: 1, sequence: 3, data: { call_id: 'a', name: 'read_file', status: 'success' } },
+      { id: '4', type: 'phase_summary', turn: 1, sequence: 4, data: { activity_summary: '本阶段已完成：读取文件：README.md。' } },
+      { id: '5', type: 'turn_start', turn: 2, sequence: 5, data: {} },
+    ], true)
+    const stages = executionStages(timeline)
+    expect(stages).toHaveLength(2)
+    expect(stages[0].tools[0]).toMatchObject({ turn: 1, state: 'completed' })
+    expect(stages[0].notes.map(note => note.label)).toContain('本阶段已完成：读取文件：README.md。')
+    expect(isTimelineEvent({ id: '4', type: 'phase_summary', data: {} })).toBe(true)
   })
   it('shows concrete task, command, result status, and compaction without raw thinking', () => {
     const events = [
