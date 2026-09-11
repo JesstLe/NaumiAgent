@@ -1,7 +1,22 @@
 import { describe, expect, it } from 'vitest'
-import { executionStages, isTimelineEvent, liveExecutionTimeline, runActivity, runExecutionTimeline, runsByUserMessage, toolActivity } from '../../src/api/activity'
+import { assistantActionsReady, executionStages, isTimelineEvent, liveExecutionTimeline, runActivity, runExecutionTimeline, runsByUserMessage, toolActivity } from '../../src/api/activity'
 
 describe('public execution activity', () => {
+  it('shows assistant actions only after the owning run reaches a terminal state', () => {
+    const base = {
+      content: '已经收到部分正文',
+      assistantPending: false,
+      userPending: false,
+      userMessageId: 'u1',
+      runningUserMessageId: null,
+    }
+    expect(assistantActionsReady({ ...base, runStatus: 'running' })).toBe(false)
+    expect(assistantActionsReady({ ...base, runningUserMessageId: 'u1', runStatus: 'completed' })).toBe(false)
+    expect(assistantActionsReady({ ...base, userPending: true, runStatus: 'completed' })).toBe(false)
+    expect(assistantActionsReady({ ...base, runStatus: 'completed' })).toBe(true)
+    expect(assistantActionsReady({ ...base, runStatus: 'failed' })).toBe(true)
+    expect(assistantActionsReady({ ...base, runStatus: undefined })).toBe(true)
+  })
   it('pairs concurrent calls by id and retains the correct input and failure', () => {
     const rows = toolActivity([
       { id: '1', type: 'tool_call_start', data: { call_id: 'a', name: 'read', arguments: { path: 'a' } } },
