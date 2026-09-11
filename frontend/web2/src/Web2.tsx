@@ -47,7 +47,10 @@ import { GoalPanel } from './GoalPanel'
 import { DiffPanel } from './DiffPanel'
 import { ThinkingState } from './beautiful/ThinkingState'
 import { SelectionActions } from './beautiful/SelectionActions'
+import './beautiful/upstream.generated.css'
 import './beautiful/beautiful.css'
+import '@fontsource-variable/inter'
+import '@fontsource-variable/jetbrains-mono'
 import { useCommandCompletion } from '@naumi/shared/hooks/useCommandCompletion'
 
 type Panel = 'home' | 'review' | 'files' | 'browser' | 'tools' | 'tasks'
@@ -447,7 +450,8 @@ export function Web2() {
                 <button aria-pressed={summary === 'goal'} onClick={() => setSummary('goal')}>目标</button>
                 <IconButton label="收起对话摘要" onClick={() => setSummary(null)}><X /></IconButton>
               </div>
-              {summary === 'todos' ? <TodoPanel key={w.sessionId || 'new'} /> : <GoalPanel />}
+              {summary === 'todos' && <TodoPanel key={w.sessionId || 'new'} />}
+              {summary === 'goal' && <GoalPanel />}
             </section>}
             <div
               className="w2-conversation"

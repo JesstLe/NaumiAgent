@@ -11,6 +11,12 @@ importers:
       '@playwright/test':
         specifier: ^1.61.1
         version: 1.61.1
+      '@tailwindcss/node':
+        specifier: ^4.3.2
+        version: 4.3.2
+      '@tailwindcss/oxide':
+        specifier: ^4.3.2
+        version: 4.3.2
       '@tailwindcss/vite':
         specifier: ^4.3.2
         version: 4.3.2(vite@8.1.4(@types/node@26.1.1)(jiti@2.7.0))
@@ -41,6 +47,9 @@ importers:
       msw:
         specifier: ^2.15.0
         version: 2.15.0(@types/node@26.1.1)(typescript@6.0.3)
+      postcss:
+        specifier: ^8.5.19
+        version: 8.5.19
       tailwindcss:
         specifier: ^4.3.2
         version: 4.3.2
@@ -159,18 +168,45 @@ importers:
 
   web2:
     dependencies:
+      '@fontsource-variable/inter':
+        specifier: ^5.3.0
+        version: 5.3.0
+      '@fontsource-variable/jetbrains-mono':
+        specifier: ^5.3.0
+        version: 5.3.0
       '@naumi/shared':
         specifier: workspace:*
         version: link:../shared
+      class-variance-authority:
+        specifier: ^0.7.1
+        version: 0.7.1
+      clsx:
+        specifier: ^2.1.1
+        version: 2.1.1
+      iconoir-react:
+        specifier: ^7.12.1
+        version: 7.12.1(react@19.2.7)
+      liveline:
+        specifier: 0.0.7
+        version: 0.0.7(react@19.2.7)
       lucide-react:
         specifier: ^1.24.0
         version: 1.24.0(react@19.2.7)
       react:
         specifier: ^19.0.0
         version: 19.2.7
+      react-dom:
+        specifier: ^19.2.7
+        version: 19.2.7(react@19.2.7)
       react-router-dom:
         specifier: ^7.18.1
         version: 7.18.1(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      shadow-plugin:
+        specifier: ^2.1.0
+        version: 2.1.0
+      tailwind-merge:
+        specifier: ^3.6.0
+        version: 3.6.0
 
 packages:
 
@@ -261,6 +297,12 @@ packages:
     peerDependenciesMeta:
       '@noble/hashes':
         optional: true
+
+  '@fontsource-variable/inter@5.3.0':
+    resolution: {integrity: sha512-OupL48va4JNofb97w6NYeF9S7W/kHNKM0Er8Dem5nqi4jeOLrVJDoE8tZEpnMJmtkvNbB1EIPPwHcdkF6b1oUA==}
+
+  '@fontsource-variable/jetbrains-mono@5.3.0':
+    resolution: {integrity: sha512-F32xpS2NsGYoQi2ADSkKTgpJj7ozajsGgDJ8woTnqjmIB+dxDIqImjl4pXZVEExu8UFZ2ndhmX18EBS/hdz3Lw==}
 
   '@inquirer/ansi@2.0.7':
     resolution: {integrity: sha512-3eTuUO1vH2cZm2ZKHeQxnOqlTi9EfZDGgIe3BL3I4u+rJHocr9Fz86M4fjYABPvFnQG/gGK551HqDiIcETwU6Q==}
@@ -685,6 +727,9 @@ packages:
     resolution: {integrity: sha512-NUPRluOfOiTKBKvWPtSD4PhFvWCqOi0BGStNWs57X9js7XGTprSmFoz5F0tWhR4WPjNeR9jXqdC7/UpSJTnlRg==}
     engines: {node: '>=18'}
 
+  class-variance-authority@0.7.1:
+    resolution: {integrity: sha512-Ka+9Trutv7G8M6WT6SeiRWz792K5qEqIGEGzXKhAE6xOWAY6pPH8U+9IY3oCMv6kqTmLsv7Xh/2w2RigkePMsg==}
+
   cli-width@4.1.0:
     resolution: {integrity: sha512-ouuZd4/dm2Sw5Gmqy6bGyNNNe1qt9RpmxveLSO7KcgsTnU7RXfsw+/bukWGo1abgBiMAic068rclZsO4IWmmxQ==}
     engines: {node: '>= 12'}
@@ -692,6 +737,10 @@ packages:
   cliui@8.0.1:
     resolution: {integrity: sha512-BSeNnyus75C4//NQ9gQt1/csTXyo/8Sb+afLAkzAptFuMsod9HFokGNudZpi/oQV73hnVK+sR+5PVRMd+Dr7YQ==}
     engines: {node: '>=12'}
+
+  clsx@2.1.1:
+    resolution: {integrity: sha512-eYm0QWBtUrBWZWG0d386OGAw16Z995PiOVo2B7bjWSbHedGl5e0ZWaq65kOGgUSNesEIDkB9ISbTg/JK9dhCZA==}
+    engines: {node: '>=6'}
 
   color-convert@2.0.1:
     resolution: {integrity: sha512-RRECPsj7iu/xb5oKYcsFHSppFNnsj/52OVTRKb4zP5onXwVF3zVmmToNcOfGC+CRDpfK/U584fMg38ZHCaElKQ==}
@@ -905,6 +954,11 @@ packages:
       typescript:
         optional: true
 
+  iconoir-react@7.12.1:
+    resolution: {integrity: sha512-e+Lwgqr10ruCwrCrFjG5RD0axwENFxPzLP1cESiQPEMH9UC/W6dk6u0MYwLoG0MBVsmBYAhVBb5GqO1aSljeGQ==}
+    peerDependencies:
+      react: 18 || 19
+
   indent-string@4.0.0:
     resolution: {integrity: sha512-EdDDZu4A2OyIK7Lr/2zG+w5jmbuk1DVBnEwREQvBzspBJkCEbRa8GxU1lghYcaGJCnRWibjDXlq779X1/y5xwg==}
     engines: {node: '>=8'}
@@ -1008,6 +1062,12 @@ packages:
   lightningcss@1.32.0:
     resolution: {integrity: sha512-NXYBzinNrblfraPGyrbPoD19C1h9lfI/1mzgWYvXUTe414Gz/X1FD2XBZSZM7rRTrMA8JL3OtAaGifrIKhQ5yQ==}
     engines: {node: '>= 12.0.0'}
+
+  liveline@0.0.7:
+    resolution: {integrity: sha512-S1Weo1kmefiOCNaW/WFXErqJXlV8A/ldIkIthaOeT57I2ZhqhKLKQDJ1wfabtMSK9vJeU8PeMNHd8Sr8TLByWQ==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      react: '>=18'
 
   lru-cache@11.5.2:
     resolution: {integrity: sha512-4pfM1Ff0x50o0tQwb5ucw/RzNyD0/YJME6IVcStalZuMWxdt3sR3huStTtxz4PUmvZfRguvDejasvQ2kifR11g==}
@@ -1193,6 +1253,9 @@ packages:
   set-cookie-parser@3.1.2:
     resolution: {integrity: sha512-5/r/lTwbJ3zQ+qwdUFZYeRNqda7P5HD8zQKqlSjdGt1/S0cjLAphHusj4Y58ahDtWn/g32xrIS58/ikOvwl0Lw==}
 
+  shadow-plugin@2.1.0:
+    resolution: {integrity: sha512-LPzD22Hsa5+DPIc4iOZAswuTDzgs8Ypy6GS2kf+nh7FvADa4Yq5WtRBkdAuIomVljRxluhgdMuOWcckuoBALKQ==}
+
   siginfo@2.0.0:
     resolution: {integrity: sha512-ybx0WO1/8bSBLEWXZvEd7gMW3Sn3JFlW3TvX1nREbDLRNQNaeNN8WK0meBwPdAaOI7TtRRRJn/Es1zhrrCHu7g==}
 
@@ -1235,6 +1298,9 @@ packages:
   tagged-tag@1.0.0:
     resolution: {integrity: sha512-yEFYrVhod+hdNyx7g5Bnkkb0G6si8HJurOoOEgC8B/O0uXLHlaey/65KRv6cuWBNhBgHKAROVpc7QyYqE5gFng==}
     engines: {node: '>=20'}
+
+  tailwind-merge@3.6.0:
+    resolution: {integrity: sha512-uxL7qAVQriqRQPAyK3pj66VqskWqoZ37PW94jwOTwNfq/z9oyu1V+eqrZqtR2+fCiXdYOZe/Modt8GtvqNzu+w==}
 
   tailwindcss@4.3.2:
     resolution: {integrity: sha512-WtctNNSH8A9jlMIqxzuYumOHU5uGZyRv0Q5svQl+oEPy5w84YpBxdb7MdqyiSPQge5jTJ6zFQLq0PFygdccSBA==}
@@ -1529,6 +1595,10 @@ snapshots:
     optional: true
 
   '@exodus/bytes@1.15.1': {}
+
+  '@fontsource-variable/inter@5.3.0': {}
+
+  '@fontsource-variable/jetbrains-mono@5.3.0': {}
 
   '@inquirer/ansi@2.0.7': {}
 
@@ -1892,6 +1962,10 @@ snapshots:
 
   chai@6.2.2: {}
 
+  class-variance-authority@0.7.1:
+    dependencies:
+      clsx: 2.1.1
+
   cli-width@4.1.0: {}
 
   cliui@8.0.1:
@@ -1899,6 +1973,8 @@ snapshots:
       string-width: 4.2.3
       strip-ansi: 6.0.1
       wrap-ansi: 7.0.0
+
+  clsx@2.1.1: {}
 
   color-convert@2.0.1:
     dependencies:
@@ -2084,6 +2160,10 @@ snapshots:
     optionalDependencies:
       typescript: 6.0.3
 
+  iconoir-react@7.12.1(react@19.2.7):
+    dependencies:
+      react: 19.2.7
+
   indent-string@4.0.0: {}
 
   is-fullwidth-code-point@3.0.0: {}
@@ -2170,6 +2250,10 @@ snapshots:
       lightningcss-linux-x64-musl: 1.32.0
       lightningcss-win32-arm64-msvc: 1.32.0
       lightningcss-win32-x64-msvc: 1.32.0
+
+  liveline@0.0.7(react@19.2.7):
+    dependencies:
+      react: 19.2.7
 
   lru-cache@11.5.2: {}
 
@@ -2342,6 +2426,8 @@ snapshots:
 
   set-cookie-parser@3.1.2: {}
 
+  shadow-plugin@2.1.0: {}
+
   siginfo@2.0.0: {}
 
   signal-exit@4.1.0: {}
@@ -2373,6 +2459,8 @@ snapshots:
   symbol-tree@3.2.4: {}
 
   tagged-tag@1.0.0: {}
+
+  tailwind-merge@3.6.0: {}
 
   tailwindcss@4.3.2: {}
 
