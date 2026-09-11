@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest'
 import { setupServer } from 'msw/node'
 import { http, HttpResponse } from 'msw'
-import { WorkbenchApiClient } from '@/api/WorkbenchApiClient'
-import { ApiException, isApiException } from '@/api/ApiException'
+import { WorkbenchApiClient } from '@naumi/shared/api/WorkbenchApiClient'
+import { ApiException, isApiException } from '@naumi/shared/api/ApiException'
 
 const baseURL = 'http://localhost:9876/api/v1'
 

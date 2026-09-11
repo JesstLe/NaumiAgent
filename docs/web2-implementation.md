@@ -4,6 +4,14 @@
 
 用户参考图：2026-09-11 提供的 Codex Windows 工作区。新增 `/web2`，复用 `frontend/web` 的 React、Vite、Lucide SVG 和现有 FastAPI 服务。旧入口保持可用。
 
+## 同级目录调整（2026-09-11）
+
+按用户要求，将新版从 `frontend/web/src/web2` 移至 `frontend/web2/src`；公共 API、控制器、Provider、平台适配和会话状态移至 `frontend/shared/src`，对应测试移至 `frontend/shared/tests`。两个界面均通过 `@naumi/shared` 消费公共能力，`web2` 不引用旧版源码。
+
+Web 依赖合并为 `frontend` 下的 pnpm workspace（web/web2/shared），锁文件统一移至 `frontend/pnpm-lock.yaml`。统一应用装配入口和构建产物仍在 `web`，保持 `/chat`、`/web2`、同路由 Provider 生命周期及 Windows 打包脚本兼容。
+
+迁移后验证：根目录与原 `web` 目录冻结锁文件安装均通过；TypeScript + Vite 构建、27 项单元测试、13 项 Playwright 测试通过，覆盖跨界面草稿与流状态保持。Ruff 与 API import 通过。重启本任务 5174 开发服务后，用 Chrome 访问真实后端的 `/web2`，历史会话和模型列表正常加载、页面无运行时异常，并检查截图。公共包未引用任一界面源码，构建产物仍为 `web/dist`。本次目录迁移未重复调用模型，也未重新构建 Windows 安装包；此前全量 Python 套件的未通过状态保持如实记录。
+
 布局：240px 渐变项目侧栏、白色双栏工作区、底部输入框、可收起的执行记录面板。避免营销文案，数据来自本地服务，不填充演示项目。
 
 ## 实现范围

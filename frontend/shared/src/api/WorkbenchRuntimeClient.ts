@@ -1,5 +1,5 @@
-import { WorkbenchApiClient } from '@/api/WorkbenchApiClient'
-import type { MessageCreate, MessageResponse, Session } from '@/api/types'
+import { WorkbenchApiClient } from '@naumi/shared/api/WorkbenchApiClient'
+import type { MessageCreate, MessageResponse, Session } from '@naumi/shared/api/types'
 
 export interface ModelConfig {
   models: { id: string; name: string; tier: string }[]

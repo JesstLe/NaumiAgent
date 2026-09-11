@@ -1,7 +1,7 @@
 import { useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Paperclip, Send, Square } from 'lucide-react'
-import { useWorkspace } from '@/hooks/WorkspaceProvider'
+import { useWorkspace } from '@naumi/shared/hooks/WorkspaceProvider'
 import { MessageBubble } from './MessageBubble'
 
 // The legacy shell is a presentation adapter over the shared workspace controller.

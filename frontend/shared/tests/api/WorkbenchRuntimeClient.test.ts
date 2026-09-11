@@ -3,7 +3,7 @@ import {
   consumeEvents,
   safeWebUrl,
   type StreamEvent,
-} from '@/api/WorkbenchRuntimeClient'
+} from '@naumi/shared/api/WorkbenchRuntimeClient'
 
 describe('shared SSE transport', () => {
   it('preserves Chinese UTF-8 across byte chunks and CRLF boundaries', async () => {

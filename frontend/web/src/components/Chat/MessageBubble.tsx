@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Copy, Check, Pencil } from 'lucide-react'
 import { useClipboard } from './useClipboard'
-import type { MessageResponse } from '@/api/types'
+import type { MessageResponse } from '@naumi/shared/api/types'
 
 interface MessageBubbleProps {
   message: MessageResponse

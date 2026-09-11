@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { LayoutGrid } from 'lucide-react'
-import { useSessionStore } from '@/stores/sessionStore'
+import { useSessionStore } from '@naumi/shared/stores/sessionStore'
 
 export interface GroupPanelProps {
   showHeader?: boolean

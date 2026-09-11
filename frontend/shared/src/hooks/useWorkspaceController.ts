@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { usePlatform } from '@/platform'
+import { usePlatform } from '@naumi/shared/platform'
 import type {
   ChatSource,
   DaemonStatusResponse,
@@ -7,7 +7,7 @@ import type {
   MessageResponse,
   Session,
   WorkbenchSnapshot,
-} from '@/api/types'
+} from '@naumi/shared/api/types'
 import {
   readPreference,
   savePreference,
@@ -15,7 +15,7 @@ import {
   type ModelConfig,
   type Run,
   type StreamEvent,
-} from '@/api/WorkbenchRuntimeClient'
+} from '@naumi/shared/api/WorkbenchRuntimeClient'
 
 export interface Permission {
   callId: string

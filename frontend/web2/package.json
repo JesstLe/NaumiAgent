@@ -1,0 +1,19 @@
+{
+  "name": "@naumi/web2",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/Web2.tsx"
+  },
+  "scripts": {
+    "dev": "pnpm --dir ../web run dev",
+    "build": "pnpm --dir ../web run build"
+  },
+  "dependencies": {
+    "@naumi/shared": "workspace:*",
+    "react": "^19.0.0",
+    "react-router-dom": "^7.18.1",
+    "lucide-react": "^1.24.0"
+  }
+}

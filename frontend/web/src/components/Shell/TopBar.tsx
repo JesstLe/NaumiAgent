@@ -12,9 +12,9 @@ import {
   History,
 } from 'lucide-react'
 import { useAppStore } from '@/stores/appStore'
-import { useSessionStore } from '@/stores/sessionStore'
-import { useWorkbenchConnection } from '@/hooks/useWorkbenchConnection'
-import { usePlatform } from '@/platform/PlatformContext'
+import { useSessionStore } from '@naumi/shared/stores/sessionStore'
+import { useWorkbenchConnection } from '@naumi/shared/hooks/useWorkbenchConnection'
+import { usePlatform } from '@naumi/shared/platform/PlatformContext'
 import { WindowControls } from './WindowControls'
 
 export function TopBar() {

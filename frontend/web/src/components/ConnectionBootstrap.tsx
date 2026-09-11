@@ -1,5 +1,5 @@
 import { AppRoutes } from '@/routes'
-import { useWorkspace } from '@/hooks/WorkspaceProvider'
+import { useWorkspace } from '@naumi/shared/hooks/WorkspaceProvider'
 
 export function ConnectionBootstrap() {
   const workspace = useWorkspace()

@@ -22,7 +22,9 @@
     "react-dom": "^19.0.0",
     "react-i18next": "^17.0.9",
     "react-router-dom": "^7.18.1",
-    "zustand": "^5.0.14"
+    "zustand": "^5.0.14",
+    "@naumi/shared": "workspace:*",
+    "@naumi/web2": "workspace:*"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",

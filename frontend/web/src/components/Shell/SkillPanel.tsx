@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { Wrench } from 'lucide-react'
-import { useSessionStore } from '@/stores/sessionStore'
+import { useSessionStore } from '@naumi/shared/stores/sessionStore'
 
 export function SkillPanel() {
   const { t } = useTranslation()

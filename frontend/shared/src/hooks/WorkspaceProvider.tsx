@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, type ReactNode } from 'react'
 import { useWorkspaceController } from './useWorkspaceController'
-import { useSessionStore } from '@/stores/sessionStore'
+import { useSessionStore } from '@naumi/shared/stores/sessionStore'
 
 export type Workspace = ReturnType<typeof useWorkspaceController>
 const WorkspaceContext = createContext<Workspace | null>(null)
