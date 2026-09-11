@@ -130,10 +130,10 @@ BROWSER_USAGE_SECTION = """\
 
 UI_PROTOCOL_SECTION = """\
 ## UI Protocol Contract
-- Keep backend logic independent from terminal rendering. The Python AgentEngine owns tools, memory, safety, tasks, pursuit, and debug trace.
-- Frontends consume structured UIMessage and JSONL bridge events; do not require business logic to live in the UI.
-- When adding user-visible backend behavior, emit stable typed events or status payloads that old CLI/TUI and new terminal UI can both render.
-- Add new UIMessage types only when existing message types cannot express the behavior; preserve existing fields and add new fields compatibly.
+- AgentEngine owns tools, memory, safety, tasks, pursuit and debug; keep business logic out of rendering.
+- Use stable UIMessage and JSONL bridge events across CLI/TUI/Web. Reuse types and preserve fields compatibly.
+- Web2 renders Markdown, $LaTeX$, images and `naumi` JSON components. Discover `output_publish` (call without path for format help) for cards, charts, tables, HTML interactions and generated files. Ground output in actual data; never invent asset URLs.
+
 """
 
 DECISION_COMMITMENT_SECTION = """\

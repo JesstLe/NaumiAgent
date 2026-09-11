@@ -1,4 +1,4 @@
-import { Children, isValidElement, memo, useState, type ReactNode } from 'react'
+import { Children, isValidElement, lazy, memo, Suspense, useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
@@ -7,6 +7,8 @@ import rehypeHighlight from 'rehype-highlight'
 import { Check, Copy, Download, X, ZoomIn } from 'lucide-react'
 import 'katex/dist/katex.min.css'
 import './rich-content.css'
+
+const RichWidget = lazy(() => import('./RichWidget'))
 
 export function contentUrl(value: string): string {
   if (/^\/api\/v1\/output-assets\/[a-f0-9]{64}\.(png|jpg|webp|gif|pdf|csv|txt|json)$/.test(value)) return value
@@ -62,6 +64,7 @@ function PlainPre({ children }: { children?: ReactNode }) {
   const flatten = (node: ReactNode): string => typeof node === 'string' ? node : Array.isArray(node) ? node.map(flatten).join('') : isValidElement<{ children?: ReactNode }>(node) ? flatten(node.props.children) : ''
   const code = flatten(child.props.children).replace(/\n$/, '')
   const language = child.props.className?.match(/language-([^ ]+)/)?.[1] || ''
+  if (language === 'naumi') return <Suspense fallback={<p role="status">正在加载组件…</p>}><RichWidget code={code} /></Suspense>
   return <div className="rich-highlight"><CodeBlock code={code} language={language} /><pre className="rich-highlighted">{children}</pre></div>
 }
 
