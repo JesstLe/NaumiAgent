@@ -44,8 +44,9 @@ import './web2.css'
 import { MenuBar } from './MenuBar'
 import { SettingsPage } from './SettingsPage'
 import { TodoPanel } from './TodoPanel'
+import { GoalPanel } from './GoalPanel'
 
-type Panel = 'home' | 'review' | 'files' | 'browser' | 'tools' | 'tasks' | 'todos'
+type Panel = 'home' | 'review' | 'files' | 'browser' | 'tools' | 'tasks' | 'todos' | 'goal'
 const panelNames: Record<Panel, string> = {
   home: '工作区',
   review: '审查',
@@ -54,6 +55,7 @@ const panelNames: Record<Panel, string> = {
   tools: '工具与扩展',
   tasks: '任务',
   todos: '待办',
+  goal: '目标',
 }
 
 function Logo({ className = '' }: { className?: string }) {
@@ -301,6 +303,7 @@ export function Web2() {
             { label: '代码更改', shortcut: 'Ctrl+Shift+G', run: () => openPanel('review') },
             { label: '会话文件', run: () => openPanel('files') },
             { label: '待办', run: () => openPanel('todos') },
+            { label: '目标', run: () => openPanel('goal') },
             { label: fullscreen ? '退出全屏' : '进入全屏', run: () => { void (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()).catch(() => w.setError('浏览器暂不支持全屏')) } },
           ] },
           { label: '帮助', actions: [
@@ -334,6 +337,7 @@ export function Web2() {
           </IconButton>
         </div>
         <nav className="w2-nav" aria-label="主导航">
+          <button className={panel === 'goal' ? 'selected' : ''} onClick={() => openPanel('goal')}><Workflow />目标{w.goalSnapshot?.current_goal_id && <span className="w2-nav-hint">1</span>}</button>
           <button className={panel === 'todos' ? 'selected' : ''} onClick={() => openPanel('todos')}><Check />待办<span className="w2-nav-hint">{w.todos.filter(todo => todo.status !== 'completed').length || ''}</span></button>
           <button disabled={locked} onClick={newChat}>
             <SquarePen />
@@ -756,6 +760,7 @@ export function Web2() {
             ) : (
               <div className="w2-panel-content">
                 {panel === 'todos' && <TodoPanel />}
+                {panel === 'goal' && <GoalPanel />}
                 {panel === 'review' && (
                   <>
                     <div className="w2-section-heading">

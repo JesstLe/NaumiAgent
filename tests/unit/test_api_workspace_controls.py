@@ -10,6 +10,8 @@ from fastapi import FastAPI
 from naumi_agent.api.routes.workspace_controls import router
 from naumi_agent.config.settings import MemoryConfig
 from naumi_agent.memory.session import SessionStore
+from naumi_agent.orchestrator.goal_store import GoalStore
+from naumi_agent.orchestrator.pursuit_store import PursuitStore
 from naumi_agent.tasks.store import TaskStore
 
 
@@ -24,6 +26,8 @@ async def controls(tmp_path):
         session_store=sessions, task_store=TaskStore(str(tmp_path / "tasks.db"))
     )
     app.state.engine_lock = asyncio.Lock()
+    app.state.engine.goal_store = GoalStore(tmp_path / "goals")
+    app.state.engine.pursuit_store = PursuitStore(tmp_path / "pursuit")
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
@@ -73,3 +77,35 @@ async def test_todo_concurrent_writes_and_busy_rejection(controls):
     assert len(rows) == sum(response.status_code == 201 for response in responses)
     async with app.state.engine_lock:
         assert (await client.post(endpoint, json={"subject": "执行中修改"})).status_code == 409
+
+
+async def test_goal_lifecycle_conflict_and_pursuit_guard(controls):
+    client, app, first, _ = controls
+    assert (await client.get("/goals")).json()["goals"] == []
+    endpoint = f"/sessions/{first}/goals"
+    assert (await client.post(endpoint, json={"objective": " "})).status_code == 422
+    result = await client.post(endpoint, json={"objective": "核对当前目标"})
+    assert result.status_code == 201
+    goal_id = result.json()["current_goal_id"]
+    assert (await client.post(endpoint, json={"objective": "重复未完成目标"})).status_code == 409
+    assert (await client.patch(f"/goals/{goal_id}", json={"status": "paused"})).status_code == 200
+    assert (await client.patch(f"/goals/{goal_id}", json={"status": "active"})).status_code == 200
+    app.state.engine.goal_store.attach_pursuit(goal_id, "pursuit-existing")
+    assert (
+        await client.patch(f"/goals/{goal_id}", json={"status": "completed"})
+    ).status_code == 409
+    assert (await client.get("/goals")).json()["goals"][0]["pursuit_link_status"] == "missing"
+
+
+async def test_goal_completion_persists_and_cannot_reopen(controls):
+    client, app, first, _ = controls
+    response = await client.post(f"/sessions/{first}/goals", json={"objective": "可验收目标"})
+    goal_id = response.json()["current_goal_id"]
+    result = await client.patch(
+        f"/goals/{goal_id}", json={"status": "completed", "note": "已核对结果"}
+    )
+    assert result.status_code == 200
+    assert result.json()["current_goal_id"] == ""
+    assert (await client.patch(f"/goals/{goal_id}", json={"status": "active"})).status_code == 409
+    restored = GoalStore(app.state.engine.goal_store.base_dir).get(goal_id)
+    assert restored.status == "completed" and restored.note == "已核对结果"

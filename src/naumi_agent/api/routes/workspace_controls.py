@@ -9,10 +9,78 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from naumi_agent.api.deps import AuthDep
 from naumi_agent.api.routes.messages import _engine_lock
+from naumi_agent.orchestrator.goal_store import GoalStatus, GoalStoreError
 from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.tasks.tools import TaskCreateTool, TaskUpdateTool
+from naumi_agent.tools.goal import GoalCreateTool, GoalUpdateTool
+from naumi_agent.ui.goal_panel import build_goal_pursuit_snapshot
 
 router = APIRouter(tags=["workspace-controls"])
+
+
+class GoalCreate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    objective: str = Field(min_length=1, max_length=8000)
+
+
+class GoalUpdate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    status: GoalStatus
+    note: str = Field(default="", max_length=4000)
+
+
+def _goals(engine):
+    return build_goal_pursuit_snapshot(engine.goal_store, engine.pursuit_store).to_protocol_dict()
+
+
+@router.get("/goals")
+async def list_goals(request: Request, auth: str = AuthDep):
+    return _goals(request.app.state.engine)
+
+
+@router.post("/sessions/{session_id}/goals", status_code=201)
+async def create_goal(
+    session_id: str,
+    body: GoalCreate,
+    request: Request,
+    auth: str = AuthDep,
+):
+    async with _idle_lock(request):
+        engine = await _session_engine(request, session_id)
+        result = await GoalCreateTool(engine.goal_store, lambda: session_id).execute(
+            objective=body.objective,
+        )
+        if result.startswith("⚠"):
+            raise HTTPException(409, result)
+        return _goals(engine)
+
+
+@router.patch("/goals/{goal_id}")
+async def update_goal(
+    goal_id: str,
+    body: GoalUpdate,
+    request: Request,
+    auth: str = AuthDep,
+):
+    async with _idle_lock(request):
+        engine = request.app.state.engine
+        try:
+            goal = engine.goal_store.get(goal_id)
+        except GoalStoreError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        if goal is None:
+            raise HTTPException(404, "目标不存在，请刷新列表")
+        if goal.pursuit_run_id:
+            raise HTTPException(
+                409, "目标已关联追踪运行，请通过追踪控制流程处理，避免只改变目标标签"
+            )
+        result = await GoalUpdateTool(engine.goal_store).execute(
+            goal_id=goal_id,
+            **body.model_dump(),
+        )
+        if result.startswith("⚠"):
+            raise HTTPException(409, result)
+        return _goals(engine)
 
 
 class TodoCreate(BaseModel):
