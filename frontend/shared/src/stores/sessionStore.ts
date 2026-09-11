@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Session, MessageResponse, Issue, Mission, Worktree, AgentProfileEnriched, WorkbenchSnapshot, Event } from '@/api/types'
+import type { Session, MessageResponse, Issue, Mission, Worktree, AgentProfileEnriched, WorkbenchSnapshot, Event } from '@naumi/shared/api/types'
 
 export interface PendingPermission {
   call_id: string

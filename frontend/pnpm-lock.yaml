@@ -7,6 +7,54 @@ settings:
 importers:
 
   .:
+    devDependencies:
+      '@playwright/test':
+        specifier: ^1.61.1
+        version: 1.61.1
+      '@tailwindcss/vite':
+        specifier: ^4.3.2
+        version: 4.3.2(vite@8.1.4(@types/node@26.1.1)(jiti@2.7.0))
+      '@testing-library/jest-dom':
+        specifier: ^6.9.1
+        version: 6.9.1
+      '@testing-library/react':
+        specifier: ^16.3.2
+        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.2.17
+      '@types/react-dom':
+        specifier: ^19.0.0
+        version: 19.2.3(@types/react@19.2.17)
+      '@vitejs/plugin-react':
+        specifier: ^6.0.3
+        version: 6.0.3(vite@8.1.4(@types/node@26.1.1)(jiti@2.7.0))
+      globals:
+        specifier: ^15.15.0
+        version: 15.15.0
+      jsdom:
+        specifier: ^29.1.1
+        version: 29.1.1
+      msw:
+        specifier: ^2.15.0
+        version: 2.15.0(@types/node@26.1.1)(typescript@6.0.3)
+      tailwindcss:
+        specifier: ^4.3.2
+        version: 4.3.2
+      typescript:
+        specifier: ~6.0.2
+        version: 6.0.3
+      vite:
+        specifier: ^8.1.1
+        version: 8.1.4(@types/node@26.1.1)(jiti@2.7.0)
+      vitest:
+        specifier: ^4.1.10
+        version: 4.1.10(@types/node@26.1.1)(jsdom@29.1.1)(msw@2.15.0(@types/node@26.1.1)(typescript@6.0.3))(vite@8.1.4(@types/node@26.1.1)(jiti@2.7.0))
+
+  shared:
     dependencies:
       '@tauri-apps/api':
         specifier: ^2.11.1
@@ -16,7 +64,31 @@ importers:
         version: 2.9.0
       axios:
         specifier: ^1.18.1
-        version: 1.18.1
+        version: 1.18.1(debug@4.4.3)
+      react:
+        specifier: ^19.0.0
+        version: 19.2.7
+      zustand:
+        specifier: ^5.0.14
+        version: 5.0.14(@types/react@19.2.17)(react@19.2.7)(use-sync-external-store@1.6.0(react@19.2.7))
+
+  web:
+    dependencies:
+      '@naumi/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@naumi/web2':
+        specifier: workspace:*
+        version: link:../web2
+      '@tauri-apps/api':
+        specifier: ^2.11.1
+        version: 2.11.1
+      '@tauri-apps/plugin-log':
+        specifier: ^2.9.0
+        version: 2.9.0
+      axios:
+        specifier: ^1.18.1
+        version: 1.18.1(debug@4.4.3)
       i18next:
         specifier: ^26.3.6
         version: 26.3.6(typescript@6.0.3)
@@ -84,6 +156,21 @@ importers:
       vitest:
         specifier: ^4.1.10
         version: 4.1.10(@types/node@26.1.1)(jsdom@29.1.1)(msw@2.15.0(@types/node@26.1.1)(typescript@6.0.3))(vite@8.1.4(@types/node@26.1.1)(jiti@2.7.0))
+
+  web2:
+    dependencies:
+      '@naumi/shared':
+        specifier: workspace:*
+        version: link:../shared
+      lucide-react:
+        specifier: ^1.24.0
+        version: 1.24.0(react@19.2.7)
+      react:
+        specifier: ^19.0.0
+        version: 19.2.7
+      react-router-dom:
+        specifier: ^7.18.1
+        version: 7.18.1(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
 
 packages:
 
@@ -1784,9 +1871,9 @@ snapshots:
 
   asynckit@0.4.0: {}
 
-  axios@1.18.1:
+  axios@1.18.1(debug@4.4.3):
     dependencies:
-      follow-redirects: 1.16.0
+      follow-redirects: 1.16.0(debug@4.4.3)
       form-data: 4.0.6
       https-proxy-agent: 5.0.1
       proxy-from-env: 2.1.0
@@ -1913,7 +2000,9 @@ snapshots:
     optionalDependencies:
       picomatch: 4.0.5
 
-  follow-redirects@1.16.0: {}
+  follow-redirects@1.16.0(debug@4.4.3):
+    optionalDependencies:
+      debug: 4.4.3
 
   form-data@4.0.6:
     dependencies:

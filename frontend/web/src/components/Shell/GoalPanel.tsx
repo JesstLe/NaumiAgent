@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next'
-import { useSessionStore } from '@/stores/sessionStore'
+import { useSessionStore } from '@naumi/shared/stores/sessionStore'
 import { formatDate } from '@/utils/formatDate'
 
 export function GoalPanel() {

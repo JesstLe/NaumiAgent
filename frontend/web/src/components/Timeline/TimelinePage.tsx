@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Loader2, Filter } from 'lucide-react'
-import { useWorkbenchConnection } from '@/hooks/useWorkbenchConnection'
-import { useSessionStore } from '@/stores/sessionStore'
-import { isApiException } from '@/api/ApiException'
+import { useWorkbenchConnection } from '@naumi/shared/hooks/useWorkbenchConnection'
+import { useSessionStore } from '@naumi/shared/stores/sessionStore'
+import { isApiException } from '@naumi/shared/api/ApiException'
 import { formatDate } from '@/utils/formatDate'
-import type { Event, EventSeverity } from '@/api/types'
+import type { Event, EventSeverity } from '@naumi/shared/api/types'
 
 const SEVERITY_COLOR: Record<EventSeverity, string> = {
   info: 'bg-info/15 text-info',

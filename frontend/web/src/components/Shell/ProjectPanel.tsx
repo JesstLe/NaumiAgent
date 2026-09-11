@@ -10,13 +10,13 @@ import {
   ChevronDown,
   ChevronRight,
 } from 'lucide-react'
-import { useSessionStore } from '@/stores/sessionStore'
-import { useWorkbenchConnection } from '@/hooks/useWorkbenchConnection'
-import { isApiException } from '@/api/ApiException'
+import { useSessionStore } from '@naumi/shared/stores/sessionStore'
+import { useWorkbenchConnection } from '@naumi/shared/hooks/useWorkbenchConnection'
+import { isApiException } from '@naumi/shared/api/ApiException'
 import { formatRelativeTime } from '@/utils/formatDate'
 import { GroupPanel } from './GroupPanel'
-import type { Session } from '@/api/types'
-import { useWorkspace } from '@/hooks/WorkspaceProvider'
+import type { Session } from '@naumi/shared/api/types'
+import { useWorkspace } from '@naumi/shared/hooks/WorkspaceProvider'
 
 type ProjectView = 'projects' | 'groups'
 

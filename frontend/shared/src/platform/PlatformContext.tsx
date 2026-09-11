@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import { createPlatformAdapter, type PlatformAdapter } from '@/platform'
+import { createPlatformAdapter, type PlatformAdapter } from '@naumi/shared/platform'
 
 const PlatformContext = createContext<PlatformAdapter | null>(null)
 

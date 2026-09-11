@@ -33,14 +33,14 @@ import {
   Workflow,
   X,
 } from 'lucide-react'
-import { useWorkspace } from '@/hooks/WorkspaceProvider'
-import { usePlatform } from '@/platform'
+import { useWorkspace } from '@naumi/shared/hooks/WorkspaceProvider'
+import { usePlatform } from '@naumi/shared/platform'
 import {
   readPreference,
   safeWebUrl,
   savePreference,
-} from '@/api/WorkbenchRuntimeClient'
-import { errorText } from '@/hooks/useWorkspaceController'
+} from '@naumi/shared/api/WorkbenchRuntimeClient'
+import { errorText } from '@naumi/shared/hooks/useWorkspaceController'
 import './web2.css'
 
 type Panel = 'home' | 'review' | 'files' | 'browser' | 'tools' | 'tasks'

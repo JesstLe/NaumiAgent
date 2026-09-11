@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next'
-import { useSessionStore } from '@/stores/sessionStore'
+import { useSessionStore } from '@naumi/shared/stores/sessionStore'
 import { Users, CircleAlert, ShieldAlert, ClipboardCheck, XCircle } from 'lucide-react'
 
 export function DashboardPage() {

@@ -18,9 +18,9 @@ import {
 } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
-import { WorkspaceProvider, useWorkspace } from '@/hooks/WorkspaceProvider'
-import { PlatformProvider } from '@/platform'
-import { savePreference } from '@/api/WorkbenchRuntimeClient'
+import { WorkspaceProvider, useWorkspace } from '@naumi/shared/hooks/WorkspaceProvider'
+import { PlatformProvider } from '@naumi/shared/platform'
+import { savePreference } from '@naumi/shared/api/WorkbenchRuntimeClient'
 
 const base = 'http://localhost:9888/api/v1'
 const session = (id: string) => ({

@@ -16,7 +16,7 @@ import {
   Folder,
 } from 'lucide-react'
 import { useAppStore, type AppRoute } from '@/stores/appStore'
-import { useWorkspace } from '@/hooks/WorkspaceProvider'
+import { useWorkspace } from '@naumi/shared/hooks/WorkspaceProvider'
 
 import { ProjectPanel } from './ProjectPanel'
 import { GroupPanel } from './GroupPanel'
