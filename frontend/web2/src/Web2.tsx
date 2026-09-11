@@ -45,6 +45,7 @@ import { MenuBar } from './MenuBar'
 import { SettingsPage } from './SettingsPage'
 import { TodoPanel } from './TodoPanel'
 import { GoalPanel } from './GoalPanel'
+import { useCommandCompletion } from '@naumi/shared/hooks/useCommandCompletion'
 
 type Panel = 'home' | 'review' | 'files' | 'browser' | 'tools' | 'tasks' | 'todos' | 'goal'
 const panelNames: Record<Panel, string> = {
@@ -152,6 +153,7 @@ function MessageContent({ content }: { content: string }) {
 export function Web2() {
   const w = useWorkspace()
   const platform = usePlatform()
+  const completion = useCommandCompletion(w.commands, w.draft, w.setDraft)
   const [sidebar, setSidebar] = useState(
     () => readPreference('sidebar', String(window.innerWidth > 580)) === 'true',
   )
@@ -578,11 +580,14 @@ export function Web2() {
                 <textarea
                   ref={textarea}
                   aria-label="消息"
+                  aria-controls={completion.items.length ? 'w2-command-list' : undefined}
+                  aria-activedescendant={completion.items.length ? `w2-command-${completion.index}` : undefined}
                   placeholder="描述任务，或输入 / 使用命令"
                   value={w.draft}
                   disabled={w.busy}
                   onChange={(event) => w.setDraft(event.target.value)}
                   onKeyDown={(event) => {
+                    if (completion.onKeyDown(event)) return
                     if (
                       event.key === 'Enter' &&
                       (w.sendKey === 'enter' || event.ctrlKey || event.metaKey) &&
@@ -595,6 +600,13 @@ export function Web2() {
                     }
                   }}
                 />
+                {!!completion.items.length && <div className="w2-command-list" role="listbox" id="w2-command-list" aria-label="斜杠命令">
+                  {completion.items.map((command, index) => <button type="button" role="option" tabIndex={-1} id={`w2-command-${index}`} key={command.command} aria-selected={index === completion.index}
+                    onMouseDown={event => event.preventDefault()} onClick={() => { completion.pick(command); textarea.current?.focus() }}>
+                    <strong>{command.command}</strong><span>{command.description}</span><small>{command.arguments.syntax}</small>
+                  </button>)}
+                </div>}
+                {w.draft.startsWith('/') && w.commandsError && <p className="w2-muted" role="status">{w.commandsError}</p>}
                 {!!w.selectedSources.length && (
                   <div className="w2-attachments">
                     {w.sources

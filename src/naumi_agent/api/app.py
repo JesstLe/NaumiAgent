@@ -27,9 +27,7 @@ async def lifespan(app: FastAPI):
     engine = create_agent_engine(config)
     permission_broker: PermissionApprovalBroker | None = None
     try:
-        app.state.session_reconciliation_recovery = (
-            await engine.start_long_running_services()
-        )
+        app.state.session_reconciliation_recovery = await engine.start_long_running_services()
         permission_broker = PermissionApprovalBroker()
         engine.set_permission_confirmer(permission_broker.confirm)
         app.state.engine = engine
@@ -61,13 +59,22 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    from naumi_agent.api.routes import health, messages, tools, workbench, workspace_controls, ws
+    from naumi_agent.api.routes import (
+        commands,
+        health,
+        messages,
+        tools,
+        workbench,
+        workspace_controls,
+        ws,
+    )
 
     app.include_router(health.router, prefix="/api/v1")
     app.include_router(messages.router, prefix="/api/v1")
     app.include_router(tools.router, prefix="/api/v1")
     app.include_router(workbench.router, prefix="/api/v1")
     app.include_router(workspace_controls.router, prefix="/api/v1")
+    app.include_router(commands.router, prefix="/api/v1")
     app.include_router(ws.router, prefix="/api/v1")
 
     from naumi_agent.api.middleware import AuthMiddleware, RateLimitMiddleware

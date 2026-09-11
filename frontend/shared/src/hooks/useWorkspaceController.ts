@@ -17,6 +17,7 @@ import {
   type ModelConfig,
   type Run,
   type StreamEvent,
+  type SlashCommand,
 } from '@naumi/shared/api/WorkbenchRuntimeClient'
 
 export interface Permission {
@@ -43,6 +44,8 @@ export function useWorkspaceController() {
   )
   const [daemon, setDaemon] = useState<DaemonStatusResponse | null>(null)
   const [config, setConfig] = useState<ModelConfig | null>(null)
+  const [commands, setCommands] = useState<SlashCommand[]>([])
+  const [commandsError, setCommandsError] = useState('')
   const [sessions, setSessions] = useState<Session[]>([])
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [messages, setMessages] = useState<MessageResponse[]>([])
@@ -159,6 +162,9 @@ export function useWorkspaceController() {
       const status = await api.fetchDaemonStatus()
       if (current !== connectionGeneration.current) return
       setDaemon(status)
+      api.commands().then(result => {
+        if (current === connectionGeneration.current) { setCommands(result.commands ?? []); setCommandsError('') }
+      }).catch(() => { if (current === connectionGeneration.current) setCommandsError('命令列表未加载，请重新连接') })
       await refreshSessions()
       if (current !== connectionGeneration.current) return
       const selected = readPreference('session')
@@ -432,6 +438,8 @@ export function useWorkspaceController() {
       }
       setBusy(false)
       operation.current = false
+      void taskState.refreshTasks()
+      void goalState.refreshGoals()
     }
   }
   const stop = async () => {
@@ -574,6 +582,8 @@ export function useWorkspaceController() {
     base,
     daemon,
     config,
+    commands,
+    commandsError,
     sessions,
     sessionId,
     messages,
