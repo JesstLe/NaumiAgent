@@ -2,6 +2,38 @@ import type { Run, StreamEvent } from './WorkbenchRuntimeClient'
 import type { MessageResponse } from './types'
 
 export type ActivityState = 'running' | 'completed' | 'failed' | 'cancelled' | 'unknown'
+const TERMINAL_RUN_STATUSES = new Set([
+  'completed',
+  'completed_unverified',
+  'failed',
+  'error',
+  'cancelled',
+  'blocked',
+])
+
+export function assistantActionsReady({
+  content,
+  assistantPending,
+  userPending,
+  userMessageId,
+  runningUserMessageId,
+  runStatus,
+}: {
+  content: string
+  assistantPending: boolean
+  userPending: boolean
+  userMessageId?: string
+  runningUserMessageId: string | null
+  runStatus?: string
+}): boolean {
+  if (
+    !content.trim()
+    || assistantPending
+    || userPending
+    || (userMessageId && userMessageId === runningUserMessageId)
+  ) return false
+  return runStatus ? TERMINAL_RUN_STATUSES.has(runStatus) : true
+}
 export interface ActivityStep { id: string; label: string; state: ActivityState; input: string; output: string; outputRecorded?: boolean; outputTruncated?: boolean }
 export interface ReasoningStep {
   id: string

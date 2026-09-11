@@ -56,7 +56,7 @@ import {
   savePreference,
 } from '@naumi/shared/api/WorkbenchRuntimeClient'
 import { errorText } from '@naumi/shared/hooks/useWorkspaceController'
-import { runsByUserMessage } from '@naumi/shared/api/activity'
+import { assistantActionsReady, runsByUserMessage } from '@naumi/shared/api/activity'
 import './web2.css'
 import { MenuBar } from './MenuBar'
 import { SettingsPage } from './SettingsPage'
@@ -916,6 +916,15 @@ export function Web2() {
                     const retryUser = message.role === 'assistant'
                       ? [...messages.slice(0, index)].reverse().find(item => item.role === 'user')
                       : undefined
+                    const retryRun = retryUser ? messageRuns.get(retryUser.id) : undefined
+                    const showAssistantActions = message.role === 'assistant' && assistantActionsReady({
+                      content: message.content,
+                      assistantPending: message.metadata.pending === true,
+                      userPending: retryUser?.metadata.pending === true,
+                      userMessageId: retryUser?.id,
+                      runningUserMessageId: w.runningUserMessageId,
+                      runStatus: retryRun?.status,
+                    })
                     const live = message.role === 'user'
                       && message.id === w.runningUserMessageId
                       && (w.busy || w.liveEvents.length > 0)
@@ -923,7 +932,7 @@ export function Web2() {
                       <article className={`w2-message ${message.role}`}>
                         <MessageContent content={message.content} plain={message.role === 'user'} />
                         {message.role === 'assistant' && <AiSources sources={sources} />}
-                        {message.role === 'assistant'
+                        {showAssistantActions
                           ? <MessageActionBar
                               messageId={message.id}
                               timestamp={message.timestamp}
@@ -935,7 +944,9 @@ export function Web2() {
                                 void w.regenerate(retryUser.content, retryUser.id, message.id)
                               }}
                             />
-                          : <div className="w2-message-actions"><CopyButton text={message.content} /></div>}
+                          : message.role === 'user'
+                            ? <div className="w2-message-actions"><CopyButton text={message.content} /></div>
+                            : null}
                       </article>
                       {message.role === 'user' && (run || live) && (
                         <ThinkingState run={run} live={live} objective={message.content} />
