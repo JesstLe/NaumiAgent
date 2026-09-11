@@ -53,7 +53,8 @@ test('dependency dragging moves its connector and insights inspect actual status
   await insights.getByRole('button', { name: '待处理: 50%' }).click()
   await expect(insights.getByRole('button', { name: '待处理: 50%' })).toHaveAttribute('aria-pressed', 'true')
   await insights.getByRole('button', { name: '查看待办' }).click()
-  await expect(panel.getByLabel('待办状态 核对配置约束')).toHaveValue('pending')
+  const summary = page.getByRole('region', { name: '置顶摘要' })
+  await expect(summary.getByLabel('待办状态 核对配置约束')).toHaveValue('pending')
 })
 test('empty summaries do not display upstream sample data', async ({ page }) => {
   await mockWorkbenchApi(page)
