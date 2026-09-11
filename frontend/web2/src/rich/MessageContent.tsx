@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import rehypeHighlight from 'rehype-highlight'
+import { remarkDisplayMath } from './remarkDisplayMath'
 import { Check, Copy, Download, X, ZoomIn } from 'lucide-react'
 import 'katex/dist/katex.min.css'
 import './rich-content.css'
@@ -89,7 +90,7 @@ function PlainPre({ children }: { children?: ReactNode }) {
 export const MessageContent = memo(function MessageContent({ content, plain = false }: { content: string; plain?: boolean }) {
   if (plain) return <div className="w2-prose">{content}</div>
   return <div className="rich-content">
-    <Markdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[[rehypeKatex, { strict: false, trust: false, throwOnError: false, maxExpand: 500 }], [rehypeHighlight, { detect: false }]]}
+    <Markdown remarkPlugins={[remarkGfm, remarkMath, remarkDisplayMath]} rehypePlugins={[[rehypeKatex, { strict: false, trust: false, throwOnError: false, maxExpand: 500 }], [rehypeHighlight, { detect: false }]]}
       skipHtml urlTransform={contentUrl}
       components={{
         a: ({ href, children }) => href?.startsWith('/api/v1/output-assets/') ? <Suspense fallback={<span>正在加载文件…</span>}><PublishedFile path={href}>{children}</PublishedFile></Suspense> : href ? <a href={href} target={href.startsWith('#') ? undefined : '_blank'} rel="noopener noreferrer">{children}</a> : <span>{children}</span>,
