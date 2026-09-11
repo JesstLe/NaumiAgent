@@ -1,0 +1,5 @@
+[
+  {"id": "UPD-001", "date": "2026-09-07", "status": "completed", "summary": "星河演示项目完成报表导出功能的本地测试。"},
+  {"id": "UPD-002", "date": "2026-09-09", "status": "completed", "summary": "星河演示项目补充下载文件格式校验。"},
+  {"id": "UPD-003", "date": "2026-09-10", "status": "blocked", "summary": "星河演示项目尚未获得真实站点测试账号，不能宣布线上验收通过。"}
+]
