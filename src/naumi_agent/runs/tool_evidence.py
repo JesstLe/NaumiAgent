@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from naumi_agent.runs.public_activity import public_excerpt, tool_action
 from naumi_agent.safety.guardrails import OutputGuardrail
 
 OUTPUT_PREVIEW_LIMIT = 64_000
@@ -27,6 +28,12 @@ def tool_output(data: dict[str, Any]) -> str:
 
 def tool_metadata(data: dict[str, Any], *, ended: bool) -> dict[str, Any]:
     metadata: dict[str, Any] = {}
+    if not ended and any(
+        data.get(key) is not None for key in ("activity_summary", "arguments", "args")
+    ):
+        metadata["public_action"] = (
+            public_excerpt(data.get("activity_summary"), 400) or tool_action(data)
+        )
     call_id = data.get("call_id") or data.get("tool_call_id") or data.get("request_id")
     if call_id:
         metadata["tool_call_id"] = str(call_id)

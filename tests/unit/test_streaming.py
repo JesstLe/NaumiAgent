@@ -263,7 +263,10 @@ class TestStreamEventSink:
         event = await self._convert(runtime_event)
 
         assert event.type is EventType.TOOL_CALL_START
-        assert event.data == {"name": "bash_run", "call_id": "call-1"}
+        assert event.data == {
+            "name": "bash_run", "call_id": "call-1",
+            "activity_summary": "在 工作目录 执行命令：echo $API_KEY",
+        }
 
     async def test_thinking_delta_mapping_omits_internal_content(self) -> None:
         runtime_event = _make_runtime_event(

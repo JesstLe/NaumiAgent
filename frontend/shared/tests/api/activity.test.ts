@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { liveExecutionTimeline, runActivity, runExecutionTimeline, toolActivity } from '../../src/api/activity'
+import { isTimelineEvent, liveExecutionTimeline, runActivity, runExecutionTimeline, toolActivity } from '../../src/api/activity'
 
 describe('public execution activity', () => {
   it('pairs concurrent calls by id and retains the correct input and failure', () => {
@@ -57,5 +57,55 @@ describe('public execution activity', () => {
       { sequence: 4, stage: 'analysis', status: 'completed', summary: '第 2 轮分析', detail: '' },
     ] })
     expect(rows.map(row => row.kind)).toEqual(['reasoning', 'tool', 'reasoning'])
+  })
+  it('shows concrete task, command, result status, and compaction without raw thinking', () => {
+    const events = [
+      { id: '1', type: 'turn_start', turn: 1, data: {} },
+      { id: '2', type: 'thinking_delta', turn: 1, data: { content: 'PRIVATE_REASONING' } },
+      { id: '3', type: 'tool_call_start', turn: 1, data: { call_id: 'a', name: 'bash_run', activity_summary: '在 E:/Workspace 执行命令：pnpm build' } },
+      { id: '4', type: 'tool_call_error', turn: 1, data: { call_id: 'a', name: 'bash_run', message: '构建失败' } },
+      { id: '5', type: 'turn_start', turn: 2, data: {} },
+      { id: '6', type: 'context_compacted', data: { activity_summary: '已压缩上下文：100 → 25 条消息' } },
+      { id: '7', type: 'runtime_event', data: { event: 'task_snapshot', data: { activity_summary: '执行计划 · 进行中：修复构建问题' } } },
+      { id: '8', type: 'agent_end', data: { status: 'cancelled' } },
+    ]
+    const rows = liveExecutionTimeline(events, false, { objective: '修复归档接口', workspace: 'E:/Workspace' })
+    expect(rows[0].label).toContain('本次任务：修复归档接口')
+    expect(rows[0].label).toContain('工作目录：E:/Workspace')
+    expect(rows[1]).toMatchObject({ action: '在 E:/Workspace 执行命令：pnpm build', state: 'failed' })
+    expect(rows[2]).toMatchObject({ label: '第 2 轮 · 上一步执行失败：在 E:/Workspace 执行命令：pnpm build', state: 'cancelled' })
+    expect(rows[3].label).toContain('100 → 25')
+    expect(rows[4].label).toContain('修复构建问题')
+    expect(JSON.stringify(rows)).not.toContain('PRIVATE_REASONING')
+    expect(isTimelineEvent(events[1])).toBe(false)
+    expect(isTimelineEvent(events[5])).toBe(true)
+    expect(isTimelineEvent(events[6])).toBe(true)
+  })
+  it('restores public summaries and never uses saved internal analysis detail', () => {
+    const rows = runExecutionTimeline({ id: 'r', status: 'failed', started_at: '', steps: [
+      { sequence: 1, stage: 'request', status: 'completed', summary: '检查布局', detail: '' },
+      { sequence: 2, stage: 'analysis', status: 'completed', summary: '分析请求', detail: 'PRIVATE_REASONING' },
+      { sequence: 3, stage: 'tool', status: 'completed', summary: 'browser_observe', detail: 'button', metadata: { public_action: '查看页面元素与布局' } },
+      { sequence: 4, stage: 'activity', status: 'completed', summary: '已压缩上下文：30 → 12 条消息', detail: '' },
+      { sequence: 5, stage: 'analysis', status: 'running', summary: '第 2 轮分析', detail: '' },
+    ] })
+    expect(rows[1]).toMatchObject({ action: '查看页面元素与布局' })
+    expect(rows[2].label).toContain('30 → 12')
+    expect(rows[3]).toMatchObject({ state: 'unknown' })
+    expect(JSON.stringify(rows)).not.toContain('PRIVATE_REASONING')
+  })
+  it('deduplicates delivery and keeps concurrent calls separate', () => {
+    const start = { id: '1', type: 'tool_call_start', data: { name: 'read', call_id: 'a', arguments: { path: 'a.py' } } }
+    const rows = liveExecutionTimeline([start, start, { ...start, id: '2', data: { ...start.data, call_id: 'b', arguments: { path: 'b.py' } } }], false)
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toMatchObject({ action: '读取文件：a.py', state: 'unknown' })
+    expect(rows[1]).toMatchObject({ action: '读取文件：b.py', state: 'unknown' })
+  })
+  it('describes progress facts from older daemons without claiming unrecorded work', () => {
+    const rows = liveExecutionTimeline([
+      { id: '1', type: 'context_compacted', data: { before: 80, after: 20, archived_tool_results: 1 } },
+      { id: '2', type: 'runtime_event', data: { event: 'task_snapshot', data: { items: [{ status: 'in_progress', subject: '核对布局' }], completed_count: 0 } } },
+    ], false)
+    expect(rows.map(row => row.label)).toEqual(['已压缩上下文：80 → 20 条消息；归档 1 条工具结果', '执行计划 · 进行中：核对布局；已完成 0 项'])
   })
 })

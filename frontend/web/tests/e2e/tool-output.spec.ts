@@ -67,10 +67,10 @@ test('reasoning appears immediately and tools stay at their turn position', asyn
   await expect(page.getByText('处理完成', { exact: true })).toBeVisible()
   const labels = await trace.locator('.bui-timeline > p, .bui-timeline-tool > button').allTextContents()
   expect(labels).toEqual([
-    '我会先理解请求并检查当前上下文，然后选择需要执行的工具。',
-    expect.stringContaining('read_file'),
-    '我会结合刚才的工具结果继续判断，并确定下一步操作。',
-    expect.stringContaining('write_file'),
+    expect.stringContaining('本次任务：检查后修改'),
+    expect.stringContaining('读取文件'),
+    '第 2 轮 · 上一步已完成：读取文件',
+    expect.stringContaining('修改文件'),
   ])
   const order = await page.locator('.w2-message-list > *').evaluateAll(nodes => nodes.map(node => node.className))
   expect(order.findIndex(value => String(value).includes('bui-execution'))).toBeLessThan(order.findLastIndex(value => String(value).includes('assistant')))

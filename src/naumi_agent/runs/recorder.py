@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from naumi_agent.runs.models import CompletionReceipt
+from naumi_agent.runs.public_activity import progress_summary
 from naumi_agent.runs.receipt_builder import RunReceiptBuilder
 from naumi_agent.runs.store import ChatRunRecord, ChatRunStore
 from naumi_agent.runs.tool_evidence import (
@@ -168,6 +169,10 @@ def _step_fields(
     event: str,
     data: dict[str, Any],
 ) -> tuple[str, str, str, str, str] | None:
+    progress = progress_summary(event, data)
+    if progress:
+        key = data.get("event_id") or uuid.uuid4().hex
+        return f"activity:{key}", "activity", "completed", progress, ""
     if event in {"turn_start", "thinking_start", "thinking_delta", "thinking_end"}:
         turn = data.get("turn")
         turn_number = turn if isinstance(turn, int) and turn > 0 else 1

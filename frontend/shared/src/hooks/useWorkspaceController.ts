@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { usePlatform } from '@naumi/shared/platform'
+import { isTimelineEvent } from '@naumi/shared/api/activity'
 import { useWorkspaceTasks } from './useWorkspaceTasks'
 import { useWorkspaceGoals } from './useWorkspaceGoals'
 import type {
@@ -404,20 +405,7 @@ export function useWorkspaceController() {
                   ]
             })
           }
-          if (
-            [
-              'turn_start',
-              'thinking_start',
-              'thinking_delta',
-              'thinking_end',
-              'tool_call_start',
-              'tool_call_end',
-              'tool_call_error',
-              'permission_request',
-              'agent_end',
-              'agent_error',
-            ].includes(event.type)
-          ) {
+          if (isTimelineEvent(event)) {
             setLiveEvents((previous) => [...previous.slice(-199), event])
           }
           if (event.type === 'permission_request') {
