@@ -25,4 +25,11 @@
 - 交互：来源列表折叠、计数、域名、外链与单条摘要原位展开；动效使用 Framer Motion，系统开启 reduced motion 时由浏览器和 CSS 降低动态效果。
 - 安全：拒绝非 HTTP(S)、带 URL 用户名或密码的地址；不生成、补写或暗示不存在的来源。
 
-后续模块：Border Beam。
+## 2026-09-11：Border Beam
+
+- 21st.dev `@larsen66/border-beam` 指向 `Jakubantalik/Libraries/packages/border-beam`，许可证为 MIT。
+- npm 尚未发布 GitHub 当前的 1.4.0（注册表最新为 1.3.0），因此本项目在 `frontend/web2/src/community/border-beam` 保留 1.4.0 GitHub 源码与 LICENSE，不降级安装旧包。仅清理了 5 处上游未使用的函数／参数，以通过本项目更严格的 TypeScript `noUnused` 检查，运行逻辑不变。
+- 接入位置：Web2 输入框外层。Agent 执行时启用彩色光束边框，停止后按上游淡出状态收口；采用浅色主题并降低亮度、饱和度和光晕强度，避免破坏 Codex 风格。
+- 上游实现包含离屏暂停、元素圆角检测、IntersectionObserver、ResizeObserver、共享限帧动画驱动和 reduced motion 处理；这些能力均保留。
+
+本轮四项组件已经全部接入。

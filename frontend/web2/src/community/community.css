@@ -23,6 +23,7 @@
 @keyframes community-avatar-breathe { 0%, 100% { transform: scale(1); opacity: .9; } 50% { transform: scale(1.055); opacity: 1; } }
 
 .community-message { position: relative; display: flex; align-items: flex-start; gap: 10px; width: 100%; }
+.w2-message.community-message { width: 100%; max-width: none; padding: 0; margin: 10px 0 26px; background: transparent; border-radius: 0; }
 .community-message.user { justify-content: flex-end; }
 .community-message-body { min-width: 0; max-width: min(100%, 780px); }
 .community-message.user .community-message-body { max-width: min(82%, 700px); }
@@ -62,3 +63,6 @@
 .community-sources-list article > div > button[aria-expanded='true'] svg { transform: rotate(180deg); }
 .community-sources-list article > p { height: auto; overflow: hidden; margin: 0 26px 9px 22px; padding: 7px 9px; border-left: 1px solid #dfe4db; color: #747a72; background: #fafbf8; font-size: 11px; line-height: 1.65; overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) { .community-sources-trigger > svg:last-child, .community-sources-list article > div > button svg { transition: none; } }
+
+.community-composer-beam { width: 100%; border-radius: 15px; }
+.community-composer-beam > .w2-composer { width: 100%; }

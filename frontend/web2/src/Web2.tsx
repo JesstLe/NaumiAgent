@@ -66,6 +66,7 @@ import { MessageContent } from './rich/MessageContent'
 import { WorkspaceFileTree } from './community/WorkspaceFileTree'
 import { AiMessage } from './community/AiMessage'
 import { AiSources, messageSources } from './community/AiSources'
+import { BorderBeam } from './community/border-beam'
 import { SelectionActions } from './beautiful/SelectionActions'
 import { ContextCards } from './beautiful/ContextCards'
 import { Flowchart } from './beautiful/Flowchart'
@@ -861,16 +862,28 @@ export function Web2() {
                   </span>
                 )}
               </div>
-              <div
-                className="w2-composer"
-                onDragOver={(event) => {
-                  event.preventDefault()
-                }}
-                onDrop={(event) => {
-                  event.preventDefault()
-                  if (!uploadLocked) void w.upload(event.dataTransfer.files)
-                }}
+              <BorderBeam
+                className="community-composer-beam"
+                size="md"
+                colorVariant="colorful"
+                theme="light"
+                active={w.busy}
+                borderRadius={15}
+                brightness={1.05}
+                saturation={0.72}
+                glowSize={0.6}
+                strength={0.62}
               >
+                <div
+                  className="w2-composer"
+                  onDragOver={(event) => {
+                    event.preventDefault()
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault()
+                    if (!uploadLocked) void w.upload(event.dataTransfer.files)
+                  }}
+                >
                 <textarea
                   ref={textarea}
                   aria-label="消息"
@@ -925,7 +938,7 @@ export function Web2() {
                       ))}
                   </div>
                 )}
-                <div className="w2-composer-actions">
+                  <div className="w2-composer-actions">
                   <input
                     hidden
                     ref={fileInput}
@@ -996,8 +1009,9 @@ export function Web2() {
                       <ArrowUp size={18} />
                     )}
                   </button>
+                  </div>
                 </div>
-              </div>
+              </BorderBeam>
             </div>
           </section>
 

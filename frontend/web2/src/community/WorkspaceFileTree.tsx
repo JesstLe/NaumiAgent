@@ -95,7 +95,11 @@ export function WorkspaceFileTree() {
     setLoading(true)
     setFailure('')
     try {
-      setData(await w.api.workspaceTree())
+      const response = await w.api.workspaceTree()
+      if (!response.items || !response.root_id || !response.items[response.root_id]) {
+        throw new Error('服务返回的目录结构不完整')
+      }
+      setData(response)
     } catch (error) {
       setFailure(errorText(error))
     } finally {
