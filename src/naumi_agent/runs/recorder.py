@@ -10,6 +10,12 @@ from typing import Any
 from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.runs.receipt_builder import RunReceiptBuilder
 from naumi_agent.runs.store import ChatRunRecord, ChatRunStore
+from naumi_agent.runs.tool_evidence import (
+    public_tool_text,
+    tool_end_status,
+    tool_metadata,
+    tool_output,
+)
 from naumi_agent.runtime.ports.events import RuntimeEvent
 from naumi_agent.safety.guardrails import OutputGuardrail
 from naumi_agent.streaming.sinks import CallbackEventSink
@@ -83,6 +89,9 @@ class ChatRunRecorder:
                 summary=summary,
                 detail=detail,
                 event_id=str(data.get("event_id") or f"{self.run_id}:{step_key}"),
+                metadata=tool_metadata(data, ended=event in {"tool_end", "tool_error"})
+                if stage in {"tool", "approval"}
+                else None,
             )
 
         name = str(data.get("name") or data.get("tool_name") or "")
@@ -122,6 +131,7 @@ class ChatRunRecorder:
         summary: str,
         detail: str = "",
         event_id: str = "",
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         sequence = self._step_sequences.setdefault(
             step_key,
@@ -133,8 +143,9 @@ class ChatRunRecorder:
             stage=stage,
             status=status,
             summary=self._public_text(summary, 500),
-            detail=self._public_text(detail, 2_000),
+            detail=public_tool_text(detail),
             event_id=event_id[:500],
+            metadata=metadata,
         )
 
     def _public_text(self, value: Any, maximum: int) -> str:
@@ -158,10 +169,18 @@ def _step_fields(
     data: dict[str, Any],
 ) -> tuple[str, str, str, str, str] | None:
     if event in {"turn_start", "thinking_start", "thinking_delta", "thinking_end"}:
-        return "analysis", "analysis", "running", "分析请求", ""
+        return (
+            "analysis",
+            "analysis",
+            "completed" if event == "thinking_end" else "running",
+            "分析请求",
+            "",
+        )
     if event in {"tool_start", "tool_end", "tool_error", "permission_bubble"}:
         name = str(data.get("tool_name") or data.get("name") or "tool")
-        call_id = str(data.get("call_id") or data.get("request_id") or name)
+        call_id = str(
+            data.get("call_id") or data.get("tool_call_id") or data.get("request_id") or name
+        )
         if event == "permission_bubble":
             permission_status = str(data.get("status") or "")
             if permission_status == "needs_confirmation":
@@ -176,12 +195,9 @@ def _step_fields(
                 return f"tool:{call_id}", "approval", "failed", name, ""
             return f"tool:{call_id}", "tool", "running", name, ""
         if event == "tool_end":
-            raw_status = str(data.get("status") or "").lower()
-            status = "completed" if raw_status in _SUCCESS_STATUSES else "failed"
-            detail = str(data.get("content") or "") if name == "delegate_task" else ""
-            return f"tool:{call_id}", "tool", status, name, detail
+            return f"tool:{call_id}", "tool", tool_end_status(data), name, tool_output(data)
         if event == "tool_error":
-            return f"tool:{call_id}", "tool", "failed", name, ""
+            return f"tool:{call_id}", "tool", "failed", name, tool_output(data)
         return f"tool:{call_id}", "tool", "running", name, ""
     if event in {"response_start", "token", "response_end"}:
         status = "completed" if event == "response_end" else "running"

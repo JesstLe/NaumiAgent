@@ -5,6 +5,6 @@ export function ToolChips({ steps }: { steps: ActivityStep[] }) {
   return <Primitive steps={steps.map((row, index) => ({
     icon: /read|读取/i.test(row.label) ? 'read' : /write|edit|写|编辑/i.test(row.label) ? 'write' : 'run',
     label: `${index + 1}. ${row.label}`, chip: activityNames[row.state], mono: true, detailMono: true,
-    detail: [...(row.input ? [{ text: `输入：${row.input}` }] : []), { text: row.output || (row.state === 'running' ? '等待工具结果…' : '此记录没有附带输出') }],
+    detail: [...(row.input ? [{ text: `输入：${row.input}` }] : []), { text: row.output || (row.state === 'running' ? '等待工具结果…' : row.outputRecorded ? '工具未返回文本内容' : '旧记录未保存工具输出') }, ...(row.outputTruncated ? [{ text: '当前记录仅包含工具返回的输出预览。' }] : [])],
   }))} diffs={[]} diffLines={{}} labels={{ header: `${steps.length} 条工具记录`, more: '' }} />
 }

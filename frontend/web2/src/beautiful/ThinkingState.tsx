@@ -5,7 +5,9 @@ import { activityNames, ToolChips } from './ToolChips'
 export function ThinkingState() {
   const w = useWorkspace()
   const latest = w.runs[0]
-  const steps = w.liveEvents.length ? toolActivity(w.liveEvents, w.busy) : latest ? runActivity(latest) : []
+  const liveRun = w.liveEvents.at(-1)?.run_id || w.liveEvents.at(-1)?.data.run_id
+  const useSaved = !w.busy && latest && (!w.liveEvents.length || liveRun === latest.id)
+  const steps = useSaved ? runActivity(latest) : w.liveEvents.length ? toolActivity(w.liveEvents, w.busy) : []
   if (!steps.length) return null
   const status = w.busy ? 'running' : latest ? activityState(latest.status) : 'unknown'
   return <div className="bui-root bui-execution" aria-label="执行过程" key={w.sessionId}>

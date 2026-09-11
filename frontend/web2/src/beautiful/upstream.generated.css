@@ -378,6 +378,9 @@
 .bui-root .h-full {
     height: 100%;
   }
+.bui-root .max-h-80 {
+    max-height: calc(var(--spacing) * 80);
+  }
 .bui-root .min-h-0 {
     min-height: 0;
   }
@@ -524,6 +527,9 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+.bui-root .overflow-auto {
+    overflow: auto;
   }
 .bui-root .overflow-hidden {
     overflow: hidden;
@@ -824,6 +830,9 @@
     --tw-tracking: -0.01em;
     letter-spacing: -0.01em;
   }
+.bui-root .break-words {
+    overflow-wrap: break-word;
+  }
 .bui-root .whitespace-normal {
     white-space: normal;
   }
@@ -832,6 +841,9 @@
   }
 .bui-root .whitespace-pre {
     white-space: pre;
+  }
+.bui-root .whitespace-pre-wrap {
+    white-space: pre-wrap;
   }
 .bui-root .text-canvas {
     color: var(--canvas);
