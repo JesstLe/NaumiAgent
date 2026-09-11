@@ -39,6 +39,9 @@ async def lifespan(app: FastAPI):
         app.state.started_at = datetime.now(UTC).replace(microsecond=0).isoformat()
         yield
     finally:
+        pi_web_engine = getattr(app.state, "pi_web_engine", None)
+        if pi_web_engine is not None:
+            await pi_web_engine.stop()
         if permission_broker is not None:
             await permission_broker.close()
         await engine.shutdown()
@@ -61,6 +64,7 @@ def create_app() -> FastAPI:
 
     from naumi_agent.api.routes import (
         commands,
+        engines,
         health,
         messages,
         output_assets,
@@ -72,6 +76,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health.router, prefix="/api/v1")
     app.include_router(messages.router, prefix="/api/v1")
+    app.include_router(engines.router, prefix="/api/v1")
     app.include_router(output_assets.router, prefix="/api/v1")
     app.include_router(tools.router, prefix="/api/v1")
     app.include_router(workbench.router, prefix="/api/v1")
