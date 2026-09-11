@@ -5042,6 +5042,78 @@ class TestConvergenceMessagesDisabled:
 
 class TestEmptyModelResponseRecovery:
     @pytest.mark.asyncio
+    async def test_streaming_empty_long_history_compacts_before_retry(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        events: list[tuple[str, dict[str, object]]] = []
+        attempts = 0
+        engine._messages = [
+            {"role": "system", "content": "system prompt"},
+            *[
+                {
+                    "role": "user" if index % 2 == 0 else "assistant",
+                    "content": f"旧会话消息 {index}",
+                }
+                for index in range(12)
+            ],
+            {"role": "user", "content": "创建一个 HTML 文件"},
+        ]
+        compacted = [
+            {"role": "system", "content": "system prompt"},
+            {"role": "system", "content": "旧会话已压缩"},
+            {"role": "user", "content": "创建一个 HTML 文件"},
+        ]
+
+        async def stream_response(**_: object):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                yield StreamChunk(finish_reason="stop")
+                return
+            yield StreamChunk(token="压缩后恢复成功")
+            yield StreamChunk(finish_reason="stop")
+
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
+        with (
+            patch.object(engine._router, "stream", new=stream_response),
+            patch.object(engine, "_maybe_compact", new_callable=AsyncMock),
+            patch.object(
+                engine,
+                "_inject_harness_context_snapshot",
+                new_callable=AsyncMock,
+            ),
+            patch.object(
+                engine._compactor,
+                "compact",
+                new_callable=AsyncMock,
+                return_value=compacted,
+            ) as compact_mock,
+        ):
+            result = await engine._react_loop_streaming(
+                tools=[FakeTool().to_openai_tool()],
+                event_source=on_event,
+            )
+
+        assert attempts == 2
+        assert result.status == "completed"
+        assert result.response == "压缩后恢复成功"
+        compact_mock.assert_awaited_once()
+        assert compact_mock.await_args.kwargs["max_tokens"] == 1
+        assert any(event == "context_compacted" for event, _ in events)
+        assert any(
+            event == "phase_summary" and "压缩上下文" in str(data)
+            for event, data in events
+        )
+        assert not any(
+            message.get("role") == "system"
+            and "上一次模型调用没有返回" in str(message.get("content") or "")
+            for message in engine._full_history
+        )
+
+    @pytest.mark.asyncio
     async def test_streaming_retries_once_and_returns_visible_content(
         self,
         engine: AgentEngine,

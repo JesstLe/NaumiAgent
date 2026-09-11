@@ -111,7 +111,7 @@ _RUNTIME_EVENT_TYPE_MAP: dict[RuntimeEventType, EventType | None] = {
     RuntimeEventType.COMPLETION_RECEIPT: EventType.COMPLETION_RECEIPT,
     RuntimeEventType.CONTEXT_COMPACTED: EventType.CONTEXT_COMPACTED,
     RuntimeEventType.ERROR: EventType.AGENT_ERROR,
-    RuntimeEventType.HARNESS_COMPLETION_CORRECTION: None,
+    RuntimeEventType.HARNESS_COMPLETION_CORRECTION: EventType.PHASE_SUMMARY,
     RuntimeEventType.HARNESS_COMPLETION_RECEIPT: None,
     RuntimeEventType.HARNESS_KNOWLEDGE: None,
     RuntimeEventType.HARNESS_KNOWLEDGE_INVALIDATED: None,
@@ -170,6 +170,16 @@ def runtime_event_to_stream_event(event: RuntimeEvent) -> StreamEvent:
 
     if event.type in {RuntimeEventType.THINKING_DELTA, RuntimeEventType.THINKING_END}:
         payload = {}
+    elif event.type is RuntimeEventType.HARNESS_COMPLETION_CORRECTION:
+        message = str(payload.get("message") or "完成门禁发现执行证据不足，已继续处理")
+        payload = {
+            "items": [
+                {
+                    "action": message,
+                    "status": "completed",
+                }
+            ]
+        }
     elif event.type is RuntimeEventType.PERMISSION_BUBBLE:
         safe_fields = (
             "agent_name",
@@ -198,7 +208,12 @@ def runtime_event_to_stream_event(event: RuntimeEvent) -> StreamEvent:
     ):
         event_type = EventType.TOOL_CALL_ERROR
 
-    activity = progress_summary(event.type.value, payload)
+    activity_source = (
+        EventType.PHASE_SUMMARY.value
+        if event.type is RuntimeEventType.HARNESS_COMPLETION_CORRECTION
+        else event.type.value
+    )
+    activity = progress_summary(activity_source, payload)
     if activity:
         payload["activity_summary"] = activity
 
