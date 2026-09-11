@@ -15,7 +15,6 @@ import {
   ChevronDown,
   ChevronRight,
   Clock3,
-  Copy,
   CopyPlus,
   File,
   FolderClosed,
@@ -65,6 +64,7 @@ import { DiffPanel } from './DiffPanel'
 import { ThinkingState } from './beautiful/ThinkingState'
 import { MessageContent } from './rich/MessageContent'
 import { WorkspaceFileTree } from './community/WorkspaceFileTree'
+import { AiMessage } from './community/AiMessage'
 import { SelectionActions } from './beautiful/SelectionActions'
 import { ContextCards } from './beautiful/ContextCards'
 import { Flowchart } from './beautiful/Flowchart'
@@ -179,23 +179,6 @@ function IconButton({
     >
       {children}
     </button>
-  )
-}
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false)
-  const w = useWorkspace()
-  return (
-    <IconButton
-      label={copied ? '已复制' : '复制消息'}
-      onClick={() => {
-        navigator.clipboard
-          .writeText(text)
-          .then(() => setCopied(true))
-          .catch(() => w.setError('复制失败，请选中文字复制'))
-      }}
-    >
-      {copied ? <Check /> : <Copy />}
-    </IconButton>
   )
 }
 function SchedulePanel() {
@@ -805,12 +788,15 @@ export function Web2() {
                       && (w.busy || w.liveEvents.length > 0)
                       && (!liveRunId || !run || liveRunId === run.id)
                     return <Fragment key={message.id}>
-                      <article className={`w2-message ${message.role}`}>
+                      <AiMessage
+                        from={message.role as 'user' | 'assistant'}
+                        timestamp={message.timestamp}
+                        seed={`assistant:${w.sessionId || 'new'}`}
+                        copyText={message.content}
+                        onCopyError={() => w.setError('复制失败，请选中文字复制')}
+                      >
                         <MessageContent content={message.content} plain={message.role === 'user'} />
-                        <div className="w2-message-actions">
-                          <CopyButton text={message.content} />
-                        </div>
-                      </article>
+                      </AiMessage>
                       {message.role === 'user' && (run || live) && (
                         <ThinkingState run={run} live={live} objective={message.content} />
                       )}

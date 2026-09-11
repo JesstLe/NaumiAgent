@@ -10,4 +10,11 @@
 - 安全边界：忽略 `.git`、`.naumi`、虚拟环境、构建产物、缓存和 `node_modules`；忽略符号链接；每个路径再次确认位于工作区内；最多返回 2500 项和 10 层。树保持只读，没有提供会误导用户的拖拽移动。
 - 样式：保留参考组件的缩进导引线、无大圆角行、文件类型图标、选中与焦点反馈，使用 Web2 浅色配色。
 
-后续模块：AI Message、Agent Avatar、AI Sources、Border Beam。
+## 2026-09-11：AI Message 与 Agent Avatar
+
+- 来源：21st.dev `@educalvolpz/ai-message` 与 `@educalvolpz/agent-avatar`，页面公开许可均为 MIT。
+- 获取边界：公开页面可读取 Usage 和行为说明，但 `Component.tsx` 的资源接口返回 401；本项目按公开 API 与视觉行为独立适配，没有声称复制不可访问的源码。
+- AI Message 接管 Web2 用户／助手消息外壳，保留原有 Markdown、公式、图片、文件和富组件渲染。消息头与操作在 hover 或键盘聚焦时出现；当前只显示已有真实实现的复制操作。组件保留 `onRetry`、`onVote` 接口，后端具备真实语义后才会在产品界面显示。
+- Agent Avatar 使用 Canvas 生成 7×7 镜像像素图；seed 决定配色和像素，同一会话稳定一致。助手消息和执行时间线共用该组件，执行时轻微呼吸；高 DPI 清晰绘制并支持 reduced motion。
+
+后续模块：AI Sources、Border Beam。
