@@ -42,7 +42,7 @@ export interface Run {
     status: string
     summary: string
     detail: string
-    metadata?: { tool_call_id?: string; input?: string; output_recorded?: boolean; output_truncated?: boolean; recovered_from?: string }
+    metadata?: { tool_call_id?: string; input?: string; output_recorded?: boolean; output_truncated?: boolean; recovered_from?: string; public_action?: string }
   }[]
 }
 export interface StreamEvent {

@@ -39,6 +39,7 @@ from naumi_agent.api.schemas import (
     SessionUpdate,
 )
 from naumi_agent.harness.coordinator import ReconciliationCoordinatorOutcome
+from naumi_agent.runs.public_activity import progress_summary
 from naumi_agent.runs.recovery import restore_tool_previews
 from naumi_agent.runs.store import ChatRunRecord, ChatRunStore, SourceReferenceRecord
 from naumi_agent.runs.tool_evidence import tool_end_status, tool_metadata, tool_output
@@ -897,6 +898,11 @@ async def _persist_stream_event(
 def _stream_step_fields(
     event: StreamEvent,
 ) -> tuple[str | None, str, str, str, str]:
+    source = event.data.get("event") if event.type is EventType.RUNTIME_EVENT else event.type.value
+    payload = event.data.get("data", {}) if event.type is EventType.RUNTIME_EVENT else event.data
+    progress = progress_summary(str(source), payload) if isinstance(payload, dict) else ""
+    if progress:
+        return f"activity:{event.id}", "activity", "completed", progress, ""
     if event.type in {
         EventType.TURN_START,
         EventType.THINKING_START,

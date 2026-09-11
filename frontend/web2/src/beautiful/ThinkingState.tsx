@@ -17,15 +17,6 @@ const toolIcon = (name: string) => {
   return Wrench
 }
 
-const toolAction = (name: string, running: boolean) => {
-  const prefix = running ? '正在' : '已'
-  if (/search/i.test(name)) return `${prefix}搜索网页`
-  if (/read|fetch|读取/i.test(name)) return `${prefix}读取内容`
-  if (/write|edit|patch|创建|编辑|写/i.test(name)) return `${prefix}编辑文件`
-  if (/run|exec|command|shell|执行/i.test(name)) return `${prefix}运行命令`
-  return `${prefix}调用工具`
-}
-
 function InlineTool({ step }: { step: ToolTimelineStep }) {
   const [open, setOpen] = useState(false)
   const Icon = toolIcon(step.label)
@@ -46,8 +37,8 @@ function InlineTool({ step }: { step: ToolTimelineStep }) {
       onClick={() => setOpen(value => !value)}
     >
       <Icon size={14} strokeWidth={1.8} />
-      <span>{step.state === 'running' || step.state === 'completed' ? toolAction(step.label, step.state === 'running') : activityNames[step.state]}</span>
-      <code title={step.input || step.label}>{step.input || step.label}</code>
+      <span>{activityNames[step.state]}</span>
+      <span className="bui-action-summary" title={step.action || step.label}>{step.action || step.label}</span>
       <svg viewBox="0 0 24 24" aria-hidden style={{ transform: open ? 'rotate(180deg)' : undefined }}>
         <path d="M6 9l6 6 6-6" />
       </svg>
@@ -70,11 +61,13 @@ const elapsedLabel = (startedAt: string, completedAt: string | undefined, now: n
 export function ThinkingState() {
   const w = useWorkspace()
   const latest = w.runs[0]
+  const objective = [...w.messages].reverse().find(message => message.role === 'user')?.content
+  const workspace = w.daemon?.workspace_root
   const liveRun = w.liveEvents.at(-1)?.run_id || w.liveEvents.at(-1)?.data.run_id
   const useSaved = !w.busy && latest && (!w.liveEvents.length || liveRun === latest.id)
   const steps = useMemo(
-    () => useSaved ? runExecutionTimeline(latest) : liveExecutionTimeline(w.liveEvents, w.busy),
-    [latest, useSaved, w.busy, w.liveEvents],
+    () => useSaved ? runExecutionTimeline(latest, { objective, workspace }) : liveExecutionTimeline(w.liveEvents, w.busy, { objective, workspace }),
+    [latest, useSaved, w.busy, w.liveEvents, objective, workspace],
   )
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
@@ -100,7 +93,7 @@ export function ThinkingState() {
     <Primitive active="正在推理" done={done} working={w.busy} settledExpanded rows={[]}>
       <div className="bui-timeline" aria-label="执行时间线">
         {steps.map(step => step.kind === 'reasoning'
-          ? <p key={step.id} className={step.state === 'running' ? 'is-running' : ''}>{step.label}</p>
+          ? <p key={step.id} style={{ whiteSpace: 'pre-line' }} className={step.state === 'running' ? 'is-running' : ''}>{step.label}</p>
           : <InlineTool key={step.id} step={step} />)}
       </div>
     </Primitive>
