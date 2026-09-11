@@ -231,7 +231,7 @@ export default function ToolChips({
                       <span
                         key={line.text}
                         title={line.text}
-                        className={`truncate text-[11.5px] leading-[1.6] ${row.detailMono ? "font-mono" : ""} ${line.tone === "add" ? "text-green" : "text-ink-2"}`}
+                        className={`max-h-80 overflow-auto whitespace-pre-wrap break-words text-[11.5px] leading-[1.6] ${row.detailMono ? "font-mono" : ""} ${line.tone === "add" ? "text-green" : "text-ink-2"}`}
                       >
                         {line.text}
                       </span>

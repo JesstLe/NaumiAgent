@@ -660,4 +660,4 @@ async def test_run_recorder_event_sink_persists_runtime_event_identity(tmp_path)
     assert restored is not None
     assert restored.steps[-1].stage == "tool"
     assert restored.steps[-1].event_id == "event-tool-start"
-    assert restored.steps[-1].metadata == {}
+    assert restored.steps[-1].metadata == {"tool_call_id": "read-1"}

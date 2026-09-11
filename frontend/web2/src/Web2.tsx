@@ -475,7 +475,7 @@ export function Web2() {
                     el.scrollHeight - el.scrollTop - el.clientHeight < 80
               }}
             >
-              {!messages.length && !w.loading ? (
+              {!messages.length && !w.loading && !w.runs.length && !w.liveEvents.length ? (
                 <div className="w2-welcome">
                   <Logo className="w2-welcome-logo" />
                   <h1>

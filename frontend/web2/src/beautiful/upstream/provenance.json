@@ -11,7 +11,7 @@
     {
       "file": "components/primitives/ToolChips.tsx",
       "sha256": "36de9ee8a0ce5c09bf348fa2b272c0f19f4ca760ce4463520e12ff2889559ae3",
-      "local_sha256": "a52dc3492bdafb96e836cd16aed3cd026fe9a8ca11f004e34b589e75d442f771"
+      "local_sha256": "585acf54f6e805f7fafcd05b1629e251992f77829af937ca90e58b7bf8e45fe8"
     },
     {
       "file": "components/primitives/ContextCards.tsx",
@@ -67,6 +67,7 @@
     "Context cards support duplicate titles by position-qualified keys.",
     "Flowchart accepts real edges, remeasures changed nodes, handles empty input and missing edge endpoints.",
     "Selection Actions accepts a native-selection anchor and a real action callback; only standalone demo mode simulates rewrites. External toolbars fit or scroll on narrow screens.",
-    "Insight Cards exposes original AllocationCard with content props, guards empty/shrinking pages, translates pager labels and dispatches action callbacks. Production only uses real distributions; demo time series are not shown."
+    "Insight Cards exposes original AllocationCard with content props, guards empty/shrinking pages, translates pager labels and dispatches action callbacks. Production only uses real distributions; demo time series are not shown.",
+    "Tool detail text preserves line breaks and scrolls within a bounded height so persisted output remains readable."
   ]
 }
