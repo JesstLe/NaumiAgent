@@ -6565,6 +6565,10 @@ def test_list_workbench_sessions_route_returns_session_registry() -> None:
                 "total_tokens": 128,
                 "total_cost_usd": 0.012,
                 "status": "active",
+                "pinned": False,
+                "workspace_root": "",
+                "git_branch": "",
+                "summary": "",
             }
         ],
         "total": 1,
