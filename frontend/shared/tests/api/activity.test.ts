@@ -112,6 +112,20 @@ describe('public execution activity', () => {
     expect(rows[3]).toMatchObject({ state: 'unknown' })
     expect(JSON.stringify(rows)).not.toContain('PRIVATE_REASONING')
   })
+  it('shows the persisted failure reason for an empty historical response', () => {
+    const rows = runExecutionTimeline({ id: 'r', status: 'failed', started_at: '', steps: [
+      { sequence: 1, stage: 'request', status: 'completed', summary: '生成页面', detail: '' },
+      { sequence: 2, stage: 'analysis', status: 'completed', summary: '第 1 轮分析', detail: '' },
+      { sequence: 3, stage: 'response', status: 'failed', summary: '生成答复', detail: '任务结束但未返回可显示结果，请重试' },
+    ] })
+
+    expect(rows).toHaveLength(2)
+    expect(rows[1]).toMatchObject({
+      kind: 'reasoning',
+      state: 'failed',
+      label: '任务结束但未返回可显示结果，请重试',
+    })
+  })
   it('deduplicates delivery and keeps concurrent calls separate', () => {
     const start = { id: '1', type: 'tool_call_start', data: { name: 'read', call_id: 'a', arguments: { path: 'a.py' } } }
     const rows = liveExecutionTimeline([start, start, { ...start, id: '2', data: { ...start.data, call_id: 'b', arguments: { path: 'b.py' } } }], false)

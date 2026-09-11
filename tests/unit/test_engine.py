@@ -1103,6 +1103,59 @@ class TestSessionLoading:
         await engine.shutdown()
 
     @pytest.mark.asyncio
+    async def test_load_session_removes_legacy_blank_assistant_message(
+        self,
+        tmp_path,
+    ) -> None:
+        config = AppConfig(
+            memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
+        )
+        engine = AgentEngine(config)
+        session = Session(title="历史空回复")
+        session.messages = [
+            {"role": "system", "content": "prompt"},
+            {"role": "user", "content": "生成页面"},
+            {"role": "assistant", "content": ""},
+            {"role": "user", "content": "请重试"},
+        ]
+        await engine.session_store.save(session)
+
+        loaded = await engine.load_session(session.id)
+
+        assert loaded is True
+        assert engine._messages == engine._full_history
+        assert engine._messages == [
+            {"role": "system", "content": "prompt"},
+            {"role": "user", "content": "生成页面"},
+            {"role": "user", "content": "请重试"},
+        ]
+        await engine.shutdown()
+
+    def test_model_sanitizer_drops_blank_assistant_but_keeps_tool_call(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        messages = [
+            {"role": "user", "content": "生成页面"},
+            {"role": "assistant", "content": "   "},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call-1",
+                        "function": {"name": "file_read", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call-1", "content": "完成"},
+        ]
+
+        sanitized = engine._sanitize_messages_for_model(messages)
+
+        assert sanitized == [messages[0], messages[2], messages[3]]
+
+    @pytest.mark.asyncio
     async def test_load_session_revokes_previous_session_permission_grants(
         self,
         tmp_path,
@@ -4985,3 +5038,109 @@ class TestConvergenceMessagesDisabled:
             m.get("role") == "system" and "不要再调用任何工具" in m.get("content", "")
             for m in engine._messages
         )
+
+
+class TestEmptyModelResponseRecovery:
+    @pytest.mark.asyncio
+    async def test_streaming_retries_once_and_returns_visible_content(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        attempts = 0
+        events: list[tuple[str, dict[str, object]]] = []
+
+        async def stream_response(**_: object):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                yield StreamChunk(finish_reason="stop")
+                return
+            yield StreamChunk(token="恢复后的答复")
+            yield StreamChunk(finish_reason="stop")
+
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
+        with patch.object(engine._router, "stream", new=stream_response):
+            result = await engine.run_streaming("请给出最终答复", on_event)
+
+        assert attempts == 2
+        assert result.status == "completed"
+        assert result.response == "恢复后的答复"
+        assert any(event == "phase_summary" for event, _ in events)
+        assert [
+            message["content"]
+            for message in engine._full_history
+            if message.get("role") == "assistant"
+        ] == ["恢复后的答复"]
+
+    @pytest.mark.asyncio
+    async def test_streaming_reasoning_only_twice_fails_without_empty_assistant(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        attempts = 0
+        events: list[tuple[str, dict[str, object]]] = []
+
+        async def stream_response(**_: object):
+            nonlocal attempts
+            attempts += 1
+            yield StreamChunk(thinking=f"隐藏分析 {attempts}")
+            yield StreamChunk(finish_reason="stop")
+
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
+        with patch.object(engine._router, "stream", new=stream_response):
+            result = await engine.run_streaming("不要只返回分析", on_event)
+
+        assert attempts == 2
+        assert result.status == "failed"
+        assert result.response == ""
+        assert "连续两次未返回可显示内容" in str(result.error)
+        assert not any(
+            message.get("role") == "assistant"
+            for message in engine._full_history
+        )
+        assert not any(
+            event == "token" and str(data.get("content") or "").strip()
+            for event, data in events
+        )
+        errors = [data for event, data in events if event == "error"]
+        assert "连续两次未返回可显示内容" in str(errors[-1]["message"])
+        assert engine._session is not None
+        runs = await engine.chat_run_store.list_runs(engine._session.id)
+        assert runs[0].status == "failed"
+        failed_response = next(
+            step for step in runs[0].steps if step.stage == "response"
+        )
+        assert failed_response.status == "failed"
+        assert "连续两次未返回可显示内容" in failed_response.detail
+
+    @pytest.mark.asyncio
+    async def test_non_streaming_retries_empty_response_without_persisting_blank(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        await engine.get_or_create_session()
+        engine._append_message({"role": "user", "content": "直接回答"})
+        responses = [
+            ModelResponse(content="", model="test-model"),
+            ModelResponse(content="非流式恢复成功", model="test-model"),
+        ]
+
+        with patch.object(
+            engine._router,
+            "call",
+            new_callable=AsyncMock,
+            side_effect=responses,
+        ):
+            result = await engine._react_loop(None)
+
+        assert result.status == "completed"
+        assert result.response == "非流式恢复成功"
+        assert [
+            message["content"]
+            for message in engine._full_history
+            if message.get("role") == "assistant"
+        ] == ["非流式恢复成功"]

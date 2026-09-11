@@ -376,6 +376,78 @@ describe('one shared workspace for two presentation shells', () => {
     await waitFor(() => expect(screen.getByTestId('web2-error')).toHaveTextContent('响应连接已中断'))
     expect(screen.getByLabelText('web2-draft')).toHaveValue('断流也必须保留')
   })
+  it('shows a retryable error when a completed run has no visible result', async () => {
+    let attempts = 0
+    server.use(
+      http.post(`${base}/sessions/:id/messages`, () => {
+        attempts++
+        if (attempts === 1)
+          return new HttpResponse(
+            'data: {"id":"end","type":"agent_end","data":{"status":"completed"}}\n\n',
+            { headers: { 'Content-Type': 'text/event-stream' } },
+          )
+        return new HttpResponse(
+          'data: {"id":"token","type":"token_delta","data":{"token":"重试后已有结果"}}\n\ndata: {"id":"end","type":"agent_end","data":{"status":"completed"}}\n\n',
+          { headers: { 'Content-Type': 'text/event-stream' } },
+        )
+      }),
+    )
+    setup()
+    await waitFor(() => expect(screen.getByTestId('web-connected')).toHaveTextContent('connected'))
+    fireEvent.click(screen.getByText('选择 web one'))
+    await waitFor(() => expect(screen.getByTestId('web-messages')).toHaveTextContent('历史-one'))
+    fireEvent.change(screen.getByLabelText('web2-draft'), { target: { value: '不能静默完成' } })
+    fireEvent.click(screen.getByText('发送 web2'))
+
+    await waitFor(() =>
+      expect(screen.getByTestId('web-error')).toHaveTextContent(
+        '任务结束但未返回可显示结果，请重试',
+      ),
+    )
+    expect(screen.getByTestId('web-failed-message')).toHaveTextContent('不能静默完成')
+    expect(screen.getByText('重试 web')).toBeEnabled()
+
+    fireEvent.click(screen.getByText('重试 web'))
+    await waitFor(() =>
+      expect(screen.getByTestId('web2-messages')).toHaveTextContent('重试后已有结果'),
+    )
+    expect(attempts).toBe(2)
+    expect(screen.getByTestId('web-error')).toBeEmptyDOMElement()
+  })
+  it('reloads a persisted assistant result when the stream has no token event', async () => {
+    let completed = false
+    server.use(
+      http.get(`${base}/sessions/one/messages`, () => HttpResponse.json({
+        messages: completed
+          ? [
+              { id: 'question', role: 'user', content: '从持久化恢复', timestamp: '', metadata: {} },
+              { id: 'answer', role: 'assistant', content: '持久化中的最终结果', timestamp: '', metadata: {} },
+            ]
+          : [
+              { id: 'history', role: 'assistant', content: '历史-one', timestamp: '', metadata: {} },
+            ],
+        total: completed ? 2 : 1,
+      })),
+      http.post(`${base}/sessions/one/messages`, () => {
+        completed = true
+        return new HttpResponse(
+          'data: {"id":"end","type":"agent_end","data":{"status":"completed"}}\n\n',
+          { headers: { 'Content-Type': 'text/event-stream' } },
+        )
+      }),
+    )
+    setup()
+    await waitFor(() => expect(screen.getByTestId('web-connected')).toHaveTextContent('connected'))
+    fireEvent.click(screen.getByText('选择 web one'))
+    await waitFor(() => expect(screen.getByTestId('web-messages')).toHaveTextContent('历史-one'))
+    fireEvent.change(screen.getByLabelText('web-draft'), { target: { value: '从持久化恢复' } })
+    fireEvent.click(screen.getByText('发送 web'))
+
+    await waitFor(() =>
+      expect(screen.getByTestId('web2-messages')).toHaveTextContent('持久化中的最终结果'),
+    )
+    expect(screen.getByTestId('web-error')).toBeEmptyDOMElement()
+  })
   it('shares attachment selection and submits only selected source IDs', async () => {
     server.use(
       http.post(`${base}/sessions/:id/upload`, () =>

@@ -15,6 +15,7 @@ from naumi_agent import __version__
 from naumi_agent.api.chat_runs import ChatRunStore
 from naumi_agent.api.permission_broker import PermissionApprovalBroker
 from naumi_agent.api.routes.messages import (
+    _chat_run_to_response,
     _stream_response,
     add_chat_source,
     cancel_chat_run,
@@ -30,6 +31,8 @@ from naumi_agent.api.schemas import HealthResponse, MessageCreate, SessionCreate
 from naumi_agent.config.settings import AppConfig, MemoryConfig
 from naumi_agent.harness.coordinator import ReconciliationCoordinatorOutcome
 from naumi_agent.orchestrator.engine import AgentEngine
+from naumi_agent.runs.models import CompletionReceipt
+from naumi_agent.runs.store import ChatRunRecord, ChatRunStepRecord
 from naumi_agent.runtime.ports.events import EventSink, RuntimeEvent, RuntimeEventType
 
 
@@ -562,6 +565,144 @@ class TestMessageRoutes:
         assert events[0]["type"] == "token_delta"
         assert events[0]["data"]["token"] == "你"
         assert events[-1]["type"] == "agent_end"
+
+    @pytest.mark.asyncio
+    async def test_stream_response_rejects_completed_result_without_content(
+        self,
+    ) -> None:
+        class EmptyEngine(_FakeEngine):
+            async def run_streaming(
+                self,
+                content: str,
+                event_sink: EventSink,
+                turn_context: str = "",
+            ):
+                self.ran.append(content)
+                usage = SimpleNamespace(turns=1, total_cost_usd=0.0)
+                return SimpleNamespace(
+                    status="completed",
+                    response="",
+                    error=None,
+                    usage=usage,
+                )
+
+        engine = EmptyEngine()
+        events = [
+            json.loads(chunk.removeprefix("data: "))
+            async for chunk in _stream_response(
+                engine,
+                "sess_1",
+                "hello",
+                _fake_request(engine),
+            )
+        ]
+
+        assert [event["type"] for event in events] == ["agent_error"]
+        assert "未返回可显示结果" in events[0]["data"]["message"]
+
+    @pytest.mark.asyncio
+    async def test_non_streaming_route_rejects_result_without_content(self) -> None:
+        class EmptyEngine(_FakeEngine):
+            async def run(self, content: str, turn_context: str = ""):
+                usage = SimpleNamespace(turns=1, total_cost_usd=0.0)
+                return SimpleNamespace(
+                    status="failed",
+                    response="",
+                    error="模型连续两次未返回可显示内容，本次任务未完成，请重试。",
+                    usage=usage,
+                )
+
+        engine = EmptyEngine()
+
+        with pytest.raises(Exception) as exc:
+            await send_message(
+                "sess_1",
+                MessageCreate(content="hello", stream=False),
+                _fake_request(engine),
+                auth="test",
+            )
+
+        assert exc.value.status_code == 502
+        assert "连续两次未返回可显示内容" in exc.value.detail
+
+    @pytest.mark.asyncio
+    async def test_stream_response_recovers_result_when_token_event_is_missing(
+        self,
+    ) -> None:
+        class ResultOnlyEngine(_FakeEngine):
+            async def run_streaming(
+                self,
+                content: str,
+                event_sink: EventSink,
+                turn_context: str = "",
+            ):
+                usage = SimpleNamespace(turns=1, total_cost_usd=0.0)
+                return SimpleNamespace(
+                    status="completed",
+                    response="补发的最终答复",
+                    error=None,
+                    usage=usage,
+                )
+
+        engine = ResultOnlyEngine()
+        events = [
+            json.loads(chunk.removeprefix("data: "))
+            async for chunk in _stream_response(
+                engine,
+                "sess_1",
+                "hello",
+                _fake_request(engine),
+            )
+        ]
+
+        assert [event["type"] for event in events] == [
+            "token_delta",
+            "agent_end",
+        ]
+        assert events[0]["data"]["token"] == "补发的最终答复"
+
+    def test_legacy_completed_run_without_response_is_presented_as_failed(self) -> None:
+        receipt = CompletionReceipt.from_dict(
+            {
+                "schema_version": 1,
+                "receipt_id": "receipt-empty",
+                "run_id": "run-empty",
+                "outcome": "completed",
+                "summary": "本轮运行已结束。",
+                "git_state": {"available": False, "dirty": False},
+            }
+        )
+        run = ChatRunRecord(
+            id="run-empty",
+            session_id="sess_1",
+            user_message_id="msg-user",
+            status="completed",
+            started_at="2026-09-11T08:00:00+08:00",
+            updated_at="2026-09-11T08:01:00+08:00",
+            completed_at="2026-09-11T08:01:00+08:00",
+            receipt=receipt,
+            steps=[
+                ChatRunStepRecord(
+                    sequence=1,
+                    stage="request",
+                    status="completed",
+                    summary="生成页面",
+                ),
+                ChatRunStepRecord(
+                    sequence=2,
+                    stage="analysis",
+                    status="completed",
+                    summary="第 1 轮分析",
+                ),
+            ],
+        )
+
+        response = _chat_run_to_response(run)
+
+        assert response.status == "failed"
+        assert response.steps[-1].stage == "response"
+        assert response.steps[-1].status == "failed"
+        assert "未返回可显示结果" in response.steps[-1].detail
 
     @pytest.mark.asyncio
     async def test_sse_and_websocket_routes_pass_typed_sink_and_preserve_identity(

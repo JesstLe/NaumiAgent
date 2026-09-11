@@ -277,10 +277,22 @@ export function runExecutionTimeline(run: Run, context: ActivityContext = {}): E
   let previous: ToolTimelineStep | undefined
   let currentTurn = 1
   return run.steps
-    .filter(step => ['analysis', 'tool', 'approval', 'activity'].includes(step.stage))
+    .filter(step =>
+      ['analysis', 'tool', 'approval', 'activity'].includes(step.stage)
+      || (step.stage === 'response' && activityState(step.status) === 'failed'),
+    )
     .map((step): ExecutionTimelineStep => {
       if (step.stage === 'activity') {
         return { id: `${run.id}:activity:${step.sequence}`, kind: 'reasoning', label: excerpt(step.summary, 500), state: activityState(step.status), turn: currentTurn }
+      }
+      if (step.stage === 'response') {
+        return {
+          id: `${run.id}:response:${step.sequence}`,
+          kind: 'reasoning',
+          label: excerpt(step.detail, 500) || '任务结束但未返回可显示结果，请重试',
+          state: 'failed',
+          turn: currentTurn,
+        }
       }
       if (step.stage === 'analysis') {
         const match = step.summary.match(/(\d+)/)
