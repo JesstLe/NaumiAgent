@@ -31,6 +31,14 @@ class SessionResponse(BaseModel):
     total_tokens: int
     total_cost_usd: float
     status: str
+    pinned: bool = False
+    workspace_root: str = ""
+    git_branch: str = ""
+    summary: str = ""
+
+
+class SessionPinUpdate(BaseModel):
+    pinned: bool
 
 
 class SessionListResponse(BaseModel):

@@ -50,6 +50,32 @@ class TestSessionStore:
         sessions2, _ = await store.list_sessions(page=2, page_size=3)
         assert len(sessions2) == 2
 
+    async def test_pin_orders_sessions_and_duplicate_copies_history(
+        self, store: SessionStore
+    ) -> None:
+        first = Session(title="第一条", messages=[{"role": "user", "content": "原始内容"}])
+        second = Session(title="第二条")
+        await store.save(first)
+        await store.save(second)
+
+        assert await store.set_pinned(first.id, True) is True
+        sessions, _ = await store.list_sessions()
+        assert sessions[0].id == first.id
+        assert sessions[0].pinned_at is not None
+
+        duplicate = await store.duplicate(first.id)
+        assert duplicate is not None
+        assert duplicate.id != first.id
+        assert duplicate.title == "第一条 副本"
+        assert duplicate.messages == first.messages
+        duplicate.messages[0]["content"] = "副本修改"
+        restored = await store.load(first.id)
+        assert restored is not None
+        assert restored.messages[0]["content"] == "原始内容"
+
+        assert await store.set_pinned(first.id, False) is True
+        assert (await store.load(first.id)).pinned_at is None
+
     async def test_list_sessions_can_scope_exact_workspace(
         self, store: SessionStore
     ) -> None:

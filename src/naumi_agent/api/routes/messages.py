@@ -34,6 +34,7 @@ from naumi_agent.api.schemas import (
     PermissionResolutionResponse,
     SessionCreate,
     SessionListResponse,
+    SessionPinUpdate,
     SessionResponse,
     SessionUpdate,
 )
@@ -87,6 +88,47 @@ async def update_session(
             session.add_message("system", body.system_prompt)
     session.updated_at = datetime.now()
     await engine.session_store.save(session)
+    active = getattr(engine, "_session", None)
+    if active is not None and active.id == session_id:
+        active.title = session.title
+        active.model = session.model
+    return _session_to_response(session)
+
+
+@router.post("/sessions/{session_id}/pin", response_model=SessionResponse)
+async def pin_session(
+    session_id: str,
+    body: SessionPinUpdate,
+    request: Request,
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    if not await engine.session_store.set_pinned(session_id, body.pinned):
+        raise HTTPException(status_code=404, detail="Session not found")
+    session = await engine.session_store.load(session_id)
+    active = getattr(engine, "_session", None)
+    if active is not None and active.id == session_id:
+        active.pinned_at = session.pinned_at
+    return _session_to_response(session)
+
+
+@router.post("/sessions/{session_id}/archive", status_code=204)
+async def archive_session(session_id: str, request: Request, auth: str = AuthDep):
+    engine = request.app.state.engine
+    lock = _engine_lock(request)
+    if lock.locked() and getattr(getattr(engine, "_session", None), "id", None) == session_id:
+        raise HTTPException(status_code=409, detail="当前会话正在执行，完成或停止后才能归档")
+    if not await engine.archive_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    return Response(status_code=204)
+
+
+@router.post("/sessions/{session_id}/duplicate", response_model=SessionResponse, status_code=201)
+async def duplicate_session(session_id: str, request: Request, auth: str = AuthDep):
+    engine = request.app.state.engine
+    session = await engine.session_store.duplicate(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
     return _session_to_response(session)
 
 
@@ -655,6 +697,10 @@ def _session_to_response(session) -> SessionResponse:
         total_tokens=session.total_tokens,
         total_cost_usd=session.total_cost_usd,
         status=session.status,
+        pinned=session.pinned_at is not None,
+        workspace_root=session.workspace_root,
+        git_branch=session.git_branch,
+        summary=session.summary,
     )
 
 
