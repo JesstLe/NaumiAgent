@@ -63,6 +63,11 @@ export function useWorkspaceController() {
   const [diffUpdatedAt, setDiffUpdatedAt] = useState('')
   const diffRevision = useRef(0)
   const [error, setError] = useState('')
+  const [failedSend, setFailedSend] = useState<{
+    content: string
+    error: string
+    userMessageId?: string
+  } | null>(null)
   const [connecting, setConnecting] = useState(true)
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -125,6 +130,7 @@ export function useWorkspaceController() {
       setPermissions([])
       setLiveEvents([])
       setError('')
+      setFailedSend(null)
       setDraftState(readPreference(`draft:${id ?? 'new'}`))
       if (!id) {
         setLoading(false)
@@ -323,30 +329,43 @@ export function useWorkspaceController() {
     savePreference('draft:new', '')
     return session.id
   }
-  const send = async (contentOverride?: string) => {
+  const send = async (
+    contentOverride?: string,
+    retryUserMessageId?: string,
+  ) => {
     const requestedContent = contentOverride ?? draft
     if (!requestedContent.trim() || operation.current || !daemon || loading) return
     operation.current = true
     stopped.current = false
     setBusy(true)
     setError('')
+    setFailedSend(null)
+    const sendGeneration = generation.current
     const content = requestedContent.trim()
     const messageId = `stream-${crypto.randomUUID()}`
-    const optimisticUserId = `user-${messageId}`
+    const optimisticUserId = retryUserMessageId ?? `user-${messageId}`
     let completed = false
     let failure = ''
     let sessionReady = false
     let sentSessionId = ''
-    setMessages((previous) => [
-      ...previous,
-      {
-        id: optimisticUserId,
-        role: 'user',
-        content,
-        timestamp: new Date().toISOString(),
-        metadata: { pending: true },
-      },
-    ])
+    setMessages((previous) =>
+      retryUserMessageId
+        ? previous.map((message) =>
+            message.id === retryUserMessageId
+              ? { ...message, metadata: { ...message.metadata, pending: true } }
+              : message,
+          )
+        : [
+            ...previous,
+            {
+              id: optimisticUserId,
+              role: 'user',
+              content,
+              timestamp: new Date().toISOString(),
+              metadata: { pending: true },
+            },
+          ],
+    )
     setDraft('')
     setLiveEvents([{
       id: `local-${messageId}`,
@@ -439,11 +458,27 @@ export function useWorkspaceController() {
       if (!completed && !stopped.current)
         throw new Error('响应连接已中断，请检查执行记录后重试')
       setSelectedSources([])
+      setMessages((previous) =>
+        previous.map((message) =>
+          message.id === optimisticUserId
+            ? { ...message, metadata: { ...message.metadata, pending: false } }
+            : message,
+        ),
+      )
     } catch (e) {
-      if (!stopped.current) {
+      const remainsActive =
+        sendGeneration === generation.current &&
+        (!sentSessionId || activeId.current === sentSessionId)
+      if (!stopped.current && remainsActive) {
+        const message = errorText(e)
         if (!sessionReady)
           setMessages(previous => previous.filter(message => message.id !== optimisticUserId))
-        setError(errorText(e))
+        setError(message)
+        setFailedSend({
+          content,
+          error: message,
+          userMessageId: sessionReady ? optimisticUserId : undefined,
+        })
         setDraft(content)
       }
     } finally {
@@ -471,6 +506,11 @@ export function useWorkspaceController() {
       void taskState.refreshTasks()
       void goalState.refreshGoals()
     }
+  }
+  const retryFailedSend = async () => {
+    const failed = failedSend
+    if (!failed || failed.error !== error || operation.current || !daemon || loading) return
+    await send(failed.content, failed.userMessageId)
   }
   const stop = async () => {
     stopped.current = true
@@ -724,6 +764,8 @@ export function useWorkspaceController() {
     diffUpdatedAt,
     error,
     setError,
+    failedMessage: failedSend?.error === error ? failedSend.content : '',
+    retryFailedSend,
     connecting,
     loading,
     busy,

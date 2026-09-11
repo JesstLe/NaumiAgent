@@ -841,6 +841,14 @@ export function Web2() {
                 <div className="w2-error" role="alert">
                   <span>{w.error}</span>
                   <div>
+                    {w.failedMessage && w.daemon && (
+                      <button
+                        disabled={w.busy || w.connecting}
+                        onClick={() => void w.retryFailedSend()}
+                      >
+                        重试发送
+                      </button>
+                    )}
                     {!w.daemon && (
                       <button
                         disabled={w.connecting}

@@ -24,8 +24,20 @@ export function ChatPage() {
         </button>
       </header>
       {w.error && (
-        <div role="alert" className="p-3 bg-amber-50 text-amber-900">
-          {w.error}
+        <div
+          role="alert"
+          className="p-3 bg-amber-50 text-amber-900 flex items-center justify-between gap-3"
+        >
+          <span>{w.error}</span>
+          {w.failedMessage && (
+            <button
+              className="underline disabled:opacity-50"
+              disabled={w.busy || w.connecting}
+              onClick={() => void w.retryFailedSend()}
+            >
+              重试发送
+            </button>
+          )}
         </div>
       )}
       <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-neutral-50">
