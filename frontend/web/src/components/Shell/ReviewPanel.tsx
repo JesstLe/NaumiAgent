@@ -11,12 +11,12 @@ import {
   RefreshCw,
   FileQuestion,
 } from 'lucide-react'
-import { useWorkbenchConnection } from '@/hooks/useWorkbenchConnection'
-import { useSessionStore } from '@/stores/sessionStore'
-import { usePlatform } from '@/platform/PlatformContext'
-import { isApiException } from '@/api/ApiException'
+import { useWorkbenchConnection } from '@naumi/shared/hooks/useWorkbenchConnection'
+import { useSessionStore } from '@naumi/shared/stores/sessionStore'
+import { usePlatform } from '@naumi/shared/platform/PlatformContext'
+import { isApiException } from '@naumi/shared/api/ApiException'
 import { WindowControls } from './WindowControls'
-import type { GitDiffResponse, GitDiffFile } from '@/api/types'
+import type { GitDiffResponse, GitDiffFile } from '@naumi/shared/api/types'
 
 type DiffFilter = 'all' | 'staged' | 'unstaged'
 

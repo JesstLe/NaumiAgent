@@ -1,0 +1,74 @@
+{
+  "repository": "https://github.com/slev12397/beautiful-ui",
+  "revision": "ff0f74d62d8be9d89bcb735b3632e31a6ccf88dc",
+  "license": "MIT",
+  "files": [
+    {
+      "file": "components/primitives/ThinkingState.tsx",
+      "sha256": "3efce7c7820a153d44a3820f784a07f87577bacc73f5736887df10827785f110",
+      "local_sha256": "71e8dda12116a48e6e81422bc745df099bb88243b324e60c5e33cd8cd5c91020"
+    },
+    {
+      "file": "components/primitives/ToolChips.tsx",
+      "sha256": "36de9ee8a0ce5c09bf348fa2b272c0f19f4ca760ce4463520e12ff2889559ae3",
+      "local_sha256": "585acf54f6e805f7fafcd05b1629e251992f77829af937ca90e58b7bf8e45fe8"
+    },
+    {
+      "file": "components/primitives/ContextCards.tsx",
+      "sha256": "284973470e1ad10eca48edb3a8e9ecb7c76fbf00696c97defd29b9f64296390c",
+      "local_sha256": "d6b3e0b80722bc6963cf4d7fea9cced11fe9adf8261ca4a5ce0b4537c203bbc4"
+    },
+    {
+      "file": "components/primitives/Flowchart.tsx",
+      "sha256": "c4250f4cb0f085919dd54ff095bc23cfb97e101a3ec49e7b2a9cb2fd3bc83b82",
+      "local_sha256": "1c76cff2f84e2b7e3587870d555bb68c86b46fc170b8c4dbc2e4196e878b629c"
+    },
+    {
+      "file": "components/primitives/InsightCards.tsx",
+      "sha256": "693670bada462676f9a1db88f1b514967a858f8992c9afc371caef36ad68e936",
+      "local_sha256": "0a46076ac0ce71d18bed769954c27cc4ee4e632226f4700aed13ec84168e12f3"
+    },
+    {
+      "file": "components/primitives/SelectionActions.tsx",
+      "sha256": "b45fab927091c34c594ae9b70cc44b53cd9f599f904d72f39bfa87f0d160f4ac",
+      "local_sha256": "0cc1190e9bdc74c0decc8fbfd52aeeb4bb82529fc99653f259e311ee4f82ff68"
+    },
+    {
+      "file": "components/atoms/Button.tsx",
+      "sha256": "b12b82614be4284d2e84569f418892d663e857e1e4b5058b41979ee9e9b9e7e5",
+      "local_sha256": "1dca21f255e14a48df72ee97959632bcabb5215ffe95c05012d124e356601f24"
+    },
+    {
+      "file": "components/atoms/Shimmer.tsx",
+      "sha256": "12f629fb56e1d279b3a7ce2d4916e305e91e59935b954eaf301ac8d511e0eceb",
+      "local_sha256": "12f629fb56e1d279b3a7ce2d4916e305e91e59935b954eaf301ac8d511e0eceb"
+    },
+    {
+      "file": "components/atoms/StreamText.tsx",
+      "sha256": "540aa190d23e2c3a15d74ead9d61b8d1890c6d5461fdd61111fb97adcbf406fe",
+      "local_sha256": "540aa190d23e2c3a15d74ead9d61b8d1890c6d5461fdd61111fb97adcbf406fe"
+    },
+    {
+      "file": "lib/utils.ts",
+      "sha256": "59b7dac1a685b67cd6274c910c1c890c7d48a0b74e04f269743da6a9fcda72e3",
+      "local_sha256": "59b7dac1a685b67cd6274c910c1c890c7d48a0b74e04f269743da6a9fcda72e3"
+    }
+  ],
+  "foundation": {
+    "source": "app/globals.css",
+    "sha256": "90b764fdfb093f5bd9c851559240467716784febd2a440e3cadb37c276c17bba",
+    "local_sha256": "338c1a0c1dc1523a68617c40098fe51a053a47b012a5b7466156750e10b89a3e"
+  },
+  "local_changes": [
+    "Resolve Next aliases to relative paths and use type-only React imports.",
+    "Compile complete foundation with explicit Tailwind scanning, flatten layers, scope selectors to .bui-root; host loads local Inter and JetBrains Mono font packages.",
+    "Thinking and tool state comes from runtime props rather than demo timers. Thinking accepts nested tool rows and observes changing trace height. Header has an accessible name.",
+    "Tool diff chips are omitted in the application adapter; long labels/details expose full text via title attributes.",
+    "Context cards support duplicate titles by position-qualified keys.",
+    "Flowchart accepts real edges, remeasures changed nodes, handles empty input and missing edge endpoints.",
+    "Selection Actions accepts a native-selection anchor and a real action callback; only standalone demo mode simulates rewrites. External toolbars fit or scroll on narrow screens.",
+    "Insight Cards exposes original AllocationCard with content props, guards empty/shrinking pages, translates pager labels and dispatches action callbacks. Production only uses real distributions; demo time series are not shown.",
+    "Tool detail text preserves line breaks and scrolls within a bounded height so persisted output remains readable.",
+    "Thinking can remain expanded after completion so the application timeline stays in conversation order until the user collapses it."
+  ]
+}

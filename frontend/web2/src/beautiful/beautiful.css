@@ -1,0 +1,33 @@
+/* Host placement only. Primitive appearance comes from upstream.generated.css. */
+.bui-root { --font-inter: 'Inter Variable'; --font-mono-face: 'JetBrains Mono Variable'; font-family: 'Inter Variable', 'Microsoft YaHei', sans-serif; color: var(--ink); font-feature-settings: 'cv11', 'ss01'; font-size: 14px; letter-spacing: -.01em; line-height: 1.5; min-width: 0; }
+.bui-execution { display: flex; align-items: flex-start; gap: 10px; margin: 10px 0 22px; }
+.bui-execution-body { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 13px; }
+.bui-execution-body > div { max-width: none; min-height: 0 !important; }
+.bui-stage { width: min(100%, 720px); }
+.bui-stage > div:first-child { max-width: 540px; }
+.bui-stage-summary { max-width: 680px; margin: 7px 0 0; color: var(--ink-2); font-size: 13px; line-height: 1.75; }
+.bui-stage-summary .rich-content > :first-child { margin-top: 0; }
+.bui-stage-summary .rich-content > :last-child { margin-bottom: 0; }
+.bui-root .bui-execution-body > .bui-tool-chips { width: 100%; max-width: 540px; }
+.bui-chip-rows > div > button { height: 28px; }
+.bui-chip-rows .bui-operation { flex-shrink: 0; max-width: 48%; }
+.bui-chip-rows .bui-action-summary { display: block; line-height: 22px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bui-chip-rows [data-state='running'] .bui-operation { color: var(--ink); }
+.bui-chip-status { flex-shrink: 0; color: var(--ink-3); font-size: 10px; }
+.bui-tool-input { font-size: 11.5px; color: var(--ink-3); }
+.bui-tool-input summary { cursor: pointer; }
+.bui-tool-input pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; }
+.bui-chip-rows [data-state='failed'] .bui-chip-status { color: var(--red); }
+.bui-chip-rows button:focus-visible, .bui-tool-chips [data-diffchip] button:focus-visible { outline: 2px solid var(--ink-3); outline-offset: 2px; }
+.bui-tool-chips [data-diffchip] { max-width: 100%; }
+.bui-diff-preview { max-width: calc(100vw - 24px); max-height: min(440px, calc(100vh - 24px)); }
+.bui-diff-lines { max-height: 340px; overflow: auto; overscroll-behavior: contain; }
+.bui-root .bui-section-heading { display: flex; justify-content: space-between; align-items: center; margin: 5px 0 14px; font-size: 13px; }
+.bui-root .bui-section-heading small { color: var(--ink-3); margin-left: 5px; }
+.bui-root .bui-section-heading button { padding: 5px; border-radius: 6px; }
+.bui-root .bui-section-heading button:hover { background: var(--hover); }
+.bui-selection-anchor { position: fixed; z-index: 20; width: 460px; max-width: calc(100vw - 16px); pointer-events: none; }
+.bui-root .bui-empty { font-size: 12px; color: var(--ink-3); padding: 10px 0; }
+.w2-summary-heading { flex-wrap: wrap; }
+.w2-chat-summary:has(.bui-root) { max-height: 55%; }
+@media (prefers-reduced-motion: reduce) { .bui-root *, .bui-root { animation: none !important; transition: none !important; } }

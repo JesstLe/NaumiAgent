@@ -157,6 +157,45 @@ pub fn open_in_terminal(path: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Show the native Windows folder picker and return the selected directory.
+#[command]
+pub fn select_workspace_directory(initial_path: Option<String>) -> Result<Option<String>, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let script = r#"
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+$dialog.Description = '选择 NaumiAgent 工作目录'
+$dialog.ShowNewFolderButton = $true
+if ($env:NAUMI_INITIAL_DIR -and (Test-Path -LiteralPath $env:NAUMI_INITIAL_DIR)) {
+  $dialog.SelectedPath = $env:NAUMI_INITIAL_DIR
+}
+if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+  [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+  Write-Output $dialog.SelectedPath
+}
+"#;
+        let mut command = Command::new("powershell.exe");
+        command.args(["-NoProfile", "-STA", "-Command", script]);
+        if let Some(path) = initial_path {
+            command.env("NAUMI_INITIAL_DIR", path);
+        }
+        let output = command
+            .output()
+            .map_err(|err| format!("无法打开目录选择器: {err}"))?;
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        }
+        let selected = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        return Ok((!selected.is_empty()).then_some(selected));
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = initial_path;
+        Err("当前平台暂不支持目录选择器".to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

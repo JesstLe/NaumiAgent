@@ -17,6 +17,10 @@ from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.runtime.ports.events import (
     LegacyEventCallback as ToolEventCallback,
 )
+from naumi_agent.runtime.ports.events import (
+    RuntimeEvent,
+    RuntimeEventType,
+)
 from naumi_agent.runtime.ports.tool_execution import (
     ToolExecutionOutcome,
     ToolExecutionPort,
@@ -438,10 +442,9 @@ async def test_engine_public_facade_invokes_port_after_bypass_authorization(
             ToolCall(
                 id="authorized",
                 name="file_write",
-                arguments=(
-                    '{"path":"'
-                    + str(target)
-                    + '","content":"authorized through port"}'
+                arguments=_json_arguments(
+                    path=str(target),
+                    content="authorized through port",
                 ),
             ),
             agent_name="contract-test",
@@ -508,6 +511,64 @@ async def test_engine_tool_batches_dispatch_through_public_facade(
         )
 
         assert public_calls == [("batch-public-facade", None)]
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_engine_publishes_public_phase_summary_after_tool_results(
+    tmp_path: Path,
+) -> None:
+    engine = AgentEngine(_engine_config(tmp_path))
+    engine.set_runtime_mode("bypass")
+    session = await engine.get_or_create_session()
+    target = tmp_path / "phase-summary.txt"
+    target.write_text("ready", encoding="utf-8")
+    received: list[RuntimeEvent] = []
+
+    class RecordingSink:
+        async def emit(self, event: RuntimeEvent) -> None:
+            received.append(event)
+
+    publisher = RuntimeEventPublisher(
+        RecordingSink(),
+        session_id=session.id,
+        run_id="phase-summary-run",
+    )
+    try:
+        await engine._execute_tool_calls(
+            [
+                {
+                    "id": "phase-summary-call",
+                    "function": {
+                        "name": "file_read",
+                        "arguments": _json_arguments(path=str(target)),
+                    },
+                }
+            ],
+            tool_call_history=[],
+            session_id=session.id,
+            turn=3,
+            events=publisher,
+        )
+
+        phase_events = [
+            event
+            for event in received
+            if event.type is RuntimeEventType.PHASE_SUMMARY
+        ]
+        assert len(phase_events) == 1
+        assert phase_events[0].turn == 3
+        items = phase_events[0].data["items"]
+        assert isinstance(items, tuple)
+        assert len(items) == 1
+        assert items[0]["action"] == f"读取文件：{target}"
+        assert items[0]["status"] == "success"
+        assert received.index(phase_events[0]) > max(
+            index
+            for index, event in enumerate(received)
+            if event.type is RuntimeEventType.TOOL_END
+        )
     finally:
         await engine.shutdown()
 

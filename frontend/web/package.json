@@ -4,9 +4,10 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
+    "dev": "node ../web2/scripts/build-beautiful-ui.mjs && vite",
+    "build": "node ../web2/scripts/build-beautiful-ui.mjs && tsc -b && vite build",
     "preview": "vite preview",
+    "serve:production": "pnpm run build && vite preview --host 127.0.0.1 --port 5174 --strictPort",
     "test": "vitest",
     "test:run": "vitest run",
     "e2e": "playwright test",
@@ -22,7 +23,9 @@
     "react-dom": "^19.0.0",
     "react-i18next": "^17.0.9",
     "react-router-dom": "^7.18.1",
-    "zustand": "^5.0.14"
+    "zustand": "^5.0.14",
+    "@naumi/shared": "workspace:*",
+    "@naumi/web2": "workspace:*"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
