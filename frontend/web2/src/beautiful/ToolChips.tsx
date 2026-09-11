@@ -1,22 +1,10 @@
-// Adapted from Beautiful UI ToolChips, MIT (see LICENSE).
-// Runtime-driven rows replace demo sequencing and duplicate diff previews.
-import { Check, ChevronDown, CircleHelp, Loader2, Terminal, X } from 'lucide-react'
 import type { ActivityStep, ActivityState } from '@naumi/shared/api/activity'
-
+import Primitive from './upstream/components/primitives/ToolChips'
 export const activityNames: Record<ActivityState, string> = { running: '执行中', completed: '已完成', failed: '失败', cancelled: '已停止', unknown: '状态待确认' }
 export function ToolChips({ steps }: { steps: ActivityStep[] }) {
-  return <div className="bui-tool-chips">{steps.map(row => <details className="bui-tool-row" key={row.id}>
-    <summary>
-      <span className="bui-tool-glyph"><Terminal size={13} /><ChevronDown size={13} /></span>
-      <span className="bui-tool-label">{row.label}</span>
-      <span className={`bui-chip ${row.state}`}>
-        {row.state === 'running' ? <Loader2 className="w2-spin" size={12} /> : row.state === 'completed' ? <Check size={12} /> : row.state === 'failed' ? <X size={12} /> : <CircleHelp size={12} />}
-        {activityNames[row.state]}
-      </span>
-    </summary>
-    <div className="bui-tool-detail">
-      {row.input && <><span>输入</span><pre>{row.input}</pre></>}
-      {row.output ? <><span>输出</span><pre>{row.output}</pre></> : <p>{row.state === 'running' ? '等待工具结果…' : '此记录没有附带输出'}</p>}
-    </div>
-  </details>)}</div>
+  return <Primitive steps={steps.map((row, index) => ({
+    icon: /read|读取/i.test(row.label) ? 'read' : /write|edit|写|编辑/i.test(row.label) ? 'write' : 'run',
+    label: `${index + 1}. ${row.label}`, chip: activityNames[row.state], mono: true, detailMono: true,
+    detail: [...(row.input ? [{ text: `输入：${row.input}` }] : []), { text: row.output || (row.state === 'running' ? '等待工具结果…' : '此记录没有附带输出') }],
+  }))} diffs={[]} diffLines={{}} labels={{ header: `${steps.length} 条工具记录`, more: '' }} />
 }
