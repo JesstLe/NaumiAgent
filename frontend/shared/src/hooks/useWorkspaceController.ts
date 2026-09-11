@@ -334,9 +334,18 @@ export function useWorkspaceController() {
     contentOverride?: string,
     retryUserMessageId?: string,
     replaceAssistantMessageId?: string,
-  ) => {
+    editUserMessageId?: string,
+    persistedEditMessageId?: string,
+  ): Promise<boolean> => {
     const requestedContent = contentOverride ?? draft
-    if (!requestedContent.trim() || operation.current || !daemon || loading) return
+    if (!requestedContent.trim() || operation.current || !daemon || loading) return false
+    const editIndex = editUserMessageId
+      ? messages.findIndex((message) => message.id === editUserMessageId && message.role === 'user')
+      : -1
+    if (editUserMessageId && editIndex < 0) {
+      setError('要编辑的消息已不存在，请刷新会话后重试')
+      return false
+    }
     operation.current = true
     stopped.current = false
     setBusy(true)
@@ -345,7 +354,9 @@ export function useWorkspaceController() {
     const sendGeneration = generation.current
     const content = requestedContent.trim()
     const messageId = replaceAssistantMessageId ?? `stream-${crypto.randomUUID()}`
-    const optimisticUserId = retryUserMessageId ?? `user-${messageId}`
+    const optimisticUserId = editUserMessageId ?? retryUserMessageId ?? `user-${messageId}`
+    const editingBranch = Boolean(editUserMessageId)
+    const messageSnapshot = messages
     const replacingAssistant = Boolean(replaceAssistantMessageId)
     const replacedAssistant = replaceAssistantMessageId
       ? messages.find((message) => message.id === replaceAssistantMessageId)
@@ -364,6 +375,19 @@ export function useWorkspaceController() {
     let sentSessionId = ''
     setRunningUserMessageId(optimisticUserId)
     setMessages((previous) => {
+      if (editUserMessageId) {
+        const currentIndex = previous.findIndex((message) => message.id === editUserMessageId)
+        if (currentIndex < 0) return previous
+        return [
+          ...previous.slice(0, currentIndex),
+          {
+            ...previous[currentIndex],
+            content,
+            timestamp: startedAt,
+            metadata: { ...previous[currentIndex].metadata, pending: true },
+          },
+        ]
+      }
       const next = retryUserMessageId
         ? previous.map((message) =>
             message.id === retryUserMessageId
@@ -393,7 +417,7 @@ export function useWorkspaceController() {
           )
         : next
     })
-    if (!replacingAssistant) setDraft('')
+    if (!replacingAssistant && !editingBranch) setDraft('')
     setLiveEvents([{
       id: `local-${messageId}`,
       type: 'turn_start',
@@ -407,8 +431,8 @@ export function useWorkspaceController() {
       sentSessionId = id
       runningSessionId.current = id
       sessionReady = true
-      if (!replacingAssistant) savePreference(`draft:${id}`, '')
-      if (stopped.current) return
+      if (!replacingAssistant && !editingBranch) savePreference(`draft:${id}`, '')
+      if (stopped.current) return false
       controller.current = new AbortController()
       runId.current = ''
       await api.stream(
@@ -416,9 +440,10 @@ export function useWorkspaceController() {
         {
           content,
           runtime_mode: mode,
-          source_ids: replacingAssistant ? [] : selectedSources,
+          edit_message_id: persistedEditMessageId ?? editUserMessageId,
+          source_ids: replacingAssistant || editingBranch ? [] : selectedSources,
           workbench_issue:
-            !replacingAssistant && createIssue && snapshot?.missions[0]
+            !replacingAssistant && !editingBranch && createIssue && snapshot?.missions[0]
               ? {
                   mission_id: snapshot.missions[0].id,
                   title: content.slice(0, 80),
@@ -502,8 +527,15 @@ export function useWorkspaceController() {
       }
       if (!receivedAssistantContent)
         throw new Error('任务结束但未返回可显示结果，请重试')
-      if (!replacingAssistant) setSelectedSources([])
+      if (!replacingAssistant && !editingBranch) setSelectedSources([])
       succeeded = true
+      if (editingBranch && activeId.current === id) {
+        try {
+          setMessages(await fetchAllMessages(id))
+        } catch (e) {
+          setError(`修改已完成，但会话刷新失败：${errorText(e)}`)
+        }
+      }
       setMessages((previous) =>
         previous.map((message) =>
           message.id === optimisticUserId || message.id === messageId
@@ -519,18 +551,22 @@ export function useWorkspaceController() {
         const message = errorText(e)
         if (!sessionReady)
           setMessages(previous => previous.filter(message => message.id !== optimisticUserId))
+        if (editingBranch)
+          setMessages(messageSnapshot)
         if (replacedAssistant)
           setMessages(previous => previous.map(message =>
             message.id === replaceAssistantMessageId ? replacedAssistant : message,
           ))
         setError(message)
-        setFailedSend({
-          content,
-          error: message,
-          userMessageId: sessionReady ? optimisticUserId : undefined,
-          assistantMessageId: replaceAssistantMessageId,
-        })
-        if (!replacingAssistant) setDraft(content)
+        if (!editingBranch) {
+          setFailedSend({
+            content,
+            error: message,
+            userMessageId: sessionReady ? optimisticUserId : undefined,
+            assistantMessageId: replaceAssistantMessageId,
+          })
+        }
+        if (!replacingAssistant && !editingBranch) setDraft(content)
       }
     } finally {
       controller.current = null
@@ -568,6 +604,7 @@ export function useWorkspaceController() {
       void taskState.refreshTasks()
       void goalState.refreshGoals()
     }
+    return succeeded
   }
   const retryFailedSend = async () => {
     const failed = failedSend
@@ -579,6 +616,38 @@ export function useWorkspaceController() {
     userMessageId: string,
     assistantMessageId: string,
   ) => send(content, userMessageId, assistantMessageId)
+  const reviseMessage = async (content: string, userMessageId: string) => {
+    const id = activeId.current
+    const currentIndex = messages.findIndex(
+      message => message.id === userMessageId && message.role === 'user',
+    )
+    if (!id || currentIndex < 0) {
+      setError('要编辑的消息已不存在，请刷新会话后重试')
+      return false
+    }
+    const userOrdinal = messages
+      .slice(0, currentIndex + 1)
+      .filter(message => message.role === 'user').length - 1
+    try {
+      const persistedMessages = await fetchAllMessages(id)
+      const persistedUser = persistedMessages
+        .filter(message => message.role === 'user')[userOrdinal]
+      if (!persistedUser) {
+        setError('要编辑的消息未能从会话历史中恢复，请刷新后重试')
+        return false
+      }
+      return send(
+        content,
+        undefined,
+        undefined,
+        userMessageId,
+        persistedUser.id,
+      )
+    } catch (e) {
+      setError(`无法准备消息编辑：${errorText(e)}`)
+      return false
+    }
+  }
   const stop = async () => {
     stopped.current = true
     try {
@@ -852,6 +921,7 @@ export function useWorkspaceController() {
     connect,
     send,
     regenerate,
+    reviseMessage,
     stop,
     upload,
     loadDiff,

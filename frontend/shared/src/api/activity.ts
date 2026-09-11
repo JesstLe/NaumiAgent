@@ -102,6 +102,7 @@ export function runsByUserMessage(
         }
       }
     }
+    if (request && match < 0) continue
     if (match < 0) {
       for (let index = remainingUsers.length - 1; index >= 0; index--) {
         if (!assigned.has(remainingUsers[index].id)) {
