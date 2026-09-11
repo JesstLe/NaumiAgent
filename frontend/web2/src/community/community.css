@@ -1,0 +1,18 @@
+.community-tree-section { min-width: 0; }
+.community-tree-section .w2-section-heading > button { display: inline-flex; align-items: center; gap: 5px; padding: 4px 6px; border-radius: 5px; }
+.community-file-tree { position: relative; display: flex; flex-direction: column; padding: 2px 0 8px; isolation: isolate; }
+.community-file-tree::before { content: ''; position: absolute; z-index: -1; inset: 0 auto 0 1px; width: calc(100% - 2px); background: repeating-linear-gradient(to right, transparent 0, transparent calc(var(--community-tree-indent) - 1px), #e7e9e4 calc(var(--community-tree-indent) - 1px), #e7e9e4 var(--community-tree-indent)); opacity: .72; pointer-events: none; }
+.community-tree-item { width: 100%; padding: 0 0 1px calc(var(--community-tree-level) * var(--community-tree-indent)); text-align: left; outline: 0; }
+.community-tree-label { display: flex; align-items: center; min-height: 29px; gap: 6px; padding: 4px 7px; background: #fff; color: #454943; font-size: 12px; line-height: 20px; transition: color 100ms ease, background 100ms ease; }
+.community-tree-label > svg { width: 14px; height: 14px; flex: none; color: #858b82; stroke-width: 1.65; }
+.community-tree-label > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.community-tree-label > small { margin-left: auto; color: #ae7569; font-size: 10px; }
+.community-tree-item:hover .community-tree-label { background: #f4f5f2; color: #272b25; }
+.community-tree-item[data-selected] .community-tree-label { background: #eef0eb; color: #283026; }
+.community-tree-item[data-focus] .community-tree-label { box-shadow: inset 2px 0 #829177; }
+.community-tree-chevron { transition: transform 150ms ease; }
+.community-tree-item[aria-expanded='false'] .community-tree-chevron { transform: rotate(-90deg); }
+.community-tree-file-icon { margin-left: -1px; }
+.community-tree-status, .community-tree-limit { margin: 3px 0 12px; color: #93988f; font-size: 11px; }
+.community-tree-status[role='alert'] { color: #a26157; }
+@media (prefers-reduced-motion: reduce) { .community-tree-label, .community-tree-chevron { transition: none; } }

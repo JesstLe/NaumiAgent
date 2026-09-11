@@ -64,6 +64,7 @@ import { GoalPanel } from './GoalPanel'
 import { DiffPanel } from './DiffPanel'
 import { ThinkingState } from './beautiful/ThinkingState'
 import { MessageContent } from './rich/MessageContent'
+import { WorkspaceFileTree } from './community/WorkspaceFileTree'
 import { SelectionActions } from './beautiful/SelectionActions'
 import { ContextCards } from './beautiful/ContextCards'
 import { Flowchart } from './beautiful/Flowchart'
@@ -1100,6 +1101,8 @@ export function Web2() {
                 {panel === 'plugins' && <PluginPanel />}
                 {panel === 'files' && (
                   <>
+                    <WorkspaceFileTree />
+                    <div className="w2-file-divider" />
                     <div className="w2-section-heading">
                       <span>会话文件</span>
                       <button

@@ -41,6 +41,7 @@ import type {
   GitBranchesResponse,
   ScheduleJob,
   SkillExtensionsResponse,
+  WorkspaceTreeResponse,
 } from './types'
 
 export type TokenProvider = () => Promise<string | null>
@@ -227,6 +228,10 @@ export class WorkbenchApiClient {
 
   async gitBranches(): Promise<GitBranchesResponse> {
     return this.request({ method: 'GET', url: '/workspace/git/branches' })
+  }
+
+  async workspaceTree(): Promise<WorkspaceTreeResponse> {
+    return this.request({ method: 'GET', url: '/workspace/tree' })
   }
 
   async switchGitBranch(branch: string): Promise<GitBranchesResponse> {
