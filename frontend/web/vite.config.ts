@@ -9,6 +9,10 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url))
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  build: {
+    minify: 'oxc',
+    sourcemap: false,
+  },
   resolve: {
     dedupe: ['react', 'react-dom'],
     alias: {

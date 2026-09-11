@@ -6,6 +6,7 @@
     "beautiful:css": "node web2/scripts/build-beautiful-ui.mjs",
     "dev": "pnpm --filter naumi-agent-web run dev",
     "build": "pnpm --filter naumi-agent-web run build",
+    "serve:production": "pnpm --filter naumi-agent-web run serve:production",
     "test": "pnpm --filter naumi-agent-web run test:run",
     "e2e": "pnpm --filter naumi-agent-web run e2e:run"
   },
