@@ -16,3 +16,29 @@
 .community-tree-status, .community-tree-limit { margin: 3px 0 12px; color: #93988f; font-size: 11px; }
 .community-tree-status[role='alert'] { color: #a26157; }
 @media (prefers-reduced-motion: reduce) { .community-tree-label, .community-tree-chevron { transition: none; } }
+
+.community-avatar { display: inline-grid; place-items: center; flex: none; overflow: hidden; border: 1px solid #dfe4da; border-radius: 7px; background: #f2f4ef; box-shadow: 0 1px 2px #27351f0b; transform-origin: center; }
+.community-avatar canvas { display: block; width: 100%; height: 100%; }
+.community-avatar[data-working] { animation: community-avatar-breathe 1.9s ease-in-out infinite; }
+@keyframes community-avatar-breathe { 0%, 100% { transform: scale(1); opacity: .9; } 50% { transform: scale(1.055); opacity: 1; } }
+
+.community-message { position: relative; display: flex; align-items: flex-start; gap: 10px; width: 100%; }
+.community-message.user { justify-content: flex-end; }
+.community-message-body { min-width: 0; max-width: min(100%, 780px); }
+.community-message.user .community-message-body { max-width: min(82%, 700px); }
+.community-message-body > header { display: flex; align-items: baseline; gap: 8px; min-height: 21px; margin-bottom: 3px; color: #7f857c; font-size: 10.5px; opacity: 0; transition: opacity 120ms ease; }
+.community-message:hover .community-message-body > header, .community-message:focus-within .community-message-body > header { opacity: 1; }
+.community-message-body > header strong { color: #636962; font-size: 11px; font-weight: 550; }
+.community-message-body > header time { color: #a2a69f; }
+.community-message.user .community-message-body > header { justify-content: flex-end; }
+.community-message-content { min-width: 0; }
+.community-message.user .community-message-content { padding: 9px 12px; border: 1px solid #e5e7e2; border-radius: 13px 13px 3px 13px; background: #f4f5f2; color: #30332f; }
+.community-message-actions { display: flex; align-items: center; gap: 2px; min-height: 26px; margin-top: 2px; opacity: 0; transition: opacity 120ms ease; }
+.community-message.user .community-message-actions { justify-content: flex-end; }
+.community-message:hover .community-message-actions, .community-message:focus-within .community-message-actions { opacity: 1; }
+.community-message-actions button { display: inline-grid; place-items: center; width: 26px; height: 25px; border-radius: 5px; color: #858a83; }
+.community-message-actions button:hover, .community-message-actions button[aria-pressed='true'] { background: #f0f2ed; color: #4e574b; }
+.community-message-actions svg { width: 13px; height: 13px; stroke-width: 1.7; }
+
+@media (max-width: 580px) { .community-message.user .community-message-body { max-width: 92%; } .community-message-body > header { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .community-avatar[data-working] { animation: none; } .community-message-body > header, .community-message-actions { transition: none; } }

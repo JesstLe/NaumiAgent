@@ -1,7 +1,8 @@
 /* Host placement only. Primitive appearance comes from upstream.generated.css. */
 .bui-root { --font-inter: 'Inter Variable'; --font-mono-face: 'JetBrains Mono Variable'; font-family: 'Inter Variable', 'Microsoft YaHei', sans-serif; color: var(--ink); font-feature-settings: 'cv11', 'ss01'; font-size: 14px; letter-spacing: -.01em; line-height: 1.5; min-width: 0; }
-.bui-execution { margin: 10px 0 22px; }
-.bui-execution > div { max-width: none; min-height: 0 !important; }
+.bui-execution { display: flex; align-items: flex-start; gap: 10px; margin: 10px 0 22px; }
+.bui-execution-body { flex: 1; min-width: 0; }
+.bui-execution-body > div { max-width: none; min-height: 0 !important; }
 .bui-timeline { display: flex; flex-direction: column; gap: 7px; width: min(100%, 760px); padding: 3px 0 5px; }
 .bui-timeline > p { margin: 0; padding: 3px 6px; color: var(--ink-2); font-size: 13px; line-height: 1.75; white-space: pre-wrap; }
 .bui-timeline > p.is-running { color: var(--ink); animation: fade-in 220ms ease-out both; }

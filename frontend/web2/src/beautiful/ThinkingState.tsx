@@ -10,6 +10,7 @@ import {
 import type { Run } from '@naumi/shared/api/WorkbenchRuntimeClient'
 import Primitive from './upstream/components/primitives/ThinkingState'
 import { activityNames } from './ToolChips'
+import { AgentAvatar } from '../community/AgentAvatar'
 
 const toolIcon = (name: string) => {
   if (/read|读取|fetch|search/i.test(name)) return FileText
@@ -100,12 +101,15 @@ export function ThinkingState({
       ? `${elapsedLabel(firstEvent.timestamp || '', terminal?.timestamp, now)} · ${activityNames[status]}`
       : activityNames[status]
   return <div className="bui-root bui-execution" aria-label="执行过程" data-run-id={run?.id || 'live'}>
-    <Primitive active="正在推理" done={done} working={useLive && w.busy} settledExpanded rows={[]}>
-      <div className="bui-timeline" aria-label="执行时间线">
-        {steps.map(step => step.kind === 'reasoning'
-          ? <p key={step.id} style={{ whiteSpace: 'pre-line' }} className={step.state === 'running' ? 'is-running' : ''}>{step.label}</p>
-          : <InlineTool key={step.id} step={step} />)}
-      </div>
-    </Primitive>
+    <AgentAvatar seed={run?.id || `live:${w.sessionId || 'new'}`} size={25} working={useLive && w.busy} />
+    <div className="bui-execution-body">
+      <Primitive active="正在推理" done={done} working={useLive && w.busy} settledExpanded rows={[]}>
+        <div className="bui-timeline" aria-label="执行时间线">
+          {steps.map(step => step.kind === 'reasoning'
+            ? <p key={step.id} style={{ whiteSpace: 'pre-line' }} className={step.state === 'running' ? 'is-running' : ''}>{step.label}</p>
+            : <InlineTool key={step.id} step={step} />)}
+        </div>
+      </Primitive>
+    </div>
   </div>
 }
