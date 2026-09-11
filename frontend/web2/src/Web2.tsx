@@ -50,6 +50,7 @@ import {
 import { useWorkspace } from '@naumi/shared/hooks/WorkspaceProvider'
 import { usePlatform } from '@naumi/shared/platform'
 import {
+  WorkbenchRuntimeClient,
   readPreference,
   safeWebUrl,
   savePreference,
@@ -82,6 +83,14 @@ import type {
   ScheduleJob,
   SkillExtensionsResponse,
 } from '@naumi/shared/api/types'
+import {
+  loadWorkspaceProjects,
+  normalizeWorkspacePath,
+  saveWorkspaceProject,
+  workspaceProjectMatches,
+  type WorkspaceProject,
+} from '@naumi/shared/projects/workspaceProjects'
+import { ProjectCreationDialog, type ProjectCreationInput } from './ProjectCreationDialog'
 
 type Panel =
   | 'home'
@@ -113,6 +122,10 @@ const MIN_LEFT_WIDTH = 200
 const MAX_LEFT_WIDTH = 420
 const MIN_RIGHT_WIDTH = 280
 const MAX_RIGHT_WIDTH = 720
+
+function directoryName(path: string) {
+  return path.replaceAll(String.fromCharCode(92), '/').split('/').filter(Boolean).at(-1) || ''
+}
 
 function defaultLeftWidth() {
   return window.innerWidth <= 1100 ? 215 : 240
@@ -302,6 +315,9 @@ export function Web2() {
   const [workspaceMenu, setWorkspaceMenu] = useState(false)
   const [gitState, setGitState] = useState<GitBranchesResponse | null>(null)
   const [workspaceSwitching, setWorkspaceSwitching] = useState(false)
+  const [workspaceTarget, setWorkspaceTarget] = useState('')
+  const [projectDialogOpen, setProjectDialogOpen] = useState(false)
+  const [projects, setProjects] = useState<WorkspaceProject[]>([])
   const [fullscreen, setFullscreen] = useState(false)
   const dialogRef = useRef<HTMLDialogElement>(null)
   const summaryRef = useRef<HTMLDivElement>(null)
@@ -316,7 +332,26 @@ export function Web2() {
   const fileInput = useRef<HTMLInputElement>(null)
   const scroll = useRef<HTMLDivElement>(null)
   const followOutput = useRef(true)
-  const workspace = w.daemon?.workspace_name || 'NaumiAgent'
+  const workspaceRoot = w.daemon?.workspace_root
+  const activeProject = projects.find((project) =>
+    workspaceProjectMatches(project, workspaceRoot),
+  )
+  const workspace = activeProject?.name || w.daemon?.workspace_name || 'NaumiAgent'
+  const visibleProjects = useMemo(() => {
+    if (!workspaceRoot || projects.some((project) => workspaceProjectMatches(project, workspaceRoot)))
+      return projects
+    return [
+      {
+        id: `local:${workspaceRoot}`,
+        name: w.daemon?.workspace_name || 'NaumiAgent',
+        path: workspaceRoot,
+        location: 'local' as const,
+        createdAt: '',
+        lastOpenedAt: '',
+      },
+      ...projects,
+    ]
+  }, [projects, w.daemon?.workspace_name, workspaceRoot])
   const current = w.sessions.find((item) => item.id === w.sessionId)
   const messages = w.messages.filter(
     (item) => ['user', 'assistant'].includes(item.role) && item.content,
@@ -433,11 +468,11 @@ export function Web2() {
     if (!path || !action) return
     void action.call(platform, path).catch(error => w.setError(errorText(error)))
   }
-  const chooseWorkspace = async () => {
-    if (!platform.selectWorkspaceDirectory || !platform.getDaemonLaunchConfig || !platform.startDaemon) return
-    const path = await platform.selectWorkspaceDirectory(w.daemon?.workspace_root)
-    if (!path) return
+  const activateWorkspace = async (path: string, name?: string) => {
+    if (!platform.getDaemonLaunchConfig || !platform.startDaemon)
+      throw new Error('切换项目需要 NaumiAgent 桌面版')
     setWorkspaceSwitching(true)
+    setWorkspaceTarget(path)
     try {
       const previous = await platform.getDaemonLaunchConfig()
       const config = previous ?? { executable: null, args: [], working_dir: null, port: null, env_vars: {} }
@@ -446,11 +481,72 @@ export function Web2() {
       const status = await platform.startDaemon(config)
       if (!status.running || !status.url) throw new Error(status.last_error || '新工作目录启动失败')
       savePreference('api', status.url)
+      const client = new WorkbenchRuntimeClient(status.url, () => platform.getToken())
+      let connected = false
+      let lastError: unknown
+      for (let attempt = 0; attempt < 20; attempt++) {
+        try {
+          const daemon = await client.fetchDaemonStatus()
+          if (normalizeWorkspacePath(daemon.workspace_root || '') === normalizeWorkspacePath(path)) {
+            connected = true
+            break
+          }
+          lastError = new Error('新服务返回了其他工作目录')
+        } catch (error) {
+          lastError = error
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 250))
+      }
+      if (!connected) throw new Error(`新工作目录未能就绪：${errorText(lastError)}`)
+      try {
+        const nextProjects = await saveWorkspaceProject(platform, {
+          name: name || directoryName(path) || '未命名项目',
+          path,
+          location: 'local',
+        })
+        setProjects(nextProjects)
+      } catch (error) {
+        void platform.log('warn', '项目名称未能保存：' + errorText(error))
+      }
       window.location.reload()
     } catch (error) {
-      w.setError(errorText(error)); setWorkspaceSwitching(false)
+      setWorkspaceSwitching(false)
+      setWorkspaceTarget('')
+      throw error
     }
   }
+  const chooseWorkspace = async () => {
+    if (!platform.selectWorkspaceDirectory) return
+    try {
+      const path = await platform.selectWorkspaceDirectory(workspaceRoot)
+      if (!path) return
+      await activateWorkspace(path)
+    } catch (error) {
+      w.setError(errorText(error))
+    }
+  }
+  const createProject = async (input: ProjectCreationInput) => {
+    await activateWorkspace(input.path, input.name)
+  }
+
+  useEffect(() => {
+    let disposed = false
+    void (async () => {
+      let stored = await loadWorkspaceProjects(platform)
+      if (workspaceRoot) {
+        const existing = stored.find((project) => workspaceProjectMatches(project, workspaceRoot))
+        stored = await saveWorkspaceProject(platform, {
+          name: existing?.name || w.daemon?.workspace_name || 'NaumiAgent',
+          path: workspaceRoot,
+          location: 'local',
+        })
+      }
+      if (!disposed) setProjects(stored)
+    })().catch((error) => {
+      void platform.log('warn', '项目列表未能加载：' + errorText(error))
+    })
+    return () => { disposed = true }
+  }, [platform, w.daemon?.workspace_name, workspaceRoot])
 
   useEffect(() => {
     if (dialog) {
@@ -532,11 +628,23 @@ export function Web2() {
       style={layoutStyle}
     >
       <SelectionActions focusComposer={() => textarea.current?.focus()} />
+      <ProjectCreationDialog
+        open={projectDialogOpen}
+        canSelectLocal={!!platform.selectWorkspaceDirectory && !!platform.startDaemon}
+        busy={workspaceSwitching}
+        initialPath={workspaceRoot}
+        onClose={() => setProjectDialogOpen(false)}
+        onSelectDirectory={(initialPath) =>
+          platform.selectWorkspaceDirectory?.(initialPath) ?? Promise.resolve(null)
+        }
+        onCreate={createProject}
+      />
       <header className="w2-titlebar">
         <MenuBar menus={[
           { label: '文件', actions: [
             { label: '新建对话', run: newChat },
             { label: '新建侧边聊天', run: () => { void w.createSidebarSession() }, disabled: !w.daemon || w.mutating },
+            { label: '创建项目', run: () => setProjectDialogOpen(true), disabled: workspaceSwitching || w.busy },
             { label: '打开新的工作目录', run: () => { void chooseWorkspace() }, disabled: !platform.selectWorkspaceDirectory || workspaceSwitching || w.busy },
             { label: '添加文件', run: () => fileInput.current?.click(), disabled: uploadLocked },
             { label: '导出对话', disabled: !messages.length, run: () => {
@@ -654,22 +762,35 @@ export function Web2() {
         )}
         <div className="w2-project-label">
           项目
-          <IconButton label="新建侧边聊天" disabled={!w.daemon || w.mutating} onClick={() => { void w.createSidebarSession() }}>
+          <IconButton label="创建项目" disabled={workspaceSwitching || w.busy} onClick={() => setProjectDialogOpen(true)}>
             <Plus />
           </IconButton>
         </div>
         <div className="w2-project-scroll">
-          <button
-            className="w2-project"
-            onClick={() => setExpanded((value) => !value)}
-            aria-expanded={expanded}
-          >
-            {expanded ? <FolderOpen /> : <FolderClosed />}
-            <span>{workspace}</span>
-            {expanded ? <ChevronDown /> : <ChevronRight />}
-          </button>
-          {expanded && (
-            <div className="w2-session-list">
+          {visibleProjects.map((project) => {
+            const active = workspaceProjectMatches(project, workspaceRoot)
+            const switching = workspaceSwitching && workspaceProjectMatches(project, workspaceTarget)
+            return <Fragment key={project.id}>
+              <button
+                className={`w2-project ${active ? 'active' : ''}`}
+                disabled={!active && (workspaceSwitching || !platform.startDaemon)}
+                onClick={() => {
+                  if (active) setExpanded((value) => !value)
+                  else void activateWorkspace(project.path, project.name).catch((error) => w.setError(errorText(error)))
+                }}
+                aria-expanded={active ? expanded : undefined}
+                title={project.path}
+              >
+                {active && expanded ? <FolderOpen /> : <FolderClosed />}
+                <span>{project.name}</span>
+                {switching
+                  ? <Loader2 className="w2-spin" />
+                  : active
+                    ? expanded ? <ChevronDown /> : <ChevronRight />
+                    : null}
+              </button>
+              {active && expanded && (
+                <div className="w2-session-list">
               {filteredSessions.map((session) => (
                 <div className={`w2-session-row ${session.id === w.sessionId ? 'selected' : ''}`} key={session.id}>
                   <button className="w2-session-open" aria-current={session.id === w.sessionId ? 'page' : undefined} title={session.title || '新对话'} onClick={() => void w.select(session.id)}>
@@ -697,8 +818,10 @@ export function Web2() {
                       : '暂无历史会话'}
                 </div>
               )}
-            </div>
-          )}
+                </div>
+              )}
+            </Fragment>
+          })}
         </div>
         <footer className="w2-sidebar-footer">
           <button onClick={() => setDialog('settings')}>

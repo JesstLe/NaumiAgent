@@ -194,9 +194,12 @@
   text-align: left;
   border-radius: 9px;
   padding: 6px 8px !important;
-  background: #dfead8c7 !important;
+  background: transparent !important;
   min-height: 31px;
 }
+.w2-project:hover { background: #e8eee3 !important; }
+.w2-project.active { background: #dfead8c7 !important; }
+.w2-project:disabled { opacity: .55; }
 .w2-project > svg {
   width: 15px;
   height: 15px;
@@ -1212,6 +1215,119 @@
 .w2-dialog-actions button {
   padding: 7px 17px;
   border-radius: 7px;
+}
+.w2-project-dialog {
+  width: min(680px, calc(100vw - 32px));
+  padding: 0;
+  border: 1px solid #e4e7df;
+  border-radius: 15px;
+  background: #fff;
+  color: #30362d;
+  box-shadow: 0 28px 90px #20291c2e;
+}
+.w2-project-dialog::backdrop {
+  background: #26302038;
+  backdrop-filter: blur(3px);
+}
+.w2-project-dialog-inner { padding: 20px; }
+.w2-project-dialog header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 38px;
+}
+.w2-project-dialog header > div { display: flex; align-items: center; gap: 8px; }
+.w2-project-dialog h2 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: -.5px; }
+.w2-project-close,
+.w2-project-back {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+}
+.w2-project-close:hover,
+.w2-project-back:hover { background: #f0f2ed; }
+.w2-project-close svg,
+.w2-project-back svg { width: 16px; height: 16px; }
+.w2-project-field-title {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.w2-project-types { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.w2-project-types > button {
+  min-height: 145px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  text-align: left;
+  padding: 17px;
+  border: 1px solid #e1e4dc;
+  border-radius: 13px;
+  background: #fff;
+}
+.w2-project-types > button.selected { background: #f2f3f0; border-color: #eceee8; }
+.w2-project-types > button:disabled { opacity: .55; }
+.w2-project-types > button > span { display: flex; justify-content: space-between; align-items: center; }
+.w2-project-types svg { width: 18px; height: 18px; color: #7c8279; }
+.w2-project-types i {
+  width: 20px;
+  height: 20px;
+  border: 1.5px solid #9da29a;
+  border-radius: 50%;
+  background: #fff;
+}
+.w2-project-types .selected i { border: 5px solid #459df7; }
+.w2-project-types strong { margin-top: auto; font-size: 14px; }
+.w2-project-types small { margin-top: 5px; color: #969b93; font-size: 12px; }
+.w2-project-notice,
+.w2-project-error { margin: 12px 0 0; font-size: 12px; color: #a76752; }
+.w2-project-dialog footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  margin-top: 40px;
+}
+.w2-project-dialog footer button { min-height: 34px; padding: 7px 16px; border-radius: 8px; }
+.w2-project-next,
+.w2-project-create { display: inline-flex; align-items: center; gap: 7px; background: #282d27 !important; color: #fff !important; }
+.w2-project-dialog button:disabled { cursor: default; opacity: .45; }
+.w2-project-name { display: block; font-size: 13px; font-weight: 600; }
+.w2-project-name > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  margin-top: 10px;
+  padding: 0 13px;
+  border: 1px solid #e0e4dc;
+  border-radius: 9px;
+}
+.w2-project-name svg { width: 16px; color: #717970; }
+.w2-project-name input { flex: 1; min-width: 0; border: 0; outline: 0; font-size: 13px; }
+.w2-project-source { margin-top: 18px; }
+.w2-project-source > button {
+  width: 100%;
+  min-height: 98px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid #e0e4dc;
+  border-radius: 10px;
+  background: #fbfcfa;
+}
+.w2-project-source > button:hover { background: #f4f6f1; border-color: #d6dbd1; }
+.w2-project-source svg { width: 18px; height: 18px; color: #8c9489; }
+.w2-project-source strong { font-size: 13px; font-weight: 500; }
+.w2-project-source small { max-width: 90%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #939a90; font-size: 11px; }
+@media (max-width: 620px) {
+  .w2-project-types { grid-template-columns: 1fr; }
+  .w2-project-dialog header { margin-bottom: 24px; }
+  .w2-project-dialog footer { margin-top: 26px; }
 }
 .w2-danger {
   color: #a85347 !important;
