@@ -1056,6 +1056,49 @@
   width: fit-content;
   margin-left: auto;
 }
+.w2-message.user.is-editing {
+  width: min(90%, 680px);
+}
+.w2-message-edit {
+  display: grid;
+  gap: 10px;
+}
+.w2-message-edit textarea {
+  width: 100%;
+  min-height: 82px;
+  max-height: 280px;
+  resize: vertical;
+  border: 0;
+  outline: 0;
+  padding: 0;
+  color: var(--w2-text);
+  background: transparent;
+  font: inherit;
+  line-height: 1.7;
+}
+.w2-message-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+}
+.w2-message-edit-actions button {
+  min-height: 30px;
+  padding: 0 11px;
+  border: 1px solid var(--w2-line);
+  border-radius: 6px;
+  color: #626860;
+  background: #fff;
+  font-size: 12px;
+}
+.w2-message-edit-actions button:hover:not(:disabled) {
+  border-color: #cfd4cb;
+  background: #fafbf9;
+}
+.w2-message-edit-actions .w2-primary {
+  border-color: #596650;
+  color: #fff;
+  background: #596650;
+}
 .w2-message.assistant {
   padding: 0 3px;
 }

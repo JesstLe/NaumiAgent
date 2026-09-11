@@ -319,6 +319,8 @@ export function Web2() {
   const [projectDialogOpen, setProjectDialogOpen] = useState(false)
   const [projects, setProjects] = useState<WorkspaceProject[]>([])
   const [fullscreen, setFullscreen] = useState(false)
+  const [editingMessage, setEditingMessage] = useState<{ id: string; content: string } | null>(null)
+  const [savingEdit, setSavingEdit] = useState(false)
   const dialogRef = useRef<HTMLDialogElement>(null)
   const summaryRef = useRef<HTMLDivElement>(null)
   const resizeRef = useRef<{
@@ -361,6 +363,10 @@ export function Web2() {
     [messages, w.runs],
   )
   const composerLocked = w.busy || w.uploading || w.loading || w.connecting
+  useEffect(() => {
+    setEditingMessage(null)
+    setSavingEdit(false)
+  }, [w.sessionId])
   const uploadLocked = w.busy || w.uploading || !w.daemon
   const currentWriteLocked = (id: string) =>
     w.mutating || (w.busy && w.runningSessionId === id)
@@ -917,7 +923,7 @@ export function Web2() {
                       ? [...messages.slice(0, index)].reverse().find(item => item.role === 'user')
                       : undefined
                     const retryRun = retryUser ? messageRuns.get(retryUser.id) : undefined
-                    const showAssistantActions = message.role === 'assistant' && assistantActionsReady({
+                    const showAssistantActions = !savingEdit && message.role === 'assistant' && assistantActionsReady({
                       content: message.content,
                       assistantPending: message.metadata.pending === true,
                       userPending: retryUser?.metadata.pending === true,
@@ -929,8 +935,38 @@ export function Web2() {
                       && message.id === w.runningUserMessageId
                       && (w.busy || w.liveEvents.length > 0)
                     return <Fragment key={message.id}>
-                      <article className={`w2-message ${message.role}`}>
-                        <MessageContent content={message.content} plain={message.role === 'user'} />
+                      <article className={`w2-message ${message.role}${editingMessage?.id === message.id ? ' is-editing' : ''}`}>
+                        {editingMessage?.id === message.id
+                          ? <form className="w2-message-edit" onSubmit={async event => {
+                              event.preventDefault()
+                              if (!editingMessage.content.trim() || savingEdit || composerLocked) return
+                              setSavingEdit(true)
+                              const saved = await w.reviseMessage(editingMessage.content, message.id)
+                              setSavingEdit(false)
+                              if (saved) setEditingMessage(null)
+                            }}>
+                              <textarea
+                                autoFocus
+                                aria-label="编辑已发送消息"
+                                value={editingMessage.content}
+                                onChange={event => setEditingMessage({ id: message.id, content: event.target.value })}
+                                onKeyDown={event => {
+                                  if (event.key === 'Escape') {
+                                    event.preventDefault()
+                                    setEditingMessage(null)
+                                  }
+                                  if ((event.ctrlKey || event.metaKey) && event.key === 'Enter')
+                                    event.currentTarget.form?.requestSubmit()
+                                }}
+                              />
+                              <div className="w2-message-edit-actions">
+                                <button type="button" disabled={savingEdit} onClick={() => setEditingMessage(null)}>取消</button>
+                                <button type="submit" className="w2-primary" disabled={!editingMessage.content.trim() || savingEdit || composerLocked}>
+                                  {savingEdit ? '发送中…' : '发送修改'}
+                                </button>
+                              </div>
+                            </form>
+                          : <MessageContent content={message.content} plain={message.role === 'user'} />}
                         {message.role === 'assistant' && <AiSources sources={sources} />}
                         {showAssistantActions
                           ? <MessageActionBar
@@ -945,7 +981,16 @@ export function Web2() {
                               }}
                             />
                           : message.role === 'user'
-                            ? <div className="w2-message-actions"><CopyButton text={message.content} /></div>
+                            ? editingMessage?.id === message.id
+                              ? null
+                              : <div className="w2-message-actions">
+                                  <CopyButton text={message.content} />
+                                  <IconButton
+                                    label="编辑消息"
+                                    disabled={composerLocked}
+                                    onClick={() => setEditingMessage({ id: message.id, content: message.content })}
+                                  ><Pencil /></IconButton>
+                                </div>
                             : null}
                       </article>
                       {message.role === 'user' && (run || live) && (

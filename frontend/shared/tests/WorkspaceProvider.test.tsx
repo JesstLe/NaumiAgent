@@ -162,6 +162,9 @@ function View({ label }: { label: string }) {
       <button onClick={() => void w.regenerate('原始问题', 'question', 'answer')}>
         重新生成 {label}
       </button>
+      <button onClick={() => void w.reviseMessage('修改后的问题', 'question')}>
+        编辑消息 {label}
+      </button>
     </section>
   )
 }
@@ -343,6 +346,51 @@ describe('one shared workspace for two presentation shells', () => {
     expect(screen.getByTestId('web-messages').textContent?.match(/原始问题/g)).toHaveLength(1)
     expect(screen.getByTestId('web-runs')).toHaveTextContent('new-run')
     expect(screen.getByLabelText('web2-draft')).toHaveValue('尚未发送的草稿')
+  })
+  it('edits a sent user turn, removes the later branch and submits the revised content', async () => {
+    let requestBody: Record<string, unknown> = {}
+    let persistedEdited = false
+    server.use(
+      http.get(`${base}/sessions/:id/messages`, () => HttpResponse.json(persistedEdited ? {
+        messages: [
+          { id: 'question', role: 'user', content: '修改后的问题', timestamp: '', metadata: {} },
+          { id: 'edited-answer', role: 'assistant', content: '修改后的回答', timestamp: '', metadata: {} },
+        ],
+        total: 2,
+      } : {
+        messages: [
+          { id: 'question', role: 'user', content: '原始问题', timestamp: '', metadata: {} },
+          { id: 'answer', role: 'assistant', content: '旧回答', timestamp: '', metadata: {} },
+          { id: 'later', role: 'user', content: '后续问题', timestamp: '', metadata: {} },
+          { id: 'later-answer', role: 'assistant', content: '后续回答', timestamp: '', metadata: {} },
+        ],
+        total: 4,
+      })),
+      http.post(`${base}/sessions/:id/messages`, async ({ request }) => {
+        requestBody = (await request.json()) as Record<string, unknown>
+        persistedEdited = true
+        return new HttpResponse(
+          'data: {"id":"t","type":"token_delta","run_id":"edited-run","data":{"token":"修改后的回答"}}\n\ndata: {"id":"e","type":"agent_end","run_id":"edited-run","data":{"status":"completed"}}\n\n',
+          { headers: { 'Content-Type': 'text/event-stream' } },
+        )
+      }),
+    )
+    setup()
+    await waitFor(() => expect(screen.getByTestId('web-connected')).toHaveTextContent('connected'))
+    fireEvent.click(screen.getByText('选择 web one'))
+    await waitFor(() => expect(screen.getByTestId('web-messages')).toHaveTextContent('原始问题|旧回答|后续问题|后续回答'))
+
+    fireEvent.click(screen.getByText('编辑消息 web2'))
+
+    await waitFor(() => expect(screen.getByTestId('web-messages')).toHaveTextContent('修改后的问题|修改后的回答'))
+    expect(screen.getByTestId('web-messages')).not.toHaveTextContent('旧回答')
+    expect(screen.getByTestId('web-messages')).not.toHaveTextContent('后续问题')
+    expect(requestBody).toMatchObject({
+      content: '修改后的问题',
+      edit_message_id: 'question',
+      stream: true,
+      source_ids: [],
+    })
   })
   it('restores the previous answer when regeneration fails', async () => {
     server.use(

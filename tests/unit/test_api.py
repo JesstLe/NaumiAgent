@@ -14,6 +14,7 @@ import naumi_agent.api.routes.messages as message_routes
 from naumi_agent import __version__
 from naumi_agent.api.chat_runs import ChatRunStore
 from naumi_agent.api.permission_broker import PermissionApprovalBroker
+from naumi_agent.api.routes.commands import CommandRequest, run_command
 from naumi_agent.api.routes.messages import (
     _chat_run_to_response,
     _stream_response,
@@ -180,6 +181,9 @@ class _FakeSessionStore:
     async def load(self, session_id: str):
         return SimpleNamespace(id=session_id, messages=self.messages)
 
+    async def save(self, session) -> None:
+        self.messages = session.messages
+
 
 class _FakeEngine:
     def __init__(self) -> None:
@@ -304,6 +308,116 @@ async def _async_value(value):
 
 
 class TestMessageRoutes:
+    @pytest.mark.asyncio
+    async def test_edit_command_rejects_a_non_user_message(self) -> None:
+        engine = _FakeEngine()
+        engine.session_store.messages = [
+            {"role": "user", "content": "/version"},
+            {"role": "assistant", "content": "0.1.214"},
+        ]
+
+        with pytest.raises(Exception) as exc:
+            await run_command(
+                "sess_1",
+                CommandRequest(command="/version", edit_message_id="msg-2"),
+                _fake_request(engine),
+                auth="test",
+            )
+
+        assert exc.value.status_code == 400
+        assert exc.value.detail == "只能编辑自己发送的消息"
+
+    @pytest.mark.asyncio
+    async def test_edit_message_truncates_the_old_branch_before_rerunning(self) -> None:
+        engine = _FakeEngine()
+        engine.session_store.messages = [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "旧问题"},
+            {"role": "assistant", "content": "旧回答"},
+            {"role": "user", "content": "后续问题"},
+            {"role": "assistant", "content": "后续回答"},
+        ]
+
+        response = await send_message(
+            "sess_1",
+            MessageCreate(
+                content="修改后的问题",
+                stream=False,
+                edit_message_id="msg-2",
+            ),
+            _fake_request(engine),
+            auth="test",
+        )
+
+        assert engine.session_store.messages == [
+            {"role": "system", "content": "system"}
+        ]
+        assert engine.ran == ["修改后的问题"]
+        assert response.content == "ok"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("message_id", "content", "status_code", "detail"),
+        [
+            ("msg-2", "修改", 400, "只能编辑自己发送的消息"),
+            ("msg-9", "修改", 404, "要编辑的消息不存在"),
+            ("msg-1", "   ", 400, "编辑后的消息不能为空"),
+        ],
+    )
+    async def test_edit_message_rejects_invalid_targets(
+        self,
+        message_id: str,
+        content: str,
+        status_code: int,
+        detail: str,
+    ) -> None:
+        engine = _FakeEngine()
+        engine.session_store.messages = [
+            {"role": "user", "content": "问题"},
+            {"role": "assistant", "content": "回答"},
+        ]
+
+        with pytest.raises(Exception) as exc:
+            await send_message(
+                "sess_1",
+                MessageCreate(
+                    content=content,
+                    stream=False,
+                    edit_message_id=message_id,
+                ),
+                _fake_request(engine),
+                auth="test",
+            )
+
+        assert exc.value.status_code == status_code
+        assert exc.value.detail == detail
+
+    @pytest.mark.asyncio
+    async def test_edit_message_rejects_an_active_session_run(self) -> None:
+        engine = _FakeEngine()
+        engine.session_store.messages = [{"role": "user", "content": "问题"}]
+        request = _fake_request(engine)
+        task = asyncio.create_task(asyncio.sleep(10))
+        request.app.state.active_chat_run_tasks = {"run-1": ("sess_1", task)}
+        try:
+            with pytest.raises(Exception) as exc:
+                await send_message(
+                    "sess_1",
+                    MessageCreate(
+                        content="修改后的问题",
+                        stream=False,
+                        edit_message_id="msg-1",
+                    ),
+                    request,
+                    auth="test",
+                )
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+        assert exc.value.status_code == 409
+        assert exc.value.detail == "任务仍在执行，结束后才能编辑消息"
+
     @pytest.mark.asyncio
     async def test_delete_session_route_delegates_to_engine_lifecycle(self) -> None:
         engine = _FakeEngine()
@@ -564,6 +678,33 @@ class TestMessageRoutes:
         assert engine.ran == ["hello"]
         assert events[0]["type"] == "token_delta"
         assert events[0]["data"]["token"] == "你"
+        assert events[-1]["type"] == "agent_end"
+
+    @pytest.mark.asyncio
+    async def test_stream_edit_truncates_history_before_loading_the_session(self) -> None:
+        engine = _FakeEngine()
+        engine.session_store.messages = [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "旧问题"},
+            {"role": "assistant", "content": "旧回答"},
+        ]
+
+        events = [
+            json.loads(chunk.removeprefix("data: "))
+            async for chunk in _stream_response(
+                engine,
+                "sess_1",
+                "修改后的问题",
+                _fake_request(engine),
+                edit_message_id="msg-2",
+            )
+        ]
+
+        assert engine.session_store.messages == [
+            {"role": "system", "content": "system"}
+        ]
+        assert engine.loaded == ["sess_1"]
+        assert engine.ran == ["修改后的问题"]
         assert events[-1]["type"] == "agent_end"
 
     @pytest.mark.asyncio

@@ -130,3 +130,100 @@ test('session menu exposes durable conversation actions', async ({ page }) => {
   await page.getByRole('button', { name: '保存' }).click()
   await expect(page.getByRole('button', { name: '新的会话名称', exact: true })).toBeVisible()
 })
+
+test('sent user messages can be edited and replace the following conversation branch', async ({ page }) => {
+  let edited = false
+  let submitted: Record<string, unknown> = {}
+  await page.route('**/sessions/*/runs*', route => route.fulfill({
+    json: {
+      runs: [{
+        id: edited ? 'edited-run' : 'old-run',
+        user_message_id: edited ? 'legacy-edited' : 'legacy-old',
+        status: 'completed',
+        started_at: '2026-09-11T00:00:00Z',
+        completed_at: '2026-09-11T00:00:03Z',
+        steps: [{
+          sequence: 1,
+          stage: 'request',
+          status: 'completed',
+          summary: edited ? '修改后的问题' : '原始问题',
+          detail: '',
+        }],
+      }],
+      total: 1,
+    },
+  }))
+  await page.route('**/sessions/*/messages*', async route => {
+    if (route.request().method() === 'POST') {
+      submitted = route.request().postDataJSON() as Record<string, unknown>
+      edited = true
+      return route.fulfill({
+        contentType: 'text/event-stream',
+        body: 'data: {"id":"token","type":"token_delta","run_id":"edited-run","data":{"token":"修改后的回答"}}\n\ndata: {"id":"end","type":"agent_end","run_id":"edited-run","data":{"status":"completed"}}\n\n',
+      })
+    }
+    return route.fulfill({ json: edited ? {
+      messages: [
+        { id: 'question', role: 'user', content: '修改后的问题', timestamp: '', metadata: {} },
+        { id: 'edited-answer', role: 'assistant', content: '修改后的回答', timestamp: '', metadata: {} },
+      ],
+      total: 2,
+    } : {
+      messages: [
+        { id: 'question', role: 'user', content: '原始问题', timestamp: '', metadata: {} },
+        { id: 'answer', role: 'assistant', content: '旧回答', timestamp: '', metadata: {} },
+        { id: 'later-question', role: 'user', content: '后续问题', timestamp: '', metadata: {} },
+        { id: 'later-answer', role: 'assistant', content: '后续回答', timestamp: '', metadata: {} },
+      ],
+      total: 4,
+    } })
+  })
+
+  await page.goto('/web2')
+  const conversation = page.getByLabel('对话', { exact: true })
+  await expect(conversation.getByText('原始问题', { exact: true })).toBeVisible()
+  await conversation.getByRole('article').filter({ hasText: '原始问题' }).hover()
+  await page.getByRole('button', { name: '编辑消息' }).first().click()
+  await page.getByRole('textbox', { name: '编辑已发送消息' }).fill('修改后的问题')
+  await page.getByRole('button', { name: '发送修改' }).click()
+
+  await expect(page.getByText('修改后的回答', { exact: true })).toBeVisible()
+  await expect(page.getByText('旧回答', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('后续问题', { exact: true })).toHaveCount(0)
+  expect(submitted).toMatchObject({ content: '修改后的问题', edit_message_id: 'question' })
+
+  await page.reload()
+  await expect(conversation.getByText('修改后的问题', { exact: true })).toBeVisible()
+  await expect(conversation.getByText('原始问题', { exact: true })).toHaveCount(0)
+  await expect(conversation.getByText('旧回答', { exact: true })).toHaveCount(0)
+})
+
+test('assistant actions stay hidden until the related run is terminal', async ({ page }) => {
+  let terminal = false
+  await page.route('**/sessions/*/messages*', route => route.fulfill({ json: {
+    messages: [
+      { id: 'question', role: 'user', content: '运行中的问题', timestamp: '', metadata: {} },
+      { id: 'answer', role: 'assistant', content: '已经输出的部分正文', timestamp: '', metadata: {} },
+    ],
+    total: 2,
+  } }))
+  await page.route('**/sessions/*/runs*', route => route.fulfill({ json: {
+    runs: [{
+      id: 'run-1',
+      user_message_id: 'question',
+      status: terminal ? 'completed' : 'running',
+      started_at: '2026-09-11T00:00:00Z',
+      completed_at: terminal ? '2026-09-11T00:00:03Z' : '',
+      steps: [{ sequence: 1, stage: 'request', status: 'completed', summary: '运行中的问题', detail: '' }],
+    }],
+    total: 1,
+  } }))
+
+  await page.goto('/web2')
+  await expect(page.getByText('已经输出的部分正文', { exact: true })).toBeVisible()
+  await expect(page.locator('.community-message-action-bar')).toHaveCount(0)
+
+  terminal = true
+  await page.reload()
+  await expect(page.locator('.community-message-action-bar')).toBeVisible()
+})

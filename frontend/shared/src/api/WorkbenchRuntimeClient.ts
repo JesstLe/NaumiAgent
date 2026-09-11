@@ -207,7 +207,11 @@ export class WorkbenchRuntimeClient extends WorkbenchApiClient {
       `/sessions/${encodeURIComponent(id)}/${command ? 'commands' : 'messages'}`,
       {
         method: 'POST',
-        body: JSON.stringify(command ? { command: message.content, runtime_mode: message.runtime_mode || 'default' } : { ...message, stream: true }),
+        body: JSON.stringify(command ? {
+          command: message.content,
+          runtime_mode: message.runtime_mode || 'default',
+          edit_message_id: message.edit_message_id,
+        } : { ...message, stream: true }),
         signal,
       },
     )

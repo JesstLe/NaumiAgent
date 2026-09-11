@@ -11,7 +11,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from rich.text import Text
 
 from naumi_agent.api.deps import AuthDep
-from naumi_agent.api.routes.messages import _active_chat_run_tasks, _engine_lock
+from naumi_agent.api.routes.messages import (
+    _active_chat_run_tasks,
+    _engine_lock,
+    _message_revision_index,
+    _truncate_message_branch,
+)
 from naumi_agent.cli.slash_router import (
     _normalize_command,
     _split_command_batch,
@@ -40,6 +45,7 @@ class CommandRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
     command: str = Field(min_length=1, max_length=16000)
     runtime_mode: str = Field(default="default", pattern="^(default|plan|bypass)$")
+    edit_message_id: str | None = None
 
 
 def command_index():
@@ -107,17 +113,26 @@ async def run_command(
 ):
     command = validate_command(body.command)
     engine = request.app.state.engine
-    if not await engine.session_store.load(session_id):
+    session = await engine.session_store.load(session_id)
+    if not session:
         raise HTTPException(404, "会话不存在")
+    if body.edit_message_id:
+        _message_revision_index(session.messages, body.edit_message_id)
     if _engine_lock(request).locked():
         raise HTTPException(409, "Agent 正在执行，请等待完成后重试命令")
     return StreamingResponse(
-        _command_stream(request, session_id, command, body.runtime_mode),
+        _command_stream(
+            request,
+            session_id,
+            command,
+            body.runtime_mode,
+            edit_message_id=body.edit_message_id,
+        ),
         media_type="text/event-stream",
     )
 
 
-async def _command_stream(request, session_id, command, mode):
+async def _command_stream(request, session_id, command, mode, *, edit_message_id=None):
     engine = request.app.state.engine
     store = request.app.state.chat_run_store
     queue: asyncio.Queue[StreamEvent | None] = asyncio.Queue()
@@ -145,6 +160,12 @@ async def _command_stream(request, session_id, command, mode):
         previous_mode = None
         try:
             async with _engine_lock(request):
+                if edit_message_id:
+                    await _truncate_message_branch(
+                        engine,
+                        session_id,
+                        edit_message_id,
+                    )
                 if not await engine.load_session(session_id):
                     raise ValueError("会话不存在")
                 run = await store.start_run(session_id=session_id, user_message_id=uuid.uuid4().hex)

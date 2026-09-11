@@ -220,4 +220,18 @@ describe('public execution activity', () => {
     expect(assigned.get('u1')?.id).toBe('regenerated')
     expect(assigned.get('u2')?.id).toBe('second')
   })
+  it('does not attach an edited-away run to an unrelated remaining user', () => {
+    const messages = [
+      { id: 'u1', role: 'user', content: '保留的问题', timestamp: '', metadata: {} },
+      { id: 'a1', role: 'assistant', content: '保留的回答', timestamp: '', metadata: {} },
+    ]
+    const assigned = runsByUserMessage(messages, [{
+      id: 'removed-run',
+      user_message_id: 'legacy-removed',
+      status: 'completed',
+      started_at: '2026-09-11T00:03:00Z',
+      steps: [{ sequence: 1, stage: 'request', status: 'completed', summary: '已经编辑删除的问题', detail: '' }],
+    }])
+    expect(assigned.size).toBe(0)
+  })
 })
