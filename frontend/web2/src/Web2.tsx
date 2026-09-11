@@ -49,6 +49,7 @@ import { ThinkingState } from './beautiful/ThinkingState'
 import { SelectionActions } from './beautiful/SelectionActions'
 import { ContextCards } from './beautiful/ContextCards'
 import { Flowchart } from './beautiful/Flowchart'
+import { InsightCards } from './beautiful/InsightCards'
 import './beautiful/upstream.generated.css'
 import './beautiful/beautiful.css'
 import '@fontsource-variable/inter'
@@ -170,7 +171,7 @@ export function Web2() {
     () => readPreference('terminal', 'true') === 'true',
   )
   const [panel, setPanel] = useState<Panel>('home')
-  const [summary, setSummary] = useState<'todos' | 'goal' | 'context' | 'flow' | null>(null)
+  const [summary, setSummary] = useState<'todos' | 'goal' | 'context' | 'flow' | 'insights' | null>(null)
   const [expanded, setExpanded] = useState(true)
   const [searching, setSearching] = useState(false)
   const [query, setQuery] = useState('')
@@ -316,6 +317,7 @@ export function Web2() {
             { label: '目标', run: () => setSummary('goal') },
             { label: '上下文快照', run: () => setSummary('context') },
             { label: '任务依赖图', run: () => setSummary('flow') },
+            { label: '会话洞察', run: () => setSummary('insights') },
             { label: '任务记录', run: () => openPanel('tasks') },
             { label: fullscreen ? '退出全屏' : '进入全屏', run: () => { void (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()).catch(() => w.setError('浏览器暂不支持全屏')) } },
           ] },
@@ -454,12 +456,14 @@ export function Web2() {
                 <button aria-pressed={summary === 'goal'} onClick={() => setSummary('goal')}>目标</button>
                 <button aria-pressed={summary === 'context'} onClick={() => setSummary('context')}>上下文</button>
                 <button aria-pressed={summary === 'flow'} onClick={() => setSummary('flow')}>依赖</button>
+                <button aria-pressed={summary === 'insights'} onClick={() => setSummary('insights')}>洞察</button>
                 <IconButton label="收起对话摘要" onClick={() => setSummary(null)}><X /></IconButton>
               </div>
               {summary === 'todos' && <TodoPanel key={w.sessionId || 'new'} />}
               {summary === 'goal' && <GoalPanel />}
               {summary === 'context' && <ContextCards />}
               {summary === 'flow' && <Flowchart key={w.sessionId || 'new'} />}
+              {summary === 'insights' && <InsightCards onInspect={key => setSummary(key === 'context' ? 'context' : 'todos')} />}
             </section>}
             <div
               className="w2-conversation"
