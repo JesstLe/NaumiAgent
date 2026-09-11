@@ -7,6 +7,12 @@
 
 ## 从一个具体问题开始
 
+<!-- teaching-figure:11:start -->
+![MCP 连接能力，Skill 提供方法：章节教学示意图](assets/illustrations/11-teaching-v1.png)
+
+读图：先看 Host 内的 Client 如何连接 Server，再看 Skill 如何按需提供任务方法。图中远程 HTTP 表示协议层的另一种传输选择，不表示本项目已实现该入口；当前章节核对的是 stdio 工具桥，加载 Skill 也不会自动授予工具权限。
+<!-- teaching-figure:11:end -->
+
 如果每接一个资料库都重新写一套模型专用接口，维护成本会很高。MCP 用协议规范应用与能力提供者的通信。Host 是承载模型和用户交互的应用，Client 是 Host 内与一个 Server 通信的连接组件，Server 提供能力。调用通常经历 initialize 协商、列出工具、调用工具和返回结果。模型本身不会凭空连接服务器，连接生命周期由应用管理。
 
 协议中的 Tools 是可请求的动作，Resources 是上下文资料，Prompts 是可选择的模板。支持哪项要看协商和具体实现，不能因为装了 MCP SDK 就声称全支持。stdio 常用于本地子进程的标准输入输出；远程 HTTP 则涉及传输、认证和授权配置。这两条部署路径需要分开讲。
