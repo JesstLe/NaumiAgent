@@ -345,13 +345,15 @@ async def test_streaming_change_request_retries_plan_only_then_requires_file_cha
 
 
 @pytest.mark.asyncio
-async def test_core_action_gate_blocks_two_plan_only_responses_without_harness(
+async def test_core_action_gate_blocks_three_plan_only_responses_without_harness(
     tmp_path: Path,
 ) -> None:
     engine = await _untrusted_engine(tmp_path, "创建一个高级 HTML 页面")
+    engine.set_runtime_mode(AgentRuntimeMode.BYPASS)
     responses = [
         ModelResponse(content="我先规划页面结构。", usage=_usage(), model="test-model"),
         ModelResponse(content="页面已经设计完成。", usage=_usage(), model="test-model"),
+        ModelResponse(content="页面方案已经准备好。", usage=_usage(), model="test-model"),
     ]
 
     try:
@@ -367,13 +369,87 @@ async def test_core_action_gate_blocks_two_plan_only_responses_without_harness(
         assert result.error == "模型没有执行用户要求的工作区修改，本次任务未完成，请重试。"
         assert not any(
             message.get("role") == "assistant"
-            and message.get("content") in {"我先规划页面结构。", "页面已经设计完成。"}
+            and message.get("content") in {
+                "我先规划页面结构。",
+                "页面已经设计完成。",
+                "页面方案已经准备好。",
+            }
             for message in engine._messages
         )
         assert any(
             "请立即调用 file_write" in str(message.get("content", ""))
             for message in engine._messages
         )
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_streaming_action_recovery_survives_empty_forced_tool_turn(
+    tmp_path: Path,
+) -> None:
+    engine = await _untrusted_engine(tmp_path, "创建一个高级 HTML 页面")
+    engine.set_runtime_mode(AgentRuntimeMode.BYPASS)
+    events: list[tuple[str, dict[str, object]]] = []
+    call_count = 0
+    stream_kwargs: list[dict[str, object]] = []
+
+    async def stream_response(**kwargs: object):
+        nonlocal call_count
+        call_count += 1
+        stream_kwargs.append(kwargs)
+        if call_count == 1:
+            yield StreamChunk(token="我先整理页面方案。")
+            yield StreamChunk(finish_reason="stop")
+            return
+        if call_count == 2:
+            yield StreamChunk(finish_reason="stop")
+            return
+        if call_count == 3:
+            yield StreamChunk(token="接下来准备写入页面。")
+            yield StreamChunk(finish_reason="stop")
+            return
+        if call_count == 4:
+            yield StreamChunk(
+                tool_call={
+                    0: {
+                        "id": "write-after-empty",
+                        "function": {
+                            "name": "file_write",
+                            "arguments": json.dumps(
+                                {"path": "recovered.html", "content": "<main>恢复成功</main>"}
+                            ),
+                        },
+                    }
+                },
+                finish_reason="tool_calls",
+            )
+            return
+        yield StreamChunk(token="recovered.html 已创建。")
+        yield StreamChunk(finish_reason="stop")
+
+    async def on_event(event: str, data: dict[str, object]) -> None:
+        events.append((event, data))
+
+    try:
+        with patch.object(engine._router, "stream", new=stream_response):
+            result = await engine._react_loop_streaming(
+                engine.tool_registry.get_openai_tools(),
+                on_event,
+            )
+
+        assert result.status == "completed"
+        assert result.response == "recovered.html 已创建。"
+        assert call_count == 5
+        assert all(kwargs.get("tool_choice") == "required" for kwargs in stream_kwargs[1:4])
+        assert (engine.workspace_root / "recovered.html").read_text(encoding="utf-8") == (
+            "<main>恢复成功</main>"
+        )
+        recovery_events = [
+            data for event, data in events
+            if event == "phase_summary" and data.get("phase_kind") == "recovery"
+        ]
+        assert len(recovery_events) == 3
     finally:
         await engine.shutdown()
 
@@ -502,6 +578,7 @@ async def test_core_action_gate_rejects_noop_write_and_todo_evidence(
         ),
         ModelResponse(content="已经修改。", usage=_usage(), model="test-model"),
         ModelResponse(content="确认完成。", usage=_usage(), model="test-model"),
+        ModelResponse(content="再次确认完成。", usage=_usage(), model="test-model"),
     ]
 
     try:
