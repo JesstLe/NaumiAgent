@@ -15,6 +15,7 @@ from pathlib import Path
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.log_setup import setup_logging
 from naumi_agent.pi_engine.bridge import PiTerminalBridge, serve_stdio
+from naumi_agent.pi_engine.env import resolve_env_refs
 
 
 def _configure_stdio_utf8() -> None:
@@ -25,24 +26,6 @@ def _configure_stdio_utf8() -> None:
             sys.stdin.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
         except (AttributeError, OSError):
             pass
-
-
-def _resolve_env_refs(env: dict[str, str]) -> dict[str, str]:
-    """Expand ``{env:NAME}`` references; drop entries whose source is unset."""
-    import os
-    import re
-
-    pattern = re.compile(r"^\{env:([A-Za-z_][A-Za-z0-9_]*)\}$")
-    resolved: dict[str, str] = {}
-    for key, value in env.items():
-        match = pattern.fullmatch(value.strip())
-        if match:
-            source = os.environ.get(match.group(1))
-            if source:
-                resolved[key] = source
-        else:
-            resolved[key] = value
-    return resolved
 
 
 async def _amain(argv: list[str] | None = None) -> int:
@@ -68,7 +51,7 @@ async def _amain(argv: list[str] | None = None) -> int:
         model=config.engine.pi.model,
         extra_args=config.engine.pi.extra_args,
         workspace_root=config.resolve_workspace_root(),
-        env=_resolve_env_refs(config.engine.pi.env),
+        env=resolve_env_refs(config.engine.pi.env),
     )
     # The status refresh inside start() emits immediately, so the writer must
     # be bound before pi is spawned.

@@ -6569,6 +6569,7 @@ def test_list_workbench_sessions_route_returns_session_registry() -> None:
                 "workspace_root": "",
                 "git_branch": "",
                 "summary": "",
+                "engine": "naumi",
             }
         ],
         "total": 1,

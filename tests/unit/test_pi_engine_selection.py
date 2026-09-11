@@ -83,10 +83,10 @@ def test_resolver_prefers_override(tmp_path: Path) -> None:
 
 
 def test_pi_env_refs_expand_from_environment(tmp_path: Path, monkeypatch) -> None:
-    from naumi_agent.pi_engine.__main__ import _resolve_env_refs
+    from naumi_agent.pi_engine.env import resolve_env_refs
 
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-value")
-    resolved = _resolve_env_refs(
+    resolved = resolve_env_refs(
         {
             "ZAI_CODING_CN_API_KEY": "{env:OPENAI_API_KEY}",
             "PI_CUSTOM": "plain-value",
