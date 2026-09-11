@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from dataclasses import asdict
 from pathlib import Path
@@ -19,6 +20,22 @@ from naumi_agent.tools.goal import GoalCreateTool, GoalUpdateTool
 from naumi_agent.ui.goal_panel import build_goal_pursuit_snapshot
 
 router = APIRouter(tags=["workspace-controls"])
+
+_TREE_IGNORED_DIRECTORIES = {
+    ".git",
+    ".mypy_cache",
+    ".naumi",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".tox",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "node_modules",
+}
+_TREE_MAX_DEPTH = 10
+_TREE_MAX_ITEMS = 2500
 
 
 class GoalCreate(BaseModel):
@@ -280,6 +297,89 @@ def _git(workspace: Path, *args: str) -> subprocess.CompletedProcess[str]:
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise HTTPException(503, f"Git 操作不可用：{exc}") from exc
+
+
+def _workspace_tree(engine) -> dict[str, object]:
+    workspace = Path(engine.workspace_root).resolve()
+    if not workspace.is_dir():
+        raise HTTPException(409, "当前工作目录不存在或不可读取")
+
+    items: dict[str, dict[str, object]] = {
+        ".": {
+            "id": ".",
+            "name": workspace.name or str(workspace),
+            "path": ".",
+            "kind": "directory",
+            "extension": "",
+            "children": [],
+        }
+    }
+    truncated = False
+
+    def scan(directory: Path, parent_id: str, depth: int) -> None:
+        nonlocal truncated
+        if truncated or depth > _TREE_MAX_DEPTH:
+            truncated = True
+            return
+        try:
+            entries = list(os.scandir(directory))
+        except OSError:
+            items[parent_id]["unreadable"] = True
+            return
+
+        safe_entries: list[os.DirEntry[str]] = []
+        for entry in entries:
+            if entry.name in _TREE_IGNORED_DIRECTORIES:
+                continue
+            try:
+                if entry.is_symlink():
+                    continue
+                target = Path(entry.path).resolve()
+                target.relative_to(workspace)
+            except (OSError, ValueError):
+                continue
+            safe_entries.append(entry)
+        safe_entries.sort(
+            key=lambda entry: (
+                not entry.is_dir(follow_symlinks=False),
+                entry.name.casefold(),
+            )
+        )
+
+        children: list[str] = []
+        for entry in safe_entries:
+            if len(items) >= _TREE_MAX_ITEMS:
+                truncated = True
+                break
+            path = Path(entry.path)
+            relative = path.relative_to(workspace).as_posix()
+            is_directory = entry.is_dir(follow_symlinks=False)
+            items[relative] = {
+                "id": relative,
+                "name": entry.name,
+                "path": relative,
+                "kind": "directory" if is_directory else "file",
+                "extension": "" if is_directory else path.suffix.removeprefix(".").lower(),
+                "children": [],
+            }
+            children.append(relative)
+            if is_directory:
+                scan(path, relative, depth + 1)
+        items[parent_id]["children"] = children
+
+    scan(workspace, ".", 1)
+    return {
+        "workspace_root": str(workspace),
+        "root_id": ".",
+        "items": items,
+        "truncated": truncated,
+        "max_items": _TREE_MAX_ITEMS,
+    }
+
+
+@router.get("/workspace/tree")
+async def workspace_tree(request: Request, auth: str = AuthDep):
+    return _workspace_tree(request.app.state.engine)
 
 
 def _git_branches(engine) -> dict[str, object]:

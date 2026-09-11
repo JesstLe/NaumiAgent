@@ -855,6 +855,11 @@
   border-bottom: 1px solid var(--w2-line);
   cursor: pointer;
 }
+.w2-file-divider {
+  height: 1px;
+  margin: 12px 0 15px;
+  background: var(--w2-line);
+}
 .w2-file-row > span {
   flex: 1;
   min-width: 0;

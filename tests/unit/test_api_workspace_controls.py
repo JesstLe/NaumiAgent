@@ -176,3 +176,30 @@ async def test_git_branch_control_refuses_dirty_workspace(controls, tmp_path):
     refused = await client.post("/workspace/git/branch", json={"branch": "master"})
     assert refused.status_code == 409
     assert "未提交修改" in refused.json()["detail"]
+
+
+async def test_workspace_tree_reads_real_files_and_stays_inside_root(controls, tmp_path):
+    client, app, _, _ = controls
+    workspace = tmp_path / "workspace"
+    (workspace / "src" / "nested").mkdir(parents=True)
+    (workspace / "src" / "main.py").write_text("print('ok')", encoding="utf-8")
+    (workspace / "README.md").write_text("# Real tree", encoding="utf-8")
+    (workspace / ".git").mkdir()
+    (workspace / ".git" / "config").write_text("hidden", encoding="utf-8")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("private", encoding="utf-8")
+    try:
+        (workspace / "outside-link.txt").symlink_to(outside)
+    except OSError:
+        pass
+    app.state.engine.workspace_root = workspace
+
+    response = await client.get("/workspace/tree")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["root_id"] == "."
+    assert payload["items"]["."]["children"] == ["src", "README.md"]
+    assert payload["items"]["src"]["children"] == ["src/nested", "src/main.py"]
+    assert payload["items"]["src/main.py"]["extension"] == "py"
+    assert ".git" not in payload["items"]
+    assert "outside-link.txt" not in payload["items"]

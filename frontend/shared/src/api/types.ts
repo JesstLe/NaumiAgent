@@ -362,6 +362,24 @@ export interface GitBranchesResponse {
   error: string
 }
 
+export interface WorkspaceTreeItem {
+  id: string
+  name: string
+  path: string
+  kind: 'directory' | 'file'
+  extension: string
+  children: string[]
+  unreadable?: boolean
+}
+
+export interface WorkspaceTreeResponse {
+  workspace_root: string
+  root_id: string
+  items: Record<string, WorkspaceTreeItem>
+  truncated: boolean
+  max_items: number
+}
+
 export interface SessionListResponse {
   sessions: Session[]
   total: number
