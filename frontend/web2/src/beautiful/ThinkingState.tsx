@@ -9,7 +9,7 @@ import {
   type ToolTimelineStep,
 } from '@naumi/shared/api/activity'
 import type { Run } from '@naumi/shared/api/WorkbenchRuntimeClient'
-import { activityNames, ToolChips } from './ToolChips'
+import { ToolChips } from './ToolChips'
 import Primitive, { type ThinkingRow } from './upstream/components/primitives/ThinkingState'
 import { AgentAvatar } from '../community/AgentAvatar'
 import { MessageContent } from '../rich/MessageContent'
@@ -25,7 +25,10 @@ const splitAction = (step: ToolTimelineStep) => {
 }
 
 const stageVariant = (stage: ExecutionStage) => {
-  if (!stage.tools.length) return stage.notes.some(note => /执行计划|压缩上下文/.test(note.label)) ? 'Steps' : 'Reasoning'
+  if (!stage.tools.length) {
+    if (stage.notes.at(-1)?.state === 'running') return 'Reasoning'
+    return stage.notes.some(note => /执行计划|压缩上下文/.test(note.label)) ? 'Steps' : 'Reasoning'
+  }
   return stage.tools.every(step => webTools.test(step.label)) ? 'Search' : 'Coding'
 }
 
@@ -67,7 +70,15 @@ const stageSummary = (stage: ExecutionStage) => {
   return [`${lead}：${facts}。`, ...progress].join('\n\n')
 }
 
-function StageTrace({ stage, status, working }: { stage: ExecutionStage; status: string; working: boolean }) {
+function StageTrace({
+  stage,
+  terminalLabel,
+  working,
+}: {
+  stage: ExecutionStage
+  terminalLabel?: string
+  working: boolean
+}) {
   const variant = stageVariant(stage)
   const rows = stageRows(stage, variant)
   const summary = stageSummary(stage)
@@ -85,7 +96,7 @@ function StageTrace({ stage, status, working }: { stage: ExecutionStage; status:
       : variant === 'Reasoning'
         ? '任务已整理'
         : `${stage.tools.length} 次工具调用`
-  const done = `${doneLabel} · ${status}`
+  const done = terminalLabel || `${doneLabel} · 阶段已记录`
   const query = variant === 'Search'
     ? stage.tools.map(splitAction).find(item => item.target)?.target
     : undefined
@@ -151,18 +162,27 @@ export function ThinkingState({
       : 'unknown'
   const status = useLive && w.busy ? 'running' : run && !useLive ? activityState(run.status) : liveStatus
   const firstEvent = w.liveEvents.find(event => event.timestamp)
-  const done = run && !useLive
-    ? `${elapsedLabel(run.started_at, run.completed_at, now)} · ${activityNames[status]}`
-    : firstEvent
-      ? `${elapsedLabel(firstEvent.timestamp || '', terminal?.timestamp, now)} · ${activityNames[status]}`
-      : activityNames[status]
+  const terminalElapsed = run && !useLive
+    ? elapsedLabel(run.started_at, run.completed_at, now)
+    : firstEvent && terminal
+      ? elapsedLabel(firstEvent.timestamp || '', terminal.timestamp, now)
+      : ''
+  const terminalLabel = terminalElapsed
+    ? status === 'completed'
+      ? `任务已完成 · ${terminalElapsed}`
+      : status === 'failed'
+        ? `任务执行失败 · ${terminalElapsed}`
+        : status === 'cancelled'
+          ? `任务已停止 · ${terminalElapsed}`
+          : `任务状态待确认 · ${terminalElapsed}`
+    : undefined
   return <div className="bui-root bui-execution" aria-label="执行过程" data-run-id={run?.id || 'live'}>
     <AgentAvatar seed={run?.id || `live:${w.sessionId || 'new'}`} size={25} working={useLive && w.busy} />
     <div className="bui-execution-body">
       {stages.map((stage, index) => <StageTrace
         key={stage.id}
         stage={stage}
-        status={index === stages.length - 1 ? done : activityNames[stage.state]}
+        terminalLabel={index === stages.length - 1 ? terminalLabel : undefined}
         working={useLive && w.busy && index === stages.length - 1}
       />)}
     </div>

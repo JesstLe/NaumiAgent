@@ -9,6 +9,7 @@ from naumi_agent.harness.completion import (
     CompletionGateInput,
     HarnessEvidenceRef,
     build_completion_contract,
+    infer_completion_task_kind,
 )
 from naumi_agent.harness.models import HarnessTaskKind
 
@@ -79,6 +80,51 @@ def test_mutating_tool_mechanically_upgrades_answer_to_change() -> None:
 
     assert answer.effective_task_kind(mutating_tool_used=False) is HarnessTaskKind.ANSWER
     assert answer.effective_task_kind(mutating_tool_used=True) is HarnessTaskKind.CHANGE
+
+
+@pytest.mark.parametrize(
+    "task",
+    [
+        "创建一个复杂的高级的有创意的去 AI 味的页面",
+        "请写一个 HTML 文件",
+        "修复 Web2 页面无输出的 Bug",
+        "build a TypeScript component",
+    ],
+)
+def test_direct_workspace_actions_are_classified_as_change(task: str) -> None:
+    assert infer_completion_task_kind(task) is HarnessTaskKind.CHANGE
+
+
+@pytest.mark.parametrize(
+    "task",
+    [
+        "为什么创建页面会失败？",
+        "解释如何修改 HTML 页面",
+        "只回答问题，不要创建文件",
+        "写一首关于秋天的诗",
+    ],
+)
+def test_informational_or_chat_requests_stay_analysis(task: str) -> None:
+    assert infer_completion_task_kind(task) is HarnessTaskKind.ANALYSIS
+
+
+def test_change_contract_requires_real_workspace_change() -> None:
+    gate = CompletionGate()
+    contract = _contract(
+        required_checks=(),
+        required_evidence=(),
+        acceptance_criteria=(),
+    )
+    facts = CompletionGateInput(current_tree_fingerprint="sha256:current")
+
+    first = gate.evaluate(contract, facts, correction_attempt=0)
+    final = gate.evaluate(contract, facts, correction_attempt=1)
+
+    assert first.status == "needs_correction"
+    assert "尚未产生工作区文件变更" in first.correction_instruction
+    assert final.status == "blocked"
+    assert final.receipt is not None
+    assert "仅描述方案不能作为完成结果" in final.receipt.warnings[0]
 
 
 def test_answer_contract_cannot_verify_after_persistent_change() -> None:

@@ -680,6 +680,7 @@ from naumi_agent.harness.completion import (
     CompletionGateResult,
     HarnessCompletionReceipt,
     HarnessRunState,
+    infer_completion_task_kind,
 )
 from naumi_agent.harness.coordinator import (
     ReconciliationCoordinatorOutcome,
@@ -690,6 +691,13 @@ from naumi_agent.harness.feedback import (
     FeedbackIntakeService,
     FeedbackSourceEnvelope,
 )
+from naumi_agent.harness.fingerprint import (
+    TreeFingerprint,
+    TreeFingerprintError,
+    changed_paths_between,
+    compute_tree_fingerprint,
+)
+from naumi_agent.harness.models import HarnessTaskKind
 from naumi_agent.harness.retention import LifecycleActor
 from naumi_agent.harness.retention_executor import (
     SessionRetentionExecutor,
@@ -900,6 +908,49 @@ _OUTPUT_TRUNCATED_FINISH_REASONS = {
 }
 _MAX_OUTPUT_CONTINUATIONS = 2
 _TOOL_TEXT_GUARD_CHARS = 24
+_EMPTY_RESPONSE_RETRY_PROMPT = (
+    "上一次模型调用没有返回可展示的正文或工具调用。"
+    "请继续完成用户任务，并返回非空的用户可见答复；不要只返回隐藏推理。"
+)
+_EMPTY_RESPONSE_ERROR = (
+    "模型连续两次未返回可显示内容，本次任务未完成，请重试。"
+)
+_ACTION_EVIDENCE_RETRY_PROMPT = (
+    "这是需要修改工作区的任务。你刚才只返回了计划或说明，没有产生可验证的文件变更。"
+    "请立即调用 file_write、file_edit 或其他真实写入工具完成任务；完成前不要再次只返回计划。"
+)
+_ACTION_EVIDENCE_ERROR = (
+    "模型没有执行用户要求的工作区修改，本次任务未完成，请重试。"
+)
+_MAX_ACTION_EVIDENCE_CORRECTIONS = 2
+_WORKSPACE_MUTATION_TOOLS = {
+    "file_write",
+    "file_edit",
+    "write",
+    "edit",
+    "apply_patch",
+    "bash_run",
+    "shell",
+    "output_publish",
+    "self_modify",
+}
+_NON_WORKSPACE_MUTATION_TOOLS = {
+    "todo_write",
+    "blackboard_write",
+    "memory_store",
+    "task_create",
+    "task_update",
+    "harness_run_check",
+}
+_WORKSPACE_PATH_ARGUMENTS = (
+    "path",
+    "file_path",
+    "target_path",
+    "target_file",
+    "filename",
+    "directory",
+    "output_path",
+)
 _OUTPUT_CONTINUATION_PROMPT = (
     "你的上一条回答因为输出上限被截断。请从截断处直接继续，"
     "不要重写已经说过的内容，不要添加开场白。"
@@ -1210,6 +1261,19 @@ class AgentResult:
     harness_receipt: HarnessCompletionReceipt | None = None
 
 
+@dataclass
+class _ActionEvidenceState:
+    """Minimum workspace-change evidence enforced independently of Harness trust."""
+
+    initial_tree: TreeFingerprint | None
+    fingerprint_error: str = ""
+    successful_tools: list[str] = field(default_factory=list)
+    target_paths: set[str] = field(default_factory=set)
+    broad_mutation: bool = False
+    correction_attempts: int = 0
+    force_tool_choice: bool = False
+
+
 class AgentEngine:
     """Agent 主引擎 — 管理 LLM 循环和工具调用."""
 
@@ -1474,6 +1538,7 @@ class AgentEngine:
         )
         self._harness_context = HarnessContextAssembler()
         self._active_harness_run: HarnessRunState | None = None
+        self._active_action_evidence: _ActionEvidenceState | None = None
         self._permission_bubble_history: list[dict[str, Any]] = []
         self._permission_confirmer: PermissionConfirmationCallback | None = None
         self._user_interaction_handler: UserInteractionCallback | None = None
@@ -5223,6 +5288,10 @@ class AgentEngine:
         while i < len(messages):
             msg = messages[i]
             role = msg.get("role", "")
+            content = msg.get("content")
+            has_visible_content = (
+                bool(content.strip()) if isinstance(content, str) else bool(content)
+            )
 
             if role == "assistant" and msg.get("tool_calls"):
                 tool_call_ids = []
@@ -5256,6 +5325,19 @@ class AgentEngine:
                         })
 
                 i = j
+            elif role == "assistant" and not has_visible_content:
+                # Some providers reject an assistant message whose content is
+                # blank and which has no tool call. Old empty-success runs can
+                # leave exactly this shape in durable session history.
+                i += 1
+            elif (
+                role == "system"
+                and isinstance(content, str)
+                and content.strip() == _EMPTY_RESPONSE_RETRY_PROMPT
+            ):
+                # Recovery instructions are ephemeral runtime guidance. Older
+                # builds persisted them into durable chat history.
+                i += 1
             elif role == "tool":
                 # Orphan tool result without preceding assistant tool_calls — skip
                 i += 1
@@ -6316,13 +6398,14 @@ class AgentEngine:
     ) -> list[dict[str, Any]]:
         """Return model-ready messages with inline visual payloads summarized."""
         sanitized, replacements = self._compactor.sanitize_visual_payloads(messages)
+        sanitized = self._sanitize_messages(sanitized)
         if replacements:
             logger.info(
                 "Sanitized %d inline visual payloads before model call",
                 replacements,
             )
-            if update_engine_context:
-                self._messages = sanitized
+        if update_engine_context and sanitized != self._messages:
+            self._messages = sanitized
         return sanitized
 
     async def _build_compaction_runtime_snapshot(self) -> tuple[str, list[str], list[str]]:
@@ -6532,6 +6615,7 @@ class AgentEngine:
         messages: list[dict[str, Any]],
         tier: ModelTier,
         tools: list[dict[str, Any]] | None,
+        tool_choice: str | dict[str, Any] | None = None,
         events: EngineEventPublisher | None = None,
         streaming: bool = False,
         cause: Exception | None = None,
@@ -6544,7 +6628,14 @@ class AgentEngine:
                 messages,
                 update_engine_context=messages is self._messages,
             )
-            return await self._model_port.call(messages=safe_messages, tier=tier, tools=tools)
+            call_kwargs: dict[str, Any] = {
+                "messages": safe_messages,
+                "tier": tier,
+                "tools": tools,
+            }
+            if tool_choice is not None:
+                call_kwargs["tool_choice"] = tool_choice
+            return await self._model_port.call(**call_kwargs)
         except Exception as e:
             if not _is_prompt_too_long_error(e):
                 raise
@@ -6563,6 +6654,7 @@ class AgentEngine:
                 messages=safe_messages,
                 tier=tier,
                 tools=tools,
+                **({"tool_choice": tool_choice} if tool_choice is not None else {}),
             )
 
     async def _continue_truncated_final_response(
@@ -6684,6 +6776,89 @@ class AgentEngine:
         )
         return recovered
 
+    async def _recover_empty_response_context(
+        self,
+        *,
+        events: EngineEventPublisher | None = None,
+        streaming: bool = False,
+    ) -> bool:
+        """Compact a long conversation before retrying one empty model response."""
+        if len(self._messages) <= 8:
+            return False
+
+        before = len(self._messages)
+        self._messages = [
+            message
+            for message in self._messages
+            if not is_harness_context_message(message)
+            and str(message.get("content") or "").strip()
+            != _EMPTY_RESPONSE_RETRY_PROMPT
+        ]
+        base_count = len(self._messages)
+        runtime_snapshot, preserved_sections, warnings = (
+            await self._build_compaction_runtime_snapshot()
+        )
+        if events is not None:
+            await events.publish(
+                RuntimeEventType.RECOVERY_EVENT,
+                {
+                    "reason": "empty_model_response",
+                    "action": "compact_retry",
+                    "phase": "started",
+                    "before": before,
+                    "streaming": streaming,
+                },
+            )
+
+        self._messages = await self._compactor.compact(
+            self._messages,
+            max_tokens=1,
+            runtime_snapshot=runtime_snapshot,
+        )
+        if len(self._messages) >= base_count:
+            self._messages = _fallback_reactive_compact_messages(
+                self._messages,
+                runtime_snapshot=runtime_snapshot,
+                reason="empty_response",
+            )
+
+        await self._inject_harness_context_snapshot(events)
+        after = len(self._messages)
+        recovered = after < before
+        if events is not None:
+            if recovered:
+                await events.publish(
+                    RuntimeEventType.CONTEXT_COMPACTED,
+                    {
+                        "before": before,
+                        "after": after,
+                        "archived_tool_results": 0,
+                        "preserved_sections": preserved_sections,
+                        "warnings": warnings,
+                        "reason": "empty_model_response",
+                    },
+                )
+            await events.publish(
+                RuntimeEventType.RECOVERY_EVENT,
+                {
+                    "reason": "empty_model_response",
+                    "action": "compact_retry",
+                    "phase": "completed" if recovered else "failed",
+                    "before": before,
+                    "after": after,
+                    "streaming": streaming,
+                    "preserved_sections": preserved_sections,
+                    "warnings": warnings,
+                },
+            )
+        logger.warning(
+            "Empty-response context compact: %d → %d messages (recovered=%s)",
+            before,
+            after,
+            recovered,
+        )
+        return recovered
+
     async def _inject_harness_context_snapshot(
         self,
         events: EngineEventPublisher | None = None,
@@ -6781,11 +6956,214 @@ class AgentEngine:
         *,
         run_id: str,
     ) -> None:
+        self._active_action_evidence = None
+        if infer_completion_task_kind(task) is HarnessTaskKind.CHANGE:
+            initial_tree: TreeFingerprint | None = None
+            fingerprint_error = ""
+            try:
+                initial_tree = compute_tree_fingerprint(self.workspace_root)
+            except (TreeFingerprintError, OSError, ValueError) as exc:
+                fingerprint_error = str(exc)
+                logger.warning("Action evidence baseline unavailable: %s", exc)
+            self._active_action_evidence = _ActionEvidenceState(
+                initial_tree=initial_tree,
+                fingerprint_error=fingerprint_error,
+            )
         session_id = self._session.id if self._session else ""
         self._active_harness_run = await self.harness_service.begin_completion_run(
             task=task,
             run_id=run_id,
             session_id=session_id,
+        )
+
+    def _record_action_evidence_tool_success(
+        self,
+        *,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+        read_only: bool,
+    ) -> None:
+        """Record successful tools that can plausibly mutate workspace files."""
+        state = self._active_action_evidence
+        if state is None or read_only or tool_name in _NON_WORKSPACE_MUTATION_TOOLS:
+            return
+
+        targets = self._workspace_targets_from_arguments(arguments)
+        if tool_name not in _WORKSPACE_MUTATION_TOOLS and not targets:
+            return
+
+        state.successful_tools.append(tool_name)
+        state.force_tool_choice = False
+        if targets:
+            state.target_paths.update(targets)
+        else:
+            state.broad_mutation = True
+
+    def _workspace_targets_from_arguments(
+        self,
+        arguments: Mapping[str, Any],
+    ) -> set[str]:
+        targets: set[str] = set()
+        workspace = self.workspace_root.resolve()
+        for key in _WORKSPACE_PATH_ARGUMENTS:
+            value = arguments.get(key)
+            if not isinstance(value, str) or not value.strip():
+                continue
+            candidate = Path(value.strip()).expanduser()
+            if not candidate.is_absolute():
+                candidate = workspace / candidate
+            try:
+                relative = candidate.resolve(strict=False).relative_to(workspace)
+            except (OSError, ValueError):
+                continue
+            targets.add(relative.as_posix())
+        return targets
+
+    def _evaluate_action_evidence(self) -> tuple[str, tuple[str, ...]]:
+        """Require a successful workspace tool and an actual per-run Git change."""
+        state = self._active_action_evidence
+        if state is None:
+            return "not_required", ()
+
+        changed_paths: tuple[str, ...] = ()
+        if state.initial_tree is not None:
+            try:
+                current_tree = compute_tree_fingerprint(self.workspace_root)
+                changed_paths = changed_paths_between(
+                    self.workspace_root,
+                    state.initial_tree,
+                    current_tree,
+                )
+            except (TreeFingerprintError, OSError, ValueError) as exc:
+                state.fingerprint_error = str(exc)
+                logger.warning("Action evidence comparison unavailable: %s", exc)
+
+        tool_evidence = bool(state.successful_tools)
+        path_evidence = bool(changed_paths)
+        target_evidence = state.broad_mutation or not state.target_paths or any(
+            changed == target
+            or changed.startswith(f"{target}/")
+            or target.startswith(f"{changed}/")
+            for changed in changed_paths
+            for target in state.target_paths
+        )
+        if tool_evidence and path_evidence and target_evidence:
+            return "satisfied", changed_paths
+        if state.correction_attempts < _MAX_ACTION_EVIDENCE_CORRECTIONS:
+            state.correction_attempts += 1
+            state.force_tool_choice = True
+            return "needs_correction", changed_paths
+        return "blocked", changed_paths
+
+    def _model_tools_for_action_turn(
+        self,
+        tools: list[dict[str, Any]] | None,
+    ) -> tuple[list[dict[str, Any]] | None, str | None]:
+        state = self._active_action_evidence
+        if state is None or not state.force_tool_choice or not tools:
+            return tools, None
+        mutation_tools = [
+            schema
+            for schema in tools
+            if str(schema.get("function", {}).get("name", ""))
+            in _WORKSPACE_MUTATION_TOOLS
+        ]
+        if not mutation_tools:
+            return tools, None
+        return mutation_tools, "required"
+
+    async def _handle_action_evidence_gate(
+        self,
+        events: EngineEventPublisher | None = None,
+        *,
+        turn: int = 0,
+    ) -> str:
+        status, changed_paths = self._evaluate_action_evidence()
+        if status == "needs_correction":
+            await self._reset_action_retry_context(events=events)
+            self._messages.append(
+                {"role": "system", "content": _ACTION_EVIDENCE_RETRY_PROMPT}
+            )
+            if events is not None:
+                await events.publish(
+                    RuntimeEventType.PHASE_SUMMARY,
+                    {
+                        "phase_kind": "recovery",
+                        "items": [
+                            {
+                                "action": (
+                                    "检测到模型仅返回计划，尚未执行工作区修改；"
+                                    "已要求继续调用写入工具"
+                                ),
+                                "status": "completed",
+                            }
+                        ],
+                        "changed_paths": list(changed_paths),
+                    },
+                    turn=turn,
+                )
+        return status
+
+    async def _reset_action_retry_context(
+        self,
+        *,
+        events: EngineEventPublisher | None = None,
+    ) -> None:
+        """Give a stuck action request a clean execution context without old replies."""
+        before = len(self._messages)
+        base_system = next(
+            (
+                message
+                for message in self._messages
+                if message.get("role") == "system"
+                and not is_harness_context_message(message)
+            ),
+            None,
+        )
+        latest_user = next(
+            (
+                message
+                for message in reversed(self._messages)
+                if message.get("role") == "user"
+            ),
+            None,
+        )
+        runtime_snapshot, preserved_sections, warnings = (
+            await self._build_compaction_runtime_snapshot()
+        )
+        retry_snapshot = {
+            "role": "system",
+            "content": (
+                "## 工作区动作恢复\n\n"
+                "旧对话中的模型答复已从本次重试上下文移除，只保留当前用户任务和"
+                "运行时状态，以便继续实际执行。\n\n"
+                "## 当前运行时状态\n\n"
+                f"{runtime_snapshot.strip() or '无额外运行时状态。'}"
+            ),
+        }
+        self._messages = [
+            message
+            for message in (base_system, retry_snapshot, latest_user)
+            if message is not None
+        ]
+        await self._inject_harness_context_snapshot(events)
+        after = len(self._messages)
+        if events is not None:
+            await events.publish(
+                RuntimeEventType.CONTEXT_COMPACTED,
+                {
+                    "before": before,
+                    "after": after,
+                    "archived_tool_results": 0,
+                    "preserved_sections": preserved_sections,
+                    "warnings": warnings,
+                    "reason": "workspace_change_evidence_missing",
+                },
+            )
+        logger.warning(
+            "Action retry context reset: %d → %d messages",
+            before,
+            after,
         )
 
     async def _observe_harness_tool_event(
@@ -6828,7 +7206,7 @@ class AgentEngine:
             pending_todo_ids=pending_todo_ids,
         )
         if result.status == "needs_correction":
-            self._append_message(
+            self._messages.append(
                 {"role": "system", "content": result.correction_instruction}
             )
             if events is not None:
@@ -7899,6 +8277,7 @@ class AgentEngine:
         max_turns = self._config.safety.max_turns
         tool_call_history: list[str] = []
         todo_reconciliation_attempted = False
+        empty_response_retry_attempted = False
 
         # Inject plan as guidance to prevent approach oscillation
         if plan:
@@ -7931,10 +8310,12 @@ class AgentEngine:
                 data={"turn": turn + 1, "message_count": len(self._messages)},
                 session_id=session_id,
             ))
+            turn_tools, tool_choice = self._model_tools_for_action_turn(tools)
             response = await self._call_model_with_recovery(
                 messages=self._messages,
                 tier=ModelTier.CAPABLE,
-                tools=tools,
+                tools=turn_tools,
+                tool_choice=tool_choice,
             )
             self._track_model_usage(response.usage, response.model)
             await self._fire_hook(HookContext(
@@ -7992,6 +8373,31 @@ class AgentEngine:
 
             # --- 无工具调用：最终回答 ---
             tool_call_history.clear()
+            final_content = response.content
+            if _is_output_truncated(response.finish_reason):
+                final_content = await self._continue_truncated_final_response(
+                    partial_content=response.content,
+                    tier=ModelTier.CAPABLE,
+                )
+            if not final_content.strip():
+                if not empty_response_retry_attempted:
+                    empty_response_retry_attempted = True
+                    await self._recover_empty_response_context()
+                    retry_prompt = _EMPTY_RESPONSE_RETRY_PROMPT
+                    if self._active_action_evidence is not None:
+                        retry_prompt += _ACTION_EVIDENCE_RETRY_PROMPT
+                    self._messages.append({"role": "system", "content": retry_prompt})
+                    continue
+                await self._fire_agent_stop(
+                    status="failed",
+                    response=_EMPTY_RESPONSE_ERROR,
+                    reason="empty_model_response",
+                )
+                return AgentResult(
+                    status="failed",
+                    error=_EMPTY_RESPONSE_ERROR,
+                    usage=self._usage,
+                )
             reconciliation = await reconcile_todos(
                 self.task_store,
                 attempted=todo_reconciliation_attempted,
@@ -8004,15 +8410,23 @@ class AgentEngine:
                     {"role": "system", "content": reconciliation.instruction}
                 )
                 continue
+            action_gate = await self._handle_action_evidence_gate()
+            if action_gate == "needs_correction":
+                continue
+            if action_gate == "blocked":
+                await self._fire_agent_stop(
+                    status="failed",
+                    response=_ACTION_EVIDENCE_ERROR,
+                    reason="workspace_change_evidence_missing",
+                )
+                return AgentResult(
+                    status="failed",
+                    error=_ACTION_EVIDENCE_ERROR,
+                    usage=self._usage,
+                )
             harness_gate = await self._evaluate_harness_completion()
             if harness_gate is not None and harness_gate.status == "needs_correction":
                 continue
-            final_content = response.content
-            if _is_output_truncated(response.finish_reason):
-                final_content = await self._continue_truncated_final_response(
-                    partial_content=response.content,
-                    tier=ModelTier.CAPABLE,
-                )
             safe_content = self._output_guardrail.redact(final_content)
             self._append_message({"role": "assistant", "content": final_content})
             final_status = (
@@ -8062,6 +8476,7 @@ class AgentEngine:
         session_id = self._session.id if self._session else ""
         tool_call_history: list[str] = []
         todo_reconciliation_attempted = False
+        empty_response_retry_attempted = False
 
         # Inject plan as guidance to prevent approach oscillation
         if plan:
@@ -8121,7 +8536,13 @@ class AgentEngine:
             except Exception:
                 guard_todo_final = False
             guard_harness_final = self._active_harness_run is not None
-            should_guard_text = bool(tools) or guard_todo_final or guard_harness_final
+            guard_action_final = self._active_action_evidence is not None
+            should_guard_text = (
+                bool(tools)
+                or guard_todo_final
+                or guard_harness_final
+                or guard_action_final
+            )
             tool_call_started = False
             tool_prepare_started = False
             tool_prepare_start = 0.0
@@ -8161,10 +8582,16 @@ class AgentEngine:
                     self._messages,
                     update_engine_context=True,
                 )
+                turn_tools, tool_choice = self._model_tools_for_action_turn(tools)
+                stream_kwargs: dict[str, Any] = {
+                    "messages": stream_messages,
+                    "tier": ModelTier.CAPABLE,
+                    "tools": turn_tools,
+                }
+                if tool_choice is not None:
+                    stream_kwargs["tool_choice"] = tool_choice
                 async for chunk in self._model_port.stream(
-                    messages=stream_messages,
-                    tier=ModelTier.CAPABLE,
-                    tools=tools,
+                    **stream_kwargs,
                 ):
                     if not first_chunk_seen:
                         first_chunk_seen = True
@@ -8262,7 +8689,11 @@ class AgentEngine:
                         text_parts.append(chunk.token)
                         if tool_call_started:
                             continue
-                        if (guard_todo_final or guard_harness_final) and not got_response:
+                        if (
+                            guard_todo_final
+                            or guard_harness_final
+                            or guard_action_final
+                        ) and not got_response:
                             pending_text_parts.append(chunk.token)
                             continue
                         if should_guard_text and not got_response:
@@ -8309,7 +8740,8 @@ class AgentEngine:
                 response = await self._call_model_with_recovery(
                     messages=self._messages,
                     tier=ModelTier.CAPABLE,
-                    tools=tools,
+                    tools=turn_tools,
+                    tool_choice=tool_choice,
                     events=events,
                     streaming=True,
                     cause=e,
@@ -8416,6 +8848,52 @@ class AgentEngine:
 
             # --- 最终回答 ---
             tool_call_history.clear()
+            if not text_content.strip():
+                pending_text_parts.clear()
+                if not empty_response_retry_attempted:
+                    empty_response_retry_attempted = True
+                    await events.publish(
+                        RuntimeEventType.PHASE_SUMMARY,
+                        {
+                            "phase_kind": "recovery",
+                            "items": [
+                                {
+                                    "action": (
+                                        "检测到模型未返回可显示内容，"
+                                        "已自动压缩上下文并重新执行"
+                                    ),
+                                    "status": "completed",
+                                }
+                            ]
+                        },
+                        turn=turn + 1,
+                    )
+                    await self._recover_empty_response_context(
+                        events=events,
+                        streaming=True,
+                    )
+                    retry_prompt = _EMPTY_RESPONSE_RETRY_PROMPT
+                    if self._active_action_evidence is not None:
+                        retry_prompt += _ACTION_EVIDENCE_RETRY_PROMPT
+                    self._messages.append({"role": "system", "content": retry_prompt})
+                    continue
+                await events.publish(
+                    RuntimeEventType.ERROR,
+                    {"message": _EMPTY_RESPONSE_ERROR},
+                    turn=turn + 1,
+                )
+                await self._fire_agent_stop(
+                    status="failed",
+                    response=_EMPTY_RESPONSE_ERROR,
+                    reason="empty_model_response",
+                    streaming=True,
+                    events=events,
+                )
+                return AgentResult(
+                    status="failed",
+                    error=_EMPTY_RESPONSE_ERROR,
+                    usage=self._usage,
+                )
             reconciliation = await reconcile_todos(
                 self.task_store,
                 attempted=todo_reconciliation_attempted,
@@ -8436,6 +8914,32 @@ class AgentEngine:
                 await self._emit_task_snapshot(
                     events,
                     source="todo_reconciliation",
+                )
+            action_gate = await self._handle_action_evidence_gate(
+                events,
+                turn=turn + 1,
+            )
+            if action_gate == "needs_correction":
+                pending_text_parts.clear()
+                continue
+            if action_gate == "blocked":
+                pending_text_parts.clear()
+                await events.publish(
+                    RuntimeEventType.ERROR,
+                    {"message": _ACTION_EVIDENCE_ERROR},
+                    turn=turn + 1,
+                )
+                await self._fire_agent_stop(
+                    status="failed",
+                    response=_ACTION_EVIDENCE_ERROR,
+                    reason="workspace_change_evidence_missing",
+                    streaming=True,
+                    events=events,
+                )
+                return AgentResult(
+                    status="failed",
+                    error=_ACTION_EVIDENCE_ERROR,
+                    usage=self._usage,
                 )
             harness_gate = await self._evaluate_harness_completion(events)
             if harness_gate is not None and harness_gate.status == "needs_correction":
@@ -8869,6 +9373,11 @@ class AgentEngine:
             duration = outcome.duration_ms
 
             logger.info("Tool %s executed in %dms", tc.name, duration)
+            self._record_action_evidence_tool_success(
+                tool_name=tc.name,
+                arguments=args,
+                read_only=tool.metadata.read_only,
+            )
             if not tool.metadata.read_only:
                 if (
                     self._active_harness_run is not None
@@ -9484,6 +9993,7 @@ def _fallback_reactive_compact_messages(
     messages: list[dict[str, Any]],
     *,
     runtime_snapshot: str,
+    reason: str = "prompt_too_long",
 ) -> list[dict[str, Any]]:
     """Deterministic fallback when LLM compaction cannot reduce the prompt."""
     system_messages = [
@@ -9494,11 +10004,16 @@ def _fallback_reactive_compact_messages(
     base_system = system_messages[:1]
     non_system = [message for message in messages if message.get("role") != "system"]
     recent = non_system[-5:]
+    reason_text = (
+        "模型连续返回空内容。旧对话已被确定性裁剪，只保留最近消息和运行时状态。"
+        if reason == "empty_response"
+        else "模型报告上下文超限。旧对话已被确定性裁剪，只保留最近消息和运行时状态。"
+    )
     summary = {
         "role": "system",
         "content": (
             "## Reactive compact fallback\n\n"
-            "模型报告上下文超限。旧对话已被确定性裁剪，只保留最近消息和运行时状态。"
+            f"{reason_text}"
             "\n\n## 压缩时保留的运行时状态\n\n"
             f"{runtime_snapshot.strip() or '无额外运行时状态。'}"
         ),

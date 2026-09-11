@@ -89,6 +89,7 @@ class HarnessCompletionContract(_StrictModel):
     prohibited_scope: tuple[str, ...] = Field(default=(), max_length=512)
     required_checks: tuple[str, ...] = Field(default=(), max_length=128)
     required_evidence: tuple[str, ...] = Field(default=(), max_length=128)
+    require_change_evidence: bool = True
     correction_attempts: int = Field(default=1, ge=0, le=1)
     unverified_status: Literal["completed_unverified", "blocked"] = "completed_unverified"
     source_refs: tuple[str, ...] = Field(default=(), max_length=256)

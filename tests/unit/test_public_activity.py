@@ -89,7 +89,40 @@ def test_progress_requires_facts_and_uses_message_counts():
         )
         == "本阶段执行存在 1 项失败：读取文件：README.md；执行命令：pnpm build。"
     )
+    assert (
+        progress_summary(
+            "phase_summary",
+            {
+                "phase_kind": "recovery",
+                "items": [
+                    {"action": "检测到模型未执行写入，已继续调用工具", "status": "completed"}
+                ],
+            },
+        )
+        == "执行恢复：检测到模型未执行写入，已继续调用工具。"
+    )
     assert progress_summary("phase_summary", {"items": [{"status": "success"}]}) == ""
+
+
+def test_harness_correction_becomes_visible_phase_summary():
+    runtime = RuntimeEvent(
+        id="correction-1",
+        type=RuntimeEventType.HARNESS_COMPLETION_CORRECTION,
+        data={"message": "动作型请求尚未产生工作区文件变更，已继续执行。"},
+        timestamp="2026-09-11T00:00:00Z",
+        session_id="s",
+        run_id="r",
+        sequence=2,
+        turn=1,
+    )
+
+    transport = runtime_event_to_stream_event(runtime)
+
+    assert transport.type.value == "phase_summary"
+    assert transport.data["items"][0]["action"] == (
+        "动作型请求尚未产生工作区文件变更，已继续执行。"
+    )
+    assert "activity_summary" in transport.data
 
 
 @pytest.mark.asyncio
