@@ -210,6 +210,31 @@ naumi serve
 
 `naumi`、`naumi chat` 与 `naumi ui` 都优先使用 Node.js 20+ 的新 Terminal UI；Node 缺失、版本过旧、资源缺失或 UI 异常退出时，只自动回退一次到 Textual。`naumi --tui`、`naumi chat --tui` 与弃用别名 `naumi ui --legacy` 也会直接进入 Textual，推荐统一使用 `naumi tui`。旧 Prompt Toolkit CLI 源码、测试与必要依赖仍保留，但不再注册 `--classic` 公共入口。
 
+### 双引擎：内置 naumi 与外部 pi
+
+新 Terminal UI 支持两种会话引擎，前端不变、后端可切：
+
+```bash
+# 临时切换（也可写进配置 engine.provider 永久生效）
+naumi --engine pi      # 会话由成熟的 pi coding agent 驱动
+naumi --engine naumi   # 回到内置 AgentEngine（默认）
+```
+
+使用 pi 引擎需要先安装 `npm install -g @earendil-works/pi-coding-agent`，并在配置中指定 provider/model 与密钥引用（密钥不写入 YAML）：
+
+```yaml
+engine:
+  provider: pi
+  pi:
+    provider: zai-coding-cn
+    model: glm-4.7
+    env:
+      ZAI_CODING_CN_API_KEY: "{env:OPENAI_API_KEY}"
+```
+
+pi 引擎下对话、流式思考、工具执行卡片与权限确认走完整协议；todo/任务/inspector/workbench 等面板与 `/chaos` 等 NaumiAgent 专属命令暂不可用（前端按能力自动降级），会话内可用 `/engine`、`/model`、`/models`、`/new`、`/compact` 管理 pi 会话。协议按 pi v0.85.1 实测适配，升级 pi 前请先回归 `tests/integration/test_pi_engine_live.py`。
+
+
 如果需要查看 LiteLLM 可选 provider 的启动 warning，可显式打开：
 
 ```bash

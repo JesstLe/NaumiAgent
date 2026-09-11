@@ -332,7 +332,12 @@ def test_launch_terminal_ui_preserves_invocation_cwd(
 
     monkeypatch.setattr(
         "naumi_agent.main._build_terminal_ui_command",
-        lambda config_path: ["/opt/bin/node", "index.js", "--config", config_path],
+        lambda config_path, engine_provider="naumi": [
+            "/opt/bin/node",
+            "index.js",
+            "--config",
+            config_path,
+        ],
     )
 
     def fake_run(cmd: list[str], *, cwd: str, check: bool) -> SimpleNamespace:
@@ -359,7 +364,7 @@ def test_interactive_launcher_does_not_fallback_for_terminal_exit_codes(
     tui_calls: list[str] = []
     monkeypatch.setattr(
         "naumi_agent.main._launch_terminal_ui",
-        lambda _config: returncode,
+        lambda _config, engine_provider="naumi": returncode,
     )
     monkeypatch.setattr(
         "naumi_agent.main._launch_tui",
@@ -380,7 +385,7 @@ def test_interactive_launcher_falls_back_once_for_launch_errors(
 ) -> None:
     tui_calls: list[str] = []
 
-    def fail_terminal(_config: str) -> int:
+    def fail_terminal(_config: str, *, engine_provider: str = "naumi") -> int:
         raise failure
 
     monkeypatch.setattr("naumi_agent.main._launch_terminal_ui", fail_terminal)
@@ -397,7 +402,10 @@ def test_interactive_launcher_falls_back_once_for_nonzero_exit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     tui_calls: list[str] = []
-    monkeypatch.setattr("naumi_agent.main._launch_terminal_ui", lambda _config: 7)
+    monkeypatch.setattr(
+        "naumi_agent.main._launch_terminal_ui",
+        lambda _config, engine_provider="naumi": 7,
+    )
     monkeypatch.setattr(
         "naumi_agent.main._launch_tui",
         lambda config: tui_calls.append(config),
@@ -414,7 +422,7 @@ def test_interactive_launcher_reports_tui_failure_without_retry(
     tui_calls = 0
     output: list[str] = []
 
-    def fail_terminal(_config: str) -> int:
+    def fail_terminal(_config: str, *, engine_provider: str = "naumi") -> int:
         nonlocal terminal_calls
         terminal_calls += 1
         raise TerminalUiLaunchError("missing terminal assets")
@@ -444,7 +452,7 @@ def test_naumi_without_subcommand_launches_terminal_ui(
     calls: list[str] = []
     monkeypatch.setattr(
         "naumi_agent.main._launch_interactive_ui",
-        lambda config_path: calls.append(config_path) or 0,
+        lambda config_path, engine=None: calls.append(config_path) or 0,
     )
     monkeypatch.setattr(
         "naumi_agent.main._chat",
@@ -463,7 +471,7 @@ def test_chat_command_launches_terminal_ui_by_default(
     calls: list[str] = []
     monkeypatch.setattr(
         "naumi_agent.main._launch_interactive_ui",
-        lambda config_path: calls.append(config_path) or 0,
+        lambda config_path, engine=None: calls.append(config_path) or 0,
     )
 
     result = runner.invoke(naumi_app, ["chat", "--config", "custom.yaml"])
@@ -515,7 +523,7 @@ def test_ui_command_launches_next_terminal_ui_by_default(
 ) -> None:
     calls: list[str] = []
 
-    def fake_launch_interactive_ui(config_path: str) -> int:
+    def fake_launch_interactive_ui(config_path: str, *, engine: str | None = None) -> int:
         calls.append(config_path)
         return 3
 
@@ -537,11 +545,11 @@ def test_ui_command_legacy_flag_uses_old_textual_tui(
 
     monkeypatch.setattr(
         "naumi_agent.main._launch_tui",
-        lambda config_path: calls.append(config_path),
+        lambda config_path, engine=None: calls.append(config_path),
     )
     monkeypatch.setattr(
         "naumi_agent.main._launch_interactive_ui",
-        lambda config_path: pytest.fail("legacy flag must not launch terminal-ui"),
+        lambda config_path, engine=None: pytest.fail("legacy flag must not launch terminal-ui"),
     )
 
     result = runner.invoke(naumi_app, ["ui", "--legacy", "--config", "legacy.yaml"])
@@ -559,7 +567,7 @@ def test_naumiagent_defaults_to_terminal_ui_and_tui_is_explicit(
     tui_calls: list[str] = []
     monkeypatch.setattr(
         "naumi_agent.main._launch_interactive_ui",
-        lambda config: terminal_calls.append(config) or 0,
+        lambda config, engine=None: terminal_calls.append(config) or 0,
     )
     monkeypatch.setattr(
         "naumi_agent.main._launch_tui",
