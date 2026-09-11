@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Check, X, Play, Loader2, ClipboardCheck, FlaskConical } from 'lucide-react'
-import { useWorkbenchConnection } from '@/hooks/useWorkbenchConnection'
-import { useSessionStore } from '@/stores/sessionStore'
-import { isApiException } from '@/api/ApiException'
+import { useWorkbenchConnection } from '@naumi/shared/hooks/useWorkbenchConnection'
+import { useSessionStore } from '@naumi/shared/stores/sessionStore'
+import { isApiException } from '@naumi/shared/api/ApiException'
 import { formatDate } from '@/utils/formatDate'
-import type { Approval, ValidationRun, ApprovalState } from '@/api/types'
+import type { Approval, ValidationRun, ApprovalState } from '@naumi/shared/api/types'
 
 type Tab = 'approvals' | 'validations'
 

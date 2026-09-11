@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { GitBranch, Trash2, FolderOpen, Terminal, Loader2, Check } from 'lucide-react'
-import { useWorkbenchConnection } from '@/hooks/useWorkbenchConnection'
-import { useSessionStore } from '@/stores/sessionStore'
-import { usePlatform } from '@/platform'
-import { isApiException } from '@/api/ApiException'
+import { useWorkbenchConnection } from '@naumi/shared/hooks/useWorkbenchConnection'
+import { useSessionStore } from '@naumi/shared/stores/sessionStore'
+import { usePlatform } from '@naumi/shared/platform'
+import { isApiException } from '@naumi/shared/api/ApiException'
 import { formatDate } from '@/utils/formatDate'
-import type { Worktree, WorktreeStatus } from '@/api/types'
+import type { Worktree, WorktreeStatus } from '@naumi/shared/api/types'
 
 const STATUS_COLOR: Record<WorktreeStatus, string> = {
   clean: 'bg-success/15 text-success',

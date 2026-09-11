@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
 import App from '@/App'
 
-vi.mock('@/hooks/useWorkbenchConnection', () => ({
+vi.mock('@naumi/shared/hooks/useWorkbenchConnection', () => ({
   useWorkbenchConnection: () => ({
     client: null,
     status: { isConnected: true, daemon: null, error: null },

@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Loader2, Play, Square, Save, KeyRound, Trash2 } from 'lucide-react'
-import { usePlatform } from '@/platform'
+import { usePlatform } from '@naumi/shared/platform'
 import { useLocaleStore, type Locale } from '@/stores/localeStore'
-import { useSessionStore } from '@/stores/sessionStore'
-import { isApiException } from '@/api/ApiException'
-import type { DaemonLaunchConfig, DaemonStatus } from '@/platform/PlatformAdapter'
+import { useSessionStore } from '@naumi/shared/stores/sessionStore'
+import { isApiException } from '@naumi/shared/api/ApiException'
+import type { DaemonLaunchConfig, DaemonStatus } from '@naumi/shared/platform/PlatformAdapter'
 
 export function SettingsPage() {
   const { t, i18n } = useTranslation()

@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Loader2, Plus, Hand, Unlock } from 'lucide-react'
-import { useWorkbenchConnection } from '@/hooks/useWorkbenchConnection'
-import { useSessionStore } from '@/stores/sessionStore'
-import { isApiException } from '@/api/ApiException'
+import { useWorkbenchConnection } from '@naumi/shared/hooks/useWorkbenchConnection'
+import { useSessionStore } from '@naumi/shared/stores/sessionStore'
+import { isApiException } from '@naumi/shared/api/ApiException'
 import { formatDate } from '@/utils/formatDate'
-import type { Issue, Lease, RiskLevel, ParallelMode } from '@/api/types'
+import type { Issue, Lease, RiskLevel, ParallelMode } from '@naumi/shared/api/types'
 
 const RISK_COLOR: Record<RiskLevel, string> = {
   low: 'bg-success/15 text-success',

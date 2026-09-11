@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 
+from naumi_agent.runs.public_activity import progress_summary, tool_action
 from naumi_agent.runtime.ports.events import (
     RuntimeEvent,
     RuntimeEventType,
@@ -35,6 +36,7 @@ class EventType(StrEnum):
     PLAN_STEP_START = "plan_step_start"
     PLAN_STEP_UPDATE = "plan_step_update"
     PLAN_STEP_END = "plan_step_end"
+    PHASE_SUMMARY = "phase_summary"
 
     # 记忆
     MEMORY_STORED = "memory_stored"
@@ -118,6 +120,7 @@ _RUNTIME_EVENT_TYPE_MAP: dict[RuntimeEventType, EventType | None] = {
     RuntimeEventType.HOOK_TRACE: None,
     RuntimeEventType.LATENCY_METRIC: None,
     RuntimeEventType.PERF_PHASE: None,
+    RuntimeEventType.PHASE_SUMMARY: EventType.PHASE_SUMMARY,
     RuntimeEventType.PERMISSION_BUBBLE: EventType.PERMISSION_REQUEST,
     RuntimeEventType.RECOVERY_EVENT: None,
     RuntimeEventType.RESPONSE_END: EventType.AGENT_END,
@@ -180,7 +183,10 @@ def runtime_event_to_stream_event(event: RuntimeEvent) -> StreamEvent:
         payload = {field: payload[field] for field in safe_fields if field in payload}
     elif event.type is RuntimeEventType.TOOL_START:
         call_id = payload.get("call_id") or payload.get("tool_call_id")
-        payload = {"name": str(payload.get("name") or "tool")}
+        payload = {
+            "name": str(payload.get("name") or "tool"),
+            "activity_summary": tool_action(payload),
+        }
         if call_id:
             payload["call_id"] = str(call_id)
     elif event.type is RuntimeEventType.TOKEN and "content" in payload:
@@ -191,6 +197,10 @@ def runtime_event_to_stream_event(event: RuntimeEvent) -> StreamEvent:
         "success",
     ):
         event_type = EventType.TOOL_CALL_ERROR
+
+    activity = progress_summary(event.type.value, payload)
+    if activity:
+        payload["activity_summary"] = activity
 
     transport_data = (
         payload

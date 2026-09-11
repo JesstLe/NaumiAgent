@@ -241,7 +241,7 @@ class ChatRunStore:
                     detail=excluded.detail,
                     event_id=excluded.event_id,
                     completed_at=excluded.completed_at,
-                    metadata_json=excluded.metadata_json
+                    metadata_json=json_patch(chat_run_steps.metadata_json, excluded.metadata_json)
                 """,
                 (
                     run_id,
@@ -433,6 +433,19 @@ class ChatRunStore:
                     usage_json,
                     run_id,
                 ),
+            )
+            await db.execute(
+                """
+                UPDATE chat_run_steps
+                SET status = CASE
+                    WHEN stage IN ('analysis', 'response')
+                        AND ? IN ('success', 'completed') THEN 'completed'
+                    WHEN ? = 'cancelled' THEN 'cancelled'
+                    ELSE 'interrupted' END,
+                    completed_at = ?
+                WHERE run_id = ? AND status IN ('running', 'awaiting_approval')
+                """,
+                (status, status, now, run_id),
             )
             await db.commit()
 

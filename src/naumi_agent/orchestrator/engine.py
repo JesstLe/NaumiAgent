@@ -792,6 +792,7 @@ from naumi_agent.release.rollout_control_keys import (
     load_release_rollout_control_trust_policy,
 )
 from naumi_agent.runs.models import CompletionReceipt
+from naumi_agent.runs.public_activity import tool_action
 from naumi_agent.runs.recorder import ChatRunRecorder, ChatRunRecorderEventSink
 from naumi_agent.runs.usage import RunUsageTotals, build_run_usage
 from naumi_agent.runtime.dependencies import RuntimePortOverrides, RuntimePorts
@@ -4273,6 +4274,7 @@ class AgentEngine:
         from naumi_agent.tools.evolution_review import create_evolution_review_tools
         from naumi_agent.tools.extensions import ExtensionDiscoveryTool
         from naumi_agent.tools.feedback import create_feedback_tools
+        from naumi_agent.tools.output_publish import OutputPublishTool
         from naumi_agent.tools.runtime import create_runtime_tools
         from naumi_agent.tools.search import create_tool_search_tools
         from naumi_agent.tools.session import create_session_tools
@@ -4284,6 +4286,7 @@ class AgentEngine:
         self._tool_registry.register(DoctorTraceIndexTool(self))
         self._tool_registry.register(ExtensionDiscoveryTool(self))
         self._tool_registry.register(RequestUserInputTool(self))
+        self._tool_registry.register(OutputPublishTool(self))
         for tool in create_feedback_tools(self, self.feedback_intake_service):
             self._tool_registry.register(tool)
         for tool in create_evolution_review_tools(self, self.evolution_review_service):
@@ -7797,6 +7800,43 @@ class AgentEngine:
                     "content": result.content,
                 }
             )
+
+        if events is not None:
+            phase_items = []
+            for index, result in outcomes.items():
+                call = parsed_calls.get(index)
+                raw_call = raw_calls[index]
+                function = raw_call.get("function")
+                function_data = function if isinstance(function, dict) else {}
+                name = (
+                    call.name
+                    if call is not None
+                    else str(
+                        function_data.get("name")
+                        or raw_call.get("name")
+                        or "invalid_tool_call"
+                    )
+                )
+                arguments = (
+                    call.arguments
+                    if call is not None
+                    else function_data.get(
+                        "arguments",
+                        raw_call.get("arguments", {}),
+                    )
+                )
+                phase_items.append(
+                    {
+                        "action": tool_action({"name": name, "args": arguments}),
+                        "status": result.status,
+                    }
+                )
+            if phase_items:
+                await events.publish(
+                    RuntimeEventType.PHASE_SUMMARY,
+                    {"items": phase_items},
+                    turn=turn,
+                )
 
         return signatures
 

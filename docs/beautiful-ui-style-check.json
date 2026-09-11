@@ -1,0 +1,122 @@
+{
+  "date": "2026-09-11",
+  "reference": "https://www.beautifului.dev/",
+  "component": "ContextCards",
+  "method": "Same upstream fixture rendered in Chrome with official site CSS versus the scoped local foundation, loaded inside Web2 host CSS. Example fixture was removed after inspection.",
+  "official": {
+    ".rounded-card": {
+      "backgroundColor": "oklch(1 0 0)",
+      "color": "oklch(0.247 0.006 258.361)",
+      "fontSize": "14px",
+      "fontFamily": "Inter, \"Inter Fallback\", ui-sans-serif, system-ui, sans-serif",
+      "fontWeight": "400",
+      "lineHeight": "21px",
+      "borderRadius": "10px",
+      "padding": "0px",
+      "boxShadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, oklch(0.946 0.003 264.542) 0px 0px 0px 1px, rgba(0, 0, 0, 0.03) 0px 18px 47px 0px, rgba(0, 0, 0, 0.02) 0px 7.5px 19px 0px, rgba(0, 0, 0, 0.02) 0px 4px 10.5px 0px, rgba(0, 0, 0, 0.01) 0px 2.3px 5.8px 0px, rgba(0, 0, 0, 0.01) 0px 1.2px 3.1px 0px, rgba(0, 0, 0, 0.01) 0px 0.5px 1.3px 0px",
+      "transitionDuration": "0s",
+      "transitionTimingFunction": "ease",
+      "animationName": "fade-up"
+    },
+    ".primitive-card-bar": {
+      "backgroundColor": "rgba(0, 0, 0, 0)",
+      "color": "oklch(0.247 0.006 258.361)",
+      "fontSize": "14px",
+      "fontFamily": "Inter, \"Inter Fallback\", ui-sans-serif, system-ui, sans-serif",
+      "fontWeight": "400",
+      "lineHeight": "21px",
+      "borderRadius": "0px",
+      "padding": "10px 12px",
+      "boxShadow": "none",
+      "transitionDuration": "0s",
+      "transitionTimingFunction": "ease",
+      "animationName": "none"
+    },
+    ".shadow-btn": {
+      "backgroundColor": "oklch(0.979 0.002 247.839)",
+      "color": "oklch(0.506 0.01 264.477)",
+      "fontSize": "12px",
+      "fontFamily": "Inter, \"Inter Fallback\", ui-sans-serif, system-ui, sans-serif",
+      "fontWeight": "500",
+      "lineHeight": "18px",
+      "borderRadius": "3.35544e+07px",
+      "padding": "0px 8px",
+      "boxShadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, oklch(0.912 0.005 258.326) 0px 0px 0px 1px, rgba(0, 0, 0, 0.04) 0px 0px 4px 0px",
+      "transitionDuration": "0.3s",
+      "transitionTimingFunction": "cubic-bezier(0.23, 1, 0.32, 1)",
+      "animationName": "none"
+    },
+    ".text-ink-2": {
+      "backgroundColor": "oklch(0.979 0.002 247.839)",
+      "color": "oklch(0.506 0.01 264.477)",
+      "fontSize": "11.5px",
+      "fontFamily": "Inter, \"Inter Fallback\", ui-sans-serif, system-ui, sans-serif",
+      "fontWeight": "500",
+      "lineHeight": "17.25px",
+      "borderRadius": "6px",
+      "padding": "0px 6px",
+      "boxShadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, oklch(0.946 0.003 264.542) 0px 0px 0px 1px",
+      "transitionDuration": "0s",
+      "transitionTimingFunction": "ease",
+      "animationName": "none"
+    }
+  },
+  "local": {
+    ".rounded-card": {
+      "backgroundColor": "oklch(1 0 0)",
+      "color": "oklch(0.247 0.006 258.361)",
+      "fontSize": "14px",
+      "fontFamily": "\"Inter Variable\", \"Microsoft YaHei\", sans-serif",
+      "fontWeight": "400",
+      "lineHeight": "21px",
+      "borderRadius": "10px",
+      "padding": "0px",
+      "boxShadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, oklch(0.946 0.003 264.542) 0px 0px 0px 1px, rgba(0, 0, 0, 0.03) 0px 18px 47px 0px, rgba(0, 0, 0, 0.02) 0px 7.5px 19px 0px, rgba(0, 0, 0, 0.02) 0px 4px 10.5px 0px, rgba(0, 0, 0, 0.01) 0px 2.3px 5.8px 0px, rgba(0, 0, 0, 0.01) 0px 1.2px 3.1px 0px, rgba(0, 0, 0, 0.01) 0px 0.5px 1.3px 0px",
+      "transitionDuration": "0s",
+      "transitionTimingFunction": "ease",
+      "animationName": "fade-up"
+    },
+    ".primitive-card-bar": {
+      "backgroundColor": "rgba(0, 0, 0, 0)",
+      "color": "oklch(0.247 0.006 258.361)",
+      "fontSize": "14px",
+      "fontFamily": "\"Inter Variable\", \"Microsoft YaHei\", sans-serif",
+      "fontWeight": "400",
+      "lineHeight": "21px",
+      "borderRadius": "0px",
+      "padding": "10px 12px",
+      "boxShadow": "none",
+      "transitionDuration": "0s",
+      "transitionTimingFunction": "ease",
+      "animationName": "none"
+    },
+    ".shadow-btn": {
+      "backgroundColor": "oklch(0.979 0.002 247.839)",
+      "color": "oklch(0.506 0.01 264.477)",
+      "fontSize": "12px",
+      "fontFamily": "\"Inter Variable\", \"Microsoft YaHei\", sans-serif",
+      "fontWeight": "500",
+      "lineHeight": "18px",
+      "borderRadius": "3.35544e+07px",
+      "padding": "0px 8px",
+      "boxShadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, oklch(0.912 0.005 258.326) 0px 0px 0px 1px, rgba(0, 0, 0, 0.04) 0px 0px 4px 0px",
+      "transitionDuration": "0.3s",
+      "transitionTimingFunction": "cubic-bezier(0.23, 1, 0.32, 1)",
+      "animationName": "none"
+    },
+    ".text-ink-2": {
+      "backgroundColor": "oklch(0.979 0.002 247.839)",
+      "color": "oklch(0.506 0.01 264.477)",
+      "fontSize": "11.5px",
+      "fontFamily": "\"Inter Variable\", \"Microsoft YaHei\", sans-serif",
+      "fontWeight": "500",
+      "lineHeight": "17.25px",
+      "borderRadius": "6px",
+      "padding": "0px 6px",
+      "boxShadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, oklch(0.946 0.003 264.542) 0px 0px 0px 1px",
+      "transitionDuration": "0s",
+      "transitionTimingFunction": "ease",
+      "animationName": "none"
+    }
+  }
+}

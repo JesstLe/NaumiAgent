@@ -1,0 +1,33 @@
+{
+  "name": "naumi-agent-frontends",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "beautiful:css": "node web2/scripts/build-beautiful-ui.mjs",
+    "dev": "pnpm --filter naumi-agent-web run dev",
+    "build": "pnpm --filter naumi-agent-web run build",
+    "serve:production": "pnpm --filter naumi-agent-web run serve:production",
+    "test": "pnpm --filter naumi-agent-web run test:run",
+    "e2e": "pnpm --filter naumi-agent-web run e2e:run"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@tailwindcss/node": "^4.3.2",
+    "@tailwindcss/oxide": "^4.3.2",
+    "@tailwindcss/vite": "^4.3.2",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^26.1.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^6.0.3",
+    "globals": "^15.15.0",
+    "jsdom": "^29.1.1",
+    "msw": "^2.15.0",
+    "postcss": "^8.5.19",
+    "tailwindcss": "^4.3.2",
+    "typescript": "~6.0.2",
+    "vite": "^8.1.1",
+    "vitest": "^4.1.10"
+  }
+}

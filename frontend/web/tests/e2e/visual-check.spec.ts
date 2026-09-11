@@ -6,18 +6,11 @@ test.describe('UX visual check', () => {
     await mockWorkbenchApi(page)
   })
 
-  test('capture full workbench UI', async ({ page }) => {
+  test('capture full workbench UI', async ({ page }, testInfo) => {
     await page.goto('/')
     // Wait for the connection bootstrap and the first render pass.
     await page.waitForSelector('text=冒烟测试会话', { timeout: 10000 })
-    await page.waitForTimeout(500)
-
-    const screenshot = await page.screenshot({ fullPage: true })
-    // Save to a stable path so it can be reviewed outside the test results.
-    const fs = await import('node:fs/promises')
-    const path = await import('node:path')
-    const dir = path.resolve('screenshots')
-    await fs.mkdir(dir, { recursive: true })
-    await fs.writeFile(path.join(dir, 'ux-check.png'), screenshot)
+    await expect(page.getByPlaceholder('输入问题或指令...')).toBeVisible()
+    await page.screenshot({ fullPage: true, path: testInfo.outputPath('ux-check.png') })
   })
 })

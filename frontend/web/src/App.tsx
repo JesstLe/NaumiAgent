@@ -1,12 +1,15 @@
 import { useEffect } from 'react'
-import { BrowserRouter } from 'react-router-dom'
+import { BrowserRouter, useLocation } from 'react-router-dom'
+import { Web2 } from '@naumi/web2'
+import { WorkspaceProvider } from '@naumi/shared/hooks/WorkspaceProvider'
 import { ConnectionBootstrap } from '@/components/ConnectionBootstrap'
-import { PlatformProvider, usePlatform } from '@/platform'
+import { PlatformProvider, usePlatform } from '@naumi/shared/platform'
 import { useLocaleStore } from '@/stores/localeStore'
 import '@/i18n'
 import '@/index.css'
 
 function LocaleInitializer() {
+  const location = useLocation()
   const platform = usePlatform()
   const initializeLocale = useLocaleStore((state) => state.initialize)
 
@@ -22,14 +25,14 @@ function LocaleInitializer() {
     }
   }, [platform, initializeLocale])
 
-  return <ConnectionBootstrap />
+  return location.pathname === '/web2' || location.pathname.startsWith('/web2/') ? <Web2 /> : <ConnectionBootstrap />
 }
 
 function App() {
   return (
     <BrowserRouter>
       <PlatformProvider>
-        <LocaleInitializer />
+        <WorkspaceProvider><LocaleInitializer /></WorkspaceProvider>
       </PlatformProvider>
     </BrowserRouter>
   )

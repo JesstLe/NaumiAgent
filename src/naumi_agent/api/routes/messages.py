@@ -34,11 +34,15 @@ from naumi_agent.api.schemas import (
     PermissionResolutionResponse,
     SessionCreate,
     SessionListResponse,
+    SessionPinUpdate,
     SessionResponse,
     SessionUpdate,
 )
 from naumi_agent.harness.coordinator import ReconciliationCoordinatorOutcome
+from naumi_agent.runs.public_activity import progress_summary
+from naumi_agent.runs.recovery import restore_tool_previews
 from naumi_agent.runs.store import ChatRunRecord, ChatRunStore, SourceReferenceRecord
+from naumi_agent.runs.tool_evidence import tool_end_status, tool_metadata, tool_output
 from naumi_agent.streaming.events import EventType, StreamEvent, StreamEventSink
 
 router = APIRouter(tags=["sessions", "messages"])
@@ -85,6 +89,47 @@ async def update_session(
             session.add_message("system", body.system_prompt)
     session.updated_at = datetime.now()
     await engine.session_store.save(session)
+    active = getattr(engine, "_session", None)
+    if active is not None and active.id == session_id:
+        active.title = session.title
+        active.model = session.model
+    return _session_to_response(session)
+
+
+@router.post("/sessions/{session_id}/pin", response_model=SessionResponse)
+async def pin_session(
+    session_id: str,
+    body: SessionPinUpdate,
+    request: Request,
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    if not await engine.session_store.set_pinned(session_id, body.pinned):
+        raise HTTPException(status_code=404, detail="Session not found")
+    session = await engine.session_store.load(session_id)
+    active = getattr(engine, "_session", None)
+    if active is not None and active.id == session_id:
+        active.pinned_at = session.pinned_at
+    return _session_to_response(session)
+
+
+@router.post("/sessions/{session_id}/archive", status_code=204)
+async def archive_session(session_id: str, request: Request, auth: str = AuthDep):
+    engine = request.app.state.engine
+    lock = _engine_lock(request)
+    if lock.locked() and getattr(getattr(engine, "_session", None), "id", None) == session_id:
+        raise HTTPException(status_code=409, detail="当前会话正在执行，完成或停止后才能归档")
+    if not await engine.archive_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    return Response(status_code=204)
+
+
+@router.post("/sessions/{session_id}/duplicate", response_model=SessionResponse, status_code=201)
+async def duplicate_session(session_id: str, request: Request, auth: str = AuthDep):
+    engine = request.app.state.engine
+    session = await engine.session_store.duplicate(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
     return _session_to_response(session)
 
 
@@ -260,6 +305,7 @@ async def list_chat_runs(
 ):
     store = _chat_run_store(request)
     runs = await store.list_runs(session_id, limit=limit)
+    runs = await _restore_legacy_tool_previews(runs, request, session_id)
     return ChatRunListResponse(
         runs=[_chat_run_to_response(run) for run in runs],
         total=len(runs),
@@ -279,6 +325,7 @@ async def get_chat_run(
     run = await _chat_run_store(request).get_run(session_id, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Chat run not found")
+    run = (await _restore_legacy_tool_previews([run], request, session_id))[0]
     return _chat_run_to_response(run)
 
 
@@ -305,12 +352,9 @@ async def get_chat_environment(
         workspace_name=snapshot.workspace_name,
         git=ChatGitEnvironmentResponse(**asdict(snapshot.git)),
         processes=[
-            ChatBackgroundProcessResponse(**asdict(process))
-            for process in snapshot.processes
+            ChatBackgroundProcessResponse(**asdict(process)) for process in snapshot.processes
         ],
-        sources=[
-            ChatSourceReferenceResponse(**asdict(source)) for source in snapshot.sources
-        ],
+        sources=[ChatSourceReferenceResponse(**asdict(source)) for source in snapshot.sources],
     )
 
 
@@ -400,7 +444,6 @@ async def upload_chat_source(
         kind=source.kind,
         title=source.title,
         path=source.path,
-        run_id=source.run_id,
         created_at=source.created_at,
     )
 
@@ -422,9 +465,7 @@ async def add_chat_source(
     workspace_root = Path(engine.workspace_root).expanduser().resolve()
     requested = Path(body.path).expanduser()
     resolved = (
-        requested.resolve()
-        if requested.is_absolute()
-        else (workspace_root / requested).resolve()
+        requested.resolve() if requested.is_absolute() else (workspace_root / requested).resolve()
     )
     try:
         relative_path = str(resolved.relative_to(workspace_root))
@@ -508,9 +549,7 @@ async def _stream_response(
 ):
     queue: asyncio.Queue[StreamEvent | None] = asyncio.Queue()
     store = getattr(request.app.state, "chat_run_store", None)
-    engine_manages_run = (
-        store is not None and getattr(engine, "chat_run_store", None) is store
-    )
+    engine_manages_run = store is not None and getattr(engine, "chat_run_store", None) is store
     run = (
         await store.start_run(
             session_id=session_id,
@@ -598,9 +637,7 @@ async def _stream_response(
                 if run is not None:
                     terminal_event = _stream_event_with_run_id(terminal_event, run.id)
                     if not engine_manages_run:
-                        await _persist_stream_event(
-                            store, run.id, terminal_event, step_sequences
-                        )
+                        await _persist_stream_event(store, run.id, terminal_event, step_sequences)
                         await store.finish_run(run.id, status=result.status)
                 await queue.put(terminal_event)
         except asyncio.CancelledError:
@@ -661,6 +698,10 @@ def _session_to_response(session) -> SessionResponse:
         total_tokens=session.total_tokens,
         total_cost_usd=session.total_cost_usd,
         status=session.status,
+        pinned=session.pinned_at is not None,
+        workspace_root=session.workspace_root,
+        git_branch=session.git_branch,
+        summary=session.summary,
     )
 
 
@@ -727,9 +768,7 @@ async def _build_turn_context(
         sources.append(source)
     linked_issue = None
     if linked_issue_id:
-        linked_issue = await engine.workbench_store.get_issue(
-            session_id, linked_issue_id
-        )
+        linked_issue = await engine.workbench_store.get_issue(session_id, linked_issue_id)
         if linked_issue is None:
             raise HTTPException(status_code=400, detail="关联 Issue 不存在")
         sections.extend(
@@ -743,6 +782,23 @@ async def _build_turn_context(
         )
     sections.append("<naumi_turn_context>")
     return "\n".join(sections), sources, linked_issue
+
+
+async def _restore_legacy_tool_previews(
+    runs: list[ChatRunRecord],
+    request: Request,
+    session_id: str,
+) -> list[ChatRunRecord]:
+    if not any(
+        step.stage == "tool" and not step.detail and not step.metadata.get("output_recorded")
+        for run in runs
+        for step in run.steps
+    ):
+        return runs
+    session = await request.app.state.engine.session_store.load(session_id)
+    if session is None:
+        return runs
+    return [restore_tool_previews(run, session.messages) for run in runs]
 
 
 def _chat_run_to_response(run: ChatRunRecord) -> ChatRunResponse:
@@ -786,11 +842,7 @@ def _chat_run_to_response(run: ChatRunRecord) -> ChatRunResponse:
 
 
 def _stream_event_with_run_id(event: StreamEvent, run_id: str) -> StreamEvent:
-    data = (
-        event.data
-        if event.type is EventType.RUNTIME_EVENT
-        else {**event.data, "run_id": run_id}
-    )
+    data = event.data if event.type is EventType.RUNTIME_EVENT else {**event.data, "run_id": run_id}
     return StreamEvent(
         id=event.id,
         type=event.type,
@@ -822,6 +874,11 @@ async def _persist_stream_event(
             summary=summary,
             detail=detail,
             event_id=event.id,
+            metadata=tool_metadata(
+                event.data, ended=event.type in {EventType.TOOL_CALL_END, EventType.TOOL_CALL_ERROR}
+            )
+            if stage in {"tool", "approval"}
+            else None,
         )
 
     if event.type == EventType.TOOL_CALL_END and event.data.get("name") == "delegate_task":
@@ -841,13 +898,25 @@ async def _persist_stream_event(
 def _stream_step_fields(
     event: StreamEvent,
 ) -> tuple[str | None, str, str, str, str]:
+    source = event.data.get("event") if event.type is EventType.RUNTIME_EVENT else event.type.value
+    payload = event.data.get("data", {}) if event.type is EventType.RUNTIME_EVENT else event.data
+    progress = progress_summary(str(source), payload) if isinstance(payload, dict) else ""
+    if progress:
+        return f"activity:{event.id}", "activity", "completed", progress, ""
     if event.type in {
         EventType.TURN_START,
         EventType.THINKING_START,
         EventType.THINKING_DELTA,
         EventType.THINKING_END,
     }:
-        return "analysis", "analysis", "running", "分析请求", ""
+        turn_number = event.turn if event.turn > 0 else 1
+        return (
+            f"analysis:{turn_number}",
+            "analysis",
+            "completed" if event.type == EventType.THINKING_END else "running",
+            f"第 {turn_number} 轮分析",
+            "",
+        )
     if event.type in {
         EventType.TOOL_CALL_START,
         EventType.TOOL_CALL_END,
@@ -870,14 +939,15 @@ def _stream_step_fields(
                 return f"tool:{call_id}", "approval", "failed", name, ""
             return f"tool:{call_id}", "tool", "running", name, ""
         if event.type == EventType.TOOL_CALL_END:
-            detail = (
-                _compact_public_text(str(event.data.get("content") or ""))
-                if name == "delegate_task"
-                else ""
+            return (
+                f"tool:{call_id}",
+                "tool",
+                tool_end_status(event.data),
+                name,
+                tool_output(event.data),
             )
-            return f"tool:{call_id}", "tool", "completed", name, detail
         if event.type == EventType.TOOL_CALL_ERROR:
-            return f"tool:{call_id}", "tool", "failed", name, ""
+            return f"tool:{call_id}", "tool", "failed", name, tool_output(event.data)
         return f"tool:{call_id}", "tool", "running", name, ""
     if event.type in {EventType.AGENT_START, EventType.TOKEN_DELTA}:
         return "response", "response", "running", "生成答复", ""
