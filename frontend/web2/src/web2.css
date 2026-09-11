@@ -1196,3 +1196,14 @@
   grid-column: 1;
   grid-row: 2;
 }
+
+.w2-menubar { display: flex; gap: 1px; flex-shrink: 0; color: #50564b; }
+.w2-menu { position: relative; }
+.w2-menu-trigger { padding: 4px 9px; font-size: 12px; border-radius: 4px; }
+.w2-menu-trigger:hover, .w2-menu-trigger[aria-expanded=true] { background: #dce8d680; }
+.w2-menu-popup { position: absolute; top: calc(100% + 5px); left: 0; width: 235px; padding: 5px; border: 1px solid #e1e4de; border-radius: 7px; background: #fff; box-shadow: 0 10px 32px #20281820; z-index: 40; }
+.w2-menu-popup button { display: flex; width: 100%; align-items: center; justify-content: space-between; padding: 8px 10px; font-size: 12px; text-align: left; border-radius: 4px; }
+.w2-menu-popup button:hover, .w2-menu-popup button:focus-visible { background: #f0f3ed; outline: none; }
+.w2-menu-popup button:disabled { opacity: .4; cursor: default; }
+.w2-menu-popup kbd { font: 10px system-ui; color: #9b9e97; }
+@media(max-width: 580px) { .w2-titlebar > span { display: none; } .w2-titlebar { gap: 5px; } .w2-menu-popup { width: 210px; } .w2-menu:last-child .w2-menu-popup { left: auto; right: -50px; } }
