@@ -169,11 +169,13 @@ def _step_fields(
     data: dict[str, Any],
 ) -> tuple[str, str, str, str, str] | None:
     if event in {"turn_start", "thinking_start", "thinking_delta", "thinking_end"}:
+        turn = data.get("turn")
+        turn_number = turn if isinstance(turn, int) and turn > 0 else 1
         return (
-            "analysis",
+            f"analysis:{turn_number}",
             "analysis",
             "completed" if event == "thinking_end" else "running",
-            "分析请求",
+            f"第 {turn_number} 轮分析",
             "",
         )
     if event in {"tool_start", "tool_end", "tool_error", "permission_bubble"}:

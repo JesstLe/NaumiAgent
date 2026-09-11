@@ -857,11 +857,12 @@ def _stream_step_fields(
         EventType.THINKING_DELTA,
         EventType.THINKING_END,
     }:
+        turn_number = event.turn if event.turn > 0 else 1
         return (
-            "analysis",
+            f"analysis:{turn_number}",
             "analysis",
             "completed" if event.type == EventType.THINKING_END else "running",
-            "分析请求",
+            f"第 {turn_number} 轮分析",
             "",
         )
     if event.type in {

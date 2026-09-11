@@ -329,26 +329,37 @@ export function useWorkspaceController() {
     setBusy(true)
     setError('')
     const content = draft.trim()
+    const messageId = `stream-${crypto.randomUUID()}`
+    const optimisticUserId = `user-${messageId}`
     let completed = false
     let failure = ''
+    let sessionReady = false
+    setMessages((previous) => [
+      ...previous,
+      {
+        id: optimisticUserId,
+        role: 'user',
+        content,
+        timestamp: new Date().toISOString(),
+        metadata: { pending: true },
+      },
+    ])
+    setDraft('')
+    setLiveEvents([{
+      id: `local-${messageId}`,
+      type: 'turn_start',
+      turn: 1,
+      sequence: 0,
+      timestamp: new Date().toISOString(),
+      data: { local: true },
+    }])
     try {
       const id = await ensureSession()
+      sessionReady = true
+      savePreference(`draft:${id}`, '')
       if (stopped.current) return
       controller.current = new AbortController()
       runId.current = ''
-      const messageId = `stream-${crypto.randomUUID()}`
-      setMessages((previous) => [
-        ...previous,
-        {
-          id: `user-${messageId}`,
-          role: 'user',
-          content,
-          timestamp: new Date().toISOString(),
-          metadata: {},
-        },
-      ])
-      setDraft('')
-      setLiveEvents([])
       await api.stream(
         id,
         {
@@ -390,9 +401,18 @@ export function useWorkspaceController() {
             })
           }
           if (
-            ['tool_call_start', 'tool_call_end', 'tool_call_error'].includes(
-              event.type,
-            )
+            [
+              'turn_start',
+              'thinking_start',
+              'thinking_delta',
+              'thinking_end',
+              'tool_call_start',
+              'tool_call_end',
+              'tool_call_error',
+              'permission_request',
+              'agent_end',
+              'agent_error',
+            ].includes(event.type)
           ) {
             setLiveEvents((previous) => [...previous.slice(-199), event])
           }
@@ -428,6 +448,8 @@ export function useWorkspaceController() {
       setSelectedSources([])
     } catch (e) {
       if (!stopped.current) {
+        if (!sessionReady)
+          setMessages(previous => previous.filter(message => message.id !== optimisticUserId))
         setError(errorText(e))
         setDraft(content)
       }

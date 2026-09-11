@@ -6,7 +6,7 @@
     {
       "file": "components/primitives/ThinkingState.tsx",
       "sha256": "3efce7c7820a153d44a3820f784a07f87577bacc73f5736887df10827785f110",
-      "local_sha256": "b5aef72dd4b7ec5d6bbcc9d16e877bed9ae68148d6ee9c94e6f7d20a51271b92"
+      "local_sha256": "71e8dda12116a48e6e81422bc745df099bb88243b324e60c5e33cd8cd5c91020"
     },
     {
       "file": "components/primitives/ToolChips.tsx",
@@ -68,6 +68,7 @@
     "Flowchart accepts real edges, remeasures changed nodes, handles empty input and missing edge endpoints.",
     "Selection Actions accepts a native-selection anchor and a real action callback; only standalone demo mode simulates rewrites. External toolbars fit or scroll on narrow screens.",
     "Insight Cards exposes original AllocationCard with content props, guards empty/shrinking pages, translates pager labels and dispatches action callbacks. Production only uses real distributions; demo time series are not shown.",
-    "Tool detail text preserves line breaks and scrolls within a bounded height so persisted output remains readable."
+    "Tool detail text preserves line breaks and scrolls within a bounded height so persisted output remains readable.",
+    "Thinking can remain expanded after completion so the application timeline stays in conversation order until the user collapses it."
   ]
 }

@@ -35,6 +35,7 @@ export interface Run {
   id: string
   status: string
   started_at: string
+  completed_at?: string
   steps: {
     sequence: number
     stage: string
@@ -48,6 +49,9 @@ export interface StreamEvent {
   id: string
   type: string
   run_id?: string
+  turn?: number
+  sequence?: number
+  timestamp?: string
   data: Record<string, unknown>
 }
 

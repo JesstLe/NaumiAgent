@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { runActivity, toolActivity } from '../../src/api/activity'
+import { liveExecutionTimeline, runActivity, runExecutionTimeline, toolActivity } from '../../src/api/activity'
 
 describe('public execution activity', () => {
   it('pairs concurrent calls by id and retains the correct input and failure', () => {
@@ -28,5 +28,34 @@ describe('public execution activity', () => {
     expect(rows).toHaveLength(2)
     expect(rows[0]).toMatchObject({ output: 'first\nsecond', input: 'file.txt', outputRecorded: true })
     expect(rows[1].state).toBe('unknown')
+  })
+  it('interleaves public reasoning rounds and tool calls in event order', () => {
+    const rows = liveExecutionTimeline([
+      { id: '1', type: 'turn_start', turn: 1, sequence: 1, data: {} },
+      { id: '2', type: 'thinking_start', turn: 1, sequence: 2, data: {} },
+      { id: '3', type: 'tool_call_start', turn: 1, sequence: 3, data: { call_id: 'a', name: 'read' } },
+      { id: '4', type: 'tool_call_end', turn: 1, sequence: 4, data: { call_id: 'a', name: 'read', status: 'success', content: 'ok' } },
+      { id: '5', type: 'turn_start', turn: 2, sequence: 5, data: {} },
+      { id: '6', type: 'tool_call_start', turn: 2, sequence: 6, data: { call_id: 'b', name: 'write' } },
+    ], true)
+    expect(rows.map(row => `${row.kind}:${row.id}`)).toEqual([
+      'reasoning:reasoning:1',
+      'tool:tool:a',
+      'reasoning:reasoning:2',
+      'tool:tool:b',
+    ])
+    expect(rows[0].state).toBe('completed')
+    expect(rows[2].state).toBe('completed')
+    expect(rows[3].state).toBe('running')
+  })
+  it('creates an immediate reasoning row and restores persisted turn order', () => {
+    expect(liveExecutionTimeline([], true)[0]).toMatchObject({ kind: 'reasoning', state: 'running' })
+    const rows = runExecutionTimeline({ id: 'r', status: 'completed', started_at: '', steps: [
+      { sequence: 1, stage: 'request', status: 'completed', summary: '执行', detail: '' },
+      { sequence: 2, stage: 'analysis', status: 'completed', summary: '第 1 轮分析', detail: '' },
+      { sequence: 3, stage: 'tool', status: 'completed', summary: 'read', detail: 'ok' },
+      { sequence: 4, stage: 'analysis', status: 'completed', summary: '第 2 轮分析', detail: '' },
+    ] })
+    expect(rows.map(row => row.kind)).toEqual(['reasoning', 'tool', 'reasoning'])
   })
 })
