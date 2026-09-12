@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import platform
+import socket
 import subprocess
 import sys
 import threading
@@ -242,6 +243,62 @@ class TestChromeLauncher:
         old_timestamp = time.time() - 120
         os.utime(cookie_file, (old_timestamp, old_timestamp))
         assert launcher._is_profile_sync_needed() is True
+
+    def test_find_available_port_skips_active_listener(self) -> None:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            listener.bind(("127.0.0.1", 0))
+            listener.listen()
+            occupied_port = listener.getsockname()[1]
+            launcher = ChromeLauncher(cdp_port=occupied_port)
+
+            selected = launcher._find_available_port(occupied_port)
+
+        assert selected > occupied_port
+
+    @pytest.mark.asyncio
+    async def test_ensure_ready_serializes_launch_and_offloads_profile_sync(self) -> None:
+        launcher = ChromeLauncher(cdp_port=9222)
+        active_results = iter((False, True))
+        checked_ports: list[int] = []
+
+        async def is_cdp_active(port: int) -> bool:
+            checked_ports.append(port)
+            return next(active_results)
+
+        launcher._is_cdp_active = is_cdp_active
+        event_loop_thread = threading.get_ident()
+        sync_threads: list[int] = []
+
+        def sync_profile() -> dict[str, object]:
+            sync_threads.append(threading.get_ident())
+            return {"synced_files": 1, "errors": []}
+
+        launcher._is_profile_sync_needed = MagicMock(return_value=True)
+        launcher._sync_profile = sync_profile
+        launcher._find_available_port = MagicMock(return_value=9223)
+        launcher._launch_chrome = MagicMock()
+        launcher._wait_for_cdp = AsyncMock(return_value=True)
+
+        launched, reused = await asyncio.gather(
+            launcher.ensure_ready(),
+            launcher.ensure_ready(),
+        )
+
+        assert launched == {
+            "endpoint": "http://127.0.0.1:9223",
+            "launched": True,
+            "synced": True,
+            "port": 9223,
+        }
+        assert reused == {
+            "endpoint": "http://127.0.0.1:9223",
+            "launched": False,
+            "synced": False,
+            "port": 9223,
+        }
+        assert checked_ports == [9222, 9223]
+        assert sync_threads and sync_threads[0] != event_loop_thread
+        launcher._launch_chrome.assert_called_once_with(9223)
 
     def test_kill_chrome_no_process(self) -> None:
         launcher = ChromeLauncher()
