@@ -1,5 +1,7 @@
 import {
   Fragment,
+  lazy,
+  Suspense,
   useEffect,
   useMemo,
   useRef,
@@ -58,20 +60,13 @@ import { errorText } from '@naumi/shared/hooks/useWorkspaceController'
 import { assistantActionsReady, runsByUserMessage } from '@naumi/shared/api/activity'
 import './web2.css'
 import { MenuBar } from './MenuBar'
-import { SettingsPage } from './SettingsPage'
 import { TodoPanel } from './TodoPanel'
 import { GoalPanel } from './GoalPanel'
-import { DiffPanel } from './DiffPanel'
 import { ThinkingState } from './beautiful/ThinkingState'
-import { MessageContent } from './rich/MessageContent'
-import { WorkspaceFileTree } from './community/WorkspaceFileTree'
 import { AiSources, messageSources } from './community/AiSources'
 import { BorderBeam } from './community/border-beam'
 import { MessageActionBar } from './community/MessageActionBar'
 import { SelectionActions } from './beautiful/SelectionActions'
-import { ContextCards } from './beautiful/ContextCards'
-import { Flowchart } from './beautiful/Flowchart'
-import { InsightCards } from './beautiful/InsightCards'
 import './beautiful/upstream.generated.css'
 import './beautiful/beautiful.css'
 import '@fontsource-variable/inter'
@@ -93,7 +88,16 @@ import {
   type WorkspaceProject,
   type WorkspaceProjectCandidate,
 } from '@naumi/shared/projects/workspaceProjects'
-import { ProjectCreationDialog, type ProjectCreationInput } from './ProjectCreationDialog'
+import type { ProjectCreationInput } from './ProjectCreationDialog'
+
+const SettingsPage = lazy(() => import('./SettingsPage').then((module) => ({ default: module.SettingsPage })))
+const MessageContent = lazy(() => import('./rich/MessageContent').then((module) => ({ default: module.MessageContent })))
+const ProjectCreationDialog = lazy(() => import('./ProjectCreationDialog').then((module) => ({ default: module.ProjectCreationDialog })))
+const DiffPanel = lazy(() => import('./DiffPanel').then((module) => ({ default: module.DiffPanel })))
+const ContextCards = lazy(() => import('./beautiful/ContextCards').then((module) => ({ default: module.ContextCards })))
+const Flowchart = lazy(() => import('./beautiful/Flowchart').then((module) => ({ default: module.Flowchart })))
+const InsightCards = lazy(() => import('./beautiful/InsightCards').then((module) => ({ default: module.InsightCards })))
+const WorkspaceFileTree = lazy(() => import('./community/WorkspaceFileTree').then((module) => ({ default: module.WorkspaceFileTree })))
 
 type Panel =
   | 'home'
@@ -199,6 +203,9 @@ function IconButton({
       {children}
     </button>
   )
+}
+function DeferredContent({ label, overlay = false }: { label: string; overlay?: boolean }) {
+  return <div className={`w2-deferred ${overlay ? 'w2-deferred-overlay' : ''}`} role="status"><Loader2 className="w2-spin" /><span>{label}</span></div>
 }
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
@@ -337,6 +344,8 @@ export function Web2() {
   const fileInput = useRef<HTMLInputElement>(null)
   const scroll = useRef<HTMLDivElement>(null)
   const followOutput = useRef(true)
+  const paneState = useRef({ leftWidth, rightWidth, right, sidebar })
+  paneState.current = { leftWidth, rightWidth, right, sidebar }
   const workspaceRoot = w.daemon?.workspace_root
   const visibleProjects = useMemo(() => {
     const candidates: WorkspaceProjectCandidate[] = w.sessions.flatMap((session) => session.workspace_root
@@ -354,8 +363,9 @@ export function Web2() {
   )
   const workspace = activeProject?.name || w.daemon?.workspace_name || 'NaumiAgent'
   const current = w.sessions.find((item) => item.id === w.sessionId)
-  const messages = w.messages.filter(
-    (item) => ['user', 'assistant'].includes(item.role) && item.content,
+  const messages = useMemo(
+    () => w.messages.filter((item) => ['user', 'assistant'].includes(item.role) && item.content),
+    [w.messages],
   )
   const messageRuns = useMemo(
     () => runsByUserMessage(messages, w.runs),
@@ -635,8 +645,12 @@ export function Web2() {
     }
   }, [w.draft])
   useEffect(() => {
-    if (followOutput.current && scroll.current)
-      scroll.current.scrollTop = scroll.current.scrollHeight
+    if (!followOutput.current) return
+    const frame = window.requestAnimationFrame(() => {
+      const element = scroll.current
+      if (followOutput.current && element) element.scrollTop = element.scrollHeight
+    })
+    return () => window.cancelAnimationFrame(frame)
   }, [w.messages, w.busy])
   useEffect(() => {
     followOutput.current = true
@@ -652,14 +666,22 @@ export function Web2() {
   useEffect(() => {
     const fitPanes = () => {
       if (window.innerWidth <= 820) return
-      const nextRight = clampPaneWidth('right', rightWidth)
-      if (nextRight !== rightWidth) setRightWidth(nextRight)
-      const nextLeft = clampPaneWidth('left', leftWidth)
-      if (nextLeft !== leftWidth) setLeftWidth(nextLeft)
+      const current = paneState.current
+      const leftSpace = current.sidebar ? current.leftWidth : 0
+      const rightMaximum = Math.max(
+        MIN_RIGHT_WIDTH,
+        Math.min(MAX_RIGHT_WIDTH, window.innerWidth - leftSpace - minimumChatWidth() - 6),
+      )
+      const nextRight = Math.round(Math.min(rightMaximum, Math.max(MIN_RIGHT_WIDTH, current.rightWidth)))
+      const rightSpace = current.right ? nextRight + 6 : 0
+      const leftMaximum = Math.max(MIN_LEFT_WIDTH, window.innerWidth - rightSpace - minimumChatWidth())
+      const nextLeft = Math.round(Math.min(MAX_LEFT_WIDTH, leftMaximum, Math.max(MIN_LEFT_WIDTH, current.leftWidth)))
+      if (nextRight !== current.rightWidth) setRightWidth(nextRight)
+      if (nextLeft !== current.leftWidth) setLeftWidth(nextLeft)
     }
     window.addEventListener('resize', fitPanes)
     return () => window.removeEventListener('resize', fitPanes)
-  })
+  }, [])
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -676,20 +698,27 @@ export function Web2() {
       }
       if (key === 'j') {
         event.preventDefault()
-        toggleTerminal()
+        setTerminal((value) => {
+          savePreference('terminal', String(!value))
+          return !value
+        })
       }
       if (key === 'b') {
         event.preventDefault()
-        toggleSidebar()
+        setSidebar((value) => {
+          savePreference('sidebar', String(!value))
+          return !value
+        })
       }
       if (key === 'g' && event.shiftKey) {
         event.preventDefault()
-        openPanel('review')
+        setPanel('review')
+        setRight(true)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  })
+  }, [dialog])
 
   return (
     <div
@@ -697,17 +726,19 @@ export function Web2() {
       style={layoutStyle}
     >
       <SelectionActions focusComposer={() => textarea.current?.focus()} />
-      <ProjectCreationDialog
-        open={projectDialogOpen}
-        canSelectLocal={!!platform.selectWorkspaceDirectory && !!platform.startDaemon}
-        busy={workspaceSwitching || workspaceOpening}
-        initialPath={workspaceRoot}
-        onClose={() => setProjectDialogOpen(false)}
-        onSelectDirectory={(initialPath) =>
-          platform.selectWorkspaceDirectory?.(initialPath) ?? Promise.resolve(null)
-        }
-        onCreate={createProject}
-      />
+      {projectDialogOpen && <Suspense fallback={<DeferredContent label="正在打开项目创建器…" overlay />}>
+        <ProjectCreationDialog
+          open
+          canSelectLocal={!!platform.selectWorkspaceDirectory && !!platform.startDaemon}
+          busy={workspaceSwitching || workspaceOpening}
+          initialPath={workspaceRoot}
+          onClose={() => setProjectDialogOpen(false)}
+          onSelectDirectory={(initialPath) =>
+            platform.selectWorkspaceDirectory?.(initialPath) ?? Promise.resolve(null)
+          }
+          onCreate={createProject}
+        />
+      </Suspense>}
       <header className="w2-titlebar">
         <MenuBar menus={[
           { label: '文件', actions: [
@@ -845,7 +876,7 @@ export function Web2() {
               workspaceRoot,
             )
             const projectMatchesQuery = project.name.toLowerCase().includes(query.trim().toLowerCase())
-            if (query.trim() && !projectMatchesQuery && !projectSessionItems.length) return null
+            if (query.trim() && !projectMatchesQuery && !projectSessionItems.length && !active) return null
             return <Fragment key={project.id}>
               <button
                 className={`w2-project ${active ? 'active' : ''}`}
@@ -1005,10 +1036,11 @@ export function Web2() {
                       ? [...messages.slice(0, index)].reverse().find(item => item.role === 'user')
                       : undefined
                     const retryRun = retryUser ? messageRuns.get(retryUser.id) : undefined
+                    const isEditing = editingMessage !== null && editingMessage.id === message.id
                     const showAssistantActions = !savingEdit && message.role === 'assistant' && assistantActionsReady({
                       content: message.content,
-                      assistantPending: message.metadata.pending === true,
-                      userPending: retryUser?.metadata.pending === true,
+                      assistantPending: message.metadata?.pending === true,
+                      userPending: retryUser?.metadata?.pending === true,
                       userMessageId: retryUser?.id,
                       runningUserMessageId: w.runningUserMessageId,
                       runStatus: retryRun?.status,
@@ -1016,9 +1048,9 @@ export function Web2() {
                     const live = message.role === 'user'
                       && message.id === w.runningUserMessageId
                       && (currentSessionBusy || w.liveEvents.length > 0)
-                    return <Fragment key={message.id}>
-                      <article className={`w2-message ${message.role}${editingMessage?.id === message.id ? ' is-editing' : ''}`}>
-                        {editingMessage?.id === message.id
+                    return <Fragment key={message.id || `${message.role}-${index}`}>
+                      <article className={`w2-message ${message.role}${isEditing ? ' is-editing' : ''}`}>
+                        {isEditing
                           ? <form className="w2-message-edit" onSubmit={async event => {
                               event.preventDefault()
                               if (!editingMessage.content.trim() || savingEdit || composerLocked) return
@@ -1048,7 +1080,9 @@ export function Web2() {
                                 </button>
                               </div>
                             </form>
-                          : <MessageContent content={message.content} plain={message.role === 'user'} />}
+                          : message.role === 'user' && !isEditing
+                            ? <div className="w2-prose">{message.content}</div>
+                            : <Suspense fallback={<div className="w2-prose">{message.content}</div>}><MessageContent content={message.content} /></Suspense>}
                         {message.role === 'assistant' && <AiSources sources={sources} />}
                         {showAssistantActions
                           ? <MessageActionBar
@@ -1062,19 +1096,17 @@ export function Web2() {
                                 void w.regenerate(retryUser.content, retryUser.id, message.id)
                               }}
                             />
-                          : message.role === 'user'
-                            ? editingMessage?.id === message.id
-                              ? null
-                              : <div className="w2-message-actions">
-                                  <CopyButton text={message.content} />
-                                  {w.engine === 'naumi' && (
-                                    <IconButton
-                                      label="编辑消息"
-                                      disabled={composerLocked}
-                                      onClick={() => setEditingMessage({ id: message.id, content: message.content })}
-                                    ><Pencil /></IconButton>
-                                  )}
-                                </div>
+                          : message.role === 'user' && !isEditing
+                            ? <div className="w2-message-actions">
+                                <CopyButton text={message.content} />
+                                {w.engine === 'naumi' && message.id && (
+                                  <IconButton
+                                    label="编辑消息"
+                                    disabled={composerLocked}
+                                    onClick={() => setEditingMessage({ id: message.id, content: message.content })}
+                                  ><Pencil /></IconButton>
+                                )}
+                              </div>
                             : null}
                       </article>
                       {message.role === 'user' && (run || live) && (
@@ -1404,6 +1436,7 @@ export function Web2() {
               </div>
             ) : (
               <div className="w2-panel-content">
+                <Suspense fallback={<DeferredContent label={`正在加载${panelNames[panel]}…`} />}>
                 {panel === 'review' && <DiffPanel />}
                 {panel === 'context' && <ContextCards />}
                 {panel === 'flow' && <Flowchart key={w.sessionId || 'new'} />}
@@ -1554,6 +1587,7 @@ export function Web2() {
                     ))}
                   </>
                 )}
+                </Suspense>
               </div>
             )}
           </section>
@@ -1653,7 +1687,7 @@ export function Web2() {
               <X />
             </IconButton>
           </header>
-          {dialog === 'settings' && <SettingsPage />}
+          {dialog === 'settings' && <Suspense fallback={<DeferredContent label="正在加载设置…" />}><SettingsPage /></Suspense>}
           {dialog === 'rename' && <form className="w2-rename-form" onSubmit={async event => {
             event.preventDefault()
             if (await w.renameSession(renameSessionId, renameTitle)) setDialog(null)
