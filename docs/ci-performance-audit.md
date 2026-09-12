@@ -42,3 +42,11 @@ Archive Admission 的并发测试还暴露 `ReleaseSlotStore.install()` 缺少�
 死代码扫描还发现长期记忆 `forget_old(max_age_days=...)` 在两阶段遗忘改造后遗失了参数接线，调用方传入自定义保留期也始终按固定 90 天执行。当前保留 `0` 代表默认策略的兼容语义，正数会覆盖进入 dormant 的天数，负数策略会在接触 ChromaDB 前明确拒绝；定向记忆测试覆盖默认策略、自定义策略、永久删除与非法输入。
 
 同一轮扫描确认 `cli/commands_meta.py` 还保留了一套无人引用的旧 `/memory` 命令实现，并且内部没有等待异步记忆接口、使用了已不存在的 `limit` 参数与旧结果字段。权威入口实际位于 `main.py` 且已有正确异步调用，因此删除这组不可达副本，避免未来误接入后重新引入运行时错误。Chrome profile 同步也移除了一个恒为假的事件循环三元表达式，文件新鲜度现在直接由 Cookies 文件时间戳计算，并用新鲜与过期两个真实文件状态定向验证。
+
+第三轮 Linux 分片把五类接口演进漂移同时暴露出来：Bridge 交互测试夹具缺少新增的恢复补位回调；Tool Catalog miss 测试仍试图注册已被注册表边界拒绝的非法工具名；Harness baseline 专项夹具写死了旧协议完整 capability 列表；输出保留命令直接断言 Rich ANSI 文本；New UI 已声明 Pursuit 恢复动作但共享必需能力和 Textual TUI manifest 未同步。相关测试现分别绑定当前接口或先转为纯文本，TUI manifest 使用现有 `/pursue resume` 共享执行路径作为证据，所有失败文件均已定向通过。
+
+扩大 Harness 相邻测试时还发现一个 Windows 可执行性问题：符号链接越界、非法 JSON 与超大 fixture 原本合并在一个测试中，普通 Windows 账户因缺少 symlink 权限会在准备阶段失败，后两项边界检查随之完全不执行。测试现拆为独立用例，仅在系统明确返回 WinError 1314 时跳过符号链接场景，非法 JSON 和超大 fixture 在 Windows 仍持续验证。
+
+本轮复扫 Git 跟踪清单仍未发现缓存、日志、备份、临时文件或构建产物；定向测试与 `compileall` 在本地生成的 53 个 `__pycache__`、pytest/ruff/mypy 缓存目录已在工作树边界内清理。Vulture 以 90% 置信度复扫只报告第三方协议要求保留的形参：prompt-toolkit completer 的 `complete_event`、context manager 的异常三元组，以及下载 stream 协议的 `chunk_size`；没有新的可安全删除实现。
+
+性能结构债务也不只存在于 `engine.py`：`harness/store.py` 约 536 KB，`main.py` 约 390 KB，`ui/bridge.py` 约 327 KB，`tools/evolution_review.py` 约 288 KB，`daemons/agent_jobs.py` 约 257 KB。它们会增加导入、静态分析、代码索引和修改回归成本，但本轮没有把机械拆文件宣称为运行时优化；后续应先为各职责建立调用与并发基准，再逐模块迁移并保持公共接口稳定。
