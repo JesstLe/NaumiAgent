@@ -105,6 +105,7 @@ class PiTerminalBridge:
         extra_args: list[str] | None = None,
         workspace_root: Path | None = None,
         env: dict[str, str] | None = None,
+        identity_prompt: str | None = None,
     ) -> None:
         self._binary = binary
         self._provider = provider
@@ -112,6 +113,7 @@ class PiTerminalBridge:
         self._extra_args = list(extra_args or [])
         self._workspace_root = workspace_root or Path.cwd()
         self._env = dict(env or {})
+        self._identity_prompt = identity_prompt
         self._registry = load_protocol_event_registry()
         self._sequence = 0
         self._writer: TextIO | None = None
@@ -146,15 +148,17 @@ class PiTerminalBridge:
         else:
             from naumi_agent.pi_engine.extension import (
                 default_pi_env,
-                resolve_default_extension_args,
+                resolve_pi_cli_args,
             )
 
             self._rpc = await PiRpcClient.start(
                 binary=self._binary,
                 provider=self._provider,
                 model=self._model,
-                extra_args=resolve_default_extension_args(
-                    self._workspace_root, list(self._extra_args)
+                extra_args=resolve_pi_cli_args(
+                    self._workspace_root,
+                    list(self._extra_args),
+                    self._identity_prompt,
                 ),
                 cwd=str(self._workspace_root),
                 event_handler=self._event_queue.put_nowait,

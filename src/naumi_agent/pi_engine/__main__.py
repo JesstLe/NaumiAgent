@@ -52,6 +52,7 @@ async def _amain(argv: list[str] | None = None) -> int:
         extra_args=config.engine.pi.extra_args,
         workspace_root=config.resolve_workspace_root(),
         env=resolve_env_refs(config.engine.pi.env),
+        identity_prompt=getattr(config.engine.pi, "system_prompt_append", None),
     )
     # The status refresh inside start() emits immediately, so the writer must
     # be bound before pi is spawned.
