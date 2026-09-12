@@ -153,15 +153,15 @@ class CodeExecuteTool(Tool):
             )
 
             try:
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(), timeout=timeout,
+                stdout, stdout_bytes, stderr, stderr_bytes = await _communicate_bounded(
+                    proc,
+                    timeout=timeout,
                 )
             except TimeoutError:
-                await _kill_process(proc)
                 return f"Error: Execution timed out after {timeout}s"
 
-            out = _truncate(stdout.decode("utf-8", errors="replace"))
-            err = _truncate(stderr.decode("utf-8", errors="replace"))
+            out = _decode_bounded(stdout, total_bytes=stdout_bytes)
+            err = _decode_bounded(stderr, total_bytes=stderr_bytes)
 
             parts: list[str] = []
             if out.strip():
@@ -203,18 +203,17 @@ class CodeExecuteTool(Tool):
                 )
 
                 try:
-                    stdout, stderr = await asyncio.wait_for(
-                        proc.communicate(), timeout=timeout,
+                    stdout, stdout_bytes, stderr, stderr_bytes = (
+                        await _communicate_bounded(proc, timeout=timeout)
                     )
                 except TimeoutError:
-                    await _kill_process(proc)
                     return (
                         f"Error: Execution timed out after {timeout}s "
                         "(本地模式，无资源隔离)"
                     )
 
-                out = _truncate(stdout.decode("utf-8", errors="replace"))
-                err = _truncate(stderr.decode("utf-8", errors="replace"))
+                out = _decode_bounded(stdout, total_bytes=stdout_bytes)
+                err = _decode_bounded(stderr, total_bytes=stderr_bytes)
 
                 parts: list[str] = []
                 if out.strip():
@@ -235,6 +234,57 @@ async def _kill_process(proc: asyncio.subprocess.Process) -> None:
         proc.kill()
     except ProcessLookupError:
         pass
+    await proc.wait()
+
+
+async def _communicate_bounded(
+    proc: asyncio.subprocess.Process,
+    *,
+    timeout: float,
+) -> tuple[bytes, int, bytes, int]:
+    """Drain both output streams while retaining only bounded previews."""
+    if proc.stdout is None or proc.stderr is None:
+        await _kill_process(proc)
+        raise RuntimeError("代码执行子进程缺少输出管道。")
+
+    stdout_task = asyncio.create_task(_read_bounded(proc.stdout))
+    stderr_task = asyncio.create_task(_read_bounded(proc.stderr))
+    wait_task = asyncio.create_task(proc.wait())
+    completion = asyncio.gather(wait_task, stdout_task, stderr_task)
+    try:
+        await asyncio.wait_for(
+            asyncio.shield(completion),
+            timeout=timeout,
+        )
+    except TimeoutError:
+        await _kill_process(proc)
+        await completion
+        raise
+    stdout, stdout_bytes = stdout_task.result()
+    stderr, stderr_bytes = stderr_task.result()
+    return stdout, stdout_bytes, stderr, stderr_bytes
+
+
+async def _read_bounded(
+    stream: asyncio.StreamReader,
+    *,
+    max_bytes: int = _MAX_OUTPUT_BYTES,
+) -> tuple[bytes, int]:
+    retained = bytearray()
+    total_bytes = 0
+    while chunk := await stream.read(64 * 1024):
+        total_bytes += len(chunk)
+        remaining = max_bytes - len(retained)
+        if remaining > 0:
+            retained.extend(chunk[:remaining])
+    return bytes(retained), total_bytes
+
+
+def _decode_bounded(data: bytes, *, total_bytes: int) -> str:
+    text = data.decode("utf-8", errors="replace")
+    if total_bytes <= len(data):
+        return text
+    return text + f"\n... (输出已截断，原始大小 {total_bytes} 字节)"
 
 
 def _truncate(text: str, max_bytes: int = _MAX_OUTPUT_BYTES) -> str:
