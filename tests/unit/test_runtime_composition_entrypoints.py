@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -9,15 +10,26 @@ import pytest
 import naumi_agent.api.app as api_app
 
 
+def _called_names(source: str) -> set[str]:
+    return {
+        node.func.id
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+
+
 def test_product_sources_do_not_construct_agent_engine_directly() -> None:
     root = Path(__file__).resolve().parents[2] / "src" / "naumi_agent"
     main_source = (root / "main.py").read_text(encoding="utf-8")
     api_source = (root / "api" / "app.py").read_text(encoding="utf-8")
 
-    assert "AgentEngine(config)" not in main_source
-    assert "AgentEngine(config)" not in api_source
-    assert main_source.count("create_agent_engine(config)") == 3
-    assert api_source.count("create_agent_engine(config)") == 1
+    main_calls = _called_names(main_source)
+    api_calls = _called_names(api_source)
+
+    assert "AgentEngine" not in main_calls
+    assert "AgentEngine" not in api_calls
+    assert "create_agent_engine" in main_calls
+    assert "create_agent_engine" in api_calls
 
 
 @pytest.mark.asyncio

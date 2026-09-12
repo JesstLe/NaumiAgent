@@ -343,7 +343,7 @@ async def test_shared_slash_route_rejects_extra_receipt_arguments_without_export
         frontend=None,
     )
 
-    assert "用法：/copy receipt" in output
+    assert "用法：/copy receipt" in clipboard.strip_ansi(output)
     assert not (tmp_path / ".naumi" / "exports").exists()
 
 

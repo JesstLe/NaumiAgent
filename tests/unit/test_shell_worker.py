@@ -829,6 +829,64 @@ async def test_harness_profile_check_runs_in_ephemeral_worker_snapshot(
     assert not tuple((tmp_path / "sandboxes").iterdir())
 
 
+@pytest.mark.asyncio
+async def test_harness_profile_check_uses_portable_snapshot_name_for_manual_run(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "source-workspace"
+    workspace.mkdir()
+    (workspace / "source.py").write_text("VALUE = 7\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "tests@example.com"],
+        cwd=workspace,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Harness Tests"],
+        cwd=workspace,
+        check=True,
+    )
+    subprocess.run(["git", "add", "."], cwd=workspace, check=True)
+    subprocess.run(["git", "commit", "-qm", "fixture"], cwd=workspace, check=True)
+    check = HarnessCheckSpec(
+        id="compile",
+        argv=(sys.executable, "-c", "print('not executed')"),
+        timeout_seconds=10,
+        required_for=("change",),
+        provides=("compile",),
+    )
+    sandbox_root = (tmp_path / "sandboxes").resolve()
+    runner = HarnessSandboxCheckRunner(
+        workspace_root=workspace,
+        sandbox_root=sandbox_root,
+        artifact_root=(tmp_path / "sandbox-artifacts").resolve(),
+    )
+    admitted_paths: list[Path] = []
+
+    async def profile_is_current() -> bool:
+        return True
+
+    async def reject_unavailable(spec: ShellCommandSpec) -> AdmittedSandboxShellJob:
+        admitted_paths.append(Path(spec.workspace_root))
+        raise ShellSandboxUnavailableError("测试环境没有可证明的隔离后端。")
+
+    result = await runner.run(
+        run_id="manual:session-id",
+        check=check,
+        profile_digest=hashlib.sha256(b"trusted-profile").hexdigest(),
+        profile_is_current=profile_is_current,
+        admit_job=reject_unavailable,
+    )
+
+    assert result.status is HarnessSandboxCheckStatus.INFRASTRUCTURE_ERROR
+    assert "sandbox_unavailable" in result.message
+    assert len(admitted_paths) == 1
+    assert admitted_paths[0].name.startswith("sandbox-")
+    assert ":" not in admitted_paths[0].name
+    assert not tuple(sandbox_root.iterdir())
+
+
 def test_evolution_overlay_namespace_is_exact_and_other_naumi_paths_stay_blocked() -> None:
     content = b"print('sealed driver')\n"
     overlay = HarnessSandboxSourceOverlay(

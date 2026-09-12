@@ -156,17 +156,16 @@ async def test_natural_language_and_unsafe_select_misses_are_not_persisted(
     assert await misses.get(workspace, "tsm_0123456789abcdef01234567") is None
 
 
-@pytest.mark.asyncio
-async def test_invalid_catalog_name_fails_persistence_without_forging_id(
+def test_invalid_catalog_name_is_rejected_before_miss_state_creation(
     tmp_path: Path,
 ) -> None:
-    _, misses, _, registry, search, _ = _runtime(tmp_path)
-    registry.register(_NamedTool("invalid tool name"))
+    _, misses, _, registry, _, _ = _runtime(tmp_path)
 
-    output = await search.execute(query="select:browser_trace_compare")
+    with pytest.raises(ValueError, match="不含空白或控制字符") as invalid:
+        registry.register(_NamedTool("invalid tool name"))
 
-    assert "缺失事实未能写入用户状态库" in output
-    assert "tsm_" not in output
+    assert "tsm_" not in str(invalid.value)
+    assert "invalid tool name" not in registry.names
     assert not misses.db_path.exists()
 
 

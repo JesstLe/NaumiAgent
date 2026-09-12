@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import socket
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from naumi_agent.background.models import BackgroundStatus, BackgroundTask
 from naumi_agent.background.store import BackgroundTaskStore
@@ -18,6 +21,8 @@ from naumi_agent.runtime.shell import (
 )
 
 _PREVIEW_CHARS = 2000
+_OUTPUT_CHUNK_BYTES = 64 * 1024
+_OUTPUT_PREVIEW_BYTES = _PREVIEW_CHARS * 4
 _IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _PORT_PATTERNS = (
     re.compile(r"\bhttp\.server\s+(?P<port>\d{2,5})(?:\s|$)"),
@@ -260,10 +265,16 @@ class BackgroundRunner:
         output_path: Path,
         timeout_seconds: int,
     ) -> None:
+        output_task = asyncio.create_task(
+            self._stream_process_output(proc, output_path)
+        )
         try:
             try:
-                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout_seconds)
-                output = (stdout or b"").decode("utf-8", errors="replace")
+                output_preview = await asyncio.wait_for(
+                    asyncio.shield(output_task),
+                    timeout=timeout_seconds,
+                )
+                await proc.wait()
                 status = (
                     BackgroundStatus.COMPLETED
                     if proc.returncode == 0
@@ -272,24 +283,71 @@ class BackgroundRunner:
                 error = "" if proc.returncode == 0 else f"进程退出码：{proc.returncode}"
             except TimeoutError:
                 await terminate_process_tree(proc)
-                output = ""
+                try:
+                    output_preview = await asyncio.wait_for(
+                        asyncio.shield(output_task),
+                        timeout=5,
+                    )
+                except TimeoutError:
+                    output_task.cancel()
+                    await asyncio.gather(output_task, return_exceptions=True)
+                    output_preview = ""
                 status = BackgroundStatus.TIMED_OUT
                 error = f"后台任务超过 {timeout_seconds} 秒未完成，已终止"
+            except Exception as exc:
+                if proc.returncode is None:
+                    await terminate_process_tree(proc)
+                output_preview = ""
+                status = BackgroundStatus.FAILED
+                error = f"保存后台任务输出失败：{type(exc).__name__}: {exc}"
 
-            output_path.write_text(output, encoding="utf-8")
             task = self._store.get(task_id)
             if task is None or task.status == BackgroundStatus.CANCELLED:
                 return
             task.status = status
             task.exit_code = proc.returncode
             task.completed_at = _now()
-            task.output_preview = _preview(output)
+            task.output_preview = output_preview
             task.error = error
             self._store.save(task)
             self._store.prune()
         finally:
+            if not output_task.done():
+                output_task.cancel()
+                await asyncio.gather(output_task, return_exceptions=True)
             self._processes.pop(task_id, None)
             self._watchers.pop(task_id, None)
+
+    async def _stream_process_output(
+        self,
+        proc: asyncio.subprocess.Process,
+        output_path: Path,
+    ) -> str:
+        stdout = proc.stdout
+        if stdout is None:
+            raise RuntimeError("后台进程没有可读取的标准输出管道")
+        output_file = await _run_output_io(output_path.open, "wb")
+        preview = bytearray()
+        truncated = False
+        try:
+            while chunk := await stdout.read(_OUTPUT_CHUNK_BYTES):
+                if len(preview) < _OUTPUT_PREVIEW_BYTES:
+                    remaining = _OUTPUT_PREVIEW_BYTES - len(preview)
+                    preview.extend(chunk[:remaining])
+                    truncated = truncated or len(chunk) > remaining
+                else:
+                    truncated = True
+                await _run_output_io(output_file.write, chunk)
+        finally:
+            await asyncio.shield(
+                _run_output_io(_finalize_output_file, output_file)
+            )
+        text = bytes(preview).decode("utf-8", errors="replace")
+        if truncated or len(text) > _PREVIEW_CHARS:
+            return text[:_PREVIEW_CHARS] + (
+                "\n...（输出已截断，完整内容见输出文件）"
+            )
+        return text
 
 
 def format_task(task: BackgroundTask) -> str:
@@ -358,10 +416,21 @@ def _is_port_listening(port: int) -> bool:
         return sock.connect_ex(("127.0.0.1", port)) == 0
 
 
-def _preview(output: str) -> str:
-    if len(output) <= _PREVIEW_CHARS:
-        return output
-    return output[:_PREVIEW_CHARS] + "\n...（输出已截断，完整内容见输出文件）"
+def _finalize_output_file(output_file) -> None:
+    try:
+        output_file.flush()
+        os.fsync(output_file.fileno())
+    finally:
+        output_file.close()
+
+
+async def _run_output_io(operation: Callable[..., Any], *args: Any) -> Any:
+    task = asyncio.create_task(asyncio.to_thread(operation, *args))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        await asyncio.gather(task, return_exceptions=True)
+        raise
 
 
 def _status_label(status: BackgroundStatus) -> str:

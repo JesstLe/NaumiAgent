@@ -33,6 +33,7 @@ REQUIRED_TERMINAL_CAPABILITIES = (
     "history_resume",
     "model_provider_identity",
     "permission_bypass",
+    "pursuit_recovery_action",
     "queued_send_now",
     "run_cancel",
     "terminal_runtime_health",

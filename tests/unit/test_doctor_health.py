@@ -126,7 +126,7 @@ def test_doctor_health_snapshot_replaces_invalid_diagnostic_code() -> None:
 
 def test_pursuit_recovery_item_uses_shared_state_and_raises_overall_severity() -> None:
     recovery = PursuitRecoverySnapshot.model_validate({
-        "schema_version": 1,
+        "schema_version": 2,
         "run_id": "pursuit-1",
         "generated_at": "2026-07-18T00:00:00+00:00",
         "recovery_state": "orphaned",
@@ -148,6 +148,15 @@ def test_pursuit_recovery_item_uses_shared_state_and_raises_overall_severity() -
         "reconcile_required": False,
         "reconcile_reason": "",
         "alerts": ["运行中但没有 live lease"],
+        "resume_action": {
+            "schema_version": 1,
+            "action": "resume",
+            "state": "available",
+            "code": "orphaned_resume_available",
+            "reason": "运行实例已离线，可以从最近检查点恢复。",
+            "command": "/pursue resume pursuit-1",
+        },
+        "attempts": [],
     })
     item = pursuit_recovery_health_item(recovery)
     snapshot = build_doctor_health_snapshot(

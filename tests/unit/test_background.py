@@ -40,6 +40,103 @@ async def _wait_for_finished(runner: BackgroundRunner, task_id: str) -> None:
 
 class TestBackgroundRunner:
     @pytest.mark.asyncio
+    async def test_watcher_streams_large_output_to_disk_with_bounded_preview(
+        self,
+        runner: BackgroundRunner,
+    ) -> None:
+        class ChunkedStdout:
+            def __init__(self, chunks: list[bytes]) -> None:
+                self.chunks = list(chunks)
+                self.read_sizes: list[int] = []
+
+            async def read(self, size: int) -> bytes:
+                self.read_sizes.append(size)
+                await asyncio.sleep(0)
+                return self.chunks.pop(0) if self.chunks else b""
+
+        class StreamingProcess:
+            def __init__(self, chunks: list[bytes]) -> None:
+                self.stdout = ChunkedStdout(chunks)
+                self.returncode = 0
+
+            async def wait(self) -> int:
+                return self.returncode
+
+            async def communicate(self):
+                raise AssertionError("watcher must not buffer output with communicate()")
+
+        chunks = [b"x" * (64 * 1024) for _ in range(40)]
+        output_path = runner.store.artifacts_dir / "bg_stream.log"
+        task = BackgroundTask(
+            id="bg_stream",
+            command="generate output",
+            cwd=str(output_path.parent),
+            status=BackgroundStatus.RUNNING,
+            output_path=str(output_path),
+            started_at=datetime.now().isoformat(),
+        )
+        runner.store.save(task)
+        process = StreamingProcess(chunks)
+
+        await runner._watch(task.id, process, output_path, timeout_seconds=5)
+
+        finished = runner.get(task.id)
+        assert finished is not None
+        assert finished.status is BackgroundStatus.COMPLETED
+        assert output_path.stat().st_size == 40 * 64 * 1024
+        assert len(finished.output_preview) < 2100
+        assert "输出已截断" in finished.output_preview
+        assert set(process.stdout.read_sizes) == {64 * 1024}
+
+    @pytest.mark.asyncio
+    async def test_watcher_marks_output_storage_failure_and_terminates_process(
+        self,
+        runner: BackgroundRunner,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        class BrokenStdout:
+            async def read(self, size: int) -> bytes:
+                raise OSError("disk unavailable")
+
+        class RunningProcess:
+            def __init__(self) -> None:
+                self.stdout = BrokenStdout()
+                self.returncode = None
+
+            async def wait(self) -> int:
+                return 0
+
+        terminated: list[RunningProcess] = []
+
+        async def terminate(process) -> None:
+            terminated.append(process)
+            process.returncode = -1
+
+        monkeypatch.setattr(
+            "naumi_agent.background.runner.terminate_process_tree",
+            terminate,
+        )
+        output_path = runner.store.artifacts_dir / "bg_broken.log"
+        task = BackgroundTask(
+            id="bg_broken",
+            command="generate output",
+            cwd=str(output_path.parent),
+            status=BackgroundStatus.RUNNING,
+            output_path=str(output_path),
+            started_at=datetime.now().isoformat(),
+        )
+        runner.store.save(task)
+        process = RunningProcess()
+
+        await runner._watch(task.id, process, output_path, timeout_seconds=5)
+
+        failed = runner.get(task.id)
+        assert failed is not None
+        assert failed.status is BackgroundStatus.FAILED
+        assert "保存后台任务输出失败" in failed.error
+        assert terminated == [process]
+
+    @pytest.mark.asyncio
     async def test_run_returns_immediately_and_persists_output(
         self,
         runner: BackgroundRunner,

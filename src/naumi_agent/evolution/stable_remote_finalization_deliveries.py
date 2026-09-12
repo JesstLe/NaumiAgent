@@ -294,14 +294,15 @@ class EvolutionStableRemoteFinalizationDeliveryStore:
                 return EvolutionStableRemoteFinalizationDeliveryView(
                     package=package, latest_event=event
                 )
-            await db.rollback()
             view = _restore_view(row)
             await _verify_chain(db, view)
             if view.package.execution_package != execution_package:
+                await db.rollback()
                 raise EvolutionStableRemoteFinalizationDeliveryError(
                     "stable_remote_delivery_conflict",
                     "同一 Delivery identity 已绑定不同 Execution Package。",
                 )
+            await db.rollback()
             return view
 
     async def get(
@@ -312,11 +313,18 @@ class EvolutionStableRemoteFinalizationDeliveryStore:
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await _ensure_schema(db)
-            row = await _row(db, _delivery_id(delivery_id))
-            if row is None:
+            rows = await _rows_with_chain(db, _delivery_id(delivery_id))
+            if not rows:
                 return None
-            view = _restore_view(row)
-            await _verify_chain(db, view)
+            view = _restore_view(rows[0])
+            events = [
+                EvolutionStableRemoteFinalizationDeliveryEvent.model_validate_json(
+                    row["chain_event_json"]
+                )
+                for row in rows
+                if row["chain_event_json"] is not None
+            ]
+            _verify_chain_events(view, events)
             return view
 
     async def claim(
@@ -1094,6 +1102,19 @@ async def _row(db, delivery_id):
     ).fetchone()
 
 
+async def _rows_with_chain(db, delivery_id):
+    return await (
+        await db.execute(
+            "SELECT delivery.*, events.event_json AS chain_event_json FROM "
+            "evolution_stable_remote_finalization_deliveries AS delivery "
+            "LEFT JOIN evolution_stable_remote_finalization_delivery_events AS events "
+            "ON events.delivery_id = delivery.delivery_id "
+            "WHERE delivery.delivery_id = ? ORDER BY events.sequence",
+            (delivery_id,),
+        )
+    ).fetchall()
+
+
 def _restore_view(row):
     return EvolutionStableRemoteFinalizationDeliveryView(
         package=EvolutionStableRemoteFinalizationDeliveryPackage.model_validate_json(
@@ -1140,6 +1161,10 @@ async def _verify_chain(db, view):
         EvolutionStableRemoteFinalizationDeliveryEvent.model_validate_json(row[0])
         for row in rows
     ]
+    _verify_chain_events(view, events)
+
+
+def _verify_chain_events(view, events):
     if not events or events[-1] != view.latest_event:
         raise EvolutionStableRemoteFinalizationDeliveryError(
             "stable_remote_delivery_chain_corrupt", "Delivery event chain 与主记录不一致。"

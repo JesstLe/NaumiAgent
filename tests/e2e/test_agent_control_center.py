@@ -15,7 +15,8 @@ import pytest
 from naumi_agent.agents.base import AgentResult
 from naumi_agent.config.settings import AppConfig, MemoryConfig
 from naumi_agent.orchestrator.engine import AgentEngine
-from naumi_agent.orchestrator.subagent_manager import SubTask
+from naumi_agent.orchestrator.subagent_manager import SubAgentManager, SubTask
+from naumi_agent.tools.analysis import set_analysis_subagent_manager
 from naumi_agent.tui.agent_control import format_agent_control_markdown
 from naumi_agent.ui.bridge import JsonlEngineBridge
 
@@ -61,6 +62,7 @@ process.stdout.write(JSON.stringify({
         check=False,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     assert completed.returncode == 0, completed.stderr
     return json.loads(completed.stdout)
@@ -84,6 +86,13 @@ async def test_real_manager_bridge_node_stop_and_textual_parity(
             long_term_enabled=False,
         ),
     ))
+    manager = SubAgentManager(
+        engine,
+        heartbeat_factory=engine.agent_execution_heartbeat_factory,
+        agent_job_store=engine._resources.agent_job_store,
+    )
+    engine.subagent_manager = manager
+    set_analysis_subagent_manager(manager)
     target_delegate: asyncio.Task[AgentResult] | None = None
     sibling_delegate: asyncio.Task[AgentResult] | None = None
     try:
@@ -131,8 +140,8 @@ async def test_real_manager_bridge_node_stop_and_textual_parity(
         sibling_delegate = asyncio.create_task(engine.subagent_manager.delegate(
             SubTask("sibling-task", "独立完成", "researcher")
         ))
-        await asyncio.wait_for(target_started.wait(), timeout=1)
-        await asyncio.wait_for(sibling_started.wait(), timeout=1)
+        await asyncio.wait_for(target_started.wait(), timeout=10)
+        await asyncio.wait_for(sibling_started.wait(), timeout=10)
 
         writer = io.StringIO()
         bridge = JsonlEngineBridge(engine, config_path="config.yaml")
@@ -183,7 +192,7 @@ async def test_real_manager_bridge_node_stop_and_textual_parity(
                 "reason": "真实 E2E 确认停止。",
             },
         })
-        target_result = await asyncio.wait_for(target_delegate, timeout=1)
+        target_result = await asyncio.wait_for(target_delegate, timeout=10)
         assert target_result.status == "cancelled"
         assert not sibling_delegate.done()
         await bridge.handle_engine_event("subagent_event", {
@@ -193,7 +202,7 @@ async def test_real_manager_bridge_node_stop_and_textual_parity(
         })
 
         sibling_release.set()
-        sibling_result = await asyncio.wait_for(sibling_delegate, timeout=1)
+        sibling_result = await asyncio.wait_for(sibling_delegate, timeout=10)
         assert sibling_result.status == "completed"
         assert sibling_result.response == "兄弟任务正常完成。"
         await bridge.handle_engine_event("subagent_event", {

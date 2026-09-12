@@ -199,6 +199,29 @@ def test_reviews_formatter_renders_real_checks_files_and_diff() -> None:
     assert "+new" in rendered
 
 
+def test_reviews_formatter_blocks_when_git_evidence_is_incomplete() -> None:
+    detail = {
+        "evidence": {
+            "approval": {
+                "id": "approval-1",
+                "title": "审批发布",
+                "requester": "agent",
+                "detail": "需要人工确认",
+            },
+            "worktree": {"name": "ui-10-real", "status": "present"},
+            "validation_runs": [{"status": "passed", "exit_code": 0}],
+            "changed_files": [{"path": "src/ui.py", "status": "modified"}],
+            "diff_hunks": [],
+            "warnings": ["Git 差异超过 4 MiB，仅显示已读取的补丁证据。"],
+        }
+    }
+
+    rendered = format_workbench_reviews_markdown(_snapshot(), detail=detail)
+
+    assert "待补证据：Git 差异读取不完整" in rendered
+    assert "证据提示：Git 差异超过 4 MiB" in rendered
+
+
 def test_reviews_formatter_renders_open_proposal_actions_and_policy_boundary() -> None:
     snapshot = _proposal_snapshot()
 

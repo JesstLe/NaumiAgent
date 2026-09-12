@@ -769,13 +769,18 @@ class TaskRunner:
             pass
         self._apply_heartbeat_snapshot(run, lifecycle.snapshot())
 
-    async def _finish_run_heartbeat(self, run: dict[str, Any]) -> None:
+    async def _finish_run_heartbeat(
+        self,
+        run: dict[str, Any],
+        *,
+        result_status: str,
+    ) -> None:
         run_id = str(run["id"])
         lifecycle = self._heartbeat_lifecycles.pop(run_id, None)
         if lifecycle is None:
             return
         try:
-            await lifecycle.finish(str(run.get("status") or "failed"))
+            await lifecycle.finish(result_status)
         except Exception:
             pass
         self._apply_heartbeat_snapshot(run, lifecycle.snapshot())
@@ -828,14 +833,14 @@ class TaskRunner:
         run["summary"] = (
             "Instruction received. Resuming browser task."
         )
-        run["status"] = "running"
         run["pendingInput"] = None
+        await self._resume_run_heartbeat(run)
+        run["status"] = "running"
         if run.get("result"):
             run["result"]["status"] = "running"
             run["result"]["summary"] = run["summary"]
             run["result"]["pendingInput"] = None
 
-        await self._resume_run_heartbeat(run)
         self._store.persist(self.runs)
         self._emit_update("run_resumed", run)
 
@@ -900,17 +905,17 @@ class TaskRunner:
                 timeout_handle.cancel()
                 self._reply_timeouts[run_id] = None
 
-            run["status"] = "manual_control"
             run["summary"] = pending_input["question"]
             run["pendingInput"] = pending_input
-            if run.get("result"):
-                run["result"]["status"] = "manual_control"
-                run["result"]["summary"] = pending_input["question"]
-                run["result"]["pendingInput"] = pending_input
             await self._set_run_heartbeat_waiting(
                 run,
                 mode="manual_control",
             )
+            run["status"] = "manual_control"
+            if run.get("result"):
+                run["result"]["status"] = "manual_control"
+                run["result"]["summary"] = pending_input["question"]
+                run["result"]["pendingInput"] = pending_input
             self._store.persist(self.runs)
             self._emit_update("run_manual_control", run)
             return run
@@ -1032,6 +1037,7 @@ class TaskRunner:
         use_isolated_runtime = self._max_concurrent > 1
         run_runtime: Any | None = None
         run_subagent: Any | None = None
+        terminal_status = "failed"
 
         run["status"] = "running"
         run["startedAt"] = _now_iso()
@@ -1077,13 +1083,11 @@ class TaskRunner:
 
             async def _on_progress(progress: dict[str, Any]) -> None:
                 run["summary"] = progress.get("summary") or run["summary"]
-                if run["status"] not in {"aborting", "aborted"}:
-                    if progress.get("status") in {
-                        "waiting_for_instruction",
-                        "manual_control",
-                        "manual_control_requested",
-                    }:
-                        run["status"] = progress["status"]
+                if (
+                    run["status"] not in {"aborting", "aborted"}
+                    and progress.get("status") == "manual_control_requested"
+                ):
+                    run["status"] = "manual_control_requested"
                 run["result"] = progress
                 run["artifacts"] = (
                     progress.get("artifacts") or run["artifacts"]
@@ -1105,7 +1109,6 @@ class TaskRunner:
                 if pending_input.get("mode") == "manual_control":
                     await run_runtime.enter_manual_control()
 
-                run["status"] = waiting_status
                 run["pendingInput"] = {
                     **pending_input,
                     "requestedAt": _now_iso(),
@@ -1115,12 +1118,14 @@ class TaskRunner:
                     or "Waiting for instruction."
                 )
                 if run.get("result"):
-                    run["result"]["status"] = waiting_status
                     run["result"]["pendingInput"] = run["pendingInput"]
                 await self._set_run_heartbeat_waiting(
                     run,
                     mode=str(pending_input.get("mode") or "instruction"),
                 )
+                run["status"] = waiting_status
+                if run.get("result"):
+                    run["result"]["status"] = waiting_status
                 self._store.persist(self.runs)
                 self._emit_update(
                     "run_manual_control"
@@ -1208,7 +1213,7 @@ class TaskRunner:
                         f"Template checks failed: {first_failure}"
                     )
 
-            run["status"] = (
+            terminal_status = (
                 "completed"
                 if result.get("status") == "completed"
                 else "aborted"
@@ -1221,13 +1226,11 @@ class TaskRunner:
             run["reports"] = result.get("reports")
             run["pendingInput"] = result.get("pendingInput")
             run["error"] = None
-            self._emit_update("run_updated", run)
 
         except Exception as exc:
-            run["status"] = "failed"
+            terminal_status = "failed"
             run["summary"] = str(exc)
             run["error"] = {"message": str(exc), "stack": None}
-            self._emit_update("run_updated", run)
 
         finally:
             if run_runtime is not None:
@@ -1247,7 +1250,11 @@ class TaskRunner:
                     )
 
             run["finishedAt"] = _now_iso()
-            await self._finish_run_heartbeat(run)
+            await self._finish_run_heartbeat(
+                run,
+                result_status=terminal_status,
+            )
+            run["status"] = terminal_status
 
             timeout_handle = self._reply_timeouts.pop(run["id"], None)
             if timeout_handle:

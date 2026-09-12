@@ -209,7 +209,7 @@ class EvidenceCollector:
                 "arguments_size_bytes": arguments_size_bytes,
                 "result_sha256": _sha256_text(safe_content),
                 "result_size_bytes": _bounded_size(
-                    data.get("content_length"),
+                    data.get("content_bytes"),
                     fallback=len(raw_content.encode("utf-8", errors="replace")),
                 ),
                 "read_only": start.read_only if start is not None else bool(data.get("read_only")),

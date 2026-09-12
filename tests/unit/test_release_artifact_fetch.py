@@ -255,7 +255,9 @@ async def test_fetch_falls_back_recovers_atomic_file_and_rejects_bad_streams(
             (source_id,),
         )
         await db.commit()
-    Path(recovered.receipt.archive_path).unlink()
+    recovered_path = Path(recovered.receipt.archive_path)
+    recovered_path.chmod(stat.S_IREAD | stat.S_IWRITE)
+    recovered_path.unlink()
 
     def bad_digest(_request: httpx.Request) -> httpx.Response:
         return _response(200, b"z" * len(archive_bytes))

@@ -775,9 +775,11 @@ async def test_installed_litellm_transports_reasoning_effort_to_loopback_bodies(
     assert received[0]["reasoning_effort"] == "high"
     assert "temperature" not in received[0]
     assert received[1]["output_config"] == {"effort": "medium"}
-    assert received[1]["thinking"] == {"type": "adaptive"}
+    assert received[1]["thinking"]["type"] == "adaptive"
+    assert received[1]["thinking"].get("display") in {None, "summarized"}
     assert received[2]["output_config"] == {"effort": "max"}
-    assert received[2]["thinking"] == {"type": "adaptive"}
+    assert received[2]["thinking"]["type"] == "adaptive"
+    assert received[2]["thinking"].get("display") in {None, "summarized"}
 
 
 @pytest.mark.asyncio

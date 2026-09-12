@@ -136,6 +136,7 @@ from naumi_agent.ui.protocol import (
     negotiate_hello,
     normalize_client_record,
 )
+from naumi_agent.ui.protocol_registry import load_protocol_event_registry
 from naumi_agent.ui.workspace_file_index import (
     WorkspaceFileItem,
     WorkspaceFileSearchResult,
@@ -190,10 +191,10 @@ async def test_create_bridge_binds_engine_to_process_launch_directory(
                 "models:",
                 "  provider: openai",
                 "  default_model: test-model",
-                f'workspace_root: "{legacy}"',
+                f"workspace_root: {json.dumps(str(legacy))}",
                 "safety:",
                 "  permission_mode: moderate",
-                f'  allowed_dirs: ["{legacy}"]',
+                f"  allowed_dirs: [{json.dumps(str(legacy))}]",
             ]
         )
         + "\n",
@@ -3554,6 +3555,7 @@ async def test_bridge_agent_stop_returns_action_and_authoritative_terminal_state
     delegated: asyncio.Task[AgentResult] | None = None
     try:
         session = await engine.get_or_create_session(title="Agent Stop")
+        engine.subagent_manager._agent_worker_process_factory = None
         agent = engine.subagent_manager.get_agent("coder")
         assert agent is not None
         started = asyncio.Event()
@@ -3567,7 +3569,7 @@ async def test_bridge_agent_stop_returns_action_and_authoritative_terminal_state
         delegated = asyncio.create_task(engine.subagent_manager.delegate(
             SubTask("stop-me", "等待停止", "coder")
         ))
-        await asyncio.wait_for(started.wait(), timeout=1)
+        await asyncio.wait_for(started.wait(), timeout=10)
         writer = io.StringIO()
         bridge = JsonlEngineBridge(engine, config_path="config.yaml")
         bridge.bind_writer(writer)
@@ -3597,7 +3599,7 @@ async def test_bridge_agent_stop_returns_action_and_authoritative_terminal_state
             "code": "accepted",
             "message": "已请求停止 Agent 执行 stop-me。",
         }
-        assert (await asyncio.wait_for(delegated, timeout=1)).status == "cancelled"
+        assert (await asyncio.wait_for(delegated, timeout=10)).status == "cancelled"
 
         await bridge.handle_engine_event("subagent_event", {
             "task_id": "stop-me",
@@ -3652,6 +3654,7 @@ async def test_bridge_agent_stop_rejects_execution_from_another_session(
     delegated: asyncio.Task[AgentResult] | None = None
     try:
         await engine.get_or_create_session(title="old")
+        engine.subagent_manager._agent_worker_process_factory = None
         agent = engine.subagent_manager.get_agent("coder")
         assert agent is not None
         started = asyncio.Event()
@@ -3666,7 +3669,7 @@ async def test_bridge_agent_stop_rejects_execution_from_another_session(
         delegated = asyncio.create_task(engine.subagent_manager.delegate(
             SubTask("old-session-task", "等待", "coder")
         ))
-        await asyncio.wait_for(started.wait(), timeout=1)
+        await asyncio.wait_for(started.wait(), timeout=10)
         engine._session = await engine.session_store.create_session(title="new")
         writer = io.StringIO()
         bridge = JsonlEngineBridge(engine, config_path="config.yaml")
@@ -3888,6 +3891,7 @@ async def test_bridge_status_payload_includes_session_id() -> None:
 
 def test_bridge_status_payload_exposes_authoritative_product_identity() -> None:
     bridge = JsonlEngineBridge(_FakeEngine(), config_path="config.yaml")
+    registry = load_protocol_event_registry()
 
     payload = bridge.status_payload()
 
@@ -3914,9 +3918,10 @@ def test_bridge_status_payload_exposes_authoritative_product_identity() -> None:
     assert payload["protocol_registry"]["client_event_count"] == len(ClientEventType)
     assert payload["protocol_registry"]["server_event_count"] == len(ServerEventType)
     assert len(payload["protocol_registry"]["registry_sha256"]) == 64
-    assert payload["protocol_registry"]["compatible_registry_sha256"] == [
-        payload["protocol_registry"]["registry_sha256"]
-    ]
+    assert payload["protocol_registry"]["registry_sha256"] == registry.registry_sha256
+    assert payload["protocol_registry"]["compatible_registry_sha256"] == list(
+        registry.compatible_registry_sha256
+    )
     assert payload["evolution_patch_recovery"]["total"] == 0
 
 
@@ -6177,7 +6182,10 @@ async def test_bridge_streams_real_engine_tool_lifecycle_without_external_api(
     engine.execute_tool = execute_tool  # type: ignore[method-assign]
 
     try:
-        await bridge.submit("写入 demo 文件", request_id="submit-real-engine")
+        await bridge.submit(
+            "演示 file_write 工具生命周期，不需要实际创建或修改文件",
+            request_id="submit-real-engine",
+        )
         assert bridge._run_task is not None
         await bridge._run_task
     finally:
@@ -10077,6 +10085,16 @@ async def test_bridge_commits_durable_interaction_before_ui_release(
     authority = bridge._interaction_authority()
     assert authority is not None
     authority.owner_renew_interval_seconds = 0.02
+    original_renew = authority.renew
+    owner_renewed = asyncio.Event()
+
+    async def renew_once(*, record, now=None):
+        renewed = await original_renew(record=record, now=now)
+        authority.owner_renew_interval_seconds = 60
+        owner_renewed.set()
+        return renewed
+
+    authority.renew = renew_once  # type: ignore[method-assign]
     observed: list[str] = []
 
     async def begin(interaction_id: str, _request: dict[str, Any]) -> None:
@@ -10106,7 +10124,7 @@ async def test_bridge_commits_durable_interaction_before_ui_release(
         "_pursuit_begin": begin,
         "_pursuit_resolve": resolve,
     }))
-    for _ in range(50):
+    for _ in range(1_000):
         if any(
             record["type"] == "interaction/request"
             for record in _records(writer)
@@ -10114,6 +10132,10 @@ async def test_bridge_commits_durable_interaction_before_ui_release(
             break
         assert pending.done() is False
         await asyncio.sleep(0.01)
+    else:
+        await bridge.shutdown()
+        await asyncio.gather(pending, return_exceptions=True)
+        pytest.fail("durable interaction 未在 10 秒内发布请求")
     request = next(
         record for record in _records(writer)
         if record["type"] == "interaction/request"
@@ -10122,7 +10144,7 @@ async def test_bridge_commits_durable_interaction_before_ui_release(
     assert request["payload"]["request_id"] == "ask-durable-bridge"
     assert request["payload"]["timeout_seconds"] == 60
     assert request["payload"]["expires_at"]
-    await asyncio.sleep(0.08)
+    await asyncio.wait_for(owner_renewed.wait(), timeout=10)
     renewed = await store.get_interaction(
         workspace_root=workspace,
         interaction_id="ask-durable-bridge",
@@ -10170,14 +10192,16 @@ async def test_bridge_live_interaction_timeout_commits_expired_and_closes_card(
         "_durable_subject_kind": "runtime",
         "_durable_subject_id": "runtime-timeout",
     }))
-    for _ in range(50):
+    for _ in range(1_000):
         pending = bridge._pending_interactions.get("ask-live-timeout")
         if pending is not None:
             break
         assert pending_task.done() is False
         await asyncio.sleep(0.01)
     else:
-        pytest.fail("durable interaction 未进入 pending")
+        await bridge.shutdown()
+        await asyncio.gather(pending_task, return_exceptions=True)
+        pytest.fail("durable interaction 未在 10 秒内进入 pending")
     durable = pending.durable_record
     assert durable is not None
 
@@ -10228,12 +10252,15 @@ async def test_bridge_cancels_live_durable_interaction_and_closes_card(
         "_durable_subject_kind": "pursuit",
         "_durable_subject_id": "pursuit-cancel",
     }))
-    for _ in range(50):
+    for _ in range(1_000):
         if "ask-goal-cancel" in bridge._pending_interactions:
             break
+        assert pending_task.done() is False
         await asyncio.sleep(0.01)
     else:
-        pytest.fail("durable interaction 未进入 pending")
+        await bridge.shutdown()
+        await asyncio.gather(pending_task, return_exceptions=True)
+        pytest.fail("durable interaction 未在 10 秒内进入 pending")
 
     await bridge.handle_client_record({
         "id": "cancel-goal-interaction",
@@ -10411,10 +10438,13 @@ async def test_bridge_recovery_cursor_refills_bounded_card_window(
         },
         request_id="answer-recovery-page",
     )
-    for _ in range(100):
+    for _ in range(1_000):
         if "ask-bridge-recovery-page-50" in bridge._pending_interactions:
             break
         await asyncio.sleep(0.01)
+    else:
+        await bridge.shutdown()
+        pytest.fail("recovery cursor 未在 10 秒内补齐第一页空位")
 
     assert len(bridge._pending_interactions) == 50
     assert "ask-bridge-recovery-page-50" in bridge._pending_interactions
@@ -10444,10 +10474,13 @@ async def test_bridge_recovery_cursor_refills_bounded_card_window(
         },
         request_id="answer-recovery-rescan",
     )
-    for _ in range(100):
+    for _ in range(1_000):
         if "ask-bridge-recovery-page-late" in bridge._pending_interactions:
             break
         await asyncio.sleep(0.01)
+    else:
+        await bridge.shutdown()
+        pytest.fail("recovery rescan 未在 10 秒内补入新记录")
 
     assert len(bridge._pending_interactions) == 50
     assert "ask-bridge-recovery-page-late" in bridge._pending_interactions

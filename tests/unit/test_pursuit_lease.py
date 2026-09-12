@@ -293,6 +293,13 @@ async def test_full_loop_commits_blocked_terminal_under_fence(tmp_path) -> None:
     assert resumed_lease is not None
     assert resumed_lease.state is HarnessRunLeaseState.RELEASED
     assert resumed_lease.epoch == 2
+    with sqlite3.connect(pursuit_store.db_path) as db:
+        repeated_boundary_occurrences = db.execute(
+            "SELECT COUNT(*) FROM pursuit_boundary_occurrences "
+            "WHERE run_id = ? AND decision_id = ?",
+            (loop._run.id, loop._run.boundary_decision.decision_id),
+        ).fetchone()[0]
+    assert repeated_boundary_occurrences == 2
 
 
 @pytest.mark.asyncio

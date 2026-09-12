@@ -10,6 +10,7 @@ import yaml
 import naumi_agent.harness.eval as eval_module
 from naumi_agent.harness.eval import evaluate_declared_suites, render_harness_eval
 from naumi_agent.harness.eval_models import EvalRunStatus
+from naumi_agent.ui.protocol import PROTOCOL_CAPABILITIES
 
 
 def _git(workspace: Path, *args: str) -> None:
@@ -54,14 +55,7 @@ def _workspace(tmp_path: Path, *, git: bool = True) -> tuple[Path, str]:
                         "expected": {
                             "outcome": "accepted",
                             "selected_version": 1,
-                            "capabilities": [
-                                "goal_snapshot",
-                                "heartbeat",
-                                "task_snapshot",
-                                "typed_ui_messages",
-                                "workbench_proposal_actions",
-                                "workbench_snapshot",
-                            ],
+                            "capabilities": sorted(PROTOCOL_CAPABILITIES),
                         },
                         "metrics": {
                             "primary": "protocol_outcome_match",

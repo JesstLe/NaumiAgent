@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -32,6 +33,10 @@ from naumi_agent.hooks.hook_manager import HookContext
 from naumi_agent.runtime.shell import create_shell_process, terminate_process_tree
 
 logger = logging.getLogger(__name__)
+
+_MAX_STDOUT_BYTES = 64 * 1024
+_MAX_STDERR_BYTES = 16 * 1024
+_READ_CHUNK_BYTES = 64 * 1024
 
 
 @dataclass
@@ -91,13 +96,12 @@ def create_shell_hook_runner(config: ShellHookConfig) -> Any:
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
             )
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(stdin_payload.encode()),
+            stdout, stdout_bytes, stderr, stderr_bytes = await _communicate_bounded(
+                proc,
+                stdin_payload.encode(),
                 timeout=config.timeout,
             )
         except TimeoutError:
-            if proc is not None:
-                await terminate_process_tree(proc)
             logger.warning(
                 "Shell hook timed out (%ds): %s", config.timeout, config.command,
             )
@@ -105,6 +109,21 @@ def create_shell_hook_runner(config: ShellHookConfig) -> Any:
         except Exception:
             logger.exception("Shell hook failed: %s", config.command)
             return
+
+        if stdout_bytes > len(stdout):
+            logger.warning(
+                "Shell hook stdout truncated (%d bytes retained of %d): %s",
+                len(stdout),
+                stdout_bytes,
+                config.command,
+            )
+        if stderr_bytes > len(stderr):
+            logger.warning(
+                "Shell hook stderr truncated (%d bytes retained of %d): %s",
+                len(stderr),
+                stderr_bytes,
+                config.command,
+            )
 
         if proc.returncode and proc.returncode != 0:
             stderr_text = stderr.decode(errors="replace").strip()
@@ -120,6 +139,85 @@ def create_shell_hook_runner(config: ShellHookConfig) -> Any:
 
     runner._shell_hook_config = config  # type: ignore[attr-defined]
     return runner
+
+
+async def _communicate_bounded(
+    proc: asyncio.subprocess.Process,
+    stdin_payload: bytes,
+    *,
+    timeout: float,
+) -> tuple[bytes, int, bytes, int]:
+    """Drain a hook process while retaining only bounded output previews."""
+    if proc.stdin is None or proc.stdout is None or proc.stderr is None:
+        await terminate_process_tree(proc, force=True)
+        raise RuntimeError("Shell hook 子进程缺少标准流管道。")
+
+    stdin_task = asyncio.create_task(_write_stdin(proc.stdin, stdin_payload))
+    stdout_task = asyncio.create_task(
+        _read_bounded(proc.stdout, max_bytes=_MAX_STDOUT_BYTES, keep_tail=False)
+    )
+    stderr_task = asyncio.create_task(
+        _read_bounded(proc.stderr, max_bytes=_MAX_STDERR_BYTES, keep_tail=True)
+    )
+    wait_task = asyncio.create_task(proc.wait())
+    completion = asyncio.gather(
+        stdin_task,
+        stdout_task,
+        stderr_task,
+        wait_task,
+    )
+    try:
+        await asyncio.wait_for(asyncio.shield(completion), timeout=timeout)
+    except TimeoutError:
+        await terminate_process_tree(proc)
+        await completion
+        raise
+    except asyncio.CancelledError:
+        await terminate_process_tree(proc)
+        await completion
+        raise
+    except Exception:
+        await terminate_process_tree(proc, force=True)
+        await asyncio.gather(completion, return_exceptions=True)
+        raise
+
+    stdout, stdout_bytes = stdout_task.result()
+    stderr, stderr_bytes = stderr_task.result()
+    return stdout, stdout_bytes, stderr, stderr_bytes
+
+
+async def _write_stdin(writer: asyncio.StreamWriter, payload: bytes) -> None:
+    try:
+        writer.write(payload)
+        await writer.drain()
+    except (BrokenPipeError, ConnectionResetError):
+        return
+    finally:
+        writer.close()
+        with contextlib.suppress(BrokenPipeError, ConnectionResetError):
+            await writer.wait_closed()
+
+
+async def _read_bounded(
+    stream: asyncio.StreamReader,
+    *,
+    max_bytes: int,
+    keep_tail: bool,
+) -> tuple[bytes, int]:
+    retained = bytearray()
+    total_bytes = 0
+    while chunk := await stream.read(_READ_CHUNK_BYTES):
+        total_bytes += len(chunk)
+        if keep_tail:
+            overflow = max(0, len(retained) + len(chunk) - max_bytes)
+            if overflow:
+                del retained[:overflow]
+            retained.extend(chunk[-max_bytes:])
+            continue
+        remaining = max_bytes - len(retained)
+        if remaining > 0:
+            retained.extend(chunk[:remaining])
+    return bytes(retained), total_bytes
 
 
 def _parse_shell_output(stdout_text: str, ctx: HookContext) -> None:

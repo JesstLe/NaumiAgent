@@ -2,12 +2,14 @@
 
 import asyncio
 import json
+import threading
+import time
 from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import UploadFile
+from fastapi import HTTPException, UploadFile
 from fastapi.testclient import TestClient
 
 import naumi_agent.api.routes.messages as message_routes
@@ -1036,7 +1038,18 @@ class TestMessageRoutes:
                     ahead=1,
                     behind=0,
                     error="",
-                    files=[],
+                    files=[
+                        SimpleNamespace(
+                            path="large.py",
+                            status="M",
+                            stage="unstaged",
+                            additions=2,
+                            deletions=1,
+                            patch="@@ -1 +1 @@\n-old\n+new",
+                            patch_truncated=True,
+                            patch_notice="补丁超过 512 KiB，仅显示开头部分。",
+                        )
+                    ],
                 )
 
         monkeypatch.setattr(message_routes, "ChatEnvironmentCollector", Collector)
@@ -1044,6 +1057,8 @@ class TestMessageRoutes:
         response = await get_git_diff(request, auth="test")
 
         assert response.branch == "audit"
+        assert response.files[0].patch_truncated is True
+        assert "512 KiB" in response.files[0].patch_notice
         engine.session_store.load.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -1100,6 +1115,174 @@ class TestMessageRoutes:
         persisted = await store.list_sources("sess_1")
         assert len(persisted) == 1
         assert persisted[0].id == response.id
+
+    @pytest.mark.asyncio
+    async def test_upload_source_keeps_same_named_references_immutable(self, tmp_path):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        engine = _FakeEngine()
+        engine.workspace_root = workspace
+        store = ChatRunStore(tmp_path / "chat-runs.db")
+        request = _fake_request(engine, store)
+
+        first = await upload_chat_source(
+            "sess_1",
+            request,
+            file=UploadFile(filename="note.txt", file=BytesIO(b"first")),
+            auth="test",
+        )
+        second = await upload_chat_source(
+            "sess_1",
+            request,
+            file=UploadFile(filename="note.txt", file=BytesIO(b"second")),
+            auth="test",
+        )
+
+        assert first.title == second.title == "note.txt"
+        assert first.path != second.path
+        assert (workspace / first.path).read_bytes() == b"first"
+        assert (workspace / second.path).read_bytes() == b"second"
+
+    @pytest.mark.asyncio
+    async def test_upload_source_rejects_oversized_file_without_partial_state(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        engine = _FakeEngine()
+        engine.workspace_root = workspace
+        store = ChatRunStore(tmp_path / "chat-runs.db")
+        request = _fake_request(engine, store)
+        monkeypatch.setattr(message_routes, "MAX_CHAT_SOURCE_BYTES", 4)
+
+        with pytest.raises(HTTPException) as exc:
+            await upload_chat_source(
+                "sess_1",
+                request,
+                file=UploadFile(filename="large.txt", file=BytesIO(b"12345")),
+                auth="test",
+            )
+
+        assert exc.value.status_code == 413
+        upload_dir = workspace / ".naumi" / "uploads" / "sess_1"
+        assert list(upload_dir.iterdir()) == []
+        assert await store.list_sources("sess_1") == []
+
+    @pytest.mark.asyncio
+    async def test_upload_source_accepts_exact_size_limit(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        engine = _FakeEngine()
+        engine.workspace_root = workspace
+        store = ChatRunStore(tmp_path / "chat-runs.db")
+        monkeypatch.setattr(message_routes, "MAX_CHAT_SOURCE_BYTES", 4)
+
+        response = await upload_chat_source(
+            "sess_1",
+            _fake_request(engine, store),
+            file=UploadFile(filename="folder\\note.txt", file=BytesIO(b"1234")),
+            auth="test",
+        )
+
+        assert response.title == "note.txt"
+        assert (workspace / response.path).read_bytes() == b"1234"
+
+    @pytest.mark.asyncio
+    async def test_upload_source_rejects_session_path_escape(self, tmp_path) -> None:
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        engine = _FakeEngine()
+        engine.workspace_root = workspace
+        store = ChatRunStore(tmp_path / "chat-runs.db")
+
+        with pytest.raises(HTTPException) as exc:
+            await upload_chat_source(
+                "../../outside",
+                _fake_request(engine, store),
+                file=UploadFile(filename="note.txt", file=BytesIO(b"content")),
+                auth="test",
+            )
+
+        assert exc.value.status_code == 400
+        assert not (tmp_path / "outside").exists()
+
+    @pytest.mark.asyncio
+    async def test_upload_source_rejects_cross_platform_invalid_filename(
+        self, tmp_path
+    ) -> None:
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        engine = _FakeEngine()
+        engine.workspace_root = workspace
+
+        with pytest.raises(HTTPException) as exc:
+            await upload_chat_source(
+                "sess_1",
+                _fake_request(engine, ChatRunStore(tmp_path / "chat-runs.db")),
+                file=UploadFile(filename="bad?.txt", file=BytesIO(b"content")),
+                auth="test",
+            )
+
+        assert exc.value.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_upload_source_removes_file_when_reference_persistence_fails(
+        self, tmp_path
+    ) -> None:
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        engine = _FakeEngine()
+        engine.workspace_root = workspace
+        store = ChatRunStore(tmp_path / "chat-runs.db")
+        store.add_source = AsyncMock(side_effect=RuntimeError("database unavailable"))
+
+        with pytest.raises(RuntimeError, match="database unavailable"):
+            await upload_chat_source(
+                "sess_1",
+                _fake_request(engine, store),
+                file=UploadFile(filename="note.txt", file=BytesIO(b"content")),
+                auth="test",
+            )
+
+        upload_dir = workspace / ".naumi" / "uploads" / "sess_1"
+        assert list(upload_dir.iterdir()) == []
+
+    @pytest.mark.asyncio
+    async def test_upload_source_does_not_block_event_loop(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        engine = _FakeEngine()
+        engine.workspace_root = workspace
+        store = ChatRunStore(tmp_path / "chat-runs.db")
+        event_loop_thread = threading.get_ident()
+        worker_threads: set[int] = set()
+
+        def slow_persist(source, target_path) -> None:
+            worker_threads.add(threading.get_ident())
+            time.sleep(0.25)
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_bytes(source.read())
+
+        monkeypatch.setattr(message_routes, "_persist_chat_upload", slow_persist)
+        pending = asyncio.create_task(
+            upload_chat_source(
+                "sess_1",
+                _fake_request(engine, store),
+                file=UploadFile(filename="note.txt", file=BytesIO(b"content")),
+                auth="test",
+            )
+        )
+        await asyncio.sleep(0.02)
+
+        assert not pending.done()
+        response = await pending
+        assert (workspace / response.path).read_bytes() == b"content"
+        assert worker_threads
+        assert event_loop_thread not in worker_threads
 
     @pytest.mark.asyncio
     async def test_add_chat_source_accepts_only_existing_workspace_file(
@@ -1168,6 +1351,33 @@ class TestMessageRoutes:
 
         assert engine.ran == ["Check the design"]
         assert "Acceptance: chat keeps three columns." in engine.turn_contexts[0]
+
+    @pytest.mark.asyncio
+    async def test_message_source_preview_is_bounded(self, tmp_path, monkeypatch) -> None:
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        source_path = workspace / "spec.md"
+        source_path.write_text("abcdefgh", encoding="utf-8")
+        engine = _FakeEngine()
+        engine.workspace_root = workspace
+        store = ChatRunStore(tmp_path / "chat-runs.db")
+        source = await store.add_source(
+            session_id="sess_1",
+            kind="file",
+            title="spec.md",
+            path="spec.md",
+        )
+        monkeypatch.setattr(message_routes, "CHAT_SOURCE_PREVIEW_CHARS", 4)
+
+        await send_message(
+            "sess_1",
+            MessageCreate(content="Read it", stream=False, source_ids=[source.id]),
+            _fake_request(engine, store),
+            auth="test",
+        )
+
+        assert "abcd" in engine.turn_contexts[0]
+        assert "efgh" not in engine.turn_contexts[0]
 
     @pytest.mark.asyncio
     async def test_existing_issue_is_linked_into_turn_context(self, tmp_path) -> None:

@@ -49,6 +49,10 @@
       "state": "supported",
       "evidence": ["src/naumi_agent/tui/app.py", "tests/unit/test_terminal_control_parity.py"]
     },
+    "pursuit_recovery_action": {
+      "state": "supported",
+      "evidence": ["src/naumi_agent/tui/app.py", "tests/unit/test_main_pursue_dispatch.py"]
+    },
     "queued_send_now": {
       "state": "supported",
       "evidence": ["src/naumi_agent/tui/app.py", "tests/unit/test_tui.py"]

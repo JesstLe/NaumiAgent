@@ -216,6 +216,16 @@ class PursuitStore:
         return self._db_path
 
     def save_run(self, run: PursuitRun) -> None:
+        boundary_decision_id = (
+            run.boundary_decision.decision_id
+            if run.boundary_decision is not None
+            else ""
+        )
+        boundary_recorded_at = (
+            run.boundary_decision_recorded_at or run.updated_at
+            if run.boundary_decision is not None
+            else 0.0
+        )
         with self._connect() as conn:
             conn.execute(
                 """
@@ -223,8 +233,8 @@ class PursuitStore:
                     id, goal, status, phase, started_at, updated_at, iteration,
                     criteria_total, criteria_verified, failure_count,
                     blocked_reason, next_action, worktree_name, worktree_path,
-                    boundary_decision_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    boundary_decision_id, boundary_decision_recorded_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     goal=excluded.goal,
                     status=excluded.status,
@@ -238,7 +248,9 @@ class PursuitStore:
                     next_action=excluded.next_action,
                     worktree_name=excluded.worktree_name,
                     worktree_path=excluded.worktree_path,
-                    boundary_decision_id=excluded.boundary_decision_id
+                    boundary_decision_id=excluded.boundary_decision_id,
+                    boundary_decision_recorded_at=
+                        excluded.boundary_decision_recorded_at
                 """,
                 (
                     run.id,
@@ -255,11 +267,8 @@ class PursuitStore:
                     run.next_action,
                     run.worktree_name,
                     run.worktree_path,
-                    (
-                        run.boundary_decision.decision_id
-                        if run.boundary_decision is not None
-                        else ""
-                    ),
+                    boundary_decision_id,
+                    boundary_recorded_at,
                 ),
             )
             conn.execute("DELETE FROM pursuit_evidence WHERE run_id = ?", (run.id,))
@@ -312,7 +321,7 @@ class PursuitStore:
                         decision.decision_id,
                         payload,
                         payload_digest,
-                        run.updated_at,
+                        boundary_recorded_at,
                     ),
                 )
                 stored = conn.execute(
@@ -337,6 +346,14 @@ class PursuitStore:
                     raise PursuitStoreConflictError(
                         "相同 boundary decision identity 对应不同 payload。"
                     )
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO pursuit_boundary_occurrences (
+                        run_id, decision_id, recorded_at
+                    ) VALUES (?, ?, ?)
+                    """,
+                    (run.id, decision.decision_id, boundary_recorded_at),
+                )
 
     def get_run(self, run_id: str) -> PursuitRun | None:
         with self._connect() as conn:
@@ -692,7 +709,21 @@ class PursuitStore:
                         "PursuitRun 的机械裁判指针缺少对应记录。",
                     )
                 boundary = _boundary_decision_from_row(boundary_row)
-                boundary_recorded_at = float(boundary_row["recorded_at"])
+                boundary_recorded_at = float(
+                    run_row["boundary_decision_recorded_at"]
+                )
+                occurrence = conn.execute(
+                    """
+                    SELECT 1 FROM pursuit_boundary_occurrences
+                    WHERE run_id = ? AND decision_id = ? AND recorded_at = ?
+                    """,
+                    (current.run_id, boundary_id, boundary_recorded_at),
+                ).fetchone()
+                if occurrence is None:
+                    raise PursuitRecoveryReconcileError(
+                        "terminal_evidence_missing",
+                        "PursuitRun 的机械裁决发生记录缺失。",
+                    )
                 if boundary_recorded_at <= current.admitted_at:
                     raise PursuitRecoveryReconcileError(
                         "terminal_evidence_not_post_admission",
@@ -3912,7 +3943,8 @@ class PursuitStore:
         ):
             return None
         run_row = conn.execute(
-            "SELECT status, boundary_decision_id FROM pursuit_runs WHERE id = ?",
+            "SELECT status, boundary_decision_id, boundary_decision_recorded_at "
+            "FROM pursuit_runs WHERE id = ?",
             (checkpoint.run_id,),
         ).fetchone()
         if run_row is None:
@@ -3933,9 +3965,18 @@ class PursuitStore:
         if boundary_row is None:
             raise PursuitStoreConflictError("terminal outbox 机械裁判指针无效。")
         boundary = _boundary_decision_from_row(boundary_row)
-        boundary_recorded_at = float(boundary_row["recorded_at"])
+        boundary_recorded_at = float(run_row["boundary_decision_recorded_at"])
+        occurrence = conn.execute(
+            """
+            SELECT 1 FROM pursuit_boundary_occurrences
+            WHERE run_id = ? AND decision_id = ? AND recorded_at = ?
+            """,
+            (checkpoint.run_id, boundary_id, boundary_recorded_at),
+        ).fetchone()
         if (
-            boundary.status != checkpoint.status
+            occurrence is None
+            or boundary_recorded_at <= 0
+            or boundary.status != checkpoint.status
             or not attempt.admitted_at < boundary_recorded_at <= checkpoint.created_at
         ):
             raise PursuitStoreConflictError(
@@ -5005,10 +5046,20 @@ class PursuitStore:
         if boundary_row is None:
             raise PursuitStoreError("恢复对账回执引用的机械裁判不存在。")
         boundary = _boundary_decision_from_row(boundary_row)
+        occurrence = conn.execute(
+            """
+            SELECT 1 FROM pursuit_boundary_occurrences
+            WHERE run_id = ? AND decision_id = ? AND recorded_at = ?
+            """,
+            (
+                receipt.run_id,
+                receipt.boundary_decision_id,
+                receipt.boundary_recorded_at,
+            ),
+        ).fetchone()
         if (
-            boundary.code != receipt.result_code
-            or float(boundary_row["recorded_at"])
-            != receipt.boundary_recorded_at
+            occurrence is None
+            or boundary.code != receipt.result_code
         ):
             raise PursuitStoreError("恢复对账回执与机械裁判不一致。")
         checkpoint = self._get_checkpoint_with_connection(
@@ -5167,7 +5218,8 @@ class PursuitStore:
                         next_action TEXT NOT NULL DEFAULT '',
                         worktree_name TEXT NOT NULL DEFAULT '',
                         worktree_path TEXT NOT NULL DEFAULT '',
-                        boundary_decision_id TEXT NOT NULL DEFAULT ''
+                        boundary_decision_id TEXT NOT NULL DEFAULT '',
+                        boundary_decision_recorded_at REAL NOT NULL DEFAULT 0
                     )
                     """
                 )
@@ -5228,6 +5280,19 @@ class PursuitStore:
                     )
                     """
                 )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS pursuit_boundary_occurrences (
+                        run_id TEXT NOT NULL,
+                        decision_id TEXT NOT NULL,
+                        recorded_at REAL NOT NULL,
+                        PRIMARY KEY(run_id, decision_id, recorded_at),
+                        FOREIGN KEY(run_id, decision_id)
+                            REFERENCES pursuit_boundary_decisions(run_id, decision_id)
+                            ON DELETE CASCADE
+                    )
+                    """
+                )
                 run_columns = {
                     str(row["name"])
                     for row in conn.execute("PRAGMA table_info(pursuit_runs)")
@@ -5250,6 +5315,34 @@ class PursuitStore:
                         WHERE boundary_decision_id = ''
                         """
                     )
+                if "boundary_decision_recorded_at" not in run_columns:
+                    conn.execute(
+                        "ALTER TABLE pursuit_runs ADD COLUMN "
+                        "boundary_decision_recorded_at REAL NOT NULL DEFAULT 0"
+                    )
+                    conn.execute(
+                        """
+                        UPDATE pursuit_runs
+                        SET boundary_decision_recorded_at = COALESCE((
+                            SELECT recorded_at
+                            FROM pursuit_boundary_decisions
+                            WHERE run_id = pursuit_runs.id
+                              AND decision_id = pursuit_runs.boundary_decision_id
+                        ), 0)
+                        WHERE boundary_decision_id != ''
+                        """
+                    )
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO pursuit_boundary_occurrences (
+                        run_id, decision_id, recorded_at
+                    )
+                    SELECT id, boundary_decision_id, boundary_decision_recorded_at
+                    FROM pursuit_runs
+                    WHERE boundary_decision_id != ''
+                      AND boundary_decision_recorded_at > 0
+                    """
+                )
                 conn.execute(
                     """
                     CREATE TABLE IF NOT EXISTS pursuit_actions (
@@ -5872,6 +5965,7 @@ def _run_from_rows(
             if boundary_row is not None
             else None
         ),
+        boundary_decision_recorded_at=float(row["boundary_decision_recorded_at"]),
     )
 
 

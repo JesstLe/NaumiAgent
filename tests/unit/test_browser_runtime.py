@@ -6,6 +6,10 @@ import asyncio
 import json
 import os
 import platform
+import socket
+import subprocess
+import sys
+import threading
 import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -16,7 +20,10 @@ from naumi_agent.tools.browser.runtime.artifact_store import (
     ArtifactStore,
     _sanitize_segment,
 )
-from naumi_agent.tools.browser.runtime.browser_runtime import BrowserRuntime
+from naumi_agent.tools.browser.runtime.browser_runtime import (
+    MAX_FFMPEG_STDERR_BYTES,
+    BrowserRuntime,
+)
 from naumi_agent.tools.browser.runtime.chrome_launcher import (
     ChromeLauncher,
     _expand_home,
@@ -221,6 +228,77 @@ class TestChromeLauncher:
         info = launcher.get_debug_info()
         assert "platform" in info
         assert "cdp_port" in info
+
+    def test_profile_sync_uses_cookie_file_age(self, tmp_path: Path) -> None:
+        launcher = ChromeLauncher()
+        launcher.debug_profile_dir = tmp_path
+        target = tmp_path / launcher.chrome_profile
+        target.mkdir()
+        cookie_file = target / "Cookies"
+        cookie_file.write_bytes(b"cookie")
+
+        launcher.staleness_threshold_ms = 60_000
+        assert launcher._is_profile_sync_needed() is False
+
+        old_timestamp = time.time() - 120
+        os.utime(cookie_file, (old_timestamp, old_timestamp))
+        assert launcher._is_profile_sync_needed() is True
+
+    def test_find_available_port_skips_active_listener(self) -> None:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            listener.bind(("127.0.0.1", 0))
+            listener.listen()
+            occupied_port = listener.getsockname()[1]
+            launcher = ChromeLauncher(cdp_port=occupied_port)
+
+            selected = launcher._find_available_port(occupied_port)
+
+        assert selected > occupied_port
+
+    @pytest.mark.asyncio
+    async def test_ensure_ready_serializes_launch_and_offloads_profile_sync(self) -> None:
+        launcher = ChromeLauncher(cdp_port=9222)
+        active_results = iter((False, True))
+        checked_ports: list[int] = []
+
+        async def is_cdp_active(port: int) -> bool:
+            checked_ports.append(port)
+            return next(active_results)
+
+        launcher._is_cdp_active = is_cdp_active
+        event_loop_thread = threading.get_ident()
+        sync_threads: list[int] = []
+
+        def sync_profile() -> dict[str, object]:
+            sync_threads.append(threading.get_ident())
+            return {"synced_files": 1, "errors": []}
+
+        launcher._is_profile_sync_needed = MagicMock(return_value=True)
+        launcher._sync_profile = sync_profile
+        launcher._find_available_port = MagicMock(return_value=9223)
+        launcher._launch_chrome = MagicMock()
+        launcher._wait_for_cdp = AsyncMock(return_value=True)
+
+        launched, reused = await asyncio.gather(
+            launcher.ensure_ready(),
+            launcher.ensure_ready(),
+        )
+
+        assert launched == {
+            "endpoint": "http://127.0.0.1:9223",
+            "launched": True,
+            "synced": True,
+            "port": 9223,
+        }
+        assert reused == {
+            "endpoint": "http://127.0.0.1:9223",
+            "launched": False,
+            "synced": False,
+            "port": 9223,
+        }
+        assert checked_ports == [9222, 9223]
+        assert sync_threads and sync_threads[0] != event_loop_thread
+        launcher._launch_chrome.assert_called_once_with(9223)
 
     def test_kill_chrome_no_process(self) -> None:
         launcher = ChromeLauncher()
@@ -626,6 +704,124 @@ def _attached_runtime_fixture(
     runtime._playwright = MagicMock(chromium=fake_chromium)
     runtime._start_attached_screencast = AsyncMock()
     return runtime, fake_context
+
+
+class TestAttachedScreencastEncoding:
+    @pytest.mark.asyncio
+    async def test_ffmpeg_probe_runs_off_event_loop_with_timeout(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+    ) -> None:
+        event_loop_thread = threading.get_ident()
+        probe_thread = None
+        probe_kwargs = None
+
+        def probe(*args, **kwargs):
+            nonlocal probe_thread, probe_kwargs
+            probe_thread = threading.get_ident()
+            probe_kwargs = kwargs
+            return subprocess.CompletedProcess(args[0], 0)
+
+        monkeypatch.setattr(subprocess, "run", probe)
+        runtime = BrowserRuntime(tmp_path)
+
+        assert await runtime._detect_ffmpeg_availability()
+        assert probe_thread != event_loop_thread
+        assert probe_kwargs is not None
+        assert probe_kwargs["timeout"] == 5
+        assert probe_kwargs["check"] is False
+
+    @pytest.mark.asyncio
+    async def test_ffmpeg_failure_bounds_stderr_and_removes_partial_video(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+    ) -> None:
+        encoder = tmp_path / "fake_ffmpeg_failure.py"
+        encoder.write_text(
+            "import pathlib, sys\n"
+            "pathlib.Path(sys.argv[1]).write_bytes(b'partial')\n"
+            "sys.stderr.buffer.write(b'x' * 300_000)\n"
+            "raise SystemExit(7)\n",
+            encoding="utf-8",
+        )
+        output_path = tmp_path / "recording.webm"
+        real_spawn = asyncio.create_subprocess_exec
+
+        async def spawn_fake_ffmpeg(*_args, **kwargs):
+            return await real_spawn(
+                sys.executable,
+                str(encoder),
+                str(output_path),
+                **kwargs,
+            )
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn_fake_ffmpeg)
+        runtime = BrowserRuntime(tmp_path)
+
+        with pytest.raises(RuntimeError, match="stderr 已截断") as exc_info:
+            await runtime._encode_screencast_frames_to_webm(
+                input_pattern=str(tmp_path / "%08d.jpg"),
+                output_path=str(output_path),
+                fps=10,
+            )
+
+        assert "原始大小 300000 字节" in str(exc_info.value)
+        assert len(str(exc_info.value)) < MAX_FFMPEG_STDERR_BYTES
+        assert not output_path.exists()
+
+    @pytest.mark.asyncio
+    async def test_ffmpeg_cancellation_reaps_process_and_removes_partial_video(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+    ) -> None:
+        encoder = tmp_path / "fake_ffmpeg_sleep.py"
+        encoder.write_text(
+            "import pathlib, sys, time\n"
+            "pathlib.Path(sys.argv[1]).write_bytes(b'partial')\n"
+            "time.sleep(60)\n",
+            encoding="utf-8",
+        )
+        output_path = tmp_path / "recording.webm"
+        real_spawn = asyncio.create_subprocess_exec
+        created = asyncio.Event()
+        process = None
+
+        async def spawn_fake_ffmpeg(*_args, **kwargs):
+            nonlocal process
+            process = await real_spawn(
+                sys.executable,
+                str(encoder),
+                str(output_path),
+                **kwargs,
+            )
+            created.set()
+            return process
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn_fake_ffmpeg)
+        runtime = BrowserRuntime(tmp_path)
+        task = asyncio.create_task(
+            runtime._encode_screencast_frames_to_webm(
+                input_pattern=str(tmp_path / "%08d.jpg"),
+                output_path=str(output_path),
+                fps=10,
+            )
+        )
+        await asyncio.wait_for(created.wait(), timeout=5)
+        for _ in range(100):
+            if output_path.exists():
+                break
+            await asyncio.sleep(0.01)
+
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert process is not None
+        assert process.returncode is not None
+        assert not output_path.exists()
 
 
 class TestBrowserRuntimeInit:

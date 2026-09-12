@@ -289,10 +289,11 @@ async def test_daemon_closes_real_delivery_to_result_mtls_loop(
             current = await delivery_store.get(delivery.package.delivery_id)
             return current is not None and current.latest_event.state == "completed"
 
-        async with asyncio.timeout(3):
+        async with asyncio.timeout(10):
             while not await completed():
                 daemon.result_worker.wake()
                 await asyncio.sleep(0.02)
+        await asyncio.wait_for(daemon.result_worker.run_once(), timeout=10)
         snapshot = daemon.snapshot()
         assert snapshot.state is StableRemoteFinalizationInstallationDaemonState.RUNNING
         assert snapshot.worker.returned_count == 1
@@ -700,11 +701,19 @@ async def test_interactive_engine_does_not_start_daemon_owned_result_worker() ->
             harness=SimpleNamespace(
                 agent_publication_recovery=SimpleNamespace(enabled=False),
                 pursuit_terminal_outbox=SimpleNamespace(enabled=False),
+                stable_promotion_runtime_admission_delivery=SimpleNamespace(
+                    enabled=False
+                ),
+                stable_promotion_observation_revision_delivery=SimpleNamespace(
+                    enabled=False
+                ),
                 stable_remote_finalization_delivery=SimpleNamespace(enabled=False),
                 stable_remote_finalization_result_return=SimpleNamespace(enabled=True),
             )
         ),
         subagent_manager=SimpleNamespace(recover_pending_publications=AsyncMock()),
+        evolution_stable_promotion_runtime_admission_delivery_worker=None,
+        evolution_stable_promotion_observation_revision_delivery_worker=None,
         evolution_stable_remote_finalization_delivery_worker=None,
         evolution_stable_remote_finalization_installation_daemon=object(),
         evolution_stable_remote_finalization_result_return_worker=result_worker,

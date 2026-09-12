@@ -204,6 +204,7 @@ async def test_bridge_and_tui_publish_same_interaction_and_normalize_answer() ->
         emit=emit,
         _schedule_pending_interaction_timeout=lambda _request_id: None,
         _schedule_pending_interaction_owner_renewal=lambda _request_id: None,
+        _schedule_interaction_recovery_fill=lambda: None,
     )
     bridge_task = asyncio.create_task(
         JsonlEngineBridge.request_user_interaction(bridge_context, payload)

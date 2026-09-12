@@ -44,7 +44,10 @@ def _install_engine(
     module.create_agent_engine = create_agent_engine  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, module.__name__, module)
     monkeypatch.setattr(main_module, "_resolve_config_path", lambda path: path)
-    parsed = SimpleNamespace(log_level="INFO")
+    parsed = SimpleNamespace(
+        log_level="INFO",
+        engine=SimpleNamespace(provider="naumi"),
+    )
     monkeypatch.setattr(
         main_module.AppConfig,
         "from_yaml",

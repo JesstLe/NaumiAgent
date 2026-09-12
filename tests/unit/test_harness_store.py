@@ -179,8 +179,12 @@ async def test_schema_migration_is_idempotent_and_adds_current_tables(
         "harness_sandbox_admission_retry_attempts",
         "harness_sandbox_retry_dispatches",
         "harness_sandbox_eval_requests",
+        "harness_sandbox_retry_prune_attempts",
+        "harness_sandbox_retry_prune_executions",
+        "harness_runtime_release_bindings",
+        "harness_runtime_release_observations",
     }
-    assert version == HARNESS_STORE_SCHEMA_VERSION == 21
+    assert version == HARNESS_STORE_SCHEMA_VERSION
     assert rows == 1
 
 

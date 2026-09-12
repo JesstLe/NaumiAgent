@@ -48,6 +48,7 @@ def _repo(root: Path) -> str:
     _git(root, "init", "-b", "main")
     _git(root, "config", "user.name", "Naumi Test")
     _git(root, "config", "user.email", "naumi@example.invalid")
+    _git(root, "config", "core.autocrlf", "false")
     source = root / "src" / "naumi_agent" / "state"
     source.mkdir(parents=True)
     (source / "schema.py").write_text("VERSION = 1\n", encoding="utf-8")
