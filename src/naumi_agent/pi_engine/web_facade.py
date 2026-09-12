@@ -121,15 +121,34 @@ class PiWebEngine:
             except PiRpcError as exc:
                 return _result("error", "", str(exc), _empty_usage())
 
+            pi_cfg = getattr(getattr(self._config, "engine", None), "pi", None)
+            stall_timeout = float(
+                getattr(pi_cfg, "stall_timeout_seconds", 300) or 300
+            )
             while True:
-                event = await self._events.get()
+                try:
+                    event = await asyncio.wait_for(
+                        self._events.get(), timeout=stall_timeout
+                    )
+                except TimeoutError:
+                    try:
+                        await rpc.abort()
+                    except PiRpcError:
+                        pass
+                    return _result(
+                        "error",
+                        translator.final_text(),
+                        f"pi 引擎已 {int(stall_timeout)} 秒没有任何事件输出，"
+                        "已自动中止。可重试或换用更强模型。",
+                        translator,
+                    )
                 kind = str(event.get("type") or "")
                 if kind == "__rpc_error__":
                     return _result(
                         "error",
-                        "",
+                        translator.final_text(),
                         str(event.get("error") or "RPC 通道错误。"),
-                        _empty_usage(),
+                        translator,
                     )
                 if kind == PiEventType.EXTENSION_UI_REQUEST:
                     await self._answer_extension_dialog(rpc, event)
