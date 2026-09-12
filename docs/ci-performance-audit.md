@@ -38,3 +38,5 @@ Archive Admission 的并发测试还暴露 `ReleaseSlotStore.install()` 缺少�
 `test_engine.py` 在 Linux coverage 模式下超过统一 10 分钟文件上限，但此前已持续执行并非死锁。CI 仍对普通 unit 文件保留 10 分钟上限，仅为该已知大文件设置 20 分钟；长期修复仍是拆分超大的 Engine 与测试文件。`/evolution` 命令索引也补回 rollback execute/outcome 的明确语法，避免通配提示掩盖真实可用子命令。
 
 命令索引模型将语法提示限制为 300 字符；补充 rollback 子命令后一度越界。提示现将四个 discover 子命令折叠为 `discover-*`，保留需要被明确发现和测试的 approval 与 rollback 子命令，总长度为 299 字符。
+
+死代码扫描还发现长期记忆 `forget_old(max_age_days=...)` 在两阶段遗忘改造后遗失了参数接线，调用方传入自定义保留期也始终按固定 90 天执行。当前保留 `0` 代表默认策略的兼容语义，正数会覆盖进入 dormant 的天数，负数策略会在接触 ChromaDB 前明确拒绝；定向记忆测试覆盖默认策略、自定义策略、永久删除与非法输入。
