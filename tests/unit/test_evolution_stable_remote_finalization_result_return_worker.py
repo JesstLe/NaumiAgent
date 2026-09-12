@@ -200,6 +200,7 @@ async def test_result_return_recovers_writer_after_key_failure_and_expiry(
     assert final is not None and final.latest_event.state == "completed"
 
 
+@pytest.mark.skipif(__import__("os").name == "nt", reason="slot fixture 使用 POSIX executable")
 @pytest.mark.asyncio
 async def test_result_return_store_fences_stale_owner_and_detects_journal_tamper(
     tmp_path: Path,
@@ -242,6 +243,7 @@ async def test_result_return_store_fences_stale_owner_and_detects_journal_tamper
     assert corrupt.value.code == "stable_remote_delivery_journal_corrupt"
 
 
+@pytest.mark.skipif(__import__("os").name == "nt", reason="slot fixture 使用 POSIX executable")
 @pytest.mark.asyncio
 async def test_result_return_claim_is_single_winner_under_concurrency(
     tmp_path: Path,
@@ -268,6 +270,7 @@ async def test_result_return_claim_is_single_winner_under_concurrency(
     assert winners[0].latest_event.claim_epoch == 1
 
 
+@pytest.mark.skipif(__import__("os").name == "nt", reason="slot fixture 使用 POSIX executable")
 @pytest.mark.asyncio
 async def test_result_return_journal_anti_join_does_not_starve_new_records(
     tmp_path: Path,
