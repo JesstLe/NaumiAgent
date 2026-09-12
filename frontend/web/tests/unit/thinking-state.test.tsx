@@ -43,6 +43,7 @@ describe('Web2 execution trace', () => {
     expect(container.textContent?.match(/本次任务：/g)).toHaveLength(1)
     expect(container).toHaveTextContent('已压缩上下文：41 → 4 条消息')
     expect(container).not.toHaveTextContent('执行进度已更新 · 已完成')
+    expect(screen.getByRole('status', { name: '流式思考摘要' })).toHaveTextContent('执行链路正在恢复，并重新确认后续步骤。')
     expect(container).toHaveTextContent('刚刚有新进展')
   })
 
@@ -59,6 +60,7 @@ describe('Web2 execution trace', () => {
     expect(screen.getByRole('button', { name: '正在推进：编写 Three.js 界面代码' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '正在推理' })).not.toBeInTheDocument()
     expect(container.textContent?.match(/正在推进：编写 Three\.js 界面代码/g)).toHaveLength(1)
+    expect(screen.getByRole('status', { name: '流式思考摘要' })).toHaveTextContent('当前聚焦“编写 Three.js 界面代码”，正在准备下一项可验证操作。')
   })
 
   it('reserves task completion wording for a terminal completed run', () => {
