@@ -529,13 +529,6 @@
 }
 .w2-panel-controls { display: flex; gap: 5px; flex-shrink: 0; }
 .w2-chat-panel-controls.right-open { display: none; }
-.w2-chat-summary { flex: 0 1 auto; max-height: 45%; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 0 22px 18px; border-bottom: 1px solid var(--w2-line); }
-.w2-summary-heading { display: flex; align-items: center; gap: 5px; padding: 8px 0 14px; position: sticky; top: 0; background: #fff; z-index: 1; }
-.w2-summary-heading > button:not(.w2-icon) { padding: 5px 12px; font-size: 12px; border-radius: 4px; }
-.w2-summary-heading > button[aria-pressed=true] { background: #f0f2ed; }
-.w2-summary-heading > .w2-icon { margin-left: auto; }
-.w2-todo-progress { display: flex; gap: 8px; align-items: center; width: 100%; font-size: 12px; }
-.w2-todo-progress > span { margin-left: auto; color: #8b9282; }
 .w2-conversation {
   flex: 1;
   min-height: 0;
@@ -813,6 +806,22 @@
   min-height: 0;
   overflow: auto;
   padding: 16px 24px;
+}
+.w2-deferred {
+  display: flex;
+  min-height: 116px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #858b81;
+  font-size: 12px;
+}
+.w2-deferred-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(245, 247, 242, .72);
+  backdrop-filter: blur(2px);
 }
 .w2-section-heading {
   display: flex;
@@ -1154,14 +1163,6 @@
 .w2-message:focus-within .w2-message-actions {
   opacity: 1;
 }
-.w2-working {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: #8a9481;
-  padding-top: 8px;
-}
 .w2-error {
   display: flex;
   align-items: center;
@@ -1252,15 +1253,6 @@
   border-radius: 8px;
   display: block;
   width: 100%;
-}
-.w2-legacy-link {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  color: #8b9583;
-  font-size: 12px;
-  margin-top: 17px;
 }
 .w2-shortcuts p {
   display: flex;
@@ -1691,11 +1683,6 @@
 .w2-todo-form label { display: grid; gap: 7px; font-size: 12px; color: #89907f; }
 .w2-todo-form input, .w2-goal-form textarea { width: 100%; border: 1px solid #e3e7de; border-radius: 5px; background: #fff; padding: 9px; font-size: 13px; }
 .w2-todo-form .w2-primary { display: flex; gap: 5px; align-items: center; justify-content: center; width: auto; justify-self: end; }
-.w2-todo-inline { border: 1px solid #e8ebe4; border-radius: 7px; margin-bottom: 12px; padding: 9px 12px; max-height: 165px; overflow: auto; }
-.w2-todo-inline summary { display: flex; gap: 8px; align-items: center; cursor: pointer; font-size: 12px; }
-.w2-todo-inline summary span { margin-left: auto; color: #9b9f93; }
-.w2-todo-inline .w2-todo { font-size: 12px; padding: 7px 0; }
-
 .w2-goal-tabs { display: flex; gap: 5px; align-items: center; padding-bottom: 18px; border-bottom: 1px solid #eceee7; }
 .w2-goal-tabs button { padding: 6px 12px; font-size: 12px; border-radius: 4px; }
 .w2-goal-tabs button[aria-pressed=true] { background: #eef1e9; }
