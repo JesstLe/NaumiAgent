@@ -88,3 +88,5 @@ Workbench 右侧 Diff 面板原先为每个文件并发执行 Git，并通过 `c
 分片 6 发现 Harness 工具证据虽然字段名为 `result_size_bytes`，却优先读取字符数 `content_length`；包含中文等多字节字符时会把 17 字节记录成 13，影响证据大小审计。Engine 已同时发布权威 `content_bytes`，Collector 现优先使用该字段，旧事件缺少字段时再从内容按 UTF-8 计算。
 
 分片 4 的 Store Catalog 测试同时引用 `AGENT_JOB_SCHEMA_VERSION` 又硬编码旧值 6；Agent Job Store 已按迁移链升级为 7，Catalog 本身正确。断言现只验证 Catalog 与权威常量一致，避免下一次合法 schema 迁移继续产生伪失败。
+
+分片 9 暴露 Browser TaskRunner 的终态发布顺序：任务字典先写入 `completed` 或等待态，持久 heartbeat 随后才写入 `stopped`/`waiting`，因此 UI 和调用方可以真实观察到“任务已完成但心跳仍 running”的矛盾状态。终态现先提交 heartbeat，再原子更新对外 run status 并发送 `run_finished`；等待和恢复仍在状态持久化前同步 heartbeat snapshot。
