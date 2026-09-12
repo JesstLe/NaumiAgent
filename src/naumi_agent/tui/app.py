@@ -2030,12 +2030,14 @@ class NaumiApp(App):
     @work(exclusive=False, exit_on_error=False)
     async def _recover_session_reconciliations(self) -> None:
         status = self.query_one(StatusBar)
+        initial_status = status.status_text
         try:
             results = await self.engine.start_long_running_services()
         except Exception:
-            status.status_text = (
-                "会话协调恢复失败，周期清理未启动；请运行 /doctor 查看诊断"
-            )
+            if status.status_text == initial_status:
+                status.status_text = (
+                    "会话协调恢复失败，周期清理未启动；请运行 /doctor 查看诊断"
+                )
             return
         patch_status_getter = getattr(
             self.engine,
@@ -2068,7 +2070,8 @@ class NaumiApp(App):
             parts.append(f"会话协调恢复: {completed}/{len(results)} 完成")
         if sandbox_recovery_summary:
             parts.append(sandbox_recovery_summary)
-        status.status_text = " | ".join(parts)
+        if status.status_text == initial_status:
+            status.status_text = " | ".join(parts)
 
     async def _surface_sandbox_retry_recovery(self) -> str:
         """Show bounded restart work without claiming a retry dispatch."""
