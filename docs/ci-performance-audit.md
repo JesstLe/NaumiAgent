@@ -125,7 +125,9 @@ Workbench 右侧 Diff 面板原先为每个文件并发执行 Git，并通过 `c
 
 后续异步子进程复扫发现 `code_execute` 虽然最终只显示 100 KiB 输出，却先通过 `communicate()` 将 stdout 与 stderr 全量读入内存，再做字符串截断。失控代码在最长 60 秒窗口内可能持续输出并显著放大 Agent 内存。Docker 与本地降级执行现并发排空两个管道，每路只保留 100 KiB 预览，同时累计真实字节数用于明确截断提示；超时或调用任务取消都会终止并等待子进程退出后再收口 reader。Docker 可用性探针超时也不再遗留后台进程。真实本地 Python 的正常、异常、超时、空输出、双管道各 300 KiB 输出及探针超时场景共 27 个用例通过；首次 26 用例 coverage 运行通过，新增探针回收用例由下一轮 CI 覆盖。
 
-运行 `34699094393` 的分片 5 随后暴露 Independent Review Store 的首次连接竞态：多个执行器同时打开同一 SQLite 文件时，每个业务方法都会重复执行 schema 初始化并切换 `journal_mode=WAL`，其中一个连接持有初始化锁时，另一个连接会直接收到 `database is locked`。Store 现将 schema 初始化从业务事务中分离，同一实例只执行一次，并为所有连接设置 10 秒 `busy_timeout`；多个 Store 实例同时首次初始化时，WAL 切换对锁冲突进行最长 10 秒的有界重试。真实 SQLite 回归分别覆盖同一 Store 8 路首次 claim 和 8 个 Store 实例同时初始化同一数据库，coverage 模式为 2 passed。
+运行 `34699094393` 的分片 5 首先暴露 Independent Review Store 的首次连接竞态：多个执行器同时打开同一 SQLite 文件时，每个业务方法都会重复执行 schema 初始化并切换 `journal_mode=WAL`，其中一个连接持有初始化锁时，另一个连接会直接收到 `database is locked`。初步修复让该 Store 本身收口后，运行 `34700474681` 又在同一端到端链路的 Decision Input Store 复现相同竞态，证明根因属于共享 `evolution.db` 的跨 Store 初始化协议，而非单张表。
+
+SQLite WAL 配置现收敛到 persistence 公共层：读取当前 journal mode 和切换 WAL 都对锁冲突执行最长 10 秒的有界重试，Decision Input、Mechanical Gate 与 Independent Review 三个 Store 将 schema 初始化从业务事务中分离，每个物理数据库文件只初始化一次；数据库被删除重建后会按文件身份重新建表，不会被实例缓存误判为已就绪。回归同时启动 4 个 Decision Store、4 个 Mechanical Gate Store 与 4 个 Independent Review Store 初始化同一文件，并保留同一 Store 8 路 claim、8 个 Store claim 及文件重建场景；普通与 CI 同等 coverage 模式均为 4 passed。
 
 生命周期 Shell Hook 也会通过 `communicate()` 全量缓存外部命令的 stdout 与 stderr；用户配置的 Hook 在超时窗口内持续输出时，可以直接放大主 Agent 内存，调用任务被取消时也没有进入既有的超时回收路径。Hook 现并发排空三个标准流，stdout 只保留前 64 KiB 以解析首行控制 JSON，stderr 只保留末尾 16 KiB 供故障日志使用，并统计真实字节数形成截断告警；超时、取消和标准流异常都会终止并等待整个进程树。真实 300 KiB 双管道输出与运行中取消场景均通过，Shell Hook 文件在 coverage 模式为 13 passed。
 
