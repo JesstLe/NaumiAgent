@@ -363,10 +363,14 @@ class LongTermMemory:
     async def forget_old(self, max_age_days: int = 0, min_access_count: int = 1) -> int:
         """两阶段遗忘：先标记 dormant，再删除超期的 dormant.
 
-        Phase 1: 将超过 dormant_after_days 且低频的 active 记忆标记为 dormant.
+        Phase 1: 将超过 max_age_days（0 表示默认策略）且低频的 active 记忆标记为 dormant.
         Phase 2: 将超过 delete_after_days 的 dormant 记忆永久删除.
         protected 类别（preference）获得额外保护期.
         """
+        if max_age_days < 0:
+            raise ValueError("max_age_days 不能为负数")
+        if min_access_count < 0:
+            raise ValueError("min_access_count 不能为负数")
         self._ensure_initialized()
 
         all_data = self._collection.get(include=["metadatas", "documents"])
@@ -392,7 +396,7 @@ class LongTermMemory:
                 continue
 
             # Protected categories get extra retention
-            threshold = _DORMANT_AFTER_DAYS
+            threshold = max_age_days or _DORMANT_AFTER_DAYS
             if category in _PROTECTED_CATEGORIES:
                 threshold += _PROTECTED_EXTRA_DAYS
 

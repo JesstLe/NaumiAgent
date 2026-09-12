@@ -386,6 +386,24 @@ class TestDeleteAndCount:
         await memory.forget_old(min_access_count=2)
         assert await memory.count() == 0
 
+    @pytest.mark.asyncio
+    async def test_forget_old_honors_custom_max_age(self, memory):
+        old_time = (datetime.now() - timedelta(days=40)).isoformat()
+        await _store(memory, "自定义保留期记忆", created_at=old_time, updated_at=old_time)
+
+        forgotten = await memory.forget_old(max_age_days=30, min_access_count=1)
+
+        assert forgotten == 1
+        stats = await memory.stats()
+        assert stats.dormant == 1
+
+    @pytest.mark.asyncio
+    async def test_forget_old_rejects_negative_policy_values(self, memory):
+        with pytest.raises(ValueError, match="max_age_days"):
+            await memory.forget_old(max_age_days=-1)
+        with pytest.raises(ValueError, match="min_access_count"):
+            await memory.forget_old(min_access_count=-1)
+
 
 # ---------------------------------------------------------------------------
 #  Stats, Search, Export
