@@ -72,3 +72,5 @@ Stable Deployment Intent 的 target 漂移测试还把变化值写死为 `linux-
 同类扫描还发现 Agent 高频使用的 `glob`、`grep`、`file_read`、`file_write` 和 `file_edit` 虽然提供异步 `execute()`，目录遍历、全文读取和落盘却仍同步占用事件循环；大工作区搜索或慢磁盘会暂停流式输出并拖慢并行会话。五个文件工具现保留原有同步实现与返回协议，由异步入口统一通过 `asyncio.to_thread` 调度。真实文件读写、搜索与编辑链路共 16 个定向用例通过，慢 I/O 调度用例确认五个工具运行期间事件循环仍可调度，且实际工作线程不等于事件循环线程。
 
 聊天附件路径原先以 `await file.read()` 一次性把文件装入内存，再在 API 事件循环同步写盘；上传没有体积上限，同名文件还会覆盖旧引用，构建模型上下文时也会读取整个来源文件后才截断。当前上传按 1 MiB 分块写入临时文件，限制为 20 MiB，并在线程中 flush、fsync 后原子提交；每份引用使用独立 source id 文件名，数据库登记失败会清理孤儿文件，附件目录和跨平台文件名均在写盘前校验。上下文预览只读取最多 20,001 个字符并在线程中执行。11 个定向用例覆盖空文件、同名附件、精确上限、超限清理、目录越界、非法文件名、数据库故障、慢磁盘调度和有界预览。
+
+后续 Linux 分片继续发现三处夹具漂移。Terminal Event Bridge 的最小 Engine 替身缺少 Sandbox 恢复快照所需的 `workspace_root`；夹具现复用事件日志 Store 的真实工作区，普通及 coverage 模式均为 5 passed。Evolution Review UI 把治理拒绝时间固定为 2026 年 7 月，却用运行时当前时间判断 cooldown，日期越过冷却期后预期从 `needs_evidence` 变为 `review_ready`；测试治理读取现固定在场景时刻，14 个用例普通及 coverage 均通过。Pursuit 恢复夹具也把后台完成回执写死在 2026 年 7 月，`BackgroundRunner` 初始化会按 7 天策略正确清理它，随后恢复自然找不到回执；夹具改用当前终态时间，文件普通及 CI 同等 coverage 模式均为 30 passed。
