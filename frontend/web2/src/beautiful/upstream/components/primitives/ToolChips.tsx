@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { createPortal } from "react-dom";
 
 /* ─────────────────────────────────────────────────────────
@@ -20,6 +20,13 @@ const Icons: Record<string, React.ReactNode> = {
 };
 
 export type ToolDetailLine = { text: string; tone?: "add" };
+export type ToolOutputBlock = {
+  kind: "code" | "diff";
+  content: string;
+  language?: string;
+  label?: string;
+};
+export type ToolContentBlock = ToolOutputBlock | { kind: "text"; text: string; tone?: "add" };
 
 export type ToolStep = {
   id?: string;
@@ -32,6 +39,7 @@ export type ToolStep = {
   mono: boolean;
   detailMono: boolean;
   detail: ToolDetailLine[];
+  content?: ToolContentBlock[];
 };
 
 export type ToolDiff = { file: string; label?: string; add?: number; del?: number };
@@ -117,6 +125,7 @@ export default function ToolChips({
   onToggleRow,
   headerLabel,
   showHeader = true,
+  renderOutput,
 }: {
   /** Accepted for gallery/registry parity; ToolChips has no visual variants. */
   variant?: string;
@@ -129,6 +138,7 @@ export default function ToolChips({
   onToggleRow?: (label: string, open: boolean) => void;
   headerLabel?: string;
   showHeader?: boolean;
+  renderOutput?: (output: ToolOutputBlock, row: ToolStep) => React.ReactNode;
 } = {}) {
   const copy = { ...DEFAULT_LABELS, ...labels };
   const step = steps.length + 1;
@@ -248,6 +258,14 @@ export default function ToolChips({
                       >
                         {line.text}
                       </span>
+                    ))}
+                    {rowOpen && row.content?.map((block, blockIndex) => (
+                      <Fragment key={`${block.kind}:${blockIndex}`}>
+                        {block.kind === "text" ? <span
+                          title={block.text}
+                          className={`max-h-80 overflow-auto whitespace-pre-wrap break-words text-[11.5px] leading-[1.6] ${row.detailMono ? "font-mono" : ""} ${block.tone === "add" ? "text-green" : "text-ink-2"}`}
+                        >{block.text}</span> : renderOutput?.(block, row)}
+                      </Fragment>
                     ))}
                     {row.input && <details className="bui-tool-input">
                       <summary>输入参数</summary>

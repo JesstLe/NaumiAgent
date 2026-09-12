@@ -1,12 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { File, RefreshCw, Search } from 'lucide-react'
 import { useWorkspace } from '@naumi/shared/hooks/WorkspaceProvider'
-import { parseUnifiedDiff, splitDiffLines, type DiffLine } from '@naumi/shared/api/diff'
+import { UnifiedDiff } from './UnifiedDiff'
 
 const stageName: Record<string, string> = { staged: '已暂存', unstaged: '未暂存', untracked: '未跟踪' }
-function Line({ line, side }: { line: DiffLine | null; side: 'left' | 'right' }) {
-  return <div className={`w2-split-cell ${line?.kind ?? 'empty'}`}><span className="w2-line-number">{side === 'left' ? line?.oldLine : line?.newLine}</span><code>{line?.text || ' '}</code></div>
-}
 export function DiffPanel() {
   const w = useWorkspace()
   const [query, setQuery] = useState('')
@@ -38,14 +35,11 @@ export function DiffPanel() {
     {files.map(file => {
       const key = `${file.stage}:${file.path}`
       const opened = openFiles.has(key)
-      const lines = opened ? parseUnifiedDiff(file.patch) : []
       return <section className="w2-diff-file" key={key}>
         <button className="w2-diff-file-heading" aria-expanded={opened} onClick={() => setOpenFiles(previous => { const next = new Set(previous); if (next.has(key)) next.delete(key); else next.add(key); return next })}>
           <File size={14} /><span title={file.path}>{file.path}</span><small>{stageName[file.stage] || file.stage}</small><b>+{file.additions}</b><em>−{file.deletions}</em>
         </button>
-        {opened && (!file.patch ? <p className="w2-muted">无文本补丁（二进制文件或仅元数据变化）</p> : <div className={`w2-code-diff ${split ? 'is-split' : ''}`} tabIndex={0} aria-label={`${file.path} 差异`}>
-          {split ? splitDiffLines(lines).map((row, index) => row.header ? <div key={index} className={`w2-diff-line ${row.header.kind}`}>{row.header.text}</div> : <div className="w2-split-row" key={index}><Line line={row.left} side="left" /><Line line={row.right} side="right" /></div>) : lines.map((line, index) => <div className={`w2-diff-line ${line.kind}`} key={index}><span className="w2-line-number">{line.oldLine}</span><span className="w2-line-number">{line.newLine}</span><span className="w2-line-sign">{line.kind === 'added' ? '+' : line.kind === 'removed' ? '−' : ' '}</span><code>{line.text || ' '}</code></div>)}
-        </div>)}
+        {opened && (!file.patch ? <p className="w2-muted">无文本补丁（二进制文件或仅元数据变化）</p> : <UnifiedDiff patch={file.patch} split={split} label={`${file.path} 差异`} />)}
       </section>
     })}
   </div>
