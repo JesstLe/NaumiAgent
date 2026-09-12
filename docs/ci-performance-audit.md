@@ -86,3 +86,5 @@ Workbench 右侧 Diff 面板原先为每个文件并发执行 Git，并通过 `c
 审批证据收集也在解析后才截断 Git status/diff，意味着大 worktree 仍会先完整进入内存；原有 30 文件上限还有 off-by-one，实际可能返回 31 个文件，并且所有裁剪都对审核人静默。异步子进程有界读取现下沉到 runtime 公共层，审批 status 限 1 MiB、diff 限 4 MiB，禁用 pager、external diff 与 textconv；状态使用 NUL 协议正确保留空格和 Unicode 路径。200 文件、30 个 diff 文件和单文件 4000 字符的展示上限都会形成明确 warning，Textual 审批页据此显示“待补证据”，不会把不完整 diff 标成可进入人工判断。
 
 分片 6 发现 Harness 工具证据虽然字段名为 `result_size_bytes`，却优先读取字符数 `content_length`；包含中文等多字节字符时会把 17 字节记录成 13，影响证据大小审计。Engine 已同时发布权威 `content_bytes`，Collector 现优先使用该字段，旧事件缺少字段时再从内容按 UTF-8 计算。
+
+分片 4 的 Store Catalog 测试同时引用 `AGENT_JOB_SCHEMA_VERSION` 又硬编码旧值 6；Agent Job Store 已按迁移链升级为 7，Catalog 本身正确。断言现只验证 Catalog 与权威常量一致，避免下一次合法 schema 迁移继续产生伪失败。
