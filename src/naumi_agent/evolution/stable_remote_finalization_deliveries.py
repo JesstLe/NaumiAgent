@@ -294,14 +294,15 @@ class EvolutionStableRemoteFinalizationDeliveryStore:
                 return EvolutionStableRemoteFinalizationDeliveryView(
                     package=package, latest_event=event
                 )
-            await db.rollback()
             view = _restore_view(row)
             await _verify_chain(db, view)
             if view.package.execution_package != execution_package:
+                await db.rollback()
                 raise EvolutionStableRemoteFinalizationDeliveryError(
                     "stable_remote_delivery_conflict",
                     "同一 Delivery identity 已绑定不同 Execution Package。",
                 )
+            await db.rollback()
             return view
 
     async def get(
@@ -312,11 +313,14 @@ class EvolutionStableRemoteFinalizationDeliveryStore:
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             await _ensure_schema(db)
+            await db.execute("BEGIN")
             row = await _row(db, _delivery_id(delivery_id))
             if row is None:
+                await db.rollback()
                 return None
             view = _restore_view(row)
             await _verify_chain(db, view)
+            await db.rollback()
             return view
 
     async def claim(
