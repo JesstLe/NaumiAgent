@@ -14,6 +14,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -306,8 +307,23 @@ class ReleaseSlotStore:
         self.release_root = Path(release_root).expanduser().resolve()
         self.slots_dir = self.release_root / "slots"
         self.db_path = self.release_root / "release-slots.db"
+        self._install_lock = threading.RLock()
 
     def install(
+        self,
+        bundle_dir: str | Path,
+        *,
+        installed_at: str | None = None,
+        expected_manifest_sha256: str | None = None,
+    ) -> ReleaseInstalledSlot:
+        with self._install_lock:
+            return self._install_locked(
+                bundle_dir,
+                installed_at=installed_at,
+                expected_manifest_sha256=expected_manifest_sha256,
+            )
+
+    def _install_locked(
         self,
         bundle_dir: str | Path,
         *,
@@ -1554,8 +1570,16 @@ def _fsync_tree(root: Path) -> None:
             path = directory / name
             if path.is_symlink():
                 continue
-            with path.open("rb") as stream:
-                os.fsync(stream.fileno())
+            mode = "r+b" if os.name == "nt" else "rb"
+            try:
+                with path.open(mode) as stream:
+                    os.fsync(stream.fileno())
+            except PermissionError:
+                if not (
+                    os.name == "nt"
+                    and not stat.S_IMODE(path.stat().st_mode) & stat.S_IWRITE
+                ):
+                    raise
     for directory in reversed(directories):
         _fsync_directory(directory)
 
