@@ -64,6 +64,17 @@ const server = setupServer(
       tools: [],
     }),
   ),
+  http.get(`${base}/commands`, () => HttpResponse.json({ commands: [] })),
+  http.get(`${base}/engines`, () => HttpResponse.json({
+    default: 'naumi',
+    engines: [{ id: 'naumi', name: 'NaumiAgent 引擎', available: true, default: true }],
+  })),
+  http.get(`${base}/goals`, () => HttpResponse.json({
+    current_goal_id: '',
+    goals: [],
+    warnings: [],
+    truncated: false,
+  })),
   http.get(`${base}/sessions/:id/messages`, ({ params }) =>
     HttpResponse.json({
       messages: [
@@ -161,6 +172,9 @@ function View({ label }: { label: string }) {
       <div data-testid={`${label}-running-user`}>{w.runningUserMessageId}</div>
       <div data-testid={`${label}-runs`}>{w.runs.map((run) => run.id).join(',')}</div>
       <div data-testid={`${label}-todos`}>{w.todos.map((todo) => `${todo.id}:${todo.status}`).join(',')}</div>
+      <div data-testid={`${label}-diff`}>{w.diff?.branch ?? ''}</div>
+      <button onClick={() => void w.addTodo('新任务')}>新增待办 {label}</button>
+      <button onClick={() => void w.loadDiff()}>读取 Diff {label}</button>
       <button onClick={() => void w.regenerate('原始问题', 'question', 'answer')}>
         重新生成 {label}
       </button>
@@ -194,6 +208,61 @@ afterEach(() => {
 afterAll(() => server.close())
 
 describe('one shared workspace for two presentation shells', () => {
+  it('loads workspace diff without creating an empty conversation', async () => {
+    let sessionCreates = 0
+    server.use(
+      http.post(`${base}/sessions`, () => {
+        sessionCreates++
+        return HttpResponse.json(session('unexpected'))
+      }),
+      http.get(`${base}/workspace/git-diff`, () => HttpResponse.json({
+        available: true,
+        branch: 'audit-branch',
+        upstream: '',
+        ahead: 0,
+        behind: 0,
+        error: '',
+        files: [],
+      })),
+    )
+    setup()
+    await waitFor(() => expect(screen.getByTestId('web-connected')).toHaveTextContent('connected'))
+
+    fireEvent.click(screen.getByText('读取 Diff web2'))
+
+    await waitFor(() => expect(screen.getByTestId('web-diff')).toHaveTextContent('audit-branch'))
+    expect(screen.getByTestId('web-session')).toBeEmptyDOMElement()
+    expect(sessionCreates).toBe(0)
+  })
+  it('shows a todo created directly from a new conversation', async () => {
+    const createdTodo = {
+      id: 'todo-created',
+      subject: '新任务',
+      description: '',
+      status: 'pending',
+      active_form: null,
+      blocked_by: [],
+      updated_at: '',
+    }
+    let created = false
+    server.use(
+      http.get(`${base}/sessions/created/todos`, () => HttpResponse.json({
+        todos: created ? [createdTodo] : [],
+      })),
+      http.post(`${base}/sessions/created/todos`, () => {
+        created = true
+        return HttpResponse.json({ todos: [createdTodo] })
+      }),
+    )
+    setup()
+    await waitFor(() => expect(screen.getByTestId('web-connected')).toHaveTextContent('connected'))
+
+    fireEvent.click(screen.getByText('新增待办 web2'))
+
+    await waitFor(() => expect(screen.getByTestId('web-session')).toHaveTextContent('created'))
+    await waitFor(() => expect(screen.getByTestId('web-todos')).toHaveTextContent('todo-created:pending'))
+    expect(screen.getByTestId('web2-todos')).toHaveTextContent('todo-created:pending')
+  })
   it('shares drafts, session selection, model updates and one stream; blocks duplicate sends', async () => {
     setup()
     await waitFor(() =>

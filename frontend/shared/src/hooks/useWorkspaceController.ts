@@ -762,15 +762,13 @@ export function useWorkspaceController() {
       setError('请先连接本地服务')
       return
     }
-    if (!activeId.current && operation.current) return
     const current = generation.current
     const revision = ++diffRevision.current
     setDiffLoading(true)
     setDiffError('')
     try {
-      const id = await ensureSession()
-      const next = await api.fetchGitDiff(id)
-      if (current === generation.current && activeId.current === id && revision === diffRevision.current) {
+      const next = await api.fetchWorkspaceGitDiff()
+      if (current === generation.current && revision === diffRevision.current) {
         setDiff(next); setDiffUpdatedAt(new Date().toISOString())
       }
     } catch (e) {
@@ -894,7 +892,7 @@ export function useWorkspaceController() {
     if (!daemon || mutating) return null
     setMutating(true)
     try {
-      const created = await api.create('新对话', model || undefined)
+      const created = await api.create('新对话', model || undefined, engineRef.current)
       setSessions(previous => [created, ...previous])
       return created
     } catch (e) {
@@ -946,7 +944,13 @@ export function useWorkspaceController() {
       throw e
     }
   }
-  const taskState = useWorkspaceTasks(api, sessionId, !!daemon, ensureSession)
+  const taskState = useWorkspaceTasks(
+    api,
+    sessionId,
+    !!daemon,
+    ensureSession,
+    () => activeId.current,
+  )
   const goalState = useWorkspaceGoals(api, !!daemon, ensureSession)
   return {
     ...goalState,

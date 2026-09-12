@@ -93,6 +93,7 @@ function EngineView() {
       <div data-testid="engine-session">{w.sessionId ?? 'new'}</div>
       <button onClick={() => w.switchEngine('naumi')}>切到 naumi</button>
       <button onClick={() => void w.select('pi-chat')}>选 pi 会话</button>
+      <button onClick={() => void w.createSidebarSession()}>新建侧边会话</button>
       <button onClick={() => void w.send()}>发送</button>
       <input
         aria-label="draft"
@@ -188,6 +189,30 @@ describe('web2 引擎切换', () => {
       expect(screen.getByTestId('engine-session').textContent).toBe('pi-chat')
       expect(screen.getByTestId('engine-current').textContent).toBe('pi')
     })
+    cleanup()
+  })
+
+  it('新建侧边会话沿用当前选择的引擎', async () => {
+    render(
+      <PlatformProvider>
+        <WorkspaceProvider>
+          <EngineView />
+        </WorkspaceProvider>
+      </PlatformProvider>,
+    )
+    await waitFor(() => {
+      expect(screen.getByTestId('engine-current').textContent).toBe('pi')
+    })
+    await act(async () => {
+      screen.getByText('切到 naumi').click()
+    })
+    await act(async () => {
+      screen.getByText('新建侧边会话').click()
+    })
+    await waitFor(() => {
+      expect(createBodies).toHaveLength(1)
+    })
+    expect(createBodies[0]).toMatchObject({ engine: 'naumi' })
     cleanup()
   })
 })

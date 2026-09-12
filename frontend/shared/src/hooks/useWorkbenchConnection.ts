@@ -1,10 +1,7 @@
 import { useWorkspace } from './WorkspaceProvider'
-import type { ConnectionCoordinatorOptions } from '@naumi/shared/api/WorkbenchConnectionCoordinator'
 
 // Compatibility adapter: both web shells use one workspace lifecycle and API client.
-export function useWorkbenchConnection(
-  _options: ConnectionCoordinatorOptions = {},
-) {
+export function useWorkbenchConnection() {
   const workspace = useWorkspace()
   return {
     client: workspace.daemon ? workspace.api : null,

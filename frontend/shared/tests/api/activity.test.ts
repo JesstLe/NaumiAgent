@@ -1,7 +1,35 @@
 import { describe, expect, it } from 'vitest'
-import { assistantActionsReady, executionStages, isTimelineEvent, liveExecutionActivity, liveExecutionTimeline, runActivity, runExecutionTimeline, runsByUserMessage, toolActivity } from '../../src/api/activity'
+import { assistantActionsReady, executionStages, isTimelineEvent, liveExecutionActivity, liveExecutionTimeline, precedingUserMessages, runActivity, runExecutionTimeline, runsByUserMessage, toolActivity } from '../../src/api/activity'
 
 describe('public execution activity', () => {
+  it('pairs assistant messages with the nearest preceding user in one pass', () => {
+    const message = (id: string, role: string) => ({
+      id,
+      role,
+      content: id,
+      timestamp: '',
+      metadata: {},
+    })
+    const messages = [
+      message('system', 'system'),
+      message('u1', 'user'),
+      message('a1', 'assistant'),
+      message('tool', 'tool'),
+      message('a2', 'assistant'),
+      message('u2', 'user'),
+      message('a3', 'assistant'),
+    ]
+
+    expect(precedingUserMessages(messages).map(item => item?.id)).toEqual([
+      undefined,
+      undefined,
+      'u1',
+      undefined,
+      'u1',
+      undefined,
+      'u2',
+    ])
+  })
   it('shows assistant actions only after the owning run reaches a terminal state', () => {
     const base = {
       content: '已经收到部分正文',
