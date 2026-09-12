@@ -104,3 +104,9 @@ Workbench 右侧 Diff 面板原先为每个文件并发执行 Git，并通过 `c
 分片 11 的 Pi Web API 测试把“接受 engine 字段”与 runner 是否真实安装 `pi` 二进制绑定，Linux 正确返回不可用 400 后被误判为 schema 回归。字段接受用例现显式注入可用性前置条件；独立的不可用用例继续使用不存在的二进制并验证 400。相邻 SessionStore 持久化用例也在 `finally` 关闭连接，避免 pytest 事件循环结束后 aiosqlite 工作线程继续回调。定向普通与 coverage 模式均为 3 passed，完整文件 16 passed，且不再产生线程泄漏 warning。
 
 分片 10 的流式事件穷尽测试复制了一份 transport 类型表，却漏掉产品已明确声明的 `HARNESS_COMPLETION_CORRECTION -> PHASE_SUMMARY` 映射，因此把可读的完成门禁纠偏摘要误判为应保留的原始 runtime event。测试表现已与权威封闭映射同步，保留 phase summary 的结构化 `items` 数据和活动摘要；完整文件普通与 coverage 模式均为 50 passed。
+
+运行 `34692164470` 继续暴露三个独立问题。分片 7 的 LiteLLM 回环传输测试把 Anthropic `thinking` 请求体完整固定为 `{type: adaptive}`，而当前 Linux 安装会在保持 adaptive 推理的同时增加 `display: summarized`；断言现验证稳定的 adaptive 契约，并只接受缺省或 summarized 两种已知展示值，避免把依赖版本补充的展示提示误判为传输回归。
+
+分片 3 的会话恢复失败测试存在确定性死锁：测试替换了 `resume()` 并等待替身进入，却向 `load_session()` 传入不存在的 ID。生产代码会先由 `load()` 正常返回空值，根本不会进入 `resume()`，因此测试永久等待。夹具现先创建真实候选会话，再让 `resume()` 返回空值，准确覆盖恢复第二阶段失败后的 transition fence 与权限授权保留；普通及 coverage 定向模式均为 1 passed。
+
+分片 0 的两个 Agent 停止 Bridge 用例仍假设默认委派走嵌入式 `agent.execute()`，但当前生产组合已携带模型配置并启用独立 Agent Worker。用例替换的嵌入式执行函数因此不会被调用，短等待失败后又在清理未进入目标状态的委派时阻塞。两个场景现明确选择其要验证的 embedded backend，并将冷启动及停止收口等待调整为 10 秒有界窗口；普通及 coverage 定向模式均为 2 passed。该修复没有关闭产品默认的独立 Worker，只消除了测试对默认组合演进的隐式依赖。
