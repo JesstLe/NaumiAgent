@@ -14,6 +14,10 @@
 .bui-chip-rows .bui-action-summary { display: block; line-height: 22px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bui-chip-rows [data-state='running'] .bui-operation { color: var(--ink); }
 .bui-chip-status { flex-shrink: 0; color: var(--ink-3); font-size: 10px; }
+.bui-tool-output { min-width: 0; max-width: 100%; margin: 4px 0 2px; }
+.bui-tool-output .rich-code { max-width: 100%; margin: 0; }
+.bui-tool-output .rich-code pre { max-height: 360px; overflow: auto; margin: 0; padding: 10px 12px; white-space: pre; font: 11px/1.7 'JetBrains Mono Variable', monospace; }
+.bui-tool-output .bui-tool-diff { max-height: 360px; border: 1px solid #e1e6dc; border-radius: 6px; background: #fafbf8; }
 .bui-tool-input { font-size: 11.5px; color: var(--ink-3); }
 .bui-tool-input summary { cursor: pointer; }
 .bui-tool-input pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; }

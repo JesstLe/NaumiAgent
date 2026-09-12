@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   consumeEvents,
   readPreference,
   safeWebUrl,
   savePreference,
+  WorkbenchRuntimeClient,
   type StreamEvent,
 } from '@naumi/shared/api/WorkbenchRuntimeClient'
 
@@ -12,7 +13,35 @@ beforeEach(() => {
   window.history.replaceState({}, '', '/')
 })
 
+afterEach(() => vi.restoreAllMocks())
+
 describe('shared SSE transport', () => {
+  it('keeps the edited message id when rerunning a slash command', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
+      'data: {"id":"end","type":"agent_end","data":{"status":"completed"}}\n\n',
+      { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+    ))
+    const client = new WorkbenchRuntimeClient('http://localhost/api/v1', async () => null)
+
+    await client.stream(
+      'session-1',
+      { content: '/version', edit_message_id: 'msg-2' },
+      () => {},
+      new AbortController().signal,
+    )
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost/api/v1/sessions/session-1/commands',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          command: '/version',
+          runtime_mode: 'default',
+          edit_message_id: 'msg-2',
+        }),
+      }),
+    )
+  })
   it('preserves Chinese UTF-8 across byte chunks and CRLF boundaries', async () => {
     const encoded = new TextEncoder().encode(
       ': heartbeat\r\n\r\ndata: {"id":"1","type":"token_delta","data":{"token":"你好"}}\r\n\r\ndata: {"id":"2","type":"agent_end","data":{}}',

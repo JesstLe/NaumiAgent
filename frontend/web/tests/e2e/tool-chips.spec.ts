@@ -7,22 +7,38 @@ test('compact rows expand independently, file previews support keyboard, and nar
   await page.route('**/sessions/*/runs*', route => route.fulfill({ json: { runs: [{
     id: 'chips', user_message_id: 'u', status: 'completed', started_at: '2026-09-11T01:00:00Z', completed_at: '2026-09-11T01:00:28Z', steps: [
       { sequence: 1, stage: 'analysis', summary: '第 1 轮分析', status: 'completed', detail: 'PRIVATE_REASONING' },
-      { sequence: 2, stage: 'tool', summary: 'file_write', status: 'completed', detail: '✅ 已创建 src/demo.ts (204 行, 999 字符)\n\n```ts\nconst first = 1\n```', metadata: { public_action: '修改文件：src/demo.ts', output_recorded: true } },
+      { sequence: 2, stage: 'tool', summary: 'file_write', status: 'completed', detail: `✅ 已创建 src/demo.ts (204 行, 999 字符)\n\n\`\`\`ts\nconst first = 1\nconst payload = "${'x'.repeat(320)}"\n\`\`\`\n校验结果：\n\`\`\`json\n{"valid":true}\n\`\`\``, metadata: { public_action: '修改文件：src/demo.ts', output_recorded: true } },
       { sequence: 3, stage: 'tool', summary: 'file_write', status: 'completed', detail: '✅ 已编辑 other/demo.ts\n```diff\n--- before\n+++ after\n@@ -1 +1 @@\n-old\n+new\n```', metadata: { public_action: '修改文件：other/demo.ts', output_recorded: true } },
     ],
   }] } }))
   await page.goto('/web2')
   const trace = page.getByLabel('执行过程', { exact: true })
-  await expect(trace).toContainText('2 次工具调用')
   const writes = trace.getByRole('button', { name: 'file_write 已完成', exact: true })
   await expect(writes).toHaveCount(2)
+  await expect(trace.locator('.bui-chip-rows > div')).toHaveCount(2)
+  await expect(trace.locator('.bui-tool-output')).toHaveCount(0)
   await expect(writes.nth(0)).toHaveCSS('height', '28px')
   await expect(trace.locator('.bui-action-summary').first()).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   await writes.nth(0).click()
   await expect(writes.nth(0)).toHaveAttribute('aria-expanded', 'true')
+  const firstOutput = writes.nth(0).locator('xpath=..').locator('.bui-tool-output .rich-code')
+  await expect(firstOutput).toHaveCount(2)
+  await expect(firstOutput.nth(0).locator('header')).toContainText('ts')
+  await expect(firstOutput.nth(0).locator('pre')).toContainText('const first = 1')
+  await expect(firstOutput.nth(1).locator('header')).toContainText('json')
+  const orderedContent = await writes.nth(0).locator('xpath=..').locator('.bui-tool-output, span[title="校验结果："]').allTextContents()
+  expect(orderedContent.map(text => text.trim())).toEqual([
+    expect.stringContaining('const first = 1'), '校验结果：', expect.stringContaining('{"valid":true}'),
+  ])
+  await expect(trace).not.toContainText('```ts')
   await expect(writes.nth(1)).toHaveAttribute('aria-expanded', 'false')
   await writes.nth(1).click()
   await expect(trace.getByText('修改文件：other/demo.ts', { exact: true })).toBeVisible()
+  const inlineDiff = trace.getByLabel('other/demo.ts 差异', { exact: true })
+  await expect(inlineDiff).toBeVisible()
+  await expect(inlineDiff.locator('.added')).toContainText('new')
+  await expect(inlineDiff.locator('.removed')).toContainText('old')
+  await expect(trace).not.toContainText('```diff')
   await expect(trace).not.toContainText('PRIVATE_REASONING')
   const chip = trace.getByRole('button', { name: '查看文件变更 other/demo.ts', exact: true })
   await chip.focus()
@@ -30,14 +46,15 @@ test('compact rows expand independently, file previews support keyboard, and nar
   await expect(preview).toBeVisible()
   await expect(preview).toContainText('new')
   await expect(preview.locator('.text-green').first()).toHaveCSS('color', 'oklch(0.603 0.155 150.883)')
-  await page.keyboard.press('Escape')
+  await chip.press('Escape')
   await expect(preview).toHaveCount(0)
   await page.setViewportSize({ width: 390, height: 844 })
   await page.getByRole('button', { name: '切换侧栏', exact: true }).click()
   await expect(trace.locator('.bui-action-summary').first()).toHaveCSS('white-space', 'nowrap')
+  expect(await firstOutput.nth(0).locator('pre').evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   const stageToggle = trace.locator('.bui-stage > div > button').first()
-  await expect(stageToggle).toHaveAccessibleName(/2 次工具调用/)
+  await expect(stageToggle).toHaveAccessibleName('任务已完成 · 用时 28 秒')
   await stageToggle.click()
   await expect(stageToggle).toHaveAttribute('aria-expanded', 'false')
   await expect(writes.nth(0)).not.toBeVisible()

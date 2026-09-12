@@ -46,6 +46,7 @@
 - [完成收据与验证](./product/terminal-ui/06-completion-receipt-and-validation.md)
 - [CLI 兼容与迁移](./product/terminal-ui/07-cli-compatibility-and-migration.md)
 - [协议、测试与发布门禁](./product/terminal-ui/08-protocol-testing-and-release-gates.md)
+- [终端并行会话](./terminal-parallel-sessions.md)
 
 产品规格同时包含已完成切片和目标态。每份规格的“当前证据/实施进度”决定某项能力是否已经交付，
 不能仅凭标题或验收标准推断完成。

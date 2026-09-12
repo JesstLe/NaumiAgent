@@ -27,6 +27,14 @@ from naumi_agent.tools.analysis_support.static_modes import (
 MODES = ("chaos", "scale", "state")
 
 
+def _configure_utf8_streams() -> None:
+    """Keep the JSON CLI contract intact on Windows legacy code pages."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8")
+
+
 def run_scan(mode: str, target: str, qps: int) -> dict:
     """Run one deterministic scan and return a JSON-serializable payload."""
     files = resolve_target(target)
@@ -51,6 +59,7 @@ def run_scan(mode: str, target: str, qps: int) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _configure_utf8_streams()
     parser = argparse.ArgumentParser(
         prog="python -m naumi_agent.analysis_scan",
         description="NaumiAgent 确定性静态扫描（无模型调用）",

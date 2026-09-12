@@ -9,13 +9,16 @@ no-ops, and a model-display shim.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from uuid import uuid4
 
 from naumi_agent.memory.session import Session
 from naumi_agent.pi_engine.rpc import PiRpcError
 from naumi_agent.pi_engine.web_facade import PiWebEngine
+from naumi_agent.runtime.ports.events import RuntimeEvent, RuntimeEventType
 
 
 class _PiRouterShim:
@@ -90,6 +93,25 @@ class PiTuiEngine(PiWebEngine):
         self._session = session
         self._current_web_session = session_id
         return True
+
+    async def run_streaming(self, content: str, sink, turn_context: str = ""):
+        """Run pi and emit the terminal event owned by the in-process TUI."""
+        result = await super().run_streaming(content, sink, turn_context)
+        await sink.emit(
+            RuntimeEvent(
+                id=uuid4().hex[:12],
+                type=RuntimeEventType.RESPONSE_END,
+                data={
+                    "status": result.status,
+                    "engine": "pi",
+                    "turns": result.usage.turns,
+                    "cost_usd": result.usage.total_cost_usd,
+                },
+                timestamp=datetime.now(UTC).isoformat(),
+                session_id=self._current_web_session,
+            )
+        )
+        return result
 
     def reset(self) -> None:
         """New conversation: drop the active binding so the next run opens one."""

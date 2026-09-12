@@ -13,6 +13,9 @@ const DEFAULT_SESSION_KEY = "__default__";
 const MAX_HISTORY_ENTRIES = 100;
 const MAX_HISTORY_ENTRY_CHARS = 200_000;
 const MAX_HISTORY_TOTAL_CHARS = 1_000_000;
+const LOCK_WAIT_MS = 10;
+const LOCK_TIMEOUT_MS = 2_000;
+const LOCK_STALE_MS = 30_000;
 let temporaryFileSequence = 0;
 
 export function loadUiStateStore(cwd) {
@@ -31,6 +34,9 @@ export function loadUiStateStore(cwd) {
         terminalEventClientId: sanitizeTerminalEventClientId(
           parsed.terminal_event_client_id,
         ),
+        baseInputHistory: sanitizeInputHistory(parsed.input_history),
+        dirtySessionKeys: new Set(),
+        inputHistoryDirty: false,
         writable: true,
       };
     }
@@ -45,6 +51,9 @@ export function loadUiStateStore(cwd) {
         ),
         inputHistory: [],
         terminalEventClientId: newTerminalEventClientId(),
+        baseInputHistory: [],
+        dirtySessionKeys: new Set(Object.keys(parsed.sessions)),
+        inputHistoryDirty: false,
         writable: true,
       };
     }
@@ -54,6 +63,9 @@ export function loadUiStateStore(cwd) {
         sessions: migrateAgentSessions(migrateInspectorSessions(parsed.sessions)),
         inputHistory: [],
         terminalEventClientId: newTerminalEventClientId(),
+        baseInputHistory: [],
+        dirtySessionKeys: new Set(Object.keys(parsed.sessions)),
+        inputHistoryDirty: false,
         writable: true,
       };
     }
@@ -63,6 +75,9 @@ export function loadUiStateStore(cwd) {
         sessions: migrateAgentSessions(migrateInspectorSessions(parsed.sessions)),
         inputHistory: sanitizeInputHistory(parsed.input_history),
         terminalEventClientId: newTerminalEventClientId(),
+        baseInputHistory: sanitizeInputHistory(parsed.input_history),
+        dirtySessionKeys: new Set(Object.keys(parsed.sessions)),
+        inputHistoryDirty: false,
         writable: true,
       };
     }
@@ -72,6 +87,9 @@ export function loadUiStateStore(cwd) {
         sessions: migrateAgentSessions(parsed.sessions),
         inputHistory: sanitizeInputHistory(parsed.input_history),
         terminalEventClientId: newTerminalEventClientId(),
+        baseInputHistory: sanitizeInputHistory(parsed.input_history),
+        dirtySessionKeys: new Set(Object.keys(parsed.sessions)),
+        inputHistoryDirty: false,
         writable: true,
       };
     }
@@ -81,6 +99,9 @@ export function loadUiStateStore(cwd) {
         sessions: parsed.sessions,
         inputHistory: sanitizeInputHistory(parsed.input_history),
         terminalEventClientId: newTerminalEventClientId(),
+        baseInputHistory: sanitizeInputHistory(parsed.input_history),
+        dirtySessionKeys: new Set(Object.keys(parsed.sessions)),
+        inputHistoryDirty: false,
         writable: true,
       };
     }
@@ -98,23 +119,51 @@ export function loadUiStateStore(cwd) {
 
 export function saveUiStateStore(store) {
   if (store.writable === false) return false;
-  const tmpPath = temporaryStatePath(store.filePath);
+  let releaseLock = null;
+  let tmpPath = "";
   try {
     fs.mkdirSync(path.dirname(store.filePath), { recursive: true });
+    if (fs.existsSync(store.filePath) && fs.statSync(store.filePath).isDirectory()) return false;
+    releaseLock = acquireUiStateLock(store.filePath);
+    const persisted = readCurrentStore(store.filePath);
+    if (persisted?.futureVersion) return false;
+    const sessions = { ...(persisted?.sessions ?? {}) };
+    const dirtyKeys = store.dirtySessionKeys instanceof Set
+      ? store.dirtySessionKeys
+      : new Set(Object.keys(store.sessions ?? {}));
+    for (const key of dirtyKeys) {
+      if (Object.hasOwn(store.sessions ?? {}, key)) sessions[key] = store.sessions[key];
+    }
+    const inputHistory = store.inputHistoryDirty
+      ? mergeInputHistory(
+        persisted?.inputHistory ?? [],
+        store.baseInputHistory ?? [],
+        store.inputHistory ?? [],
+      )
+      : (persisted?.inputHistory ?? sanitizeInputHistory(store.inputHistory));
+    tmpPath = temporaryStatePath(store.filePath);
+    const terminalEventClientId = sanitizeTerminalEventClientId(
+      persisted?.terminalEventClientId ?? store.terminalEventClientId,
+    );
     fs.writeFileSync(tmpPath, JSON.stringify({
       version: STORE_VERSION,
-      sessions: store.sessions,
-      input_history: sanitizeInputHistory(store.inputHistory),
-      terminal_event_client_id: sanitizeTerminalEventClientId(
-        store.terminalEventClientId,
-      ),
+      sessions,
+      input_history: inputHistory,
+      terminal_event_client_id: terminalEventClientId,
     }, null, 2), "utf8");
     replaceUiStateFile(tmpPath, store.filePath);
+    store.sessions = sessions;
+    store.inputHistory = inputHistory;
+    store.baseInputHistory = [...inputHistory];
+    store.terminalEventClientId = terminalEventClientId;
+    store.dirtySessionKeys = new Set();
+    store.inputHistoryDirty = false;
     return true;
   } catch {
     return false;
   } finally {
-    removeFileQuietly(fs, tmpPath);
+    if (tmpPath) removeFileQuietly(fs, tmpPath);
+    releaseLock?.();
   }
 }
 
@@ -156,11 +205,14 @@ export function getUiSnapshot(store, sessionId) {
 }
 
 export function setUiSnapshot(store, sessionId, snapshot) {
-  store.sessions[sessionKey(sessionId)] = {
+  const key = sessionKey(sessionId);
+  store.sessions[key] = {
     version: STORE_VERSION,
     updated_at: new Date().toISOString(),
     ...snapshot,
   };
+  if (!(store.dirtySessionKeys instanceof Set)) store.dirtySessionKeys = new Set();
+  store.dirtySessionKeys.add(key);
 }
 
 export function getProjectInputHistory(store) {
@@ -169,6 +221,7 @@ export function getProjectInputHistory(store) {
 
 export function setProjectInputHistory(store, history) {
   store.inputHistory = sanitizeInputHistory(history);
+  store.inputHistoryDirty = true;
 }
 
 export function sessionKey(sessionId) {
@@ -180,9 +233,79 @@ function createEmptyStore(filePath, { writable = true } = {}) {
     filePath,
     sessions: {},
     inputHistory: [],
+    baseInputHistory: [],
     terminalEventClientId: newTerminalEventClientId(),
+    dirtySessionKeys: new Set(),
+    inputHistoryDirty: false,
     writable,
   };
+}
+
+function readCurrentStore(filePath) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    if (!parsed || typeof parsed !== "object") return null;
+    if (Number(parsed.version) > STORE_VERSION) return { futureVersion: true };
+    if (!parsed.sessions || typeof parsed.sessions !== "object" || Array.isArray(parsed.sessions)) {
+      return null;
+    }
+    return {
+      sessions: parsed.sessions,
+      inputHistory: sanitizeInputHistory(parsed.input_history),
+      terminalEventClientId: sanitizeTerminalEventClientId(parsed.terminal_event_client_id),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function acquireUiStateLock(filePath) {
+  const lockPath = `${filePath}.lock`;
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  while (true) {
+    try {
+      fs.mkdirSync(lockPath);
+      fs.writeFileSync(path.join(lockPath, "owner"), `${process.pid}\n${Date.now()}\n`, "utf8");
+      return () => removeDirectoryQuietly(lockPath);
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      removeStaleLock(lockPath);
+      if (Date.now() >= deadline) throw new Error("终端 UI 状态文件正被其他会话写入");
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, LOCK_WAIT_MS);
+    }
+  }
+}
+
+function removeStaleLock(lockPath) {
+  try {
+    const age = Date.now() - fs.statSync(lockPath).mtimeMs;
+    if (age > LOCK_STALE_MS) fs.rmSync(lockPath, { recursive: true, force: true });
+  } catch {
+    // Another writer may release the lock between stat and removal.
+  }
+}
+
+function removeDirectoryQuietly(directoryPath) {
+  try {
+    fs.rmSync(directoryPath, { recursive: true, force: true });
+  } catch {
+    // Lock cleanup is best effort; stale locks are recovered on the next save.
+  }
+}
+
+function mergeInputHistory(persisted, base, local) {
+  const safePersisted = sanitizeInputHistory(persisted);
+  const safeBase = sanitizeInputHistory(base);
+  const safeLocal = sanitizeInputHistory(local);
+  let prefix = 0;
+  while (
+    prefix < safeBase.length
+    && prefix < safeLocal.length
+    && safeBase[prefix] === safeLocal[prefix]
+  ) {
+    prefix += 1;
+  }
+  return sanitizeInputHistory([...safePersisted, ...safeLocal.slice(prefix)]);
 }
 
 function temporaryStatePath(filePath) {

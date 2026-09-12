@@ -64,6 +64,7 @@ class MessageCreate(BaseModel):
     content: str
     stream: bool = True
     runtime_mode: Literal["default", "plan", "bypass"] = "default"
+    edit_message_id: str | None = None
     workbench_issue: WorkbenchIssueFromMessage | None = None
     source_ids: list[str] = Field(default_factory=list, max_length=3)
     linked_issue_id: str | None = None

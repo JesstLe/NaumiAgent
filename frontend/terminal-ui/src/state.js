@@ -1533,7 +1533,14 @@ export function reduceServerEvent(state, record) {
         state.foldCursor = 0;
         clearRenderCache(state.renderCache);
       }
-      pushSystemMessage(state, "resume", `已恢复会话: ${payload.title ?? payload.session_id}`, "info");
+      pushSystemMessage(
+        state,
+        payload.new ? "new" : "resume",
+        payload.new
+          ? `新对话已开始: ${payload.session_id}`
+          : `已恢复会话: ${payload.title ?? payload.session_id}`,
+        "info",
+      );
       {
         const actions = [{ type: "session_replayed", sessionId: state.currentSessionId }];
         if (state.route?.name === "workbench") {

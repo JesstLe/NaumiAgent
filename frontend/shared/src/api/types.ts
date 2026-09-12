@@ -421,6 +421,7 @@ export interface MessageCreate {
   content: string
   stream?: boolean
   runtime_mode?: 'default' | 'plan' | 'bypass'
+  edit_message_id?: string
   workbench_issue?: {
     mission_id: string
     title: string

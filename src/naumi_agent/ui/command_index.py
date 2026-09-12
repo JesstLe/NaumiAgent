@@ -66,6 +66,7 @@ _SESSION_STATE = frozenset(
         "/exit",
         "/clear",
         "/new",
+        "/parallel",
         "/load",
         "/resume",
         "/reasoning",

@@ -212,6 +212,20 @@ async def send_message(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     engine, is_pi = _conversation_engine_for(session, request)
+    if is_pi and body.edit_message_id:
+        raise HTTPException(
+            status_code=400,
+            detail="pi 引擎会话暂不支持编辑历史消息，请新建对话后重新发送。",
+        )
+    if body.edit_message_id:
+        if not body.content.strip():
+            raise HTTPException(status_code=400, detail="编辑后的消息不能为空")
+        if any(
+            active_session_id == session_id and not task.done()
+            for active_session_id, task in _active_chat_run_tasks(request).values()
+        ):
+            raise HTTPException(status_code=409, detail="任务仍在执行，结束后才能编辑消息")
+        _message_revision_index(session.messages, body.edit_message_id)
     if is_pi and body.workbench_issue is not None:
         raise HTTPException(
             status_code=400, detail="pi 引擎会话暂不支持同步创建 Issue。"
@@ -249,12 +263,19 @@ async def send_message(
                 source_records=source_records,
                 linked_issue=linked_issue,
                 runtime_mode=body.runtime_mode,
+                edit_message_id=body.edit_message_id,
             ),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
     async with _engine_lock(request):
+        if body.edit_message_id:
+            await _truncate_message_branch(
+                engine,
+                session_id,
+                body.edit_message_id,
+            )
         if not await engine.load_session(session_id):
             raise HTTPException(status_code=404, detail="Session not found")
         previous_runtime_mode = engine.runtime_mode
@@ -572,6 +593,7 @@ async def _stream_response(
     source_records: list[SourceReferenceRecord] | None = None,
     linked_issue=None,
     runtime_mode: str = "default",
+    edit_message_id: str | None = None,
 ):
     queue: asyncio.Queue[StreamEvent | None] = asyncio.Queue()
     received_visible_content = False
@@ -648,6 +670,12 @@ async def _stream_response(
     async def run_agent() -> None:
         try:
             async with _engine_lock(request):
+                if edit_message_id:
+                    await _truncate_message_branch(
+                        engine,
+                        session_id,
+                        edit_message_id,
+                    )
                 if not await engine.load_session(session_id):
                     raise RuntimeError("Session not found")
                 previous_runtime_mode = engine.runtime_mode
@@ -811,6 +839,26 @@ def _active_chat_run_tasks(
         active = {}
         request.app.state.active_chat_run_tasks = active
     return active
+
+
+def _message_revision_index(messages: list[dict], message_id: str) -> int:
+    for index, message in enumerate(messages):
+        stored_id = str(message.get("id") or f"msg-{index + 1}")
+        if stored_id != message_id:
+            continue
+        if message.get("role") != "user":
+            raise HTTPException(status_code=400, detail="只能编辑自己发送的消息")
+        return index
+    raise HTTPException(status_code=404, detail="要编辑的消息不存在")
+
+
+async def _truncate_message_branch(engine, session_id: str, message_id: str) -> None:
+    session = await engine.session_store.load(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    index = _message_revision_index(session.messages, message_id)
+    session.messages = session.messages[:index]
+    await engine.session_store.save(session)
 
 
 async def _build_turn_context(

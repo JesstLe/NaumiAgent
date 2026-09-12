@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import getpass
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
+import httpx
 import yaml
 from rich.console import Console
 from rich.panel import Panel
@@ -85,7 +87,7 @@ def run_onboarding(config_path: Path, *, project_root: Path | None = None) -> bo
     preset = dict(_PROVIDER_PRESETS[provider])
 
     # 3. API Key
-    api_key = _prompt_api_key(preset["name"])
+    api_key = _prompt_api_key(preset["name"], provider=provider)
     if not api_key:
         console.print(
             "[yellow]未提供 API Key，跳过配置。"
@@ -93,22 +95,34 @@ def run_onboarding(config_path: Path, *, project_root: Path | None = None) -> bo
         )
         return False
 
-    environment_key = os.environ.get("NAUMI_MODELS__API_KEY", "")
-    if environment_key != api_key:
-        try:
-            store_model_api_key(api_key, provider=provider)
-        except (CredentialStoreError, ValueError) as exc:
-            console.print(f"[red]{exc}[/red]")
-            return False
-        os.environ["NAUMI_MODELS__API_KEY"] = api_key
-        console.print("[green]模型凭据已保存到系统安全存储。[/green]")
-
     # 4. 自定义 base URL / model
     if provider == "custom":
         preset["api_base"] = Prompt.ask("API Base URL", default="http://localhost:8000/v1")
         preset["default_model"] = Prompt.ask("默认模型", default=preset["default_model"])
         preset["fast_model"] = Prompt.ask("快速模型", default=preset["default_model"])
         preset["reasoning_model"] = Prompt.ask("推理模型", default=preset["default_model"])
+
+    while api_key:
+        validation = _validate_provider_api_key(provider, preset, api_key)
+        if validation != "invalid":
+            break
+        console.print("[red]API Key 验证失败，请检查 Key 与所选提供商是否匹配。[/red]")
+        api_key = _prompt_api_key(
+            preset["name"],
+            provider=provider,
+            offer_saved=False,
+        )
+    if not api_key:
+        console.print("[yellow]未获得有效 API Key，配置未完成。[/yellow]")
+        return False
+
+    try:
+        store_model_api_key(api_key, provider=provider)
+    except (CredentialStoreError, ValueError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        return False
+    os.environ["NAUMI_MODELS__API_KEY"] = api_key
+    console.print("[green]模型凭据已保存到系统安全存储。[/green]")
 
     # 5. Permission mode
     permission_mode = Prompt.ask(
@@ -168,19 +182,78 @@ def _choose_provider() -> str:
     )
 
 
-def _prompt_api_key(provider_name: str) -> str:
-    """优先读取环境变量；否则交互式输入。"""
-    env_key = os.environ.get("NAUMI_MODELS__API_KEY", "")
-    if env_key:
-        masked = f"{env_key[:4]}...{env_key[-4:]}" if len(env_key) >= 8 else "***"
-        console.print(f"检测到环境变量 NAUMI_MODELS__API_KEY: [dim]{masked}[/dim]")
-        if Confirm.ask("是否使用此 Key", default=True):
-            return env_key
+def _prompt_api_key(
+    provider_name: str,
+    *,
+    provider: str | None = None,
+    offer_saved: bool = True,
+) -> str:
+    """优先使用 provider 专属凭据，再考虑通用环境变量。"""
+    if offer_saved and provider:
+        try:
+            stored_key = load_model_api_key(
+                provider=provider,
+                fallback_to_legacy=False,
+            )
+        except CredentialStoreError as exc:
+            console.print(f"[yellow]{exc}[/yellow]")
+        else:
+            if stored_key:
+                console.print(f"检测到已保存的 {provider_name} 凭据。")
+                if Confirm.ask("是否使用已保存凭据", default=True):
+                    return stored_key
+
+    if offer_saved:
+        env_key = os.environ.get("NAUMI_MODELS__API_KEY", "")
+        if env_key:
+            masked = f"{env_key[:4]}...{env_key[-4:]}" if len(env_key) >= 8 else "***"
+            console.print(f"检测到环境变量 NAUMI_MODELS__API_KEY: [dim]{masked}[/dim]")
+            if Confirm.ask("是否使用此 Key", default=True):
+                return env_key
 
     console.print(f"\n请输入 [bold]{provider_name}[/bold] 的 API Key")
     console.print("[dim]输入时不会显示，也可直接回车跳过[/dim]")
     key = getpass.getpass("API Key: ").strip()
     return key
+
+
+def _validate_provider_api_key(
+    provider: str,
+    preset: dict[str, Any],
+    api_key: str,
+) -> Literal["valid", "invalid", "unverified"]:
+    """Validate credentials without sending prompts or retaining response bodies."""
+    api_base = str(preset.get("api_base") or "").strip().rstrip("/")
+    if not api_base:
+        console.print("[yellow]未配置 API Base，暂时无法验证凭据。[/yellow]")
+        return "unverified"
+
+    headers = {"Authorization": f"Bearer {api_key}"}
+    if provider == "anthropic":
+        headers = {
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+        }
+    try:
+        response = httpx.get(
+            f"{api_base}/models",
+            headers=headers,
+            timeout=3,
+        )
+    except httpx.HTTPError:
+        console.print("[yellow]暂时无法连接模型服务，凭据将在首次请求时再次验证。[/yellow]")
+        return "unverified"
+
+    if 200 <= response.status_code < 300:
+        console.print("[green]模型凭据验证通过。[/green]")
+        return "valid"
+    if response.status_code in {401, 403}:
+        return "invalid"
+    console.print(
+        f"[yellow]模型服务返回 HTTP {response.status_code}，"
+        "暂时无法确认凭据状态。[/yellow]"
+    )
+    return "unverified"
 
 
 def _build_config(
@@ -246,40 +319,57 @@ def _build_config(
     }
 
 
+def _resolve_node_ui_dir(project_root: Path) -> Path | None:
+    """Resolve terminal assets from a source checkout or an installed wheel."""
+    candidates = (
+        project_root / "frontend" / "terminal-ui",
+        Path(__file__).resolve().parents[1] / "frontend" / "terminal-ui",
+    )
+    for candidate in candidates:
+        if (candidate / "src" / "index.js").is_file():
+            return candidate
+    return None
+
+
 def _check_node_ui(project_root: Path) -> None:
-    """检查 Node.js 环境，为新一代终端 UI 做准备。"""
+    """检查随包携带的免安装 Node 终端入口。"""
     node = shutil.which("node")
     if not node:
         console.print(
-            "\n[yellow]未检测到 Node.js 20+，新 Terminal UI 暂不可用。[/yellow]"
+            "\n[yellow]未检测到 Node.js 20.10+，新 Terminal UI 暂不可用。[/yellow]"
         )
         console.print("默认入口会自动回退到 Textual TUI，也可直接执行 naumi tui。")
-        console.print("如需 Node UI，请安装 Node.js 20+ 后运行：")
-        console.print(f"  [dim]cd {project_root / 'frontend' / 'terminal-ui'} && npm install[/dim]")
+        console.print("如需 Node UI，请安装 Node.js 20.10+ 后重新运行 naumi。")
         return
 
     try:
         version = _run([node, "--version"]).strip()
-        console.print(f"\n[green]检测到 Node.js {version}[/green]")
-    except Exception:
-        console.print("[yellow]检测到 node 但无法获取版本[/yellow]")
+    except Exception as exc:
+        console.print(f"[yellow]检测到 Node.js，但无法读取版本：{exc}[/yellow]")
         return
 
-    node_modules = project_root / "frontend" / "terminal-ui" / "node_modules"
-    if not node_modules.exists():
-        console.print("[dim]新一代终端 UI 依赖未安装。[/dim]")
-        if Confirm.ask("是否现在安装 Node UI 依赖？", default=True):
-            ui_dir = project_root / "frontend" / "terminal-ui"
-            try:
-                console.print("正在安装 npm 依赖...")
-                result = shutil.which("npm")
-                if result:
-                    _run([result, "install"], cwd=str(ui_dir))
-                    console.print("[green]Node UI 依赖安装完成[/green]")
-                else:
-                    console.print("[red]未找到 npm[/red]")
-            except Exception as exc:
-                console.print(f"[red]安装失败: {exc}[/red]")
+    match = re.fullmatch(r"v?(\d+)\.(\d+)(?:\.\d+.*)?", version)
+    if match is None or (int(match.group(1)), int(match.group(2))) < (20, 10):
+        console.print(
+            f"\n[yellow]Node.js {version or '未知版本'} 不满足 20.10+；"
+            "默认入口将回退到 Textual TUI。[/yellow]"
+        )
+        return
+
+    console.print(f"\n[green]检测到 Node.js {version}[/green]")
+    ui_dir = _resolve_node_ui_dir(project_root)
+    if ui_dir is None:
+        console.print("[yellow]终端 UI 文件不完整，请重新安装或升级 NaumiAgent。[/yellow]")
+        return
+
+    entry = ui_dir / "src" / "index.js"
+    try:
+        _run([node, "--check", str(entry)], cwd=str(ui_dir))
+    except Exception as exc:
+        console.print(f"[yellow]终端 UI 入口校验失败：{exc}[/yellow]")
+        return
+
+    console.print("[green]Node 终端 UI 已就绪，无需安装 npm 依赖。[/green]")
 
 
 def _report_search_readiness() -> None:
