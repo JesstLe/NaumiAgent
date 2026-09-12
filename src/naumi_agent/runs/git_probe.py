@@ -8,10 +8,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from naumi_agent.runs.models import ReceiptChange, ReceiptGitState
+from naumi_agent.runtime.async_process import read_bounded_stdout
 
 _GIT_TIMEOUT_SECONDS = 3.0
 _MAX_STATUS_PATHS = 500
 _MAX_FINGERPRINT_BYTES = 8 * 1024 * 1024
+_MAX_GIT_TEXT_BYTES = 64 * 1024
+_MAX_GIT_STATUS_BYTES = 1024 * 1024
+_MAX_GIT_NUMSTAT_BYTES = 2 * 1024 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,7 +49,8 @@ class GitRunDelta:
 class _GitResult:
     returncode: int
     stdout: bytes
-    stderr: bytes
+    stderr: bytes = b""
+    truncated: bool = False
 
 
 class GitWorkspaceProbe:
@@ -76,14 +81,21 @@ class GitWorkspaceProbe:
             "--porcelain=v1",
             "-z",
             "--untracked-files=all",
+            max_bytes=_MAX_GIT_STATUS_BYTES,
         )
-        if status_result is None or status_result.returncode != 0:
+        if status_result is None or (
+            status_result.returncode != 0 and not status_result.truncated
+        ):
             return GitWorkspaceSnapshot(
                 available=False,
                 warnings=(f"Git 状态读取失败{_safe_error(status_result)}",),
             )
 
         warnings: list[str] = []
+        if status_result.truncated:
+            warnings.append(
+                "Git 状态输出超过 1 MiB，仅保留已完整读取的路径；回执可能不完整"
+            )
         raw_statuses = _parse_porcelain_v1_z(status_result.stdout)
         if len(raw_statuses) > _MAX_STATUS_PATHS:
             warnings.append(
@@ -91,7 +103,11 @@ class GitWorkspaceProbe:
             )
             raw_statuses = raw_statuses[:_MAX_STATUS_PATHS]
 
-        stats = await self._numstat()
+        stats, numstat_truncated = await self._numstat()
+        if numstat_truncated:
+            warnings.append(
+                "Git numstat 输出超过 2 MiB，部分文件的增删行统计未计入回执"
+            )
         paths: dict[str, GitPathState] = {}
         for path, status in raw_statuses:
             fingerprint, fingerprint_warning = await asyncio.to_thread(
@@ -103,7 +119,11 @@ class GitWorkspaceProbe:
                 warnings.append(fingerprint_warning)
             additions, deletions = stats.get(path, (0, 0))
             if status == "untracked" and fingerprint.startswith("sha256:"):
-                additions = _count_file_lines(repository_root, path)
+                additions = await asyncio.to_thread(
+                    _count_file_lines,
+                    repository_root,
+                    path,
+                )
             paths[path] = GitPathState(
                 status=status,
                 fingerprint=fingerprint,
@@ -125,10 +145,16 @@ class GitWorkspaceProbe:
             warnings=_unique(warnings),
         )
 
-    async def _numstat(self) -> dict[str, tuple[int, int]]:
-        result = await self._git("diff", "--numstat", "HEAD", "--")
-        if result is None or result.returncode != 0:
-            return {}
+    async def _numstat(self) -> tuple[dict[str, tuple[int, int]], bool]:
+        result = await self._git(
+            "diff",
+            "--numstat",
+            "HEAD",
+            "--",
+            max_bytes=_MAX_GIT_NUMSTAT_BYTES,
+        )
+        if result is None or (result.returncode != 0 and not result.truncated):
+            return {}, False
         stats: dict[str, tuple[int, int]] = {}
         for line in result.stdout.decode("utf-8", errors="replace").splitlines():
             parts = line.split("\t", 2)
@@ -142,7 +168,7 @@ class GitWorkspaceProbe:
                 stats[path] = (max(int(additions), 0), max(int(deletions), 0))
             except ValueError:
                 continue
-        return stats
+        return stats, result.truncated
 
     async def _ahead_behind(self) -> tuple[int, int]:
         result = await self._git(
@@ -168,7 +194,11 @@ class GitWorkspaceProbe:
             return ""
         return result.stdout.decode("utf-8", errors="replace").strip()[:500]
 
-    async def _git(self, *args: str) -> _GitResult | None:
+    async def _git(
+        self,
+        *args: str,
+        max_bytes: int = _MAX_GIT_TEXT_BYTES,
+    ) -> _GitResult | None:
         try:
             process = await asyncio.create_subprocess_exec(
                 "git",
@@ -182,15 +212,24 @@ class GitWorkspaceProbe:
         except (FileNotFoundError, NotADirectoryError, OSError):
             return None
         try:
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
+            output, stderr = await asyncio.wait_for(
+                asyncio.gather(
+                    read_bounded_stdout(process, max_bytes=max_bytes),
+                    _read_bounded_stderr(process, max_bytes=4096),
+                ),
                 timeout=_GIT_TIMEOUT_SECONDS,
             )
         except TimeoutError:
-            process.kill()
-            await process.communicate()
+            if process.returncode is None:
+                process.kill()
+            await process.wait()
             return None
-        return _GitResult(process.returncode or 0, stdout, stderr)
+        return _GitResult(
+            returncode=output.returncode,
+            stdout=output.stdout,
+            stderr=stderr,
+            truncated=output.truncated,
+        )
 
 
 def diff_run_changes(
@@ -241,8 +280,25 @@ def diff_run_changes(
     )
 
 
+async def _read_bounded_stderr(
+    process: asyncio.subprocess.Process,
+    *,
+    max_bytes: int,
+) -> bytes:
+    if process.stderr is None:
+        return b""
+    captured = bytearray()
+    while chunk := await process.stderr.read(64 * 1024):
+        remaining = max_bytes - len(captured)
+        if remaining > 0:
+            captured.extend(chunk[:remaining])
+    return bytes(captured)
+
+
 def _parse_porcelain_v1_z(payload: bytes) -> list[tuple[str, str]]:
     tokens = payload.split(b"\0")
+    if payload and not payload.endswith(b"\0"):
+        tokens = tokens[:-1]
     result: list[tuple[str, str]] = []
     index = 0
     while index < len(tokens):
@@ -309,6 +365,8 @@ def _count_file_lines(repository_root: Path, relative_path: str) -> int:
 def _safe_error(result: _GitResult | None) -> str:
     if result is None:
         return "：git 命令不可用或超时"
+    if result.truncated:
+        return "：git 输出超过读取上限"
     detail = result.stderr.decode("utf-8", errors="replace").strip()
     return f"：{detail[:200]}" if detail else ""
 
