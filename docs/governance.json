@@ -27,6 +27,31 @@
       "enforce_current": true
     },
     {
+      "pattern": "docs/beautiful-ui-integration.md",
+      "status": "current",
+      "enforce_current": true
+    },
+    {
+      "pattern": "docs/ci-performance-audit.md",
+      "status": "current",
+      "enforce_current": true
+    },
+    {
+      "pattern": "docs/terminal-parallel-sessions.md",
+      "status": "current",
+      "enforce_current": true
+    },
+    {
+      "pattern": "docs/tool-output-persistence.md",
+      "status": "current",
+      "enforce_current": true
+    },
+    {
+      "pattern": "docs/web2-*.md",
+      "status": "current",
+      "enforce_current": true
+    },
+    {
       "pattern": "docs/harness/*.md",
       "status": "current",
       "enforce_current": true
@@ -85,6 +110,14 @@
     },
     {
       "pattern": "docs/interview/*.md",
+      "status": "reference"
+    },
+    {
+      "pattern": "docs/interview-illustrations/*.md",
+      "status": "reference"
+    },
+    {
+      "pattern": "docs/showcase/*.md",
       "status": "reference"
     },
     {

@@ -62,7 +62,8 @@ def test_new_ui_command_index_is_complete_deterministic_and_unique() -> None:
     assert by_name["/doctor"].permission_risk == "tool_execution"
     assert by_name["/evolution"].arguments.syntax == (
         "[list|priorities|detail|discover-goal|discover-miss|discover-metric|discover-outcome|evaluation|stable-*|remote-*|rollout-*|decision-*|"
-        "reflection-*|promotion-*|approval-*|revalidation-*|outcome-*|enqueue] [arguments]"
+        "reflection-*|promotion-*|approval-principal|approval-*|revalidation-*|outcome-*|"
+        "enqueue] [arguments]"
     )
     assert len(by_name["/evolution"].arguments.syntax) <= 300
 
