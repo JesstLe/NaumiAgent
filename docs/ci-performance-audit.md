@@ -50,3 +50,7 @@ Archive Admission 的并发测试还暴露 `ReleaseSlotStore.install()` 缺少�
 本轮复扫 Git 跟踪清单仍未发现缓存、日志、备份、临时文件或构建产物；定向测试与 `compileall` 在本地生成的 53 个 `__pycache__`、pytest/ruff/mypy 缓存目录已在工作树边界内清理。Vulture 以 90% 置信度复扫只报告第三方协议要求保留的形参：prompt-toolkit completer 的 `complete_event`、context manager 的异常三元组，以及下载 stream 协议的 `chunk_size`；没有新的可安全删除实现。
 
 性能结构债务也不只存在于 `engine.py`：`harness/store.py` 约 536 KB，`main.py` 约 390 KB，`ui/bridge.py` 约 327 KB，`tools/evolution_review.py` 约 288 KB，`daemons/agent_jobs.py` 约 257 KB。它们会增加导入、静态分析、代码索引和修改回归成本，但本轮没有把机械拆文件宣称为运行时优化；后续应先为各职责建立调用与并发基准，再逐模块迁移并保持公共接口稳定。
+
+新 CI 在前述失败通过后继续运行，进一步发现 `test_harness_surfaces.py` 也复制了同一份旧协议完整 capability 列表，导致离线 Eval 失败并连带阻断 Baseline 晋升。该共享 surface 夹具已同样绑定 `PROTOCOL_CAPABILITIES`，Linux 分片暴露的四个失败链路由一次根因修复收口。
+
+Windows 真实 slash 流程随后暴露了两个生产可执行性问题。Harness Sandbox 快照目录直接拼接 `manual:<session-id>`，冒号会触发 WinError 123；目录名现改为由 run、check 与 source digest 共同生成的固定长度 SHA-256 身份，原始 run id 仍保留在 manifest 和回执中。基础设施异常现在同时显示稳定的 `sandbox_unavailable` 或 `sandbox_infrastructure_error` 错误码，用户可以据此区分缺少隔离后端与其他执行故障。Surface 测试 Profile 也改用当前 `sys.executable`，避免 WindowsApps 的 `python3.exe` 别名存在但不可访问时产生 WinError 1920。Windows 定向结果为 15 passed、4 个真实隔离后端场景按设计 skipped，另有便携快照路径用例通过。
