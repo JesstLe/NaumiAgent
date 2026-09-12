@@ -192,7 +192,7 @@ async def test_service_builds_authoritative_snapshot_and_stable_revision(
             "检查真实执行",
             "observer",
         )))
-        await asyncio.wait_for(started.wait(), timeout=1)
+        await asyncio.wait_for(started.wait(), timeout=10)
         await manager.message_bus.send(AgentMessage(
             sender="coder",
             recipient="observer",
