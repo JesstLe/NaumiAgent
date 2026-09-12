@@ -10,7 +10,7 @@ from textual.widgets import Input
 from naumi_agent.agent_control import AgentControlSnapshot, AgentDescriptor
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.memory.session import Session
-from naumi_agent.orchestrator.engine import AgentEngine
+from naumi_agent.runtime.composition import create_agent_engine
 from naumi_agent.tasks.models import Task, TaskStatus
 from naumi_agent.tui.agent_control import AgentControlScreen
 from naumi_agent.tui.app import NaumiApp
@@ -64,7 +64,7 @@ def test_agent_control_initial_target_rejects_unsafe_or_oversized_names() -> Non
 
 @pytest.mark.asyncio
 async def test_tui_quick_open_cancels_or_fills_without_submitting() -> None:
-    app = NaumiApp(AgentEngine(AppConfig()))
+    app = NaumiApp(create_agent_engine(AppConfig()))
 
     async with app.run_test(size=(100, 30)) as pilot:
         composer = app.query_one("#msg-input", Input)
@@ -97,7 +97,7 @@ async def test_tui_quick_open_cancels_or_fills_without_submitting() -> None:
 
 @pytest.mark.asyncio
 async def test_tui_quick_open_ranks_recent_submitted_command_first() -> None:
-    app = NaumiApp(AgentEngine(AppConfig()))
+    app = NaumiApp(create_agent_engine(AppConfig()))
 
     async with app.run_test(size=(100, 30)) as pilot:
         composer = app.query_one("#msg-input", Input)
@@ -118,7 +118,7 @@ async def test_tui_quick_open_ranks_recent_submitted_command_first() -> None:
 
 @pytest.mark.asyncio
 async def test_tui_quick_open_switches_to_typed_tasks_and_only_fills() -> None:
-    engine = AgentEngine(AppConfig())
+    engine = create_agent_engine(AppConfig())
     engine.task_store = _QuickOpenTaskStore()
     app = NaumiApp(engine)
 
@@ -151,7 +151,7 @@ async def test_tui_quick_open_switches_to_typed_tasks_and_only_fills() -> None:
 
 @pytest.mark.asyncio
 async def test_tui_quick_open_switches_to_workspace_sessions_and_only_fills() -> None:
-    engine = AgentEngine(AppConfig())
+    engine = create_agent_engine(AppConfig())
     session = Session(
         id="quick-session",
         title="可恢复会话",
@@ -191,7 +191,7 @@ async def test_tui_quick_open_searches_workspace_files_and_only_fills_read(
     source = tmp_path / "src"
     source.mkdir()
     (source / "中文 file.py").write_text("print('ok')", encoding="utf-8")
-    engine = AgentEngine(AppConfig())
+    engine = create_agent_engine(AppConfig())
     engine.workspace_file_index = WorkspaceFileIndex(tmp_path)
     app = NaumiApp(engine)
 
@@ -222,7 +222,7 @@ async def test_tui_quick_open_searches_workspace_files_and_only_fills_read(
 
 @pytest.mark.asyncio
 async def test_tui_quick_open_deep_links_authoritative_agent_without_execution() -> None:
-    engine = AgentEngine(AppConfig())
+    engine = create_agent_engine(AppConfig())
     engine.agent_control = _QuickOpenAgentControl()
     app = NaumiApp(engine)
 
@@ -261,7 +261,7 @@ async def test_tui_quick_open_deep_links_authoritative_agent_without_execution()
 
 @pytest.mark.asyncio
 async def test_tui_quick_open_searches_authoritative_pages_and_only_fills() -> None:
-    app = NaumiApp(AgentEngine(AppConfig()))
+    app = NaumiApp(create_agent_engine(AppConfig()))
 
     async with app.run_test(size=(100, 30)) as pilot:
         composer = app.query_one("#msg-input", Input)

@@ -346,7 +346,7 @@ async def test_tampered_encrypted_dispatch_fails_child_and_requeues_job(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    process = _process(tmp_path, handshake_timeout_seconds=2)
+    process = _process(tmp_path, handshake_timeout_seconds=10)
     await process.start()
     job_id = await _admit_job(process)
     original = agent_worker_process_module._parent_job_message

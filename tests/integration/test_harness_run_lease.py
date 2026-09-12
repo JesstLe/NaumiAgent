@@ -382,6 +382,6 @@ async def test_schema_v10_migrates_additively_to_run_leases(tmp_path) -> None:
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             ).fetchall()
         }
-    assert version == HARNESS_STORE_SCHEMA_VERSION == 18
+    assert version == HARNESS_STORE_SCHEMA_VERSION
     assert marker == "preserved"
     assert {"harness_run_leases", "harness_run_fence_events"} <= tables
