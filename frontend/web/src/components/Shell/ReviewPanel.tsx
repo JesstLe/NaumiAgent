@@ -76,6 +76,9 @@ export function ReviewPanel() {
   const filteredFiles = useMemo(() => {
     if (!diff) return []
     if (filter === 'all') return diff.files
+    if (filter === 'unstaged') {
+      return diff.files.filter((f) => f.stage === 'unstaged' || f.stage === 'untracked')
+    }
     return diff.files.filter((f) => f.stage === filter)
   }, [diff, filter])
 

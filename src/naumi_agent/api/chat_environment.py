@@ -208,11 +208,12 @@ class ChatEnvironmentCollector:
             if worktree_status not in (" ", "?"):
                 descriptors.append((path, worktree_status, "unstaged", False))
             if index_status == "?" and worktree_status == "?":
-                descriptors.append((path, "A", "unstaged", True))
+                descriptors.append((path, "A", "untracked", True))
 
         stats = {
             "staged": _parse_numstat(staged_stats),
             "unstaged": _parse_numstat(unstaged_stats),
+            "untracked": {},
         }
         async def collect(
             descriptor: tuple[str, str, str, bool],

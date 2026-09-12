@@ -80,3 +80,5 @@ Stable Deployment Intent 的 target 漂移测试还把变化值写死为 `linux-
 分片 2 随后发现 runtime composition 守卫把 `main.py` 中 factory 调用次数硬编码为 3；新增合法 CLI 入口后调用变为 4，测试因此误报架构回退。守卫现通过 Python AST 检查产品入口确实调用 `create_agent_engine`，并禁止直接调用 `AgentEngine`，保留原始架构约束同时允许入口数量演进。
 
 Workbench 右侧 Diff 面板原先为每个文件并发执行 Git，并通过 `communicate()` 把完整 patch 一次性收进内存；8 个大文件会同时放大服务内存，最终 JSON 响应也没有总量上限。Git 输出现按 64 KiB 流式读取：单文件 patch 最多 512 KiB，单次响应最多 4 MiB，Git 元数据设置独立 8 MiB 完整性上限，并禁用 external diff 与 textconv。超限文件保留路径和完整 numstat，在 Web 与 Web2 明确显示“截断”或“未加载”提示；未跟踪文件读取移出事件循环。真实仓库的大 tracked diff、九个大 untracked 文件和慢磁盘调度场景均由定向测试覆盖。
+
+相邻功能检查还确认未跟踪文件一直被后端错误标为 `unstaged`，使 Web2 已提供的“未跟踪”筛选始终为空。后端现返回独立 `untracked` stage；旧 Web 的默认“未暂存”视图显式合并 `unstaged` 与 `untracked`，因此新文件继续可见，同时共享协议和 Web2 筛选语义一致。
