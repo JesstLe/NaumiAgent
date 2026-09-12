@@ -1,9 +1,13 @@
 """工具系统单元测试."""
 
+import asyncio
 import shlex
 import sys
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -228,6 +232,41 @@ class TestToolRegistry:
 
 
 class TestGlobGrepReadTools:
+    async def test_builtin_file_tools_do_not_block_event_loop(self, tmp_path) -> None:
+        event_loop_thread = threading.get_ident()
+        worker_threads: set[int] = set()
+
+        def slow_execute_sync(**kwargs) -> str:
+            worker_threads.add(threading.get_ident())
+            time.sleep(0.25)
+            return "done"
+
+        invocations: list[tuple[Any, dict[str, Any]]] = [
+            (GlobTool(workspace_root=tmp_path), {"pattern": "**/*.py"}),
+            (GrepTool(workspace_root=tmp_path), {"pattern": "needle"}),
+            (FileReadTool(workspace_root=tmp_path), {"path": "file.txt"}),
+            (FileWriteTool(workspace_root=tmp_path), {"path": "file.txt", "content": "x"}),
+            (
+                FileEditTool(workspace_root=tmp_path),
+                {"path": "file.txt", "old_text": "x", "new_text": "y"},
+            ),
+        ]
+        for tool, _ in invocations:
+            tool._execute_sync = slow_execute_sync
+
+        started = time.perf_counter()
+        pending = [
+            asyncio.create_task(tool.execute(**arguments))
+            for tool, arguments in invocations
+        ]
+        await asyncio.sleep(0.02)
+
+        assert time.perf_counter() - started < 0.2
+        assert all(not task.done() for task in pending)
+        assert await asyncio.gather(*pending) == ["done"] * len(invocations)
+        assert len(worker_threads) >= 2
+        assert event_loop_thread not in worker_threads
+
     async def test_glob_finds_multiple_paths_by_pattern(self, tmp_path) -> None:
         (tmp_path / "site").mkdir()
         (tmp_path / "site" / "index.html").write_text("<h1>Site</h1>")
