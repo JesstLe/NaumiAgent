@@ -36,6 +36,7 @@ def _golden() -> dict[str, object]:
         "tool_lifecycle",
         "completion",
         "cancel",
+        "capture",
     }
     assert document["schema_version"] == 1
     return document
