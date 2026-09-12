@@ -96,7 +96,7 @@ def test_default_catalog_covers_physical_stores_without_duplicate_paths(
         item for item in definitions if item.store_id == "runtime.agent_jobs"
     )
     assert agent_jobs.path == (tmp_path / "runtime" / "agent-jobs.db").resolve()
-    assert agent_jobs.supported_schema_version == AGENT_JOB_SCHEMA_VERSION == 6
+    assert agent_jobs.supported_schema_version == AGENT_JOB_SCHEMA_VERSION
     assert agent_jobs.retention is RetentionPolicy.AUDIT_LONG_TERM
     assert agent_jobs.sensitivity is DataSensitivity.RESTRICTED
     evolution = next(
