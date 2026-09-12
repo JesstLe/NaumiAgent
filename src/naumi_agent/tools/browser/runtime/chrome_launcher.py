@@ -203,10 +203,6 @@ class ChromeLauncher:
         cookie_file = target / "Cookies"
         if not cookie_file.exists():
             return True
-        age_ms = (
-            (asyncio.get_event_loop().time() if False else 0)
-            or 0
-        )
         import time
         age_ms = time.time() * 1000 - cookie_file.stat().st_mtime * 1000
         return age_ms > self.staleness_threshold_ms

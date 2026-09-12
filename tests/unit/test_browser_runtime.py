@@ -222,6 +222,21 @@ class TestChromeLauncher:
         assert "platform" in info
         assert "cdp_port" in info
 
+    def test_profile_sync_uses_cookie_file_age(self, tmp_path: Path) -> None:
+        launcher = ChromeLauncher()
+        launcher.debug_profile_dir = tmp_path
+        target = tmp_path / launcher.chrome_profile
+        target.mkdir()
+        cookie_file = target / "Cookies"
+        cookie_file.write_bytes(b"cookie")
+
+        launcher.staleness_threshold_ms = 60_000
+        assert launcher._is_profile_sync_needed() is False
+
+        old_timestamp = time.time() - 120
+        os.utime(cookie_file, (old_timestamp, old_timestamp))
+        assert launcher._is_profile_sync_needed() is True
+
     def test_kill_chrome_no_process(self) -> None:
         launcher = ChromeLauncher()
         result = launcher.kill_chrome()

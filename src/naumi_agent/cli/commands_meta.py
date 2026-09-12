@@ -6,7 +6,6 @@ import json
 import re
 import shlex
 import uuid
-from pathlib import Path
 from typing import Any
 
 from rich.markdown import Markdown
@@ -1106,79 +1105,3 @@ async def run_skill(engine: Any, skill_name: str, arguments: str) -> None:
                 padding=(1, 2),
             ),
         )
-
-
-async def handle_memory(engine: Any, arg: str) -> None:
-    """处理 /memory 命令及其子命令."""
-    subcmd = arg.strip().split(maxsplit=1)[0] if arg.strip() else "stats"
-    subarg = arg.strip().split(maxsplit=1)[1] if len(arg.strip().split(maxsplit=1)) > 1 else ""
-
-    handlers = {
-        "stats": lambda: _memory_stats(engine),
-        "search": lambda: _memory_search(engine, subarg),
-        "clean": lambda: _memory_clean(engine),
-        "export": lambda: _memory_export(engine),
-    }
-
-    handler = handlers.get(subcmd)
-    if handler:
-        await handler()
-    else:
-        console.print("[yellow]用法: /memory <子命令>[/yellow]")
-        console.print("[dim]子命令: stats, search <查询>, clean, export[/dim]")
-
-
-async def _memory_stats(engine: Any) -> None:
-    """显示记忆统计."""
-    from rich.table import Table
-
-    stats = engine.long_term_memory.stats()
-    console.print("[bold]记忆统计[/bold]")
-    console.print(f"  总数: {stats.total} | 活跃: {stats.active} | 休眠: {stats.dormant}")
-    console.print(f"  平均访问次数: {stats.avg_access_count:.1f}")
-
-    if stats.by_category:
-        table = Table(title="按类别", show_header=True, header_style="bold cyan")
-        table.add_column("类别")
-        table.add_column("数量", justify="right")
-        for cat, count in sorted(stats.by_category.items()):
-            table.add_row(cat, str(count))
-        console.print(table)
-    console.print()
-
-
-async def _memory_search(engine: Any, query: str) -> None:
-    """搜索记忆."""
-    if not query:
-        console.print("[yellow]用法: /memory search <查询>[/yellow]")
-        return
-
-    results = engine.long_term_memory.search(query, limit=5)
-    if not results:
-        console.print("[dim]未找到相关记忆[/dim]")
-        return
-
-    console.print(f"[bold]搜索结果: '{query}'[/bold]")
-    for r in results:
-        console.print(f"  [{r.category}] {r.content[:80]}...")
-    console.print()
-
-
-async def _memory_clean(engine: Any) -> None:
-    """清理记忆."""
-    result = engine.long_term_memory.consolidate()
-    console.print("[bold]记忆整理[/bold]")
-    console.print(f"  去重合并: {result.get('dedup_merged', 0)}")
-    console.print(f"  标记休眠: {result.get('forget_dormant', 0)}")
-    console.print(f"  永久删除: {result.get('forget_deleted', 0)}")
-    console.print()
-
-
-async def _memory_export(engine: Any) -> None:
-    """导出记忆."""
-    import json
-
-    data = engine.long_term_memory.export_memories()
-    path = "memory_export.json"
-    Path(path).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    console.print(f"[green]已导出 {len(data)} 条记忆到 {path}[/green]")
