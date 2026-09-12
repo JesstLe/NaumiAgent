@@ -265,14 +265,17 @@ async def test_stable_intent_converges_and_allows_each_population_member(
     assert not revoked.stable_deployment_intent_authority
     context["trust"][0] = active_trust
 
-    context["target_state"][0] = "linux-x64"
+    original_target = context["target_state"][0]
+    context["target_state"][0] = (
+        "linux-x64" if original_target != "linux-x64" else "macos-arm64"
+    )
     target_changed = await services[0].inspect(
         stage_advance_receipt_id=view.intent.stage_advance.receipt_id,
         credential_id=view.intent.proof.installation_credential.credential_id,
         admission_id=view.intent.archive_admission.admission_id,
     )
     assert not target_changed.installation_target_current
-    context["target_state"][0] = view.intent.installation_target
+    context["target_state"][0] = original_target
 
     next_snapshot = context["registry"].issue_snapshot(
         channel="stable",
