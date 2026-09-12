@@ -66,3 +66,5 @@ Windows 真实 slash 流程随后暴露了两个生产可执行性问题。Harne
 下一轮分片暴露 Pursuit 恢复账本无法表达“同一内容的机械裁决再次发生”：`decision_id` 由裁决内容生成，同一个 blocked 状态在第二次恢复时会复用 identity，而单行裁决表仍保留第一次发生时间，导致 terminal outbox 将合法的恢复后终态误判成准入前旧事实。当前保持裁决内容表不可变，新增按 run、decision 与时间记录的 occurrence，并由 `PursuitRun` 明确指向本次发生时间；恢复对账、outbox 与回执读取都校验该 occurrence。原失败文件普通和 coverage 模式通过，相邻恢复、对账、终态与 outbox 链路共 75 个用例通过。
 
 Stable Deployment Intent 的 target 漂移测试还把变化值写死为 `linux-x64`；Linux runner 的真实目标本来就是该值，因此断言的前置条件并未成立。夹具现保存实际原目标并选择一个确定不同的目标，恢复时也回写原值。Windows 因该真实 baseline 用例依赖 POSIX shebang 而按设计跳过，本地已验证当前主机上的替代目标确实不同，Linux 分片负责端到端执行。
+
+异步性能复扫确认 `LongTermMemory` 的公开方法虽然声明为 `async`，但 ChromaDB 初始化、embedding 查询、磁盘更新、遗忘、搜索和导出都直接运行在事件循环线程；慢向量查询会连带阻塞流式输出、心跳和同会话任务。所有 ChromaDB 事务现通过 `asyncio.to_thread` 移出事件循环，并由实例级可重入锁保持初始化、去重与更新的串行一致性；去重查询同时移除一次重复 `count()`。并发慢后端测试确认事件循环保持可调度、存储调用不重叠且不在事件循环线程执行，真实 ChromaDB 的 43 个用例在普通和 coverage 模式均通过。
