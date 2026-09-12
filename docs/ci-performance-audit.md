@@ -112,3 +112,7 @@ Workbench 右侧 Diff 面板原先为每个文件并发执行 Git，并通过 `c
 分片 0 的两个 Agent 停止 Bridge 用例仍假设默认委派走嵌入式 `agent.execute()`，但当前生产组合已携带模型配置并启用独立 Agent Worker。用例替换的嵌入式执行函数因此不会被调用，短等待失败后又在清理未进入目标状态的委派时阻塞。两个场景现明确选择其要验证的 embedded backend，并将冷启动及停止收口等待调整为 10 秒有界窗口；普通及 coverage 定向模式均为 2 passed。该修复没有关闭产品默认的独立 Worker，只消除了测试对默认组合演进的隐式依赖。
 
 同一执行中的 `test_engine.py` 在前述死锁修复后仅用 78.52 秒完成全部 155 个用例，证明原 20 分钟失败来自夹具等待而非文件规模本身。随后暴露的三个 Todo 联动用例也只替换了嵌入式 `coder.execute()`，默认独立 Worker 因而绕过替身并尝试真实模型传输。三个场景现与 Bridge 停止用例一样明确选择 embedded backend，继续验证成功、业务失败和执行器异常对 Todo 状态及事件流的映射；普通及 coverage 定向模式均为 3 passed。
+
+分片 5 的共享终端 golden 已新增 deterministic capture 元数据，但 parity loader 的封闭顶层键集合仍停留在 capture 加入前；同一份 tool result golden 也缺少当前消息协议中的 `error_code` 与 `retryable` 字段。Fixture 现完整表达 capture 与工具错误恢复契约，终端引擎适配、Textual 渲染和 Ctrl+C 生命周期文件在普通及 coverage 模式均为 5 passed。
+
+补齐 golden 后，本地普通模式还复现了 TUI 状态竞争：启动时异步执行的会话协调恢复可以在用户取消当前运行之后完成，并覆盖“已取消当前运行”的即时反馈。恢复任务现捕获启动时状态，只在状态栏期间没有被后续用户动作或运行事件修改时发布摘要或失败提示；确定性并发用例与终端生命周期文件在普通及 coverage 模式均为 6 passed。
