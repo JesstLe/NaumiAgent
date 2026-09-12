@@ -123,6 +123,10 @@ function StageTrace({
       {variant === 'Coding' && <ToolChips steps={stage.tools} status={status} working={working} showHeader={false} />}
     </Primitive>
     {summary && stage.tools.length > 0 && <div className="bui-stage-summary"><MessageContent content={summary} plain /></div>}
+    {activity?.summary && <div className="bui-live-summary" role="status" aria-live="polite" aria-label="流式思考摘要">
+      <span className="bui-live-summary-label">思考摘要</span>
+      <span className="bui-live-summary-text">{activity.summary}</span>
+    </div>}
     {activity?.detail && <div className="bui-stage-summary" data-freshness={activity.freshness}><MessageContent content={activity.detail} plain /></div>}
   </section>
 }

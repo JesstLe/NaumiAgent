@@ -58,6 +58,7 @@ export interface ExecutionStage {
 }
 export interface LiveExecutionActivity {
   headline: string
+  summary: string
   detail: string
   idleMilliseconds: number
   freshness: 'current' | 'waiting' | 'quiet' | 'stalled' | 'terminal'
@@ -258,7 +259,7 @@ export function liveExecutionActivity(
 ): LiveExecutionActivity {
   const terminal = [...events].reverse().find(event => ['agent_end', 'agent_error'].includes(event.type))
   if (!busy || terminal) {
-    return { headline: '', detail: '', idleMilliseconds: 0, freshness: 'terminal' }
+    return { headline: '', summary: '', detail: '', idleMilliseconds: 0, freshness: 'terminal' }
   }
 
   let activeTask = ''
@@ -295,6 +296,7 @@ export function liveExecutionActivity(
   const idleMilliseconds = Math.max(0, now - (lastEventTime ?? now))
   const elapsedMilliseconds = Math.max(0, now - (firstEventTime ?? now))
   const workspace = excerpt(context.workspace, 80)
+  const objective = excerpt(context.objective, 80)
   const headline = runningTool
     ? ongoingAction(runningTool.action || runningTool.label)
     : recoveryPosition > activeTaskPosition
@@ -309,13 +311,36 @@ export function liveExecutionActivity(
               ? `正在分析任务，准备在 ${workspace} 执行`
               : '正在分析任务并准备执行步骤'
 
+  const toolRows = rows.filter((row): row is ToolTimelineStep => row.kind !== 'reasoning')
+  const completedTools = toolRows.filter(row => row.state === 'completed').length
+  const failedTools = toolRows.filter(row => row.state === 'failed').length
+  const recordedResults = [
+    completedTools ? `${completedTools} 项完成` : '',
+    failedTools ? `${failedTools} 项失败` : '',
+  ].filter(Boolean).join('、')
+  const recordedSummary = recordedResults ? `已记录 ${recordedResults}` : '已记录最新操作状态'
+  const summary = runningTool
+    ? '已进入执行阶段，当前操作完成后会根据实际结果继续。'
+    : recoveryPosition > activeTaskPosition
+      ? '执行链路正在恢复，并重新确认后续步骤。'
+      : activeTask
+        ? `当前聚焦“${activeTask}”，正在准备下一项可验证操作。`
+        : planCompleted
+          ? '计划中的操作已经完成，正在核对结果并组织答复。'
+          : lastTool
+            ? `${recordedSummary}，正在结合结果准备下一步。`
+            : objective
+              ? `正在围绕“${objective}”梳理上下文，尚未开始工具操作。`
+              : '正在梳理当前请求和上下文，尚未开始工具操作。'
+
   const elapsed = `已运行 ${durationText(elapsedMilliseconds)}`
   if (idleMilliseconds < 15_000) {
-    return { headline, detail: `${elapsed} · 刚刚有新进展`, idleMilliseconds, freshness: 'current' }
+    return { headline, summary, detail: `${elapsed} · 刚刚有新进展`, idleMilliseconds, freshness: 'current' }
   }
   if (idleMilliseconds < 45_000) {
     return {
       headline,
+      summary,
       detail: `${elapsed} · ${durationText(idleMilliseconds)}前有新进展，正在等待下一步执行`,
       idleMilliseconds,
       freshness: 'waiting',
@@ -324,6 +349,7 @@ export function liveExecutionActivity(
   if (idleMilliseconds < 120_000) {
     return {
       headline,
+      summary,
       detail: `${elapsed} · ${durationText(idleMilliseconds)}没有新的工具或公开输出`,
       idleMilliseconds,
       freshness: 'quiet',
@@ -331,6 +357,7 @@ export function liveExecutionActivity(
   }
   return {
     headline,
+    summary,
     detail: `${elapsed} · ${durationText(idleMilliseconds)}没有新的工具或公开输出，任务可能停滞，可继续等待或停止`,
     idleMilliseconds,
     freshness: 'stalled',

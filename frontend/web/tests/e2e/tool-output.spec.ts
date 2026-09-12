@@ -75,6 +75,7 @@ test('reasoning appears immediately and tools stay at their turn position', asyn
   await page.getByRole('button', { name: '发送消息' }).click()
   const trace = page.getByLabel('执行过程', { exact: true })
   await expect(trace.getByRole('button', { name: /正在分析任务/ })).toBeVisible()
+  await expect(trace.getByRole('status', { name: '流式思考摘要' })).toContainText('正在围绕“检查后修改”梳理上下文')
   release?.()
   await expect(page.getByText('处理完成', { exact: true })).toBeVisible()
   const labels = await trace.locator('.bui-chip-rows > div > button').allTextContents()
