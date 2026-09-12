@@ -8,6 +8,12 @@
 .bui-stage-summary { max-width: 680px; margin: 7px 0 0; color: var(--ink-2); font-size: 13px; line-height: 1.75; }
 .bui-stage-summary .rich-content > :first-child { margin-top: 0; }
 .bui-stage-summary .rich-content > :last-child { margin-bottom: 0; }
+.bui-live-summary { display: flex; max-width: 680px; align-items: baseline; gap: 8px; margin: 8px 0 0; padding-left: 10px; border-left: 1px solid var(--line); color: var(--ink-2); font-size: 13px; line-height: 1.65; }
+.bui-live-summary-label { flex: none; color: var(--ink-3); font-size: 11px; font-weight: 600; letter-spacing: .04em; }
+.bui-live-summary-text { min-width: 0; overflow-wrap: anywhere; }
+.bui-live-summary-text::after { display: inline-block; width: 1px; height: .9em; margin-left: 4px; background: currentColor; content: ""; vertical-align: -1px; animation: bui-summary-caret 1s steps(1, end) infinite; }
+@keyframes bui-summary-caret { 0%, 45% { opacity: .8; } 46%, 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .bui-live-summary-text::after { animation: none; opacity: .55; } }
 .bui-root .bui-execution-body > .bui-tool-chips { width: 100%; max-width: 540px; }
 .bui-chip-rows > div > button { height: 28px; }
 .bui-chip-rows .bui-operation { flex-shrink: 0; max-width: 48%; }
