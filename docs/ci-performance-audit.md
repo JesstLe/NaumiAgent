@@ -68,3 +68,5 @@ Windows 真实 slash 流程随后暴露了两个生产可执行性问题。Harne
 Stable Deployment Intent 的 target 漂移测试还把变化值写死为 `linux-x64`；Linux runner 的真实目标本来就是该值，因此断言的前置条件并未成立。夹具现保存实际原目标并选择一个确定不同的目标，恢复时也回写原值。Windows 因该真实 baseline 用例依赖 POSIX shebang 而按设计跳过，本地已验证当前主机上的替代目标确实不同，Linux 分片负责端到端执行。
 
 异步性能复扫确认 `LongTermMemory` 的公开方法虽然声明为 `async`，但 ChromaDB 初始化、embedding 查询、磁盘更新、遗忘、搜索和导出都直接运行在事件循环线程；慢向量查询会连带阻塞流式输出、心跳和同会话任务。所有 ChromaDB 事务现通过 `asyncio.to_thread` 移出事件循环，并由实例级可重入锁保持初始化、去重与更新的串行一致性；去重查询同时移除一次重复 `count()`。并发慢后端测试确认事件循环保持可调度、存储调用不重叠且不在事件循环线程执行，真实 ChromaDB 的 43 个用例在普通和 coverage 模式均通过。
+
+同类扫描还发现 Agent 高频使用的 `glob`、`grep`、`file_read`、`file_write` 和 `file_edit` 虽然提供异步 `execute()`，目录遍历、全文读取和落盘却仍同步占用事件循环；大工作区搜索或慢磁盘会暂停流式输出并拖慢并行会话。五个文件工具现保留原有同步实现与返回协议，由异步入口统一通过 `asyncio.to_thread` 调度。真实文件读写、搜索与编辑链路共 16 个定向用例通过，慢 I/O 调度用例确认五个工具运行期间事件循环仍可调度，且实际工作线程不等于事件循环线程。
