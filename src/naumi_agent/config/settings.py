@@ -404,6 +404,9 @@ class PiEngineConfig(BaseSettings):
     provider: str | None = None
     model: str | None = None
     extra_args: list[str] = Field(default_factory=list)
+    # Identity block appended to pi's system prompt: None uses the
+    # NaumiAgent default, "" disables injection, custom text is verbatim.
+    system_prompt_append: str | None = None
     # Extra environment variables for the pi child process. Values may
     # reference an existing variable with "{env:NAME}" so keys never land in
     # the YAML file itself.

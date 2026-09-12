@@ -185,7 +185,7 @@ class PiWebEngine:
             return self._rpc
         from naumi_agent.pi_engine.extension import (
             default_pi_env,
-            resolve_default_extension_args,
+            resolve_pi_cli_args,
         )
 
         pi_config = self._config.engine.pi
@@ -195,8 +195,10 @@ class PiWebEngine:
             binary=pi_config.binary,
             provider=pi_config.provider,
             model=pi_config.model,
-            extra_args=resolve_default_extension_args(
-                workspace_root, list(pi_config.extra_args)
+            extra_args=resolve_pi_cli_args(
+                workspace_root,
+                list(pi_config.extra_args),
+                getattr(pi_config, "system_prompt_append", None),
             ),
             cwd=str(workspace_root),
             event_handler=self._events.put_nowait,
