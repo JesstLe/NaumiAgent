@@ -1679,6 +1679,14 @@
 .w2-todo span small { display: inline; }
 .w2-todo.completed { color: #9b9e96; } .w2-todo.completed > svg { color: #839674; }
 .w2-todo select { background: #f6f7f4; border: 0; border-radius: 4px; padding: 4px; font-size: 11px; }
+.w2-todo-complete { display: flex; align-items: flex-start; gap: 9px; padding: 3px 0 14px; color: #66755d; }
+.w2-todo-complete > svg { flex: none; margin-top: 2px; }
+.w2-todo-complete strong { display: block; font-size: 13px; font-weight: 600; }
+.w2-todo-complete small { display: block; margin-top: 2px; color: #92998b; font-size: 11px; }
+.w2-completed-toggle { display: flex; width: 100%; align-items: center; gap: 6px; border-top: 1px solid #eff0ec; padding: 10px 0 4px; color: #858b80; font-size: 12px; text-align: left; }
+.w2-completed-toggle svg { transition: transform 160ms ease; }
+.w2-completed-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+.w2-completed-list { margin-top: 3px; }
 .w2-todo-form { display: grid; gap: 12px; margin-top: 24px; }
 .w2-todo-form label { display: grid; gap: 7px; font-size: 12px; color: #89907f; }
 .w2-todo-form input, .w2-goal-form textarea { width: 100%; border: 1px solid #e3e7de; border-radius: 5px; background: #fff; padding: 9px; font-size: 13px; }
