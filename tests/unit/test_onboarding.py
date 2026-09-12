@@ -304,6 +304,80 @@ def test_node_check_recommends_automatic_and_explicit_textual_fallback(
     assert "naumi ui --legacy" not in text
 
 
+def test_node_check_validates_bundled_entry_without_npm_install(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output = StringIO()
+    ui_dir = tmp_path / "frontend" / "terminal-ui"
+    entry = ui_dir / "src" / "index.js"
+    entry.parent.mkdir(parents=True)
+    entry.write_text("#!/usr/bin/env node\n", encoding="utf-8")
+    calls: list[tuple[list[str], str | None]] = []
+
+    monkeypatch.setattr(onboarding, "console", Console(file=output, force_terminal=False))
+    monkeypatch.setattr(
+        onboarding.shutil,
+        "which",
+        lambda name: "C:/Program Files/nodejs/node.exe" if name == "node" else None,
+    )
+
+    def fake_run(cmd: list[str], cwd: str | None = None) -> str:
+        calls.append((cmd, cwd))
+        return "v24.19.0\n" if cmd[1] == "--version" else ""
+
+    monkeypatch.setattr(onboarding, "_run", fake_run)
+
+    onboarding._check_node_ui(tmp_path)
+
+    assert calls == [
+        (["C:/Program Files/nodejs/node.exe", "--version"], None),
+        (
+            ["C:/Program Files/nodejs/node.exe", "--check", str(entry)],
+            str(ui_dir),
+        ),
+    ]
+    text = output.getvalue()
+    assert "已就绪" in text
+    assert "无需安装 npm 依赖" in text
+    assert "正在安装 npm 依赖" not in text
+
+
+def test_node_ui_directory_resolves_installed_wheel_layout(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    module_file = tmp_path / "site-packages" / "naumi_agent" / "cli" / "onboarding.py"
+    packaged_ui = module_file.parents[1] / "frontend" / "terminal-ui"
+    entry = packaged_ui / "src" / "index.js"
+    entry.parent.mkdir(parents=True)
+    entry.write_text("#!/usr/bin/env node\n", encoding="utf-8")
+    monkeypatch.setattr(onboarding, "__file__", str(module_file))
+
+    assert onboarding._resolve_node_ui_dir(tmp_path / "missing-project") == packaged_ui
+
+
+def test_old_node_version_skips_terminal_entry_validation(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output = StringIO()
+    calls: list[list[str]] = []
+    monkeypatch.setattr(onboarding, "console", Console(file=output, force_terminal=False))
+    monkeypatch.setattr(onboarding.shutil, "which", lambda _name: "node")
+
+    def fake_run(cmd: list[str], cwd: str | None = None) -> str:
+        calls.append(cmd)
+        return "v20.9.0\n"
+
+    monkeypatch.setattr(onboarding, "_run", fake_run)
+
+    onboarding._check_node_ui(tmp_path)
+
+    assert calls == [["node", "--version"]]
+    assert "不满足 20.10+" in output.getvalue()
+
+
 def test_missing_key_message_does_not_recommend_plaintext_yaml(monkeypatch) -> None:
     output = StringIO()
     monkeypatch.setattr(main_module, "console", Console(file=output, force_terminal=False))
