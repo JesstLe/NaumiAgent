@@ -98,3 +98,5 @@ Workbench 右侧 Diff 面板原先为每个文件并发执行 Git，并通过 `c
 运行回执的 Git 探针仍通过 `communicate()` 把完整 status 与 numstat 同时装入内存，500 路径裁剪只在完整读取后发生；大量未跟踪文件还会在事件循环线程同步读取第二遍以统计行数。探针现复用公共有界子进程读取，普通文本限 64 KiB、status 限 1 MiB、numstat 限 2 MiB，截断时只解析完整 NUL 记录并把证据不完整写入回执 warning；stderr 独立排空并只保留 4 KiB，避免管道阻塞。未跟踪文件行数统计移到工作线程。真实 Git 净变更、非仓库、强制截断和慢磁盘调度共 5 个定向用例在普通和 coverage 模式均通过。
 
 扩大运行回执测试时发现两个 Windows 夹具边界：删除后置条件用例把未引用的绝对 Windows 路径直接拼进 POSIX lexer，反斜杠被当作转义字符，导致目标识别失败；用例现使用相对工作区路径表达真实 shell 调用。符号链接删除用例仅在系统明确返回 WinError 1314 时跳过，其他创建错误仍失败。完整文件在 Windows 为 19 passed、1 个权限受限场景 skipped。
+
+下一轮 Linux 分片在 Installation Daemon 的并发轮询中发现 Delivery Store 的读取一致性缺口：`get()` 先读取主记录，再用第二条查询验证 append-only 事件链，但两次查询不在同一显式读事务中。后台 Worker 在查询之间提交 ACK/completed 转换时，读取方会把旧主记录与新事件链拼成不可能状态，并误报存储损坏。`get()` 现以一个 SQLite snapshot 完成主记录与事件链验证；重复 enqueue 的既有记录路径也在释放 `BEGIN IMMEDIATE` 前完成验证。回归用例在主记录读取后强制启动并发 claim，验证读取方仍返回完整 queued snapshot、写入方随后进入 in-flight。该真实 release fixture 依赖 POSIX executable slot，Windows 只执行 ruff 与 compileall，Linux CI 负责端到端并发验证。

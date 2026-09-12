@@ -212,6 +212,41 @@ async def test_delivery_event_chain_tamper_fails_closed(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(__import__("os").name == "nt", reason="slot fixture 使用 POSIX executable")
 @pytest.mark.asyncio
+async def test_delivery_get_verifies_one_consistent_database_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from naumi_agent.evolution import stable_remote_finalization_deliveries as module
+
+    fixture, _, store, delivery, _, _ = await _delivery(tmp_path)
+    original_row = module._row
+    writer_task: asyncio.Task | None = None
+
+    async def read_row_then_start_writer(db, delivery_id):
+        nonlocal writer_task
+        row = await original_row(db, delivery_id)
+        writer_task = asyncio.create_task(
+            store.claim(
+                owner_id="concurrent-worker",
+                now=fixture.data.clock().isoformat(),
+            )
+        )
+        await asyncio.sleep(0.05)
+        return row
+
+    monkeypatch.setattr(module, "_row", read_row_then_start_writer)
+    snapshot = await store.get(delivery.package.delivery_id)
+    assert writer_task is not None
+    claimed = await writer_task
+
+    assert snapshot is not None
+    assert snapshot.latest_event.state == "queued"
+    assert claimed is not None
+    assert claimed.latest_event.state == "in_flight"
+
+
+@pytest.mark.skipif(__import__("os").name == "nt", reason="slot fixture 使用 POSIX executable")
+@pytest.mark.asyncio
 async def test_late_recovery_only_signs_existing_writer_fact(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
