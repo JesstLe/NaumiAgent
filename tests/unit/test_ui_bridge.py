@@ -6182,7 +6182,10 @@ async def test_bridge_streams_real_engine_tool_lifecycle_without_external_api(
     engine.execute_tool = execute_tool  # type: ignore[method-assign]
 
     try:
-        await bridge.submit("写入 demo 文件", request_id="submit-real-engine")
+        await bridge.submit(
+            "演示 file_write 工具生命周期，不需要实际创建或修改文件",
+            request_id="submit-real-engine",
+        )
         assert bridge._run_task is not None
         await bridge._run_task
     finally:
