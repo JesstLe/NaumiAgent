@@ -1,10 +1,22 @@
 """Shell hook 单元测试."""
 
+from __future__ import annotations
+
+import asyncio
+import sys
+from pathlib import Path
 
 import pytest
 
 from naumi_agent.hooks.hook_manager import HookContext, HookManager, HookPoint
-from naumi_agent.hooks.shell_hook import ShellHookConfig, create_shell_hook_runner
+from naumi_agent.hooks.shell_hook import (
+    _MAX_STDERR_BYTES,
+    _MAX_STDOUT_BYTES,
+    ShellHookConfig,
+    _communicate_bounded,
+    create_shell_hook_runner,
+)
+from naumi_agent.runtime.shell import create_shell_process
 
 
 class TestShellHookConfig:
@@ -91,6 +103,65 @@ class TestShellHookRunner:
 
         ctx = HookContext(point=HookPoint.TOOL_EXECUTE_START)
         await mgr.fire(ctx)  # should not hang
+
+    @pytest.mark.asyncio
+    async def test_large_output_is_drained_with_bounded_memory(self, tmp_path: Path):
+        script = tmp_path / "large_hook.py"
+        script.write_text(
+            "import sys\n"
+            "sys.stdout.buffer.write(b'a' * 300_000)\n"
+            "sys.stderr.buffer.write(b'b' * 300_000)\n",
+            encoding="utf-8",
+        )
+        proc = await create_shell_process(
+            f'{sys.executable} "{script}"',
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        stdout, stdout_bytes, stderr, stderr_bytes = await _communicate_bounded(
+            proc,
+            b"{}",
+            timeout=10,
+        )
+
+        assert stdout_bytes == 300_000
+        assert stderr_bytes == 300_000
+        assert len(stdout) == _MAX_STDOUT_BYTES
+        assert len(stderr) == _MAX_STDERR_BYTES
+        assert stdout == b"a" * _MAX_STDOUT_BYTES
+        assert stderr == b"b" * _MAX_STDERR_BYTES
+
+    @pytest.mark.asyncio
+    async def test_cancellation_reaps_shell_hook_process(self, monkeypatch):
+        created = asyncio.Event()
+        process = None
+
+        async def recording_create(*args, **kwargs):
+            nonlocal process
+            process = await create_shell_process(*args, **kwargs)
+            created.set()
+            return process
+
+        monkeypatch.setattr(
+            "naumi_agent.hooks.shell_hook.create_shell_process",
+            recording_create,
+        )
+        runner = create_shell_hook_runner(
+            ShellHookConfig(command="sleep 60", timeout=30)
+        )
+        task = asyncio.create_task(
+            runner(HookContext(point=HookPoint.TOOL_EXECUTE_START))
+        )
+        await asyncio.wait_for(created.wait(), timeout=5)
+
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert process is not None
+        assert process.returncode is not None
 
     @pytest.mark.asyncio
     async def test_nonzero_exit_code(self):
