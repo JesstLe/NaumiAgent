@@ -1,15 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { WorkbenchRuntimeClient, Todo } from '../api/WorkbenchRuntimeClient'
 
-export function useWorkspaceTasks(api: WorkbenchRuntimeClient, sessionId: string | null, connected: boolean, ensureSession: () => Promise<string>) {
+export function useWorkspaceTasks(
+  api: WorkbenchRuntimeClient,
+  sessionId: string | null,
+  connected: boolean,
+  ensureSession: () => Promise<string>,
+  getActiveSessionId: () => string | null,
+) {
   const [todos, setTodos] = useState<Todo[]>([])
   const [taskError, setTaskError] = useState('')
   const [tasksLoading, setTasksLoading] = useState(false)
   const [tasksMutating, setTasksMutating] = useState(false)
   const pending = useRef(false)
   const revision = useRef(0)
-  const currentSession = useRef(sessionId)
-  currentSession.current = sessionId
   const refreshTasks = useCallback(async () => {
     if (!sessionId || !connected) return
     const version = ++revision.current
@@ -34,10 +38,10 @@ export function useWorkspaceTasks(api: WorkbenchRuntimeClient, sessionId: string
     try {
       id = await ensureSession()
       const response = await operation(id)
-      if (currentSession.current === id) { revision.current++; setTasksLoading(false); setTodos(response.todos) }
+      if (getActiveSessionId() === id) { revision.current++; setTasksLoading(false); setTodos(response.todos) }
       return true
     } catch (error) {
-      if (currentSession.current === id) setTaskError(error instanceof Error ? error.message : '待办未保存，请重试')
+      if (getActiveSessionId() === id) setTaskError(error instanceof Error ? error.message : '待办未保存，请重试')
       return false
     } finally { pending.current = false; setTasksMutating(false) }
   }

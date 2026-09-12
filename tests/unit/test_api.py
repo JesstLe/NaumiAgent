@@ -22,6 +22,7 @@ from naumi_agent.api.routes.messages import (
     cancel_chat_run,
     delete_session,
     get_chat_environment,
+    get_git_diff,
     list_chat_runs,
     list_messages,
     send_message,
@@ -1012,6 +1013,38 @@ class TestMessageRoutes:
             await get_chat_environment("missing", request, auth="test")
 
         assert exc.value.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_workspace_git_diff_does_not_require_or_load_a_session(
+        self,
+        tmp_path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        engine = _FakeEngine()
+        engine.session_store.load = AsyncMock(side_effect=AssertionError("session lookup"))
+        request = _fake_request(engine, ChatRunStore(tmp_path / "chat-runs.db"))
+
+        class Collector:
+            def __init__(self, **_kwargs) -> None:
+                pass
+
+            async def collect_diff(self):
+                return SimpleNamespace(
+                    available=True,
+                    branch="audit",
+                    upstream="origin/audit",
+                    ahead=1,
+                    behind=0,
+                    error="",
+                    files=[],
+                )
+
+        monkeypatch.setattr(message_routes, "ChatEnvironmentCollector", Collector)
+
+        response = await get_git_diff(request, auth="test")
+
+        assert response.branch == "audit"
+        engine.session_store.load.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_cancel_chat_run_stops_agent_and_persists_cancelled_state(

@@ -12,19 +12,26 @@ export function DiffPanel() {
   const [openFiles, setOpenFiles] = useState<Set<string>>(new Set())
   const load = useRef(w.loadDiff)
   const loading = useRef(w.diffLoading)
+  const refreshing = useRef(false)
   load.current = w.loadDiff; loading.current = w.diffLoading
+  const refresh = async () => {
+    if (loading.current || refreshing.current) return
+    refreshing.current = true
+    try { await load.current() }
+    finally { refreshing.current = false }
+  }
   useEffect(() => {
     if (!w.daemon || w.connecting || w.loading) return
-    if (!loading.current) void load.current()
-    const timer = setInterval(() => { if (!document.hidden && !loading.current) void load.current() }, 5000)
-    const focus = () => { if (!loading.current) void load.current() }
+    void refresh()
+    const timer = setInterval(() => { if (!document.hidden) void refresh() }, 10000)
+    const focus = () => { if (!document.hidden) void refresh() }
     window.addEventListener('focus', focus)
     return () => { clearInterval(timer); window.removeEventListener('focus', focus) }
   }, [w.daemon, w.sessionId, w.connecting, w.loading])
   const all = w.diff?.files ?? []
   const files = all.filter(file => (scope === 'all' || file.stage === scope) && file.path.toLowerCase().includes(query.toLowerCase()))
   return <div className="w2-diff-panel">
-    <div className="w2-section-heading"><span>{w.diff?.branch || '当前更改'}</span><button aria-label="刷新代码更改" disabled={w.diffLoading} onClick={() => void w.loadDiff()}><RefreshCw size={15} className={w.diffLoading ? 'w2-spin' : ''} /></button></div>
+    <div className="w2-section-heading"><span>{w.diff?.branch || '当前更改'}</span><button aria-label="刷新代码更改" disabled={w.diffLoading} onClick={() => void refresh()}><RefreshCw size={15} className={w.diffLoading ? 'w2-spin' : ''} /></button></div>
     <div className="w2-diff-stats"><span>{all.length} 个文件</span><b>+{all.reduce((sum, file) => sum + file.additions, 0)}</b><em>−{all.reduce((sum, file) => sum + file.deletions, 0)}</em><small role="status">{w.diffLoading ? '更新中…' : w.diffUpdatedAt ? `${new Date(w.diffUpdatedAt).toLocaleTimeString('zh-CN')} 已更新` : ''}</small></div>
     <div className="w2-diff-toolbar"><label><Search size={14} /><input aria-label="筛选更改文件" placeholder="筛选文件…" value={query} onChange={event => setQuery(event.target.value)} /></label>
       <select aria-label="更改范围" value={scope} onChange={event => setScope(event.target.value)}><option value="all">所有更改</option>{Object.entries(stageName).map(([value, name]) => <option key={value} value={value}>{name} ({all.filter(file => file.stage === value).length})</option>)}</select>

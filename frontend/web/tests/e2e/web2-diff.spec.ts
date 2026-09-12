@@ -4,12 +4,12 @@ import { mockWorkbenchApi } from './mocks'
 test('diff filters, line numbers, split view and refreshing patches', async ({ page }) => {
   await mockWorkbenchApi(page)
   let changed = false
-  await page.route('**/sessions/*/git-diff', route => route.fulfill({ json: { available: true, branch: 'main', files: [
+  await page.route('**/workspace/git-diff', route => route.fulfill({ json: { available: true, branch: 'main', files: [
     { path: 'readme.md', stage: 'staged', additions: 1, deletions: 1, patch: `@@ -10 +10 @@\n-old\n+${changed ? 'latest' : 'new'}\n` },
     { path: 'image.png', stage: 'untracked', additions: 0, deletions: 0, patch: '' },
   ] } }))
   await page.goto('/web2')
-  await page.keyboard.press('Control+Shift+G')
+  await page.getByRole('button', { name: '审查' }).click()
   await expect(page.getByText('readme.md', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: '全部展开' }).click()
   await expect(page.getByLabel('readme.md 差异')).toContainText('10')
