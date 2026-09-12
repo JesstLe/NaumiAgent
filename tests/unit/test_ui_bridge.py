@@ -6814,6 +6814,63 @@ async def test_bridge_resume_replays_session_messages() -> None:
 
 
 @pytest.mark.asyncio
+async def test_bridge_slash_new_binds_fresh_session_and_clears_timeline() -> None:
+    engine = _FakeEngine()
+    engine._messages = [{"role": "user", "content": "保存我"}]
+    engine._save_session = AsyncMock()
+
+    def reset() -> None:
+        engine._messages = []
+        engine._session = None
+
+    engine.reset = reset
+    engine.get_or_create_session = AsyncMock(
+        side_effect=lambda title: setattr(
+            engine,
+            "_session",
+            SimpleNamespace(id="fresh-session", title=title, messages=[]),
+        )
+        or engine._session
+    )
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge._run_cli_slash_command("/new", request_id="new-1")
+
+    engine._save_session.assert_awaited_once()
+    replay = next(record for record in _records(writer) if record["type"] == "session/replayed")
+    assert replay["request_id"] == "new-1"
+    assert replay["payload"] == {
+        "session_id": "fresh-session",
+        "title": "新会话",
+        "message_count": 0,
+        "clear": True,
+        "new": True,
+        "terminal_event_recovery": {"mode": "legacy_snapshot"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_bridge_slash_new_does_not_switch_an_active_run() -> None:
+    engine = _FakeEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    release = asyncio.Event()
+    bridge._run_task = asyncio.create_task(release.wait())
+
+    try:
+        await bridge._run_cli_slash_command("/new", request_id="new-busy")
+        error = next(record for record in _records(writer) if record["type"] == "error")
+        assert error["payload"]["code"] == "run_in_progress"
+        assert "/parallel 1" in error["payload"]["message"]
+    finally:
+        release.set()
+        await bridge._run_task
+
+
+@pytest.mark.asyncio
 async def test_bridge_resume_replays_durable_completion_receipts(tmp_path: Path) -> None:
     engine = _FakeEngine()
     engine.chat_run_store = ChatRunStore(tmp_path / "chat-runs.db")

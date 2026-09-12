@@ -139,6 +139,32 @@ app.add_typer(runtime_key_app, name="runtime-key")
 console = Console()
 
 
+@app.command("parallel")
+def parallel_sessions(
+    count: int = typer.Option(1, "--count", "-n", min=1, max=10, help="并行会话数量"),
+    workspace: Path | None = typer.Option(None, "--workspace", "-w", help="工作目录"),
+    config: str = typer.Option(DEFAULT_CONFIG_PATH, "--config", "-c", help="配置文件路径"),
+) -> None:
+    """打开 1 到 10 个独立终端会话窗口。"""
+    from naumi_agent.parallel_sessions import (
+        ParallelSessionLaunchError,
+        launch_parallel_sessions,
+        render_parallel_launch_result,
+    )
+
+    _ensure_onboarding_ready(config)
+    try:
+        result = launch_parallel_sessions(
+            count=count,
+            workspace=workspace or Path.cwd(),
+            config_path=_resolve_config_path(config),
+        )
+    except ParallelSessionLaunchError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    console.print(Markdown(render_parallel_launch_result(result)))
+
+
 def _ensure_onboarding_ready(config: str) -> None:
     """Migrate legacy credentials and complete first-run configuration."""
     from naumi_agent.cli.onboarding import (
@@ -997,6 +1023,7 @@ def _launch_tui(config_path: str) -> None:
     _check_api_key(config)
     with _capture_tui_launch_noise() as (stdout_buf, stderr_buf):
         engine = _create_tui_engine(config)
+        engine._interactive_config_path = str(Path(resolved).resolve())
         keybindings = build_keybindings(config.keybindings)
         style_config = _build_ui_style_from_config(config)
     debug_trace = DebugTrace.create(
@@ -2753,6 +2780,8 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             await _new_conversation(engine)
             if _active_cli:
                 _show_cli_status(_active_cli, engine)
+        case "/parallel":
+            await _open_parallel_conversations(engine, arg)
         case "/usage" | "/u":
             u = engine.usage
             console.print(
@@ -3288,6 +3317,7 @@ def _print_help() -> None:
         ("/btemplate-run <id>", "从模板创建运行"),
         ("/btemplate-compare <id>", "比较模板运行结果"),
         ("/new", "保存当前会话并开始新对话"),
+        ("/parallel [1-10] [目录]", "打开独立 Engine 的并行会话窗口"),
         ("/clear", "清除当前会话（不保存）"),
         ("/permissions", "显示待确认权限面板"),
         ("/q", "退出"),
@@ -8901,6 +8931,32 @@ async def _new_conversation(engine: Any) -> None:
     if _active_cli:
         _active_cli.clear_output()
     console.print("[green]新对话已开始[/green]")
+
+
+async def _open_parallel_conversations(engine: Any, arg: str) -> None:
+    """Open independent terminal sessions through the shared launcher."""
+    from naumi_agent.parallel_sessions import (
+        ParallelSessionLaunchError,
+        launch_parallel_sessions,
+        parse_parallel_request,
+        render_parallel_launch_result,
+    )
+
+    try:
+        count, workspace = parse_parallel_request(
+            arg,
+            default_workspace=getattr(engine, "workspace_root", Path.cwd()),
+        )
+        config_path = getattr(engine, "_interactive_config_path", DEFAULT_CONFIG_PATH)
+        result = launch_parallel_sessions(
+            count=count,
+            workspace=workspace,
+            config_path=config_path,
+        )
+    except ParallelSessionLaunchError as exc:
+        console.print(f"[red]{exc}[/red]")
+        return
+    console.print(Markdown(render_parallel_launch_result(result)))
 
 
 def _show_skills(engine: Any) -> None:

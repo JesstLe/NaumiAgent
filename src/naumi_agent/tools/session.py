@@ -5,6 +5,11 @@ from __future__ import annotations
 from typing import Any
 
 from naumi_agent.harness.coordinator import ReconciliationCoordinatorOutcome
+from naumi_agent.parallel_sessions import (
+    ParallelSessionLaunchError,
+    launch_parallel_sessions,
+    render_parallel_launch_result,
+)
 from naumi_agent.tools.base import Tool, ToolMetadata
 from naumi_agent.ui.history_screen import (
     build_history_snapshot,
@@ -412,6 +417,69 @@ class SessionRetentionWorkerTool(Tool):
         return "不支持的操作。可用操作：start、stop、wake。"
 
 
+class ParallelSessionTool(Tool):
+    """Launch independent interactive engines for concurrent work."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "parallel_sessions"
+
+    @property
+    def description(self) -> str:
+        return (
+            "打开 1 到 10 个独立终端会话窗口，每个窗口使用独立 Engine，"
+            "对应用户斜杠命令 /parallel。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 10,
+                    "default": 1,
+                    "description": "要打开的独立会话数量。",
+                },
+                "workspace": {
+                    "type": "string",
+                    "description": "可选工作目录；默认使用当前工作区。",
+                },
+            },
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            requires_confirmation=True,
+            concurrency_safe=True,
+            path_argument_names=("workspace",),
+            command_argument_names=(),
+            user_facing_name="打开并行会话",
+            search_hint="parallel sessions /parallel 并行 会话 新窗口 多任务",
+        )
+
+    async def execute(self, count: int = 1, workspace: str = "") -> str:
+        config_path = getattr(self._engine, "_interactive_config_path", "")
+        if not config_path:
+            return "当前运行未绑定配置文件，无法安全启动独立会话。"
+        try:
+            result = launch_parallel_sessions(
+                count=count,
+                workspace=workspace or self._engine.workspace_root,
+                config_path=config_path,
+            )
+        except ParallelSessionLaunchError as exc:
+            return f"并行会话启动失败：{exc}"
+        return render_parallel_launch_result(result)
+
+
 def create_session_tools(engine: Any) -> list[Tool]:
     """Create session-related tools."""
     return [
@@ -420,4 +488,5 @@ def create_session_tools(engine: Any) -> list[Tool]:
         SessionDeleteTool(engine),
         SessionRetentionTool(engine),
         SessionRetentionWorkerTool(engine),
+        ParallelSessionTool(engine),
     ]

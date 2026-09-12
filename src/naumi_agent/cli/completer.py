@@ -122,6 +122,14 @@ def _build_commands() -> list[CommandMeta]:
         CommandMeta("/delete", "删除指定会话", takes_arg=True, arg_hint="<id>", readonly=False, category="会话"),
         CommandMeta("/clear", "清除当前会话（不保存）", readonly=False, category="会话"),
         CommandMeta("/new", "保存当前会话并开始新对话", readonly=False, category="会话"),
+        CommandMeta(
+            "/parallel",
+            "打开独立并行会话窗口",
+            takes_arg=True,
+            arg_hint="[1-10] [工作目录]",
+            readonly=False,
+            category="会话",
+        ),
         # 分析 — 无参数或可选参数
         CommandMeta("/chaos", "灾难演练 — SPOF 分析", takes_arg=True, arg_hint="[目标]", readonly=True, category="分析"),
         CommandMeta("/scale", "并发海啸 — 高并发分析", takes_arg=True, arg_hint="[目标|QPS]", readonly=True, category="分析"),
