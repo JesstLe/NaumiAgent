@@ -164,6 +164,22 @@ class GlobTool(Tool):
         include_hidden: bool = False,
         **kwargs: Any,
     ) -> str:
+        return await asyncio.to_thread(
+            self._execute_sync,
+            pattern=pattern,
+            directory=directory,
+            limit=limit,
+            include_hidden=include_hidden,
+        )
+
+    def _execute_sync(
+        self,
+        *,
+        pattern: str,
+        directory: str = ".",
+        limit: int = 100,
+        include_hidden: bool = False,
+    ) -> str:
         normalized_pattern = str(pattern or "").strip()
         if not normalized_pattern:
             return "Error: pattern 不能为空。"
@@ -287,6 +303,28 @@ class GrepTool(Tool):
         case_sensitive: bool = False,
         max_matches: int = 50,
         **kwargs: Any,
+    ) -> str:
+        return await asyncio.to_thread(
+            self._execute_sync,
+            pattern=pattern,
+            path=path,
+            glob=glob,
+            file_type=file_type,
+            literal=literal,
+            case_sensitive=case_sensitive,
+            max_matches=max_matches,
+        )
+
+    def _execute_sync(
+        self,
+        *,
+        pattern: str,
+        path: str = ".",
+        glob: str | None = None,
+        file_type: str | None = None,
+        literal: bool = False,
+        case_sensitive: bool = False,
+        max_matches: int = 50,
     ) -> str:
         raw_pattern = str(pattern or "")
         if not raw_pattern:
@@ -436,7 +474,17 @@ class FileReadTool(Tool):
             "required": ["path"],
         }
 
-    async def execute(self, *, path: str, offset: int = 0, limit: int = -1, **kwargs: Any) -> str:
+    async def execute(
+        self, *, path: str, offset: int = 0, limit: int = -1, **kwargs: Any,
+    ) -> str:
+        return await asyncio.to_thread(
+            self._execute_sync,
+            path=path,
+            offset=offset,
+            limit=limit,
+        )
+
+    def _execute_sync(self, *, path: str, offset: int = 0, limit: int = -1) -> str:
         resolved = _resolve_workspace_path(path, self._workspace_root)
         if not resolved.is_file():
             return f"Error: File not found: {path} (resolved: {resolved})"
@@ -522,6 +570,13 @@ class FileWriteTool(Tool):
         }
 
     async def execute(self, *, path: str, content: str, **kwargs: Any) -> str:
+        return await asyncio.to_thread(
+            self._execute_sync,
+            path=path,
+            content=content,
+        )
+
+    def _execute_sync(self, *, path: str, content: str) -> str:
         resolved = _resolve_workspace_path(path, self._workspace_root)
         is_new = not resolved.is_file()
 
@@ -648,6 +703,14 @@ class FileEditTool(Tool):
         }
 
     async def execute(self, *, path: str, old_text: str, new_text: str, **kwargs: Any) -> str:
+        return await asyncio.to_thread(
+            self._execute_sync,
+            path=path,
+            old_text=old_text,
+            new_text=new_text,
+        )
+
+    def _execute_sync(self, *, path: str, old_text: str, new_text: str) -> str:
         resolved = _resolve_workspace_path(path, self._workspace_root)
 
         if not resolved.is_file():
