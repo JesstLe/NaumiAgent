@@ -232,7 +232,9 @@ engine:
       ZAI_CODING_CN_API_KEY: "{env:OPENAI_API_KEY}"
 ```
 
-pi 引擎下对话、流式思考、工具执行卡片与权限确认走完整协议；todo/任务/inspector/workbench 等面板与 `/chaos` 等 NaumiAgent 专属命令暂不可用（前端按能力自动降级），会话内可用 `/engine`、`/model`、`/models`、`/new`、`/compact` 管理 pi 会话。协议按 pi v0.85.1 实测适配，升级 pi 前请先回归 `tests/integration/test_pi_engine_live.py`。
+pi 引擎下对话、流式思考、工具执行卡片与权限确认走完整协议；todo/任务/inspector/workbench 等面板暂不可用（前端按能力自动降级），会话内可用 `/engine`、`/model`、`/models`、`/new`、`/compact` 管理 pi 会话。协议按 pi v0.85.1 实测适配，升级 pi 前请先回归 `tests/integration/test_pi_engine_live.py`。
+
+**pi 会话内的 NaumiAgent 分析工具**：源码仓自带扩展 `pi_extensions/naumi-analysis.js`，向 pi 注册 `naumi_chaos` / `naumi_scale` / `naumi_state` 三个确定性静态扫描工具（复用内置引擎同一套扫描器，不调用模型；证据由 pi 的模型推演）。NaumiAgent 启动 pi 时会在工作区发现该扩展时自动加载并注入 `NAUMI_PYTHON`；也可显式配置 `engine.pi.extra_args: ["-e", "pi_extensions/naumi-analysis.js"]` 或独立使用 pi 时手动 `-e` 加载。验证：`node pi_extensions/selftest.mjs <任意源码目录>`。
 
 
 如果需要查看 LiteLLM 可选 provider 的启动 warning，可显式打开：
