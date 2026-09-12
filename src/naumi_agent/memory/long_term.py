@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import math
 import os
+import threading
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, TypeVar
 
 from naumi_agent.config.settings import MemoryConfig
 
@@ -24,6 +27,8 @@ _DELETE_AFTER_DAYS = 180
 # Protected categories get longer retention.
 _PROTECTED_CATEGORIES = frozenset({"preference"})
 _PROTECTED_EXTRA_DAYS = 60
+
+_T = TypeVar("_T")
 
 
 @dataclass(frozen=True)
@@ -78,6 +83,31 @@ class LongTermMemory:
         self._config = config
         self._client: Any = None
         self._collection: Any = None
+        self._operation_lock = threading.RLock()
+
+    async def _run_blocking(
+        self,
+        operation: Callable[..., _T],
+        /,
+        *args: Any,
+        **kwargs: Any,
+    ) -> _T:
+        """Run one serialized ChromaDB operation outside the event loop."""
+        return await asyncio.to_thread(
+            self._run_locked,
+            operation,
+            args,
+            kwargs,
+        )
+
+    def _run_locked(
+        self,
+        operation: Callable[..., _T],
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+    ) -> _T:
+        with self._operation_lock:
+            return operation(*args, **kwargs)
 
     def _ensure_initialized(self) -> None:
         if self._client is not None:
@@ -99,6 +129,9 @@ class LongTermMemory:
         自动去重：如果已存在高度相似（>0.92）的记忆，合并而非新增。
         合并策略：保留更长的内容，更新 updated_at，累加 metadata。
         """
+        return await self._run_blocking(self._store, entry)
+
+    def _store(self, entry: MemoryEntry) -> str:
         self._ensure_initialized()
 
         now = datetime.now().isoformat()
@@ -134,7 +167,8 @@ class LongTermMemory:
         self, content: str, *, category: str | None = None
     ) -> dict[str, Any] | None:
         """Check for a highly similar existing memory. Returns ChromaDB result dict or None."""
-        if self._collection.count() == 0:
+        count = self._collection.count()
+        if count == 0:
             return None
 
         # Only check active memories for dedup
@@ -145,11 +179,9 @@ class LongTermMemory:
             ]}
         else:
             where_filter = {"status": "active"}
-        n_results = min(1, self._collection.count())
-
         results = self._collection.query(
             query_texts=[content],
-            n_results=n_results,
+            n_results=1,
             where=where_filter,
             include=["documents", "metadatas", "distances"],
         )
@@ -225,7 +257,8 @@ class LongTermMemory:
 
         使用综合评分：relevance * recency_weight * access_weight.
         """
-        return await self._recall(
+        return await self._run_blocking(
+            self._recall,
             query,
             category=category,
             top_k=top_k,
@@ -244,7 +277,8 @@ class LongTermMemory:
         normalized_session_id = session_id.strip()
         if not normalized_session_id:
             return []
-        return await self._recall(
+        return await self._run_blocking(
+            self._recall,
             query,
             category=None,
             top_k=top_k,
@@ -252,7 +286,7 @@ class LongTermMemory:
             session_id=normalized_session_id,
         )
 
-    async def _recall(
+    def _recall(
         self,
         query: str,
         *,
@@ -352,11 +386,17 @@ class LongTermMemory:
 
     async def delete(self, memory_id: str) -> None:
         """删除一条记忆."""
+        await self._run_blocking(self._delete, memory_id)
+
+    def _delete(self, memory_id: str) -> None:
         self._ensure_initialized()
         self._collection.delete(ids=[memory_id])
 
     async def count(self) -> int:
         """返回记忆总数."""
+        return await self._run_blocking(self._count)
+
+    def _count(self) -> int:
         self._ensure_initialized()
         return self._collection.count() or 0
 
@@ -371,6 +411,13 @@ class LongTermMemory:
             raise ValueError("max_age_days 不能为负数")
         if min_access_count < 0:
             raise ValueError("min_access_count 不能为负数")
+        return await self._run_blocking(
+            self._forget_old,
+            max_age_days,
+            min_access_count,
+        )
+
+    def _forget_old(self, max_age_days: int, min_access_count: int) -> int:
         self._ensure_initialized()
 
         all_data = self._collection.get(include=["metadatas", "documents"])
@@ -423,7 +470,10 @@ class LongTermMemory:
 
     async def consolidate(self) -> dict[str, int]:
         """整理记忆：去重 + 老化遗忘. 返回操作统计."""
-        forgotten = await self.forget_old()
+        return await self._run_blocking(self._consolidate)
+
+    def _consolidate(self) -> dict[str, int]:
+        forgotten = self._forget_old(0, 1)
 
         # Dedup pass: find pairs with similarity > threshold
         all_data = self._collection.get(
@@ -453,6 +503,9 @@ class LongTermMemory:
 
     async def stats(self) -> MemoryStats:
         """返回记忆统计信息."""
+        return await self._run_blocking(self._stats)
+
+    def _stats(self) -> MemoryStats:
         self._ensure_initialized()
 
         all_data = self._collection.get(include=["metadatas"])
@@ -487,6 +540,16 @@ class LongTermMemory:
         self, query: str, *, top_k: int = 10, include_dormant: bool = False,
     ) -> list[MemorySearchResult]:
         """搜索记忆（管理用途，不过滤 status）."""
+        return await self._run_blocking(
+            self._search,
+            query,
+            top_k=top_k,
+            include_dormant=include_dormant,
+        )
+
+    def _search(
+        self, query: str, *, top_k: int, include_dormant: bool,
+    ) -> list[MemorySearchResult]:
         self._ensure_initialized()
 
         count = self._collection.count()
@@ -536,6 +599,9 @@ class LongTermMemory:
 
     async def export_memories(self) -> str:
         """导出所有记忆为 JSON 字符串."""
+        return await self._run_blocking(self._export_memories)
+
+    def _export_memories(self) -> str:
         self._ensure_initialized()
 
         all_data = self._collection.get(include=["documents", "metadatas"])

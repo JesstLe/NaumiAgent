@@ -1,5 +1,8 @@
 """LongTermMemory unit tests — dedup and scoring."""
 
+import asyncio
+import threading
+import time
 from datetime import datetime, timedelta
 
 import pytest
@@ -40,6 +43,47 @@ async def _store(memory: LongTermMemory, content: str, **kwargs) -> str:
         access_count=kwargs.get("access_count", 0),
     )
     return await memory.store(entry)
+
+
+class _SlowCountingCollection:
+    def __init__(self) -> None:
+        self._state_lock = threading.Lock()
+        self.active = 0
+        self.max_active = 0
+        self.thread_ids: set[int] = set()
+
+    def count(self) -> int:
+        with self._state_lock:
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            self.thread_ids.add(threading.get_ident())
+        try:
+            time.sleep(0.25)
+            return 1
+        finally:
+            with self._state_lock:
+                self.active -= 1
+
+
+@pytest.mark.asyncio
+async def test_chromadb_operations_do_not_block_or_overlap(memory) -> None:
+    collection = _SlowCountingCollection()
+    memory._client = object()
+    memory._collection = collection
+    event_loop_thread = threading.get_ident()
+
+    started = time.perf_counter()
+    first = asyncio.create_task(memory.count())
+    second = asyncio.create_task(memory.count())
+    await asyncio.sleep(0.02)
+
+    assert time.perf_counter() - started < 0.3
+    assert not first.done()
+    assert not second.done()
+    assert await asyncio.gather(first, second) == [1, 1]
+    assert collection.max_active == 1
+    assert collection.thread_ids
+    assert event_loop_thread not in collection.thread_ids
 
 
 # ---------------------------------------------------------------------------
