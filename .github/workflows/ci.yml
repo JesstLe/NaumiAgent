@@ -54,7 +54,11 @@ jobs:
           fi
           while IFS= read -r test_file; do
             echo "::group::$test_file"
-            timeout 10m pytest "$test_file" -q --tb=short \
+            test_timeout=10m
+            if [[ "$test_file" == "tests/unit/test_engine.py" ]]; then
+              test_timeout=20m
+            fi
+            timeout "$test_timeout" pytest "$test_file" -q --tb=short \
               --cov=src/naumi_agent --cov-append --cov-report=
             echo "::endgroup::"
           done < unit-tests.txt

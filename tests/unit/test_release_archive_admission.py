@@ -140,7 +140,9 @@ async def _runtime(
         assert artifact.attestation is not None
         attestation = load_release_build_attestation(artifact.attestation)
     channel_signer = _channel_signer()
-    policies = list(_policies(channel_signer, signer))
+    policies = list(
+        _policies(channel_signer, signer, reference_time=base_time)
+    )
     entry = ReleaseChannelEntry(
         target=target,
         version="1.2.3",

@@ -2,7 +2,7 @@
   "schema_version": 1,
   "manifest_kind": "claude_code_snapshot_semantic_mapping",
   "behavior_matrix_sha256": "04b815f34ce6ed806c8c55affe8828d8d7e2fb097b5eff4a640748c43e7af13a",
-  "protocol_contract_sha256": "2c110d0b498136ca3887f29df0d57498abde4bf799af2c956e01e8129eac1db8",
+  "protocol_contract_sha256": "93607436bd52aee3d6edd561571fea9ab90f3b8dff5a060df3d71c1846af5ae9",
   "scope": "cc_03_2a_snapshot_semantics",
   "responsibilities": [
     {"cell_id": "doctor.cancel", "owner": "ui_local", "reason": "取消关联在线探测请求，属于前端控制态与独立终态事件。"},

@@ -896,7 +896,7 @@ def _existing_attempt(destination, resolution):
             "Content-addressed download path 已存在不匹配文件。",
         )
     _make_read_only(destination)
-    _fsync_file(destination)
+    _fsync_file(destination, allow_read_only=True)
     _fsync_directory(destination.parent)
     return _attempt(
         url_index=0,
@@ -967,9 +967,16 @@ def _commit_staging(staging: Path, destination: Path) -> None:
             "release_download_staging_invalid",
             "Download staging 不是 regular file。",
         )
-    _make_read_only(staging)
     _fsync_file(staging)
-    os.replace(staging, destination)
+    if os.name == "nt":
+        # Windows refuses to move or remove some files after the read-only
+        # attribute is applied. Commit first, then seal the destination before
+        # exposing a successful receipt.
+        os.replace(staging, destination)
+        _make_read_only(destination)
+    else:
+        _make_read_only(staging)
+        os.replace(staging, destination)
     _fsync_directory(destination.parent)
 
 
@@ -978,9 +985,18 @@ def _make_read_only(path: Path) -> None:
     path.chmod(mode & ~0o222)
 
 
-def _fsync_file(path: Path) -> None:
-    with path.open("rb") as stream:
-        os.fsync(stream.fileno())
+def _fsync_file(path: Path, *, allow_read_only: bool = False) -> None:
+    mode = "r+b" if os.name == "nt" else "rb"
+    try:
+        with path.open(mode) as stream:
+            os.fsync(stream.fileno())
+    except PermissionError:
+        if not (
+            os.name == "nt"
+            and allow_read_only
+            and not stat.S_IMODE(path.stat().st_mode) & stat.S_IWRITE
+        ):
+            raise
 
 
 def _archive_current(path: Path, *, expected_bytes: int, expected_sha256: str) -> bool:
@@ -1014,7 +1030,14 @@ def _fsync_directory(path: Path) -> None:
 
 
 def _unlink_staging(path: Path) -> None:
-    path.unlink(missing_ok=True)
+    try:
+        path.unlink(missing_ok=True)
+    except PermissionError:
+        stat_result = path.lstat()
+        if not stat.S_ISREG(stat_result.st_mode) or path.is_symlink():
+            raise
+        path.chmod(stat.S_IMODE(stat_result.st_mode) | stat.S_IWRITE)
+        path.unlink(missing_ok=True)
 
 
 def _source_identity(resolution: ReleaseChannelResolution) -> tuple[str, str]:

@@ -55,20 +55,28 @@ def _build_signer():
     )
 
 
-def _policies(channel_signer, build_signer, *, channel_state="active", build_state="active"):
+def _policies(
+    channel_signer,
+    build_signer,
+    *,
+    channel_state="active",
+    build_state="active",
+    reference_time=T0,
+):
+    valid_until = max(T0, reference_time) + timedelta(days=30)
     channel_key = ReleaseTrustedChannelKey(
         identity=channel_signer.identity,
         state=channel_state,
         channels=("stable",),
         valid_from=(T0 - timedelta(days=7)).isoformat(),
-        valid_until=(T0 + timedelta(days=30)).isoformat(),
+        valid_until=valid_until.isoformat(),
         revoked_at=T0.isoformat() if channel_state == "revoked" else None,
     )
     build_key = ReleaseTrustedBuilderKey(
         identity=build_signer.identity,
         state=build_state,
         valid_from=(T0 - timedelta(days=7)).isoformat(),
-        valid_until=(T0 + timedelta(days=30)).isoformat(),
+        valid_until=valid_until.isoformat(),
         revoked_at=T0.isoformat() if build_state == "revoked" else None,
     )
     return (
