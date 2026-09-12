@@ -142,3 +142,7 @@ SQLite WAL 配置现收敛到 persistence 公共层：读取当前 journal mode 
 浏览器 ChromeLauncher 的端口探测仍同步调用 Linux 专用 `lsof`；Windows 缺少命令时异常分支会直接把首个端口当成可用，Linux 每个候选端口则可能阻塞异步 `ensure_ready()` 最长 3 秒。启动器现用 Python socket 对 `127.0.0.1` 做跨平台 bind 探测，已占用端口会继续扫描；配置 Profile 的文件与目录复制通过 `asyncio.to_thread` 移出事件循环。同一 Launcher 的并发 `ensure_ready()` 由异步锁合并为单次同步、启动和 CDP 等待，并在选择备用端口后更新实例端点，后续调用复用实际端口。真实监听端口与双并发启动的 3 个定向用例通过。
 
 运行 `34702630037` 中 lint、typecheck 和 shard 1–11 全部通过，shard 0 则在 `test_ui_bridge.py` 第 226 个用例达到文件级 10 分钟上限。该组持久交互用例只给 Harness SQLite authority 0.5 秒冷初始化窗口；coverage 下请求尚未发布就进入异常路径，测试又没有关闭 Bridge 或回收 pending task，最终把确定性等待放大成文件超时。创建、超时和取消三个真实持久交互场景现使用 10 秒有界轮询，若 authority 未进入预期状态会先关闭 Bridge 并收口任务后明确失败；普通与 CI 同等 coverage 定向模式均为 3 passed。
+
+运行 `34704129021` 再次只有 shard 0 在 `test_ui_bridge.py` 超时。按该文件最后 25 个用例顺序复现后，分页恢复用例会偶发只补回 49 张卡片，并在提前断言时遗留数十个 owner-renew 与 timeout task；成功路径也需要显式关闭 Bridge 才能机械收口全部后台任务。两次补位现各使用 10 秒有界等待，失败前关闭 Bridge，成功末尾继续关闭 Bridge。相邻 durable commit 用例不再以 20ms 间隔持续制造 SQLite 续租写入，而是仍真实续租一次、观测持久 sequence 前进后将后续间隔延长，再执行回答收口。两个根因用例连续三轮普通模式通过，CI 同等 coverage 模式通过；最后 25 个 Bridge 用例 coverage 模式为 25 passed。
+
+Bridge 完整文件在 Windows 还暴露启动目录夹具把绝对路径直接写入 YAML 双引号，`C:\Users` 中的 `\U` 会被 YAML 当作 Unicode 转义。夹具现用 JSON 字符串编码生成 YAML 兼容标量，保留 Windows 反斜杠且不改变产品配置解析；修复后完整文件 coverage 模式为 241 passed in 66.11s。
