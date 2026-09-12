@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import shlex
 import subprocess
 import threading
@@ -377,7 +378,7 @@ async def test_receipt_builder_fails_rm_postcondition_when_target_remains(tmp_pa
         {
             "name": "bash_run",
             "call_id": "delete-residual",
-            "args": json.dumps({"command": f"rm -rf {target}"}),
+            "args": json.dumps({"command": "rm -rf still-here"}),
         },
     )
     builder.observe(
@@ -406,7 +407,12 @@ async def test_receipt_builder_verifies_deleting_symlink_without_following_targe
     _init_repo(repo)
     target = repo / "tracked.txt"
     link = repo / "temporary-link"
-    link.symlink_to(target)
+    try:
+        link.symlink_to(target)
+    except OSError as exc:
+        if os.name == "nt" and exc.winerror == 1314:
+            pytest.skip("当前 Windows 账户没有创建符号链接的权限")
+        raise
     builder = await RunReceiptBuilder.start(workspace_root=repo, run_id="run-delete-link")
     builder.observe(
         "tool_start",
