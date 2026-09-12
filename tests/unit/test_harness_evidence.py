@@ -172,7 +172,8 @@ async def test_result_size_is_measured_in_utf8_bytes(tmp_path: Path) -> None:
             "name": "read",
             "status": "success",
             "content": content,
-            "content_length": len(content.encode("utf-8")),
+            "content_length": len(content),
+            "content_bytes": len(content.encode("utf-8")),
         },
     )
 
