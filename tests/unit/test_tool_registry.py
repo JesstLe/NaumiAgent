@@ -20,6 +20,7 @@ from naumi_agent.tools.builtin import (
     GlobTool,
     GrepTool,
     ReadTool,
+    YamlMicroVerifyTool,
     YamlValidateTool,
     create_builtin_tools,
 )
@@ -569,6 +570,51 @@ class TestYamlValidateTool:
 
         assert tool.metadata.read_only
         assert tool.metadata.path_argument_names == ("file_path",)
+
+    async def test_micro_verify_uses_safe_in_process_parser(self, tmp_path) -> None:
+        valid = tmp_path / "valid.yaml"
+        invalid = tmp_path / "invalid.yaml"
+        valid.write_text("service:\n  enabled: true\n", encoding="utf-8")
+        invalid.write_text("service: [\n", encoding="utf-8")
+        tool = YamlMicroVerifyTool()
+
+        assert await tool.execute(file_path=str(valid)) == "YAML_SYNTAX_OK"
+        assert await tool.execute(file_path=str(invalid)) == "YAML_SYNTAX_FAIL"
+
+    async def test_validate_and_micro_verify_share_parser(self, tmp_path) -> None:
+        target = tmp_path / "config.yaml"
+        target.write_text("items:\n  - one\n", encoding="utf-8")
+
+        verbose = await YamlValidateTool().execute(file_path=str(target))
+        compact = await YamlMicroVerifyTool().execute(file_path=str(target))
+
+        assert verbose == f"YAML 语法校验通过：{target}"
+        assert compact == "YAML_SYNTAX_OK"
+
+    async def test_yaml_parsing_does_not_block_event_loop(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        from naumi_agent.tools import builtin
+
+        target = tmp_path / "config.yaml"
+        target.write_text("enabled: true\n", encoding="utf-8")
+        event_loop_thread = threading.get_ident()
+        parser_threads: list[int] = []
+
+        def slow_load_yaml_file(file_path: str, *, encoding: str = "utf-8") -> None:
+            parser_threads.append(threading.get_ident())
+            time.sleep(0.25)
+
+        monkeypatch.setattr(builtin, "_load_yaml_file", slow_load_yaml_file)
+        pending = asyncio.create_task(
+            YamlMicroVerifyTool().execute(file_path=str(target))
+        )
+        await asyncio.sleep(0.02)
+
+        assert not pending.done()
+        assert await pending == "YAML_SYNTAX_OK"
+        assert parser_threads
+        assert event_loop_thread not in parser_threads
 
 
 def _python_command(script: str) -> str:
