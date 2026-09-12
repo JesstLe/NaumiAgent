@@ -1,9 +1,74 @@
 import type { ExecutionTimelineStep, ToolTimelineStep } from '@naumi/shared/api/activity'
-import type { ToolDiff, ToolDiffLine, ToolStep } from './upstream/components/primitives/ToolChips'
+import type { ToolContentBlock, ToolDiff, ToolDiffLine, ToolStep } from './upstream/components/primitives/ToolChips'
 
 export const activityNames = { running: '执行中', completed: '已完成', failed: '失败', cancelled: '已停止', unknown: '状态待确认' }
 const basename = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) || path
 const fileTools = /^(file_write|write_file|write|file_edit)$/
+const fileContentTools = /^(file_write|write_file|write|file_edit|file_read|read_file|read)$/
+const commandTools = /^(bash_run|shell|run_command|exec_command)$/
+
+const languageFor = (target: string, tool: string) => {
+  if (commandTools.test(tool)) return '终端'
+  const extension = target.match(/\.([^.\\/]+)$/)?.[1]?.toLowerCase() || ''
+  return ({
+    js: 'javascript', jsx: 'jsx', ts: 'typescript', tsx: 'tsx', py: 'python',
+    html: 'html', htm: 'html', css: 'css', scss: 'scss', json: 'json',
+    md: 'markdown', markdown: 'markdown', yml: 'yaml', yaml: 'yaml',
+    sh: 'shell', ps1: 'powershell', sql: 'sql', xml: 'xml', svg: 'svg',
+  } as Record<string, string>)[extension] || extension || '文本'
+}
+
+function outputPresentation(
+  output: string,
+  target: string,
+  tool: string,
+  fallback: string,
+): ToolContentBlock[] {
+  const text = output.trim()
+  if (!text) return [{ kind: 'text', text: fallback }]
+
+  const blocks: ToolContentBlock[] = []
+  const fence = /```([^\r\n`]*)\r?\n([\s\S]*?)\r?\n```/g
+  let cursor = 0
+  for (const match of text.matchAll(fence)) {
+    const index = match.index ?? 0
+    const prose = text.slice(cursor, index).trim()
+    if (prose) blocks.push({ kind: 'text', text: prose })
+    const language = match[1].trim().toLowerCase()
+    blocks.push({
+      kind: language === 'diff' || language === 'patch' ? 'diff' : 'code',
+      content: match[2].replace(/\r\n/g, '\n'),
+      language: language || languageFor(target, tool),
+      label: target || tool,
+    })
+    cursor = index + match[0].length
+  }
+  if (blocks.some(block => block.kind !== 'text')) {
+    const prose = text.slice(cursor).trim()
+    if (prose) blocks.push({ kind: 'text', text: prose })
+    return blocks
+  }
+
+  const diffStart = text.search(/^(?:diff --git |--- )/m)
+  if (diffStart >= 0 && /^@@ /m.test(text.slice(diffStart))) {
+    const prefix = text.slice(0, diffStart).trim()
+    return [
+      ...(prefix ? [{ kind: 'text' as const, text: prefix }] : []),
+      { kind: 'diff', content: text.slice(diffStart), language: 'diff', label: target || tool },
+    ]
+  }
+  if (text.includes('```')) return [{ kind: 'text', text }]
+  if (/\r?\n/.test(text) && (commandTools.test(tool) || fileContentTools.test(tool))) {
+    return [{ kind: 'code', content: text.replace(/\r\n/g, '\n'), language: languageFor(target, tool), label: target || tool }]
+  }
+  if (/^[\[{]/.test(text)) {
+    try {
+      JSON.parse(text)
+      return [{ kind: 'code', content: text, language: 'json', label: target || tool }]
+    } catch { /* Keep malformed JSON as readable text. */ }
+  }
+  return [{ kind: 'text', text }]
+}
 
 /** Only public activity labels and recorded tool results feed this presentation. */
 export function toolChipData(timeline: ExecutionTimelineStep[]) {
@@ -24,6 +89,12 @@ export function toolChipData(timeline: ExecutionTimelineStep[]) {
     const created = row.state === 'completed' && fileTools.test(row.label) ? row.output.match(/^✅ 已创建 .+ \((\d+) 行, \d+ 字符\)/) : null
     const written = row.state === 'completed' && fileTools.test(row.label) ? row.output.match(/^✅ 已(?:创建|覆写) .+ \((\d+) 行, \d+ 字符\)/) : null
     const label = written ? `写入 ${written[1]} 行` : operation === '在工作目录执行命令' ? '执行命令' : operation
+    const content = outputPresentation(
+      row.output,
+      target,
+      row.label,
+      row.state === 'running' ? '等待工具结果…' : row.outputRecorded ? '工具未返回文本内容' : '旧记录未保存工具输出',
+    )
     if (fileTools.test(row.label) && target && row.state === 'completed' && !/^(Error|错误|失败)/i.test(row.output)) {
       const record = fileChange(row, target, created ? Number(created[1]) : undefined)
       const prior = files.get(target)
@@ -41,8 +112,10 @@ export function toolChipData(timeline: ExecutionTimelineStep[]) {
       mono: Boolean(target), detailMono: true,
       detail: [
         { text: action }, { text: `状态：${activityNames[row.state]}` },
-        { text: row.output || (row.state === 'running' ? '等待工具结果…' : row.outputRecorded ? '工具未返回文本内容' : '旧记录未保存工具输出') },
-        ...(row.outputTruncated ? [{ text: '当前记录仅包含工具返回的输出预览。' }] : []),
+      ],
+      content: [
+        ...content,
+        ...(row.outputTruncated ? [{ kind: 'text' as const, text: '当前记录仅包含工具返回的输出预览。' }] : []),
       ],
     }
   })

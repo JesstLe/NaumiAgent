@@ -64,6 +64,8 @@ def test_node_selftest_loads_extension_and_runs_tools(tmp_path: Path) -> None:
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=180,
         env={**dict(__import__("os").environ), "NAUMI_PYTHON": sys.executable},
     )

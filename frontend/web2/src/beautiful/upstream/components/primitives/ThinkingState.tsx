@@ -172,7 +172,7 @@ export default function ThinkingState({
         <span role="status" className="contents">
           {working ? (
             <span
-              className="bg-clip-text text-[13px] font-medium whitespace-nowrap text-transparent"
+              className="max-w-[min(72vw,460px)] truncate bg-clip-text text-[13px] font-medium whitespace-nowrap text-transparent"
               style={{
                 backgroundImage:
                   "linear-gradient(90deg, var(--ink-3) 35%, var(--ink) 50%, var(--ink-3) 65%)",
@@ -184,7 +184,7 @@ export default function ThinkingState({
             </span>
           ) : (
             <span
-              className="text-[13px] font-medium whitespace-nowrap text-ink-2"
+              className="max-w-[min(72vw,460px)] truncate text-[13px] font-medium whitespace-nowrap text-ink-2"
               style={{ animation: "fade-in 350ms ease-out both" }}
             >
               {v.done}

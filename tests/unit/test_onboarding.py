@@ -4,6 +4,7 @@ from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 import yaml
 from rich.console import Console
@@ -126,7 +127,16 @@ def test_run_onboarding_stores_key_outside_yaml(
     prompts: list[str] = []
 
     monkeypatch.setattr(onboarding, "_choose_provider", lambda: "kimi")
-    monkeypatch.setattr(onboarding, "_prompt_api_key", lambda _name: "secret-value")
+    monkeypatch.setattr(
+        onboarding,
+        "_prompt_api_key",
+        lambda _name, **_kwargs: "secret-value",
+    )
+    monkeypatch.setattr(
+        onboarding,
+        "_validate_provider_api_key",
+        lambda *_args, **_kwargs: "valid",
+    )
     monkeypatch.setattr(
         onboarding.Prompt,
         "ask",
@@ -152,30 +162,35 @@ def test_run_onboarding_stores_key_outside_yaml(
     assert not any("工作区" in prompt for prompt in prompts)
 
 
-def test_run_onboarding_reuses_environment_key_without_keyring(
+def test_run_onboarding_persists_environment_key_for_selected_provider(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
     config_path = tmp_path / "config.yaml"
     answers = iter(["moderate"])
+    stored: list[tuple[str | None, str]] = []
     monkeypatch.setenv("NAUMI_MODELS__API_KEY", "environment-secret")
     monkeypatch.setattr(onboarding, "_choose_provider", lambda: "kimi")
     monkeypatch.setattr(
         onboarding,
         "_prompt_api_key",
-        lambda _name: "environment-secret",
+        lambda _name, **_kwargs: "environment-secret",
+    )
+    monkeypatch.setattr(
+        onboarding,
+        "_validate_provider_api_key",
+        lambda *_args, **_kwargs: "valid",
     )
     monkeypatch.setattr(onboarding.Prompt, "ask", lambda *_args, **_kwargs: next(answers))
     monkeypatch.setattr(onboarding, "_check_node_ui", lambda _root: None)
     monkeypatch.setattr(
         onboarding,
         "store_model_api_key",
-        lambda _value, **_kwargs: pytest.fail(
-            "environment credentials must not require keyring"
-        ),
+        lambda value, *, provider=None: stored.append((provider, value)),
     )
 
     assert onboarding.run_onboarding(config_path, project_root=tmp_path) is True
+    assert stored == [("kimi", "environment-secret")]
 
 
 def test_skipped_key_recommends_secure_configuration_sources(
@@ -185,7 +200,7 @@ def test_skipped_key_recommends_secure_configuration_sources(
     output = StringIO()
     monkeypatch.setattr(onboarding, "console", Console(file=output, force_terminal=False))
     monkeypatch.setattr(onboarding, "_choose_provider", lambda: "kimi")
-    monkeypatch.setattr(onboarding, "_prompt_api_key", lambda _name: "")
+    monkeypatch.setattr(onboarding, "_prompt_api_key", lambda _name, **_kwargs: "")
 
     assert onboarding.run_onboarding(
         tmp_path / ".naumi" / "config.yaml",
@@ -196,6 +211,75 @@ def test_skipped_key_recommends_secure_configuration_sources(
     assert "naumi configure" in text
     assert "NAUMI_MODELS__API_KEY" in text
     assert "config.yaml 设置" not in text
+
+
+def test_prompt_api_key_prefers_provider_credential_before_generic_environment(
+    monkeypatch,
+) -> None:
+    prompts: list[str] = []
+    monkeypatch.setenv("NAUMI_MODELS__API_KEY", "wrong-environment-key")
+    monkeypatch.setattr(
+        onboarding,
+        "load_model_api_key",
+        lambda **_kwargs: "stored-provider-key",
+    )
+    monkeypatch.setattr(
+        onboarding.Confirm,
+        "ask",
+        lambda message, **_kwargs: prompts.append(str(message)) or True,
+    )
+
+    assert onboarding._prompt_api_key("Kimi Coding API", provider="kimi") == (
+        "stored-provider-key"
+    )
+    assert prompts == ["是否使用已保存凭据"]
+
+
+@pytest.mark.parametrize(
+    ("status_code", "expected"),
+    [(200, "valid"), (401, "invalid"), (403, "invalid"), (429, "unverified")],
+)
+def test_validate_provider_api_key_uses_bounded_models_probe(
+    status_code: int,
+    expected: str,
+    monkeypatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_get(url: str, **kwargs):
+        calls.append({"url": url, **kwargs})
+        return SimpleNamespace(status_code=status_code)
+
+    monkeypatch.setattr(onboarding.httpx, "get", fake_get)
+
+    result = onboarding._validate_provider_api_key(
+        "kimi",
+        {"api_base": "https://api.kimi.test/v1"},
+        "private-key",
+    )
+
+    assert result == expected
+    assert calls[0]["url"] == "https://api.kimi.test/v1/models"
+    assert calls[0]["timeout"] == 3
+    assert calls[0]["headers"] == {"Authorization": "Bearer private-key"}
+
+
+def test_validate_provider_api_key_allows_offline_configuration(monkeypatch) -> None:
+    output = StringIO()
+    monkeypatch.setattr(onboarding, "console", Console(file=output, force_terminal=False))
+
+    def fail_get(*_args, **_kwargs):
+        raise httpx.ConnectError("offline")
+
+    monkeypatch.setattr(onboarding.httpx, "get", fail_get)
+
+    assert onboarding._validate_provider_api_key(
+        "openai",
+        {"api_base": "https://api.openai.test/v1"},
+        "private-key",
+    ) == "unverified"
+    assert "首次请求时再次验证" in output.getvalue()
+    assert "private-key" not in output.getvalue()
 
 
 def test_migrate_legacy_key_moves_secret_before_rewriting_yaml(
@@ -302,6 +386,80 @@ def test_node_check_recommends_automatic_and_explicit_textual_fallback(
     assert "naumi tui" in text
     assert "naumi chat --classic" not in text
     assert "naumi ui --legacy" not in text
+
+
+def test_node_check_validates_bundled_entry_without_npm_install(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output = StringIO()
+    ui_dir = tmp_path / "frontend" / "terminal-ui"
+    entry = ui_dir / "src" / "index.js"
+    entry.parent.mkdir(parents=True)
+    entry.write_text("#!/usr/bin/env node\n", encoding="utf-8")
+    calls: list[tuple[list[str], str | None]] = []
+
+    monkeypatch.setattr(onboarding, "console", Console(file=output, force_terminal=False))
+    monkeypatch.setattr(
+        onboarding.shutil,
+        "which",
+        lambda name: "C:/Program Files/nodejs/node.exe" if name == "node" else None,
+    )
+
+    def fake_run(cmd: list[str], cwd: str | None = None) -> str:
+        calls.append((cmd, cwd))
+        return "v24.19.0\n" if cmd[1] == "--version" else ""
+
+    monkeypatch.setattr(onboarding, "_run", fake_run)
+
+    onboarding._check_node_ui(tmp_path)
+
+    assert calls == [
+        (["C:/Program Files/nodejs/node.exe", "--version"], None),
+        (
+            ["C:/Program Files/nodejs/node.exe", "--check", str(entry)],
+            str(ui_dir),
+        ),
+    ]
+    text = output.getvalue()
+    assert "已就绪" in text
+    assert "无需安装 npm 依赖" in text
+    assert "正在安装 npm 依赖" not in text
+
+
+def test_node_ui_directory_resolves_installed_wheel_layout(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    module_file = tmp_path / "site-packages" / "naumi_agent" / "cli" / "onboarding.py"
+    packaged_ui = module_file.parents[1] / "frontend" / "terminal-ui"
+    entry = packaged_ui / "src" / "index.js"
+    entry.parent.mkdir(parents=True)
+    entry.write_text("#!/usr/bin/env node\n", encoding="utf-8")
+    monkeypatch.setattr(onboarding, "__file__", str(module_file))
+
+    assert onboarding._resolve_node_ui_dir(tmp_path / "missing-project") == packaged_ui
+
+
+def test_old_node_version_skips_terminal_entry_validation(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output = StringIO()
+    calls: list[list[str]] = []
+    monkeypatch.setattr(onboarding, "console", Console(file=output, force_terminal=False))
+    monkeypatch.setattr(onboarding.shutil, "which", lambda _name: "node")
+
+    def fake_run(cmd: list[str], cwd: str | None = None) -> str:
+        calls.append(cmd)
+        return "v20.9.0\n"
+
+    monkeypatch.setattr(onboarding, "_run", fake_run)
+
+    onboarding._check_node_ui(tmp_path)
+
+    assert calls == [["node", "--version"]]
+    assert "不满足 20.10+" in output.getvalue()
 
 
 def test_missing_key_message_does_not_recommend_plaintext_yaml(monkeypatch) -> None:

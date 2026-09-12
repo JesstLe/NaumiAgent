@@ -10,15 +10,13 @@ run pipeline as naumi sessions with zero route changes.
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
-from uuid import uuid4
 
 from naumi_agent.pi_engine.env import resolve_env_refs
 from naumi_agent.pi_engine.rpc import PiEventType, PiRpcClient, PiRpcError
 from naumi_agent.pi_engine.web_events import PiWebEventTranslator
-from naumi_agent.runtime.ports.events import RuntimeEvent, RuntimeEventType
+from naumi_agent.runtime.ports.events import RuntimeEvent
 
 
 class PiWebEngineError(RuntimeError):
@@ -166,19 +164,6 @@ class PiWebEngine:
                 session.total_cost_usd += translator.total_cost_usd
                 await self._session_store.save(session)
             status = "error" if error else "completed"
-            terminal = RuntimeEvent(
-                id=uuid4().hex[:12],
-                type=RuntimeEventType.RESPONSE_END,
-                data={
-                    "status": status,
-                    "engine": "pi",
-                    "turns": translator.turn,
-                    "cost_usd": translator.total_cost_usd,
-                },
-                timestamp=datetime.now(UTC).isoformat(),
-                session_id=self._current_web_session,
-            )
-            await sink.emit(terminal)
             return _result(status, response, error, translator)
 
     async def stop(self) -> None:

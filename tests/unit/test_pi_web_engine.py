@@ -315,8 +315,7 @@ async def test_facade_streams_and_persists_history() -> None:
     types = [e.type for e in sink.events]
     assert RuntimeEventType.RESPONSE_START in types
     assert RuntimeEventType.TOKEN in types
-    assert types[-1] is RuntimeEventType.RESPONSE_END
-    assert sink.events[-1].data["status"] == "completed"
+    assert RuntimeEventType.RESPONSE_END not in types
 
     session = store.sessions["web-1"]
     roles = [m["role"] for m in session.messages]
@@ -537,7 +536,7 @@ def test_send_message_dispatches_to_pi_facade(monkeypatch) -> None:
         body = "".join(chunk for chunk in response.iter_text())
     assert "token_delta" in body
     assert "pi 回复" in body
-    assert "agent_end" in body
+    assert body.count('"type": "agent_end"') == 1
     assert captured["content"] == "你好"
     assert captured["loaded"] == "web-1"
 
@@ -553,6 +552,26 @@ def test_send_message_rejects_pi_unsupported_extras() -> None:
     )
     assert response.status_code == 400
     assert "资料源" in response.json()["detail"]
+
+
+def test_send_message_rejects_pi_history_edit() -> None:
+    store = FakeSessionStore()
+    session = Session(id="web-1", engine="pi")
+    session.add_message("user", "旧问题")
+    store.sessions["web-1"] = session
+    app = _api_app(engine=_RouteEngine(store))
+    client = TestClient(app)
+
+    response = client.post(
+        "/sessions/web-1/messages",
+        json={
+            "content": "修改后的问题",
+            "edit_message_id": "msg-1",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "pi 引擎会话暂不支持编辑历史消息" in response.json()["detail"]
 
 
 async def test_facade_fails_fast_when_reader_dies() -> None:

@@ -212,11 +212,20 @@ class SessionStore:
     async def _get_db(self) -> aiosqlite.Connection:
         if self._db is None:
             os.makedirs(os.path.dirname(self._db_path) or ".", exist_ok=True)
-            self._db = await aiosqlite.connect(self._db_path)
+            self._db = await aiosqlite.connect(self._db_path, timeout=10.0)
             self._db.row_factory = aiosqlite.Row
+            await self._db.execute("PRAGMA busy_timeout = 10000")
+            await self._db.execute("PRAGMA journal_mode = WAL")
+            await self._db.execute("PRAGMA synchronous = NORMAL")
             await self._db.execute(_CREATE_TABLE)
-            await self._ensure_schema(self._db)
             await self._db.commit()
+            await self._db.execute("BEGIN IMMEDIATE")
+            try:
+                await self._ensure_schema(self._db)
+                await self._db.commit()
+            except BaseException:
+                await self._db.rollback()
+                raise
         return self._db
 
     async def _ensure_schema(self, db: aiosqlite.Connection) -> None:

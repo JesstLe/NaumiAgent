@@ -289,6 +289,7 @@ _SLASH_ALIAS_MAP: dict[str, str] = {
     "/h": "/help",
     "/r": "/resume",
     "/l": "/load",
+    "/n": "/new",
     "/t": "/tools",
     "/c": "/clear",
     "/m": "/model",
@@ -417,6 +418,11 @@ def _fallback_slash_command_registry() -> list[dict[str, Any]]:
         {"command": "/history", "description": "查看历史会话列表"},
         {"command": "/load", "aliases": ["/l"], "description": "加载会话并继续对话"},
         {"command": "/resume", "aliases": ["/r"], "description": "继续最近一次对话"},
+        {"command": "/new", "aliases": ["/n"], "description": "开始新的空白会话"},
+        {
+            "command": "/parallel",
+            "description": "打开 1 到 10 个独立并行会话窗口",
+        },
         {
             "command": "/tasks",
             "description": "任务面板（筛选、搜索、键盘导航、详情与取消）",
@@ -4670,6 +4676,38 @@ class JsonlEngineBridge:
         await self._recover_durable_conversation_queue(session_id)
         await self.emit(ServerEventType.STATUS, self.status_payload())
 
+    async def start_new_session(self, *, request_id: str) -> None:
+        """Persist the idle conversation and bind a fresh session end to end."""
+        if self._run_task is not None and not self._run_task.done():
+            await self.emit_error(
+                "当前任务仍在执行。可使用 /parallel 1 打开独立会话，不会中断本轮运行。",
+                code="run_in_progress",
+                request_id=request_id,
+            )
+            return
+
+        messages = list(getattr(self.engine, "_messages", []) or [])
+        if any(message.get("role") == "user" for message in messages):
+            await self.engine._save_session()
+        self.engine.reset()
+        session = await self.engine.get_or_create_session(title="新会话")
+        await self._stop_workbench_subscription()
+        self._inspector_subscribed = False
+        self._inspector_snapshot = None
+        await self.emit(
+            ServerEventType.SESSION_REPLAYED,
+            {
+                "session_id": str(session.id),
+                "title": "新会话",
+                "message_count": 0,
+                "clear": True,
+                "new": True,
+                "terminal_event_recovery": {"mode": "legacy_snapshot"},
+            },
+            request_id=request_id,
+        )
+        await self.emit(ServerEventType.STATUS, self.status_payload())
+
     async def _recover_durable_conversation_queue(
         self,
         session_id: str,
@@ -4790,6 +4828,20 @@ class JsonlEngineBridge:
         """Execute a slash command through the legacy CLI command handlers."""
         from naumi_agent.cli.slash_router import execute_slash_command
 
+        raw = str(cmd).strip()
+        parts = raw.split(maxsplit=1)
+        command_name = parts[0].lower() if parts else ""
+        argument = parts[1].strip() if len(parts) > 1 else ""
+        if command_name in {"/new", "/n"}:
+            await self.start_new_session(request_id=request_id)
+            return
+        if command_name in {"/load", "/l"}:
+            await self._load_session_command(argument, request_id=request_id)
+            return
+        if command_name in {"/resume", "/r"}:
+            await self.resume_session({}, request_id=request_id)
+            return
+
         parse_reasoning_toggle = None
         try:
             from naumi_agent.main import _parse_reasoning_toggle as parse_reasoning_toggle
@@ -4832,7 +4884,6 @@ class JsonlEngineBridge:
             )
             return
 
-        raw = str(cmd).strip()
         if raw.lower().startswith("/reasoning"):
             parts = raw.split(maxsplit=1)
             arg = parts[1] if len(parts) > 1 else ""
@@ -4912,15 +4963,6 @@ class JsonlEngineBridge:
             )
             return
 
-        loaded = await self.engine.load_session(arg)
-        if not loaded:
-            await self._emit_system_notice(
-                "load",
-                f"会话不存在: {arg}",
-                "warning",
-                request_id=request_id,
-            )
-            return
         await self.resume_session({"session_id": arg}, request_id=request_id)
 
     def _git_snapshot_branch(self) -> str:
@@ -7820,7 +7862,14 @@ async def create_bridge(
         from naumi_agent.runtime.composition import create_agent_engine
 
         engine_factory = create_agent_engine
-    engine = engine_factory(config)
+    from naumi_agent.runtime.process_lock import InterprocessDirectoryLock
+
+    startup_lock_path = Path(config.memory.session_db_path).with_name(
+        f"{Path(config.memory.session_db_path).name}.terminal-startup.lock"
+    )
+    with InterprocessDirectoryLock(startup_lock_path):
+        engine = engine_factory(config)
+        engine._interactive_config_path = str(Path(resolved).resolve())
     try:
         await engine.start_long_running_services()
     except Exception:

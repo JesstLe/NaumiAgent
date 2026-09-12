@@ -288,21 +288,24 @@ search:
             "models:\n  provider: openai\n  default_model: test-model\n",
             encoding="utf-8",
         )
-        requested_providers: list[str | None] = []
+        requested_providers: list[tuple[str | None, bool]] = []
         monkeypatch.delenv("NAUMI_MODELS__API_KEY", raising=False)
         monkeypatch.setitem(AppConfig.model_config, "env_file", None)
         monkeypatch.setattr(
             "naumi_agent.config.settings.load_model_api_key",
-            lambda *, provider=None: requested_providers.append(provider) or "credential-key",
+            lambda *, provider=None, fallback_to_legacy=True: (
+                requested_providers.append((provider, fallback_to_legacy))
+                or "credential-key"
+            ),
             raising=False,
         )
 
         config = AppConfig.from_yaml(yaml_path)
 
         assert config.models.api_key == "credential-key"
-        assert requested_providers == ["openai"]
+        assert requested_providers == [("openai", False)]
 
-    def test_from_yaml_environment_key_skips_system_credential_store(
+    def test_from_yaml_environment_key_is_fallback_when_provider_key_is_missing(
         self,
         tmp_path,
         monkeypatch,
@@ -314,19 +317,46 @@ search:
         )
         monkeypatch.setenv("NAUMI_MODELS__API_KEY", "environment-key")
         monkeypatch.setitem(AppConfig.model_config, "env_file", None)
+        requested: list[tuple[str | None, bool]] = []
 
-        def fail_load(*, provider=None):
-            pytest.fail(f"环境变量存在时不应读取 provider 凭据：{provider}")
+        def load_missing(*, provider=None, fallback_to_legacy=True):
+            requested.append((provider, fallback_to_legacy))
+            return None
 
         monkeypatch.setattr(
             "naumi_agent.config.settings.load_model_api_key",
-            fail_load,
+            load_missing,
             raising=False,
         )
 
         config = AppConfig.from_yaml(yaml_path)
 
         assert config.models.api_key == "environment-key"
+        assert requested == [("anthropic", False)]
+
+    def test_from_yaml_provider_key_overrides_generic_environment_key(
+        self,
+        tmp_path,
+        monkeypatch,
+    ) -> None:
+        yaml_path = tmp_path / "config.yaml"
+        yaml_path.write_text(
+            "models:\n  provider: kimi\n  default_model: openai/kimi-for-coding\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("NAUMI_MODELS__API_KEY", "wrong-environment-key")
+        monkeypatch.setitem(AppConfig.model_config, "env_file", None)
+        monkeypatch.setattr(
+            "naumi_agent.config.settings.load_model_api_key",
+            lambda *, provider=None, fallback_to_legacy=True: (
+                "stored-kimi-key" if provider == "kimi" and not fallback_to_legacy else None
+            ),
+            raising=False,
+        )
+
+        config = AppConfig.from_yaml(yaml_path)
+
+        assert config.models.api_key == "stored-kimi-key"
 
     def test_from_missing_yaml(self) -> None:
         config = AppConfig.from_yaml("/nonexistent/config.yaml")

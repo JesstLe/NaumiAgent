@@ -25,6 +25,8 @@ def _run(*args: str) -> subprocess.CompletedProcess:
         [sys.executable, "-m", "naumi_agent.analysis_scan", *args],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="strict",
         timeout=120,
     )
 
