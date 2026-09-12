@@ -404,6 +404,12 @@ class PiEngineConfig(BaseSettings):
     provider: str | None = None
     model: str | None = None
     extra_args: list[str] = Field(default_factory=list)
+    # Identity block appended to pi's system prompt: None uses the
+    # NaumiAgent default, "" disables injection, custom text is verbatim.
+    system_prompt_append: str | None = None
+    # A run whose pi event stream is silent for this many seconds is
+    # aborted with an explicit error instead of hanging forever.
+    stall_timeout_seconds: int = Field(default=300, ge=10, le=3600)
     # Extra environment variables for the pi child process. Values may
     # reference an existing variable with "{env:NAME}" so keys never land in
     # the YAML file itself.
