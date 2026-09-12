@@ -28,6 +28,7 @@ from naumi_agent.streaming.events import runtime_event_to_stream_event
         ("browser_observe", {}, "查看页面元素与布局"),
         ("browser_evaluate", {"code": "PRIVATE_CODE"}, "在页面执行检查脚本"),
         ("read", '{"path":"README.md"}', "读取文件：README.md"),
+        ("todo_write", {"todos": []}, "更新执行计划"),
         ("unknown", "{broken", "调用工具：unknown"),
         ("read", [], "读取文件"),
     ],
@@ -76,6 +77,22 @@ def test_progress_requires_facts_and_uses_message_counts():
             {"items": [{"status": "in_progress", "subject": "修复归档接口"}], "completed_count": 1},
         )
         == "执行计划 · 进行中：修复归档接口；已完成 1 项"
+    )
+    assert (
+        progress_summary(
+            "task_snapshot",
+            {
+                "items": [
+                    {
+                        "status": "in_progress",
+                        "subject": "检查页面",
+                        "active_form": "正在检查页面元素与布局",
+                    }
+                ],
+                "completed_count": 0,
+            },
+        )
+        == "执行计划 · 进行中：正在检查页面元素与布局；已完成 0 项"
     )
     assert (
         progress_summary(

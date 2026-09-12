@@ -447,6 +447,9 @@
 .bui-root .max-w-\[calc\(100vw-48px\)\] {
     max-width: calc(100vw - 48px);
   }
+.bui-root .max-w-\[min\(72vw\,460px\)\] {
+    max-width: min(72vw, 460px);
+  }
 .bui-root .max-w-full {
     max-width: 100%;
   }

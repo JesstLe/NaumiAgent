@@ -56,6 +56,12 @@ export interface ExecutionStage {
   tools: ToolTimelineStep[]
   notes: ReasoningStep[]
 }
+export interface LiveExecutionActivity {
+  headline: string
+  detail: string
+  idleMilliseconds: number
+  freshness: 'current' | 'waiting' | 'quiet' | 'stalled' | 'terminal'
+}
 const stringify = (value: unknown): string => value == null ? '' : typeof value === 'string' ? value : JSON.stringify(value, null, 2)
 
 const normalizedText = (value: unknown): string => typeof value === 'string'
@@ -180,7 +186,13 @@ function legacyAction(name: string, input: unknown): string {
   return `${actions[name] || `调用工具 ${excerpt(name)}`}${target ? `：${target}` : ''}`
 }
 
-const reasoningLabel = (turn: number, context: ActivityContext, previous?: ToolTimelineStep) => {
+const reasoningLabel = (
+  turn: number,
+  context: ActivityContext,
+  previous?: ToolTimelineStep,
+  activeTask?: string,
+) => {
+  if (activeTask) return `正在推进：${activeTask}`
   if (previous) {
     const outcome = { completed: '已完成', running: '仍在执行', failed: '执行失败', cancelled: '已取消', unknown: '结果未确认' }[previous.state]
     return `第 ${turn} 轮 · 上一步${outcome}：${previous.action || previous.label}`
@@ -189,6 +201,140 @@ const reasoningLabel = (turn: number, context: ActivityContext, previous?: ToolT
   const objective = excerpt(context.objective)
   const workspace = excerpt(context.workspace)
   return `${objective ? `本次任务：${objective}` : `第 ${turn} 轮 · 等待具体操作或答复`}${workspace ? `\n工作目录：${workspace}` : ''}`
+}
+
+const runtimePayload = (event: StreamEvent): Record<string, unknown> | undefined => {
+  const value = event.type === 'runtime_event' ? event.data.data : event.data
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined
+}
+
+const taskActivity = (data: Record<string, unknown> | undefined): string => {
+  if (!data) return ''
+  if (Array.isArray(data.items)) {
+    const items = data.items.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item))
+    const active = items.find(item => item.status === 'in_progress')
+    const label = excerpt(active?.active_form ?? active?.subject, 100)
+    if (label) return label.replace(/^正在/, '')
+  }
+  const summary = excerpt(data.activity_summary, 500)
+  const match = summary.match(/进行中：([^；\n]+)/)
+  return match ? excerpt(match[1], 100).replace(/^正在/, '') : ''
+}
+
+const taskPlanCompleted = (data: Record<string, unknown> | undefined): boolean => {
+  if (!data || !Array.isArray(data.items)) return false
+  const completed = typeof data.completed_count === 'number' && Number.isSafeInteger(data.completed_count)
+    ? data.completed_count
+    : 0
+  return completed > 0 && !data.items.some(item => item && typeof item === 'object' && !Array.isArray(item)
+    && ['pending', 'in_progress', 'blocked'].includes(String((item as Record<string, unknown>).status)))
+}
+
+const ongoingAction = (value: string): string => {
+  const action = excerpt(value, 110)
+  if (!action) return '正在处理本次任务'
+  if (action.startsWith('正在')) return action
+  if (action.startsWith('在 ')) return `正在${action.slice(1)}`
+  return `正在${action}`
+}
+
+const durationText = (milliseconds: number): string => {
+  const seconds = Math.max(0, Math.floor(milliseconds / 1000))
+  if (seconds < 60) return `${seconds} 秒`
+  const minutes = Math.floor(seconds / 60)
+  const remainder = seconds % 60
+  return remainder ? `${minutes} 分 ${remainder} 秒` : `${minutes} 分钟`
+}
+
+/** Describe only observable progress and elapsed time; hidden thinking text is never read. */
+export function liveExecutionActivity(
+  events: StreamEvent[],
+  rows: ExecutionTimelineStep[],
+  busy: boolean,
+  context: ActivityContext = {},
+  now = Date.now(),
+): LiveExecutionActivity {
+  const terminal = [...events].reverse().find(event => ['agent_end', 'agent_error'].includes(event.type))
+  if (!busy || terminal) {
+    return { headline: '', detail: '', idleMilliseconds: 0, freshness: 'terminal' }
+  }
+
+  let activeTask = ''
+  let activeTaskPosition = -1
+  let planCompleted = false
+  let recovery = ''
+  let recoveryPosition = -1
+  for (let index = 0; index < events.length; index++) {
+    const event = events[index]
+    if (event.type === 'runtime_event' && event.data.event === 'task_snapshot') {
+      const payload = runtimePayload(event)
+      const label = taskActivity(payload)
+      activeTask = label
+      planCompleted = taskPlanCompleted(payload)
+      activeTaskPosition = index
+    }
+    if (event.type === 'context_compacted') {
+      recovery = '已压缩上下文，正在重新生成可执行步骤'
+      recoveryPosition = index
+    }
+    if (event.type === 'phase_summary') {
+      const label = phaseSummaryLabel(event.data.activity_summary)
+      if (/执行恢复|自动压缩上下文|重新执行/.test(label)) {
+        recovery = '执行已自动恢复，正在重新生成可执行步骤'
+        recoveryPosition = index
+      }
+    }
+  }
+
+  const runningTool = [...rows].reverse().find((row): row is ToolTimelineStep => row.kind !== 'reasoning' && row.state === 'running')
+  const lastTool = [...rows].reverse().find((row): row is ToolTimelineStep => row.kind !== 'reasoning')
+  const lastEventTime = [...events].reverse().map(event => Date.parse(event.timestamp || '')).find(Number.isFinite)
+  const firstEventTime = events.map(event => Date.parse(event.timestamp || '')).find(Number.isFinite)
+  const idleMilliseconds = Math.max(0, now - (lastEventTime ?? now))
+  const elapsedMilliseconds = Math.max(0, now - (firstEventTime ?? now))
+  const workspace = excerpt(context.workspace, 80)
+  const headline = runningTool
+    ? ongoingAction(runningTool.action || runningTool.label)
+    : recoveryPosition > activeTaskPosition
+      ? recovery
+      : activeTask
+        ? `正在推进：${activeTask}`
+        : planCompleted
+          ? '执行计划已完成，正在整理最终结果'
+          : lastTool
+            ? `已完成：${excerpt(lastTool.action || lastTool.label, 100)}，正在准备下一步`
+            : workspace
+              ? `正在分析任务，准备在 ${workspace} 执行`
+              : '正在分析任务并准备执行步骤'
+
+  const elapsed = `已运行 ${durationText(elapsedMilliseconds)}`
+  if (idleMilliseconds < 15_000) {
+    return { headline, detail: `${elapsed} · 刚刚有新进展`, idleMilliseconds, freshness: 'current' }
+  }
+  if (idleMilliseconds < 45_000) {
+    return {
+      headline,
+      detail: `${elapsed} · ${durationText(idleMilliseconds)}前有新进展，正在等待下一步执行`,
+      idleMilliseconds,
+      freshness: 'waiting',
+    }
+  }
+  if (idleMilliseconds < 120_000) {
+    return {
+      headline,
+      detail: `${elapsed} · ${durationText(idleMilliseconds)}没有新的工具或公开输出`,
+      idleMilliseconds,
+      freshness: 'quiet',
+    }
+  }
+  return {
+    headline,
+    detail: `${elapsed} · ${durationText(idleMilliseconds)}没有新的工具或公开输出，任务可能停滞，可继续等待或停止`,
+    idleMilliseconds,
+    freshness: 'stalled',
+  }
 }
 
 export function isTimelineEvent(event: StreamEvent): boolean {
@@ -240,6 +386,7 @@ export function liveExecutionTimeline(
     } else rows[position] = update(rows[position])
   }
   const seen = new Set<string>()
+  let activeTask = ''
   for (const event of events) {
     if (seen.has(event.id)) continue
     seen.add(event.id)
@@ -252,6 +399,7 @@ export function liveExecutionTimeline(
     if (event.type === 'context_compacted' || (event.type === 'runtime_event' && event.data.event === 'task_snapshot')) {
       const data = event.type === 'runtime_event' ? event.data.data : event.data
       if (data && typeof data === 'object' && !Array.isArray(data)) {
+        if (event.type === 'runtime_event') activeTask = taskActivity(data as Record<string, unknown>)
         const label = progressLabel(event.type === 'runtime_event' ? 'task_snapshot' : event.type, data as Record<string, unknown>)
         if (label) rows.push({ id: `activity:${event.id}`, kind: 'reasoning', label, state: 'completed', turn })
       }
@@ -263,7 +411,7 @@ export function liveExecutionTimeline(
       const previous = [...rows].reverse().find((row): row is ToolTimelineStep => row.kind !== 'reasoning')
       upsert(
         id,
-        () => ({ id, kind: 'reasoning', label: reasoningLabel(turn, context, previous), state: ended ? 'completed' : 'running', turn }),
+        () => ({ id, kind: 'reasoning', label: reasoningLabel(turn, context, previous, activeTask), state: ended ? 'completed' : 'running', turn }),
         row => ({ ...row, state: ended ? 'completed' : row.state }),
       )
       continue

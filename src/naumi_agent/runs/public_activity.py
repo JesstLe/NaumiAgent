@@ -65,7 +65,14 @@ def tool_action(data: dict[str, Any]) -> str:
         return "访问页面" + (f"：{target}" if target else "")
     if name.startswith("browser_"):
         return "操作页面：" + public_excerpt(name)
-    if name in {"task_create", "task_update", "goal_create", "goal_update", "delegate_task"}:
+    if name in {
+        "todo_write",
+        "task_create",
+        "task_update",
+        "goal_create",
+        "goal_update",
+        "delegate_task",
+    }:
         target = field("subject", "objective", "description", "task")
         return "更新执行计划" + (f"：{target}" if target else "")
     return "调用工具：" + public_excerpt(name)
@@ -121,7 +128,7 @@ def progress_summary(event: str, data: dict[str, Any]) -> str:
         for item in items[:3]:
             if not isinstance(item, dict):
                 continue
-            subject = public_excerpt(item.get("subject"), 100)
+            subject = public_excerpt(item.get("active_form") or item.get("subject"), 100)
             if subject:
                 state = labels.get(str(item.get("status")), "状态未确认")
                 tasks.append(f"{state}：{subject}")
