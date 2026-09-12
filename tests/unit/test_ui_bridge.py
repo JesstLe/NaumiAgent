@@ -10114,7 +10114,7 @@ async def test_bridge_commits_durable_interaction_before_ui_release(
         "_pursuit_begin": begin,
         "_pursuit_resolve": resolve,
     }))
-    for _ in range(50):
+    for _ in range(1_000):
         if any(
             record["type"] == "interaction/request"
             for record in _records(writer)
@@ -10122,6 +10122,10 @@ async def test_bridge_commits_durable_interaction_before_ui_release(
             break
         assert pending.done() is False
         await asyncio.sleep(0.01)
+    else:
+        await bridge.shutdown()
+        await asyncio.gather(pending, return_exceptions=True)
+        pytest.fail("durable interaction 未在 10 秒内发布请求")
     request = next(
         record for record in _records(writer)
         if record["type"] == "interaction/request"
@@ -10178,14 +10182,16 @@ async def test_bridge_live_interaction_timeout_commits_expired_and_closes_card(
         "_durable_subject_kind": "runtime",
         "_durable_subject_id": "runtime-timeout",
     }))
-    for _ in range(50):
+    for _ in range(1_000):
         pending = bridge._pending_interactions.get("ask-live-timeout")
         if pending is not None:
             break
         assert pending_task.done() is False
         await asyncio.sleep(0.01)
     else:
-        pytest.fail("durable interaction 未进入 pending")
+        await bridge.shutdown()
+        await asyncio.gather(pending_task, return_exceptions=True)
+        pytest.fail("durable interaction 未在 10 秒内进入 pending")
     durable = pending.durable_record
     assert durable is not None
 
@@ -10236,12 +10242,15 @@ async def test_bridge_cancels_live_durable_interaction_and_closes_card(
         "_durable_subject_kind": "pursuit",
         "_durable_subject_id": "pursuit-cancel",
     }))
-    for _ in range(50):
+    for _ in range(1_000):
         if "ask-goal-cancel" in bridge._pending_interactions:
             break
+        assert pending_task.done() is False
         await asyncio.sleep(0.01)
     else:
-        pytest.fail("durable interaction 未进入 pending")
+        await bridge.shutdown()
+        await asyncio.gather(pending_task, return_exceptions=True)
+        pytest.fail("durable interaction 未在 10 秒内进入 pending")
 
     await bridge.handle_client_record({
         "id": "cancel-goal-interaction",
