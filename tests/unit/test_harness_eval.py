@@ -278,7 +278,7 @@ def test_eval_rejects_duplicate_case_ids_and_oversized_suite(tmp_path: Path) -> 
     assert oversized_result.code == "eval_suite_too_large"
 
 
-def test_eval_rejects_fixture_symlink_escape_invalid_json_and_oversize(
+def test_eval_rejects_fixture_symlink_escape(
     tmp_path: Path,
 ) -> None:
     suite_root = tmp_path / "evals"
@@ -286,7 +286,12 @@ def test_eval_rejects_fixture_symlink_escape_invalid_json_and_oversize(
     outside.write_text("{}", encoding="utf-8")
     linked = suite_root / "fixtures" / "linked.json"
     linked.parent.mkdir(parents=True)
-    linked.symlink_to(outside)
+    try:
+        linked.symlink_to(outside)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 1314:
+            pytest.skip("当前 Windows 账户没有创建符号链接的权限。")
+        raise
     linked_case = _case(
         "linked",
         "fixtures/linked.json",
@@ -294,8 +299,19 @@ def test_eval_rejects_fixture_symlink_escape_invalid_json_and_oversize(
         outcome="rejected",
         error_code="bad_request",
     )
+    suite = _write_suite(suite_root, [linked_case])
+
+    result = evaluate_suite_file(tmp_path, suite)
+
+    assert result.cases[0].code == "fixture_outside_suite"
+    assert result.cases[0].status is EvalCaseStatus.EVALUATION_ERROR
+
+
+def test_eval_rejects_invalid_json_and_oversized_fixtures(tmp_path: Path) -> None:
+    suite_root = tmp_path / "evals"
 
     invalid = suite_root / "fixtures" / "invalid.json"
+    invalid.parent.mkdir(parents=True)
     invalid.write_text("{broken", encoding="utf-8")
     invalid_case = _case(
         "invalid-json",
@@ -314,12 +330,11 @@ def test_eval_rejects_fixture_symlink_escape_invalid_json_and_oversize(
         outcome="rejected",
         error_code="bad_request",
     )
-    suite = _write_suite(suite_root, [linked_case, invalid_case, huge_case])
+    suite = _write_suite(suite_root, [invalid_case, huge_case])
 
     result = evaluate_suite_file(tmp_path, suite)
 
     assert [case.code for case in result.cases] == [
-        "fixture_outside_suite",
         "fixture_invalid_json",
         "eval_fixture_too_large",
     ]
