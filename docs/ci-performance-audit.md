@@ -54,3 +54,5 @@ Archive Admission 的并发测试还暴露 `ReleaseSlotStore.install()` 缺少�
 新 CI 在前述失败通过后继续运行，进一步发现 `test_harness_surfaces.py` 也复制了同一份旧协议完整 capability 列表，导致离线 Eval 失败并连带阻断 Baseline 晋升。该共享 surface 夹具已同样绑定 `PROTOCOL_CAPABILITIES`，Linux 分片暴露的四个失败链路由一次根因修复收口。
 
 Windows 真实 slash 流程随后暴露了两个生产可执行性问题。Harness Sandbox 快照目录直接拼接 `manual:<session-id>`，冒号会触发 WinError 123；目录名现改为由 run、check 与 source digest 共同生成的固定长度 SHA-256 身份，原始 run id 仍保留在 manifest 和回执中。基础设施异常现在同时显示稳定的 `sandbox_unavailable` 或 `sandbox_infrastructure_error` 错误码，用户可以据此区分缺少隔离后端与其他执行故障。Surface 测试 Profile 也改用当前 `sys.executable`，避免 WindowsApps 的 `python3.exe` 别名存在但不可访问时产生 WinError 1920。Windows 定向结果为 15 passed、4 个真实隔离后端场景按设计 skipped，另有便携快照路径用例通过。
+
+分片 11 继续向后执行后发现 `naumi run` 生命周期测试仍构造只有 `log_level` 的旧配置替身，而单任务入口已根据 `config.engine.provider` 选择 Naumi 或 Pi 引擎。夹具现明确声明 `provider=naumi`，成功与异常路径仍验证 Engine shutdown，4 个定向用例通过。
