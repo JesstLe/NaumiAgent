@@ -219,12 +219,12 @@ async def test_delivery_get_verifies_one_consistent_database_snapshot(
     from naumi_agent.evolution import stable_remote_finalization_deliveries as module
 
     fixture, _, store, delivery, _, _ = await _delivery(tmp_path)
-    original_row = module._row
+    original_rows_with_chain = module._rows_with_chain
     writer_task: asyncio.Task | None = None
 
-    async def read_row_then_start_writer(db, delivery_id):
+    async def read_snapshot_then_start_writer(db, delivery_id):
         nonlocal writer_task
-        row = await original_row(db, delivery_id)
+        rows = await original_rows_with_chain(db, delivery_id)
         writer_task = asyncio.create_task(
             store.claim(
                 owner_id="concurrent-worker",
@@ -232,9 +232,9 @@ async def test_delivery_get_verifies_one_consistent_database_snapshot(
             )
         )
         await asyncio.sleep(0.05)
-        return row
+        return rows
 
-    monkeypatch.setattr(module, "_row", read_row_then_start_writer)
+    monkeypatch.setattr(module, "_rows_with_chain", read_snapshot_then_start_writer)
     snapshot = await store.get(delivery.package.delivery_id)
     assert writer_task is not None
     claimed = await writer_task

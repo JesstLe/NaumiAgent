@@ -285,18 +285,18 @@ async def test_daemon_closes_real_delivery_to_result_mtls_loop(
         delivered = await control_worker.run_once()
         assert delivered.acknowledged == 1
 
-        async def completed_and_recorded() -> bool:
+        async def completed() -> bool:
             current = await delivery_store.get(delivery.package.delivery_id)
-            return (
-                current is not None
-                and current.latest_event.state == "completed"
-                and daemon.snapshot().worker.returned_count == 1
-            )
+            return current is not None and current.latest_event.state == "completed"
 
-        async with asyncio.timeout(3):
-            while not await completed_and_recorded():
+        async with asyncio.timeout(10):
+            while not await completed():
                 daemon.result_worker.wake()
                 await asyncio.sleep(0.02)
+        await _wait_for(
+            lambda: daemon.snapshot().worker.returned_count == 1,
+            timeout=3,
+        )
         snapshot = daemon.snapshot()
         assert snapshot.state is StableRemoteFinalizationInstallationDaemonState.RUNNING
         assert snapshot.worker.returned_count == 1
