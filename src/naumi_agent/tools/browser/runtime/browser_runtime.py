@@ -486,6 +486,43 @@ ATTACHED_SCREENCAST_MAX_PENDING_WRITES = int(
 )
 DEFAULT_CLEANUP_TIMEOUT_SECONDS = 5.0
 DEFAULT_VIDEO_ENCODE_TIMEOUT_SECONDS = 60.0
+MAX_FFMPEG_STDERR_BYTES = 16 * 1024
+
+
+async def _kill_and_wait(proc: asyncio.subprocess.Process) -> None:
+    if proc.returncode is None:
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+    await proc.wait()
+
+
+async def _read_stream_tail(
+    stream: asyncio.StreamReader,
+    *,
+    max_bytes: int,
+) -> tuple[bytes, int]:
+    retained = bytearray()
+    total_bytes = 0
+    while chunk := await stream.read(64 * 1024):
+        total_bytes += len(chunk)
+        overflow = max(0, len(retained) + len(chunk) - max_bytes)
+        if overflow:
+            del retained[:overflow]
+        retained.extend(chunk[-max_bytes:])
+    return bytes(retained), total_bytes
+
+
+def _remove_incomplete_video(output_path: str) -> None:
+    try:
+        Path(output_path).unlink(missing_ok=True)
+    except OSError:
+        logger.warning(
+            "Failed to remove incomplete screencast video: %s",
+            output_path,
+            exc_info=True,
+        )
 
 _LOG_BUFFER_LIMIT = 200
 _CleanupResult = TypeVar("_CleanupResult")
@@ -1276,14 +1313,17 @@ class BrowserRuntime:
 
     # ── Attached screencast ──
 
-    def _detect_ffmpeg_availability(self) -> bool:
+    async def _detect_ffmpeg_availability(self) -> bool:
         if isinstance(self.ffmpeg_available, bool):
             return self.ffmpeg_available
         try:
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ["ffmpeg", "-version"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                timeout=5,
+                check=False,
             )
             self.ffmpeg_available = result.returncode == 0
         except Exception:
@@ -1299,6 +1339,10 @@ class BrowserRuntime:
     ) -> str:
         args = [
             "-y",
+            "-hide_banner",
+            "-nostats",
+            "-loglevel",
+            "error",
             "-framerate",
             str(fps),
             "-i",
@@ -1314,15 +1358,39 @@ class BrowserRuntime:
             "ffmpeg",
             *args,
             stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
         )
+        if proc.stderr is None:
+            await _kill_and_wait(proc)
+            raise RuntimeError("ffmpeg 子进程缺少 stderr 管道。")
 
-        _, stderr_data = await proc.communicate()
+        stderr_task = asyncio.create_task(
+            _read_stream_tail(proc.stderr, max_bytes=MAX_FFMPEG_STDERR_BYTES)
+        )
+        try:
+            await proc.wait()
+            stderr_data, stderr_bytes = await stderr_task
+        except asyncio.CancelledError:
+            await _kill_and_wait(proc)
+            await asyncio.gather(stderr_task, return_exceptions=True)
+            _remove_incomplete_video(output_path)
+            raise
+        except Exception:
+            await _kill_and_wait(proc)
+            await asyncio.gather(stderr_task, return_exceptions=True)
+            _remove_incomplete_video(output_path)
+            raise
         if proc.returncode == 0:
             return output_path
 
+        _remove_incomplete_video(output_path)
         stderr_tail = stderr_data.decode(errors="replace")[-4000:]
+        if stderr_bytes > len(stderr_data):
+            stderr_tail = (
+                f"[ffmpeg stderr 已截断，原始大小 {stderr_bytes} 字节]\n"
+                f"{stderr_tail}"
+            )
         raise RuntimeError(
             f"ffmpeg exited with code {proc.returncode}: {stderr_tail.strip()}"
         )
@@ -1339,7 +1407,7 @@ class BrowserRuntime:
         if recorder_state and recorder_state.get("active"):
             return
 
-        if not self._detect_ffmpeg_availability():
+        if not await self._detect_ffmpeg_availability():
             self.attached_video_capability = False
             self.artifacts.append_event(
                 "session_attached_video_unavailable",
