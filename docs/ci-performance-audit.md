@@ -116,3 +116,9 @@ Workbench 右侧 Diff 面板原先为每个文件并发执行 Git，并通过 `c
 分片 5 的共享终端 golden 已新增 deterministic capture 元数据，但 parity loader 的封闭顶层键集合仍停留在 capture 加入前；同一份 tool result golden 也缺少当前消息协议中的 `error_code` 与 `retryable` 字段。Fixture 现完整表达 capture 与工具错误恢复契约，终端引擎适配、Textual 渲染和 Ctrl+C 生命周期文件在普通及 coverage 模式均为 5 passed。
 
 补齐 golden 后，本地普通模式还复现了 TUI 状态竞争：启动时异步执行的会话协调恢复可以在用户取消当前运行之后完成，并覆盖“已取消当前运行”的即时反馈。恢复任务现捕获启动时状态，只在状态栏期间没有被后续用户动作或运行事件修改时发布摘要或失败提示；确定性并发用例与终端生命周期文件在普通及 coverage 模式均为 6 passed。
+
+运行 `34696672524` 的分片 0 还暴露 Bridge 产品身份测试把协议兼容摘要写死为“只有当前摘要”，而权威 Registry 已保留 12 个历史兼容摘要供旧客户端协商。测试现直接绑定 `load_protocol_event_registry()` 返回的当前摘要与完整兼容清单，避免协议演进后把正确的兼容窗口误判为回归。
+
+同一分片的真实 Engine 流式工具生命周期用例替换了 `execute_tool()`，因此不会实际写入文件，却仍以“写入文件”声明动作型任务。新增的工作区变更完成门禁会正确重试并拒绝这种伪完成，最终回答自然不会发布。用例现明确声明只演示工具生命周期且不创建或修改文件，继续覆盖 `tool_prepare`、`tool_use`、`tool_result` 与最终 token 的真实 Bridge 事件顺序；两个分片 0 根因在普通及 coverage 模式均为 2 passed。
+
+分片 9 的 Installation Daemon 用例确认持久 delivery 已进入 `completed`，但仍用独立的 3 秒循环等待 Worker 在整轮末尾发布内存统计；Linux coverage 下完整 pass 偶尔超过该窗口。用例现通过 Worker 的 `run_once()` 互斥锁等待正在执行的 pass 原子收口，再读取 `returned_count`，既不延长任意睡眠，也不会与后台 pass 并发修改统计。Windows 完整文件为 6 passed、5 个 POSIX executable 场景按既有边界 skipped；该 mTLS 场景由下一轮 Linux CI 验证。
