@@ -92,3 +92,5 @@ Workbench 右侧 Diff 面板原先为每个文件并发执行 Git，并通过 `c
 分片 9 暴露 Browser TaskRunner 的终态发布顺序：任务字典先写入 `completed` 或等待态，持久 heartbeat 随后才写入 `stopped`/`waiting`，因此 UI 和调用方可以真实观察到“任务已完成但心跳仍 running”的矛盾状态。终态现先提交 heartbeat，再原子更新对外 run status 并发送 `run_finished`；等待和恢复仍在状态持久化前同步 heartbeat snapshot。
 
 分片 7 的 Installation Daemon 端到端测试在持久 delivery 刚写入 `completed` 时立即读取 Worker 快照，偶发落在整轮统计尚未发布的合法窗口。测试现同时等待持久终态与 `returned_count`，保持 Worker 以完整 pass 原子发布统计的语义；该链路依赖 POSIX executable slot，因此 Windows 按既有边界跳过，由 Linux CI 执行。相邻的交互式 Engine 夹具还缺少两个新增 Stable Promotion Worker 及其禁用配置，导致长期服务启动测试在进入目标断言前失败；夹具已补齐当前 composition contract，普通及 coverage 定向模式均通过。
+
+工具复扫发现 `yaml_micro_verify` 固定调用 `python3`，Windows 虚拟环境通常只有 `python.exe`，启动失败会在 Ruby fallback 之前直接抛出；fallback 使用的 `YAML.load_file` 还会引入与安全加载不同的反序列化语义。`yaml_validate` 同时保留了第二套同步 YAML 解析。两个工具现复用当前进程的 `yaml.safe_load` 底层，并通过 `asyncio.to_thread` 移出事件循环；极简工具保留原结果标记，详细工具保留中文错误回执。真实有效与非法 YAML、共享解析协议及慢解析调度共 4 个定向用例在普通和 coverage 模式均通过。

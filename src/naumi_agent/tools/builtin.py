@@ -38,6 +38,13 @@ def _relative_workspace_path(path: Path, workspace_root: Path) -> str:
     return path.relative_to(workspace_root).as_posix()
 
 
+def _load_yaml_file(file_path: str, *, encoding: str = "utf-8") -> None:
+    import yaml
+
+    with Path(file_path).open(encoding=encoding) as handle:
+        yaml.safe_load(handle)
+
+
 def _has_ignored_path_part(path: Path, workspace_root: Path, *, include_hidden: bool) -> bool:
     try:
         parts = path.relative_to(workspace_root).parts
@@ -748,10 +755,7 @@ class YamlMicroVerifyTool(Tool):
 
     @property
     def description(self) -> str:
-        return (
-            "语法级微验证：使用最小化 Python 3 命令做 YAML 加载测试，"
-            "仅输出极简标记；若 Python 环境异常，则降级为 ruby -ryaml 验证"
-        )
+        return "语法级微验证：安全加载 YAML，仅输出极简结果标记"
 
     @property
     def metadata(self) -> ToolMetadata:
@@ -776,34 +780,12 @@ class YamlMicroVerifyTool(Tool):
         }
 
     async def execute(self, *, file_path: str, **kwargs: Any) -> str:
-        python_code = (
-            "import sys, yaml; "
-            "yaml.safe_load(open(sys.argv[1], encoding='utf-8')); "
-            "print('OK')"
-        )
-        proc = await asyncio.create_subprocess_exec(
-            "python3",
-            "-c",
-            python_code,
-            file_path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        stdout, _ = await proc.communicate()
-        if stdout.decode().strip() == "OK":
+        try:
+            await asyncio.to_thread(_load_yaml_file, file_path)
+        except Exception:
+            return "YAML_SYNTAX_FAIL"
+        else:
             return "YAML_SYNTAX_OK"
-
-        proc = await asyncio.create_subprocess_exec(
-            "ruby",
-            "-ryaml",
-            "-e",
-            "YAML.load_file(ARGV[0]); puts 'OK'",
-            file_path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        stdout, _ = await proc.communicate()
-        return "YAML_SYNTAX_OK" if stdout.decode().strip() == "OK" else "YAML_SYNTAX_FAIL"
 
 
 class BashRunTool(Tool):
@@ -1054,13 +1036,14 @@ class YamlValidateTool(Tool):
         }
 
     async def execute(self, *, file_path, encoding='utf-8', **kwargs):
-        import os
-        if not os.path.isfile(file_path):
+        if not Path(file_path).is_file():
             return f'错误：文件不存在 {file_path}'
         try:
-            import yaml
-            with open(file_path, encoding=encoding) as f:
-                yaml.safe_load(f)
+            await asyncio.to_thread(
+                _load_yaml_file,
+                file_path,
+                encoding=encoding,
+            )
             return f'YAML 语法校验通过：{file_path}'
         except ImportError:
             return '错误：未安装 PyYAML，请执行 pip install pyyaml'
