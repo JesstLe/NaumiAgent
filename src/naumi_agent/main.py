@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import importlib.util
 import io
 import json
 import logging
@@ -321,7 +322,12 @@ class TerminalUiLaunchError(RuntimeError):
     """Raised when the next terminal UI cannot be launched."""
 
 
+class UiRuntimeDependencyError(RuntimeError):
+    """Raised when both interactive UIs share a missing Python dependency."""
+
+
 _TERMINAL_UI_NO_FALLBACK_EXIT_CODES = frozenset({0, 130, 143})
+_SHARED_UI_RUNTIME_DEPENDENCIES = (("PIL", "Pillow"),)
 
 
 def _safe_launch_error(exc: BaseException) -> str:
@@ -331,6 +337,27 @@ def _safe_launch_error(exc: BaseException) -> str:
     raw = str(exc).strip()
     first_line = raw.splitlines()[0] if raw else type(exc).__name__
     return OutputGuardrail.redact(first_line)[:300]
+
+
+def _validate_shared_ui_runtime_dependencies() -> None:
+    """Fail before opening either UI when their shared backend cannot import."""
+    missing = [
+        distribution
+        for module, distribution in _SHARED_UI_RUNTIME_DEPENDENCIES
+        if importlib.util.find_spec(module) is None
+    ]
+    if not missing:
+        return
+
+    source_hint = ""
+    if (_PROJECT_ROOT / "pyproject.toml").is_file():
+        source_hint = (
+            f"；源码安装请运行 uv tool install --force --editable \"{_PROJECT_ROOT}\""
+        )
+    raise UiRuntimeDependencyError(
+        f"Python 运行依赖缺失：{'、'.join(missing)}。"
+        f"请运行 uv tool install --force naumi-agent{source_hint}，然后重新执行 naumi。"
+    )
 
 
 # Friendly tool name mapping for display
@@ -693,6 +720,12 @@ def _exit_after_terminal_ui(config: str, *, engine: str | None = None) -> None:
 
 def _launch_interactive_ui(config_path: str, *, engine: str | None = None) -> int:
     """Launch the Node UI and fall back once to Textual on failure."""
+    try:
+        _validate_shared_ui_runtime_dependencies()
+    except UiRuntimeDependencyError as exc:
+        console.print(f"[red]NaumiAgent 安装不完整：{_safe_launch_error(exc)}[/red]")
+        return 1
+
     engine_provider = _resolve_terminal_engine_provider(config_path, engine)
     failure: str
     try:

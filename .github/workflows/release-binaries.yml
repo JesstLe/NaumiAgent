@@ -6,7 +6,7 @@ on:
       version:
         description: Version from pyproject.toml (without v)
         required: true
-        default: "0.1.214"
+        default: "0.1.215"
   push:
     tags:
       - "v*"

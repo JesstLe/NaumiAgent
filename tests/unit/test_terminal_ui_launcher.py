@@ -22,6 +22,7 @@ from naumi_agent.main import (
     _parse_node_major,
     _parse_node_version,
     _resolve_terminal_ui_frontend_dir,
+    _validate_shared_ui_runtime_dependencies,
     naumiagent_app,
 )
 from naumi_agent.main import (
@@ -446,6 +447,45 @@ def test_interactive_launcher_reports_tui_failure_without_retry(
     assert "sk-abcdefghijklmnopqrstuvwxyz" not in "\n".join(output)
 
 
+def test_shared_ui_dependency_failure_stops_before_both_frontends(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output: list[str] = []
+    monkeypatch.setattr(
+        "naumi_agent.main.importlib.util.find_spec",
+        lambda module: None if module == "PIL" else SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        "naumi_agent.main._launch_terminal_ui",
+        lambda *_args, **_kwargs: pytest.fail("Node UI must not open"),
+    )
+    monkeypatch.setattr(
+        "naumi_agent.main._launch_tui",
+        lambda *_args, **_kwargs: pytest.fail("Textual must not repeat the same failure"),
+    )
+    monkeypatch.setattr(
+        "naumi_agent.main.console.print",
+        lambda message: output.append(str(message)),
+    )
+
+    assert _launch_interactive_ui("project.yaml") == 1
+    text = "\n".join(output)
+    assert "安装不完整" in text
+    assert "Pillow" in text
+    assert "uv tool install --force" in text
+
+
+def test_shared_ui_dependency_check_accepts_installed_pillow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "naumi_agent.main.importlib.util.find_spec",
+        lambda module: SimpleNamespace(name=module),
+    )
+
+    assert _validate_shared_ui_runtime_dependencies() is None
+
+
 def test_naumi_without_subcommand_launches_terminal_ui(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -623,6 +663,19 @@ def test_terminal_ui_runtime_assets_are_included_in_wheel() -> None:
         "naumi_agent/tui/capability-manifest.json"
     )
     assert "frontend/terminal-ui/test" not in force_include
+
+
+def test_ui_runtime_dependencies_and_release_version_are_declared() -> None:
+    root = Path(__file__).resolve().parents[2]
+    data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    version = data["project"]["version"]
+    release_workflow = (root / ".github/workflows/release-binaries.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert tuple(map(int, version.split("."))) >= (0, 1, 215)
+    assert "pillow>=11.3" in data["project"]["dependencies"]
+    assert f'default: "{version}"' in release_workflow
 
 
 def test_help_suppresses_optional_litellm_provider_warnings() -> None:
