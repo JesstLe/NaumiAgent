@@ -1384,6 +1384,7 @@ class TestSessionLoading:
         marker = tmp_path / "failed-load-tool-ran"
         try:
             active = await engine.get_or_create_session()
+            replacement = await engine.session_store.create_session(title="replacement")
             grant = engine._permission_grant_store.create(
                 active.id,
                 "shell",
@@ -1403,7 +1404,7 @@ class TestSessionLoading:
                 return "allow_once"
 
             engine.set_permission_confirmer(confirm)
-            load_task = asyncio.create_task(engine.load_session("missing-session"))
+            load_task = asyncio.create_task(engine.load_session(replacement.id))
             await entered.wait()
 
             release.set()
