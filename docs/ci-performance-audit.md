@@ -136,3 +136,5 @@ SQLite WAL 配置现收敛到 persistence 公共层：读取当前 journal mode 
 最后一处生产 `communicate()` 位于 Skill 动态上下文的同步 shell 命令。命令虽有 10 秒超时，但此前会将两路完整输出留在内存，并把完整 stdout 直接注入模型上下文。同步 shell runtime 现用两个 reader 线程持续排空管道，每路最多保留 64 KiB，stdout 保留开头供动态上下文使用，stderr 保留末尾供诊断，并在回执中标明真实字节数；超时仍终止整个进程树后返回有界的部分证据。真实双管道各 300 KiB 的成功与超时场景均通过。超时回收测试同时发现 Windows 在已退出 PID 上执行 `os.kill(pid, 0)` 会返回 WinError 87，`pid_exists()` 现将除权限不足外的平台 `OSError` 统一识别为不可寻址；runtime shell 文件在 coverage 模式为 15 passed。
 
 运行 `34701102464` 的分片 10 继续暴露真实 mTLS Result Return 测试的超时层级错误：HTTP 客户端允许 2 秒，但共享 Worker 夹具把外层 Result timeout 固定为 0.2 秒，coverage 下会先取消正常进行中的 TLS 请求并记录 `stable_remote_result_return_return_timeout`。夹具现以可覆盖的默认字典构造策略，该真实网络闭环单独使用 5 秒 HTTP timeout、8 秒 Worker timeout 和 10 秒 claim lease，保持客户端失败先于 Worker lease 收口，同时不修改生产默认值、TLS 身份校验或真实服务路径。Windows 完成 ruff 与 compileall 验证；该 POSIX executable 场景由下一轮 Linux coverage 分片执行。
+
+同文件三个 Store 专项用例也复用了上述完整 release fixture，却漏掉 Windows 平台边界标记；fixture 在 Windows 会按 host target 生成 `.exe` 路径，但测试 bundle 只写入占位字节，启动探针稳定触发 WinError 216，Store 断言根本没有执行。三个用例现与相邻真实 release 链路使用相同的 POSIX-only 标记，Windows 文件级定向结果为 8 skipped；并发 claim、fencing 与 anti-join 行为仍由 Linux CI 原样执行，没有删除或 mock 掉覆盖。
