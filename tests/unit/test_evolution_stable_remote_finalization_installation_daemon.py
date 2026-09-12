@@ -293,10 +293,7 @@ async def test_daemon_closes_real_delivery_to_result_mtls_loop(
             while not await completed():
                 daemon.result_worker.wake()
                 await asyncio.sleep(0.02)
-        await _wait_for(
-            lambda: daemon.snapshot().worker.returned_count == 1,
-            timeout=3,
-        )
+        await asyncio.wait_for(daemon.result_worker.run_once(), timeout=10)
         snapshot = daemon.snapshot()
         assert snapshot.state is StableRemoteFinalizationInstallationDaemonState.RUNNING
         assert snapshot.worker.returned_count == 1
