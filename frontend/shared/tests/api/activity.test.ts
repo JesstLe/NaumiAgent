@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { assistantActionsReady, executionStages, isTimelineEvent, liveExecutionTimeline, runActivity, runExecutionTimeline, runsByUserMessage, toolActivity } from '../../src/api/activity'
+import { assistantActionsReady, executionStages, isTimelineEvent, liveExecutionActivity, liveExecutionTimeline, runActivity, runExecutionTimeline, runsByUserMessage, toolActivity } from '../../src/api/activity'
 
 describe('public execution activity', () => {
   it('shows assistant actions only after the owning run reaches a terminal state', () => {
@@ -178,6 +178,98 @@ describe('public execution activity', () => {
       { id: '2', type: 'runtime_event', data: { event: 'task_snapshot', data: { items: [{ status: 'in_progress', subject: '核对布局' }], completed_count: 0 } } },
     ], false)
     expect(rows.map(row => row.label)).toEqual(['已压缩上下文：80 → 20 条消息；归档 1 条工具结果', '执行计划 · 进行中：核对布局；已完成 0 项'])
+  })
+  it('uses the active plan as the next public reasoning summary', () => {
+    const rows = liveExecutionTimeline([
+      { id: '1', type: 'tool_call_start', turn: 1, data: { call_id: 'plan', name: 'todo_write', activity_summary: '更新执行计划' } },
+      { id: '2', type: 'tool_call_end', turn: 1, data: { call_id: 'plan', name: 'todo_write', status: 'success' } },
+      { id: '3', type: 'runtime_event', turn: 1, data: { event: 'task_snapshot', data: { items: [
+        { status: 'pending', subject: '稍后运行浏览器验收' },
+        { status: 'in_progress', subject: '编写 Three.js 界面代码' },
+      ] } } },
+      { id: '4', type: 'turn_start', turn: 2, data: {} },
+    ], true)
+
+    expect(rows.at(-1)).toMatchObject({
+      kind: 'reasoning',
+      label: '正在推进：编写 Three.js 界面代码',
+      state: 'running',
+    })
+    expect(JSON.stringify(rows)).not.toContain('调用工具 todo_write')
+  })
+  it('reports observable freshness and distinguishes quiet from stalled work', () => {
+    const started = '2026-09-12T00:00:00.000Z'
+    const events = [
+      { id: '1', type: 'turn_start', timestamp: started, data: {} },
+      { id: '2', type: 'runtime_event', timestamp: '2026-09-12T00:00:10.000Z', data: { event: 'task_snapshot', data: {
+        items: [{ status: 'in_progress', active_form: '正在检查页面元素与布局', subject: '检查页面' }],
+      } } },
+    ]
+    const rows = liveExecutionTimeline(events, true)
+    const quiet = liveExecutionActivity(events, rows, true, {}, Date.parse('2026-09-12T00:01:00.000Z'))
+    const stalled = liveExecutionActivity(events, rows, true, {}, Date.parse('2026-09-12T00:02:20.000Z'))
+
+    expect(quiet).toMatchObject({
+      headline: '正在推进：检查页面元素与布局',
+      freshness: 'quiet',
+      idleMilliseconds: 50_000,
+    })
+    expect(quiet.detail).toContain('50 秒没有新的工具或公开输出')
+    expect(stalled.freshness).toBe('stalled')
+    expect(stalled.detail).toContain('任务可能停滞')
+  })
+  it('describes the workspace while the first executable step is being prepared', () => {
+    const events = [{ id: '1', type: 'turn_start', timestamp: '2026-09-12T00:00:00.000Z', data: {} }]
+    const rows = liveExecutionTimeline(events, true, { objective: '创建复杂页面', workspace: 'E:/Workspace/NaumiAgent' })
+    const activity = liveExecutionActivity(
+      events,
+      rows,
+      true,
+      { objective: '创建复杂页面', workspace: 'E:/Workspace/NaumiAgent' },
+      Date.parse('2026-09-12T00:00:01.000Z'),
+    )
+    expect(activity.headline).toBe('正在分析任务，准备在 E:/Workspace/NaumiAgent 执行')
+  })
+  it('prefers a running tool, resets freshness on new public progress, and stops at terminal state', () => {
+    const events = [
+      { id: '1', type: 'turn_start', timestamp: '2026-09-12T00:00:00.000Z', data: {} },
+      { id: '2', type: 'tool_call_start', timestamp: '2026-09-12T00:02:05.000Z', data: {
+        call_id: 'browser', name: 'browser_observe', activity_summary: '查看页面元素与布局',
+      } },
+    ]
+    const rows = liveExecutionTimeline(events, true)
+    const active = liveExecutionActivity(events, rows, true, {}, Date.parse('2026-09-12T00:02:10.000Z'))
+    expect(active).toMatchObject({
+      headline: '正在查看页面元素与布局',
+      freshness: 'current',
+      idleMilliseconds: 5_000,
+    })
+
+    const terminalEvents = [...events, {
+      id: '3', type: 'agent_end', timestamp: '2026-09-12T00:02:11.000Z', data: { status: 'completed' },
+    }]
+    expect(liveExecutionActivity(terminalEvents, rows, false, {}, Date.parse('2026-09-12T00:05:00.000Z'))).toMatchObject({
+      headline: '', detail: '', freshness: 'terminal',
+    })
+  })
+  it('clears a stale active plan when the latest snapshot has no in-progress item', () => {
+    const events = [
+      { id: '1', type: 'runtime_event', timestamp: '2026-09-12T00:00:00.000Z', data: { event: 'task_snapshot', data: {
+        items: [{ status: 'in_progress', subject: '读取文件' }],
+      } } },
+      { id: '2', type: 'tool_call_start', timestamp: '2026-09-12T00:00:01.000Z', data: { call_id: 'read', name: 'read', activity_summary: '读取文件：README.md' } },
+      { id: '3', type: 'tool_call_end', timestamp: '2026-09-12T00:00:02.000Z', data: { call_id: 'read', name: 'read', status: 'success' } },
+      { id: '4', type: 'runtime_event', timestamp: '2026-09-12T00:00:03.000Z', data: { event: 'task_snapshot', data: {
+        items: [], completed_count: 1,
+      } } },
+      { id: '5', type: 'turn_start', turn: 2, timestamp: '2026-09-12T00:00:04.000Z', data: {} },
+    ]
+    const rows = liveExecutionTimeline(events, true)
+    const activity = liveExecutionActivity(events, rows, true, {}, Date.parse('2026-09-12T00:00:05.000Z'))
+
+    expect(rows.at(-1)?.label).toContain('上一步已完成：读取文件：README.md')
+    expect(activity.headline).toBe('执行计划已完成，正在整理最终结果')
+    expect(activity.headline).not.toContain('正在推进：读取文件')
   })
   it('binds every durable run to its own user turn, including legacy random ids', () => {
     const messages = [
