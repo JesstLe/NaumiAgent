@@ -22,11 +22,11 @@ x64/arm64 与 Windows x64。runner 标签发生变化时，以 GitHub 官方 run
 ## 内部预览发布
 
 ```bash
-gh workflow run release-binaries.yml -f version=0.1.214
+gh workflow run release-binaries.yml -f version=0.1.215
 gh run watch
 ```
 
-五个平台全部成功后，workflow 创建 `v0.1.214` prerelease，并同时上传版本化文件和 latest
+五个平台全部成功后，workflow 创建 `v0.1.215` prerelease，并同时上传版本化文件和 latest
 稳定别名。预览安装必须显式设置 `NAUMI_VERSION`，因为 GitHub 的 `/releases/latest` 不选择
 prerelease。
 
