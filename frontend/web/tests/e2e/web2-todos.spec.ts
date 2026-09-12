@@ -21,3 +21,24 @@ test('todos persist across reload and report failed updates', async ({ page }) =
   await page.getByRole('button', { name: '置顶摘要' }).click()
   await expect(page.getByLabel('待办状态 检查配置文件')).toHaveValue('pending')
 })
+
+test('completed todos leave the active list and remain available as history', async ({ page }) => {
+  await mockWorkbenchApi(page)
+  const todos = [
+    { id: '1', subject: '检查页面', description: '', status: 'completed', active_form: null, blocked_by: [], updated_at: '' },
+    { id: '2', subject: '提交结果', description: '', status: 'completed', active_form: null, blocked_by: [], updated_at: '' },
+  ]
+  await page.route('**/sessions/*/todos', route => route.fulfill({ json: { todos } }))
+  await page.goto('/web2')
+  await page.getByRole('button', { name: '置顶摘要' }).click()
+  const summary = page.getByRole('region', { name: '待办摘要' })
+
+  await expect(summary).toContainText('本轮待办已全部完成')
+  await expect(summary).toContainText('2 项已从活跃列表收起')
+  await expect(summary.getByLabel('待办完成进度')).toHaveCount(0)
+  await expect(summary.getByLabel('待办状态 检查页面')).toHaveCount(0)
+
+  await summary.getByRole('button', { name: '已完成 2 项' }).click()
+  await expect(summary.getByLabel('待办状态 检查页面')).toBeVisible()
+  await expect(summary.getByLabel('待办状态 提交结果')).toBeVisible()
+})

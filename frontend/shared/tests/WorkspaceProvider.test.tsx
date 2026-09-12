@@ -82,6 +82,7 @@ const server = setupServer(
     HttpResponse.json({ sources: [] }),
   ),
   http.get(`${base}/sessions/:id/runs`, () => HttpResponse.json({ runs: [] })),
+  http.get(`${base}/sessions/:id/todos`, () => HttpResponse.json({ todos: [] })),
   http.get(`${base}/workbench/sessions/:id/snapshot`, () =>
     HttpResponse.json(snapshot),
   ),
@@ -159,6 +160,7 @@ function View({ label }: { label: string }) {
       <div data-testid={`${label}-model`}>{w.model}</div>
       <div data-testid={`${label}-running-user`}>{w.runningUserMessageId}</div>
       <div data-testid={`${label}-runs`}>{w.runs.map((run) => run.id).join(',')}</div>
+      <div data-testid={`${label}-todos`}>{w.todos.map((todo) => `${todo.id}:${todo.status}`).join(',')}</div>
       <button onClick={() => void w.regenerate('原始问题', 'question', 'answer')}>
         重新生成 {label}
       </button>
@@ -632,6 +634,47 @@ describe('one shared workspace for two presentation shells', () => {
     await waitFor(() => expect(screen.getByTestId('web-busy')).toHaveTextContent('false'))
     expect(screen.getByTestId('web-messages')).toHaveTextContent('历史-two')
     expect(screen.getByTestId('web-messages')).not.toHaveTextContent('原会话答复')
+  })
+  it('refreshes todos as soon as a task snapshot arrives', async () => {
+    let taskCompleted = false
+    let output: ReadableStreamDefaultController<Uint8Array>
+    server.use(
+      http.get(`${base}/sessions/one/todos`, () => HttpResponse.json({ todos: [{
+        id: 'todo-1',
+        subject: '核对页面',
+        description: '',
+        status: taskCompleted ? 'completed' : 'in_progress',
+        active_form: taskCompleted ? null : '正在核对页面',
+        blocked_by: [],
+        updated_at: '2026-09-12T00:00:00Z',
+      }] })),
+      http.post(`${base}/sessions/one/messages`, () => new HttpResponse(new ReadableStream({
+        start(controller) {
+          output = controller
+          taskCompleted = true
+          controller.enqueue(new TextEncoder().encode(
+            'data: {"id":"tasks","type":"runtime_event","data":{"event":"task_snapshot","data":{"count":1,"open_count":0,"completed_count":1,"items":[]}}}\n\n',
+          ))
+        },
+      }), { headers: { 'Content-Type': 'text/event-stream' } })),
+    )
+    setup()
+    await waitFor(() => expect(screen.getByTestId('web-connected')).toHaveTextContent('connected'))
+    fireEvent.click(screen.getByText('选择 web one'))
+    await waitFor(() => expect(screen.getByTestId('web-todos')).toHaveTextContent('todo-1:in_progress'))
+    fireEvent.change(screen.getByLabelText('web-draft'), { target: { value: '完成页面核对' } })
+    fireEvent.click(screen.getByText('发送 web'))
+
+    await waitFor(() => expect(screen.getByTestId('web2-todos')).toHaveTextContent('todo-1:completed'))
+    expect(screen.getByTestId('web-busy')).toHaveTextContent('true')
+
+    await act(async () => {
+      output.enqueue(new TextEncoder().encode(
+        'data: {"id":"answer","type":"token_delta","data":{"token":"已完成"}}\n\ndata: {"id":"end","type":"agent_end","data":{"status":"completed"}}\n\n',
+      ))
+      output.close()
+    })
+    await waitFor(() => expect(screen.getByTestId('web-busy')).toHaveTextContent('false'))
   })
   it('stops the server run from the other shell and clears the busy state', async () => {
     let output: ReadableStreamDefaultController<Uint8Array>

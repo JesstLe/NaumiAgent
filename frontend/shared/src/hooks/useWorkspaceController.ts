@@ -546,6 +546,12 @@ export function useWorkspaceController() {
           if (isTimelineEvent(event)) {
             setLiveEvents((previous) => [...previous.slice(-199), event])
           }
+          if (
+            event.type === 'runtime_event' &&
+            event.data.event === 'task_snapshot'
+          ) {
+            void taskState.refreshTasks()
+          }
           if (event.type === 'permission_request') {
             const callId = String(event.data.call_id ?? '')
             if (callId)
