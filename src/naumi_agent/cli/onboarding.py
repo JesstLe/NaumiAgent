@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import getpass
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -246,40 +247,57 @@ def _build_config(
     }
 
 
+def _resolve_node_ui_dir(project_root: Path) -> Path | None:
+    """Resolve terminal assets from a source checkout or an installed wheel."""
+    candidates = (
+        project_root / "frontend" / "terminal-ui",
+        Path(__file__).resolve().parents[1] / "frontend" / "terminal-ui",
+    )
+    for candidate in candidates:
+        if (candidate / "src" / "index.js").is_file():
+            return candidate
+    return None
+
+
 def _check_node_ui(project_root: Path) -> None:
-    """检查 Node.js 环境，为新一代终端 UI 做准备。"""
+    """检查随包携带的免安装 Node 终端入口。"""
     node = shutil.which("node")
     if not node:
         console.print(
-            "\n[yellow]未检测到 Node.js 20+，新 Terminal UI 暂不可用。[/yellow]"
+            "\n[yellow]未检测到 Node.js 20.10+，新 Terminal UI 暂不可用。[/yellow]"
         )
         console.print("默认入口会自动回退到 Textual TUI，也可直接执行 naumi tui。")
-        console.print("如需 Node UI，请安装 Node.js 20+ 后运行：")
-        console.print(f"  [dim]cd {project_root / 'frontend' / 'terminal-ui'} && npm install[/dim]")
+        console.print("如需 Node UI，请安装 Node.js 20.10+ 后重新运行 naumi。")
         return
 
     try:
         version = _run([node, "--version"]).strip()
-        console.print(f"\n[green]检测到 Node.js {version}[/green]")
-    except Exception:
-        console.print("[yellow]检测到 node 但无法获取版本[/yellow]")
+    except Exception as exc:
+        console.print(f"[yellow]检测到 Node.js，但无法读取版本：{exc}[/yellow]")
         return
 
-    node_modules = project_root / "frontend" / "terminal-ui" / "node_modules"
-    if not node_modules.exists():
-        console.print("[dim]新一代终端 UI 依赖未安装。[/dim]")
-        if Confirm.ask("是否现在安装 Node UI 依赖？", default=True):
-            ui_dir = project_root / "frontend" / "terminal-ui"
-            try:
-                console.print("正在安装 npm 依赖...")
-                result = shutil.which("npm")
-                if result:
-                    _run([result, "install"], cwd=str(ui_dir))
-                    console.print("[green]Node UI 依赖安装完成[/green]")
-                else:
-                    console.print("[red]未找到 npm[/red]")
-            except Exception as exc:
-                console.print(f"[red]安装失败: {exc}[/red]")
+    match = re.fullmatch(r"v?(\d+)\.(\d+)(?:\.\d+.*)?", version)
+    if match is None or (int(match.group(1)), int(match.group(2))) < (20, 10):
+        console.print(
+            f"\n[yellow]Node.js {version or '未知版本'} 不满足 20.10+；"
+            "默认入口将回退到 Textual TUI。[/yellow]"
+        )
+        return
+
+    console.print(f"\n[green]检测到 Node.js {version}[/green]")
+    ui_dir = _resolve_node_ui_dir(project_root)
+    if ui_dir is None:
+        console.print("[yellow]终端 UI 文件不完整，请重新安装或升级 NaumiAgent。[/yellow]")
+        return
+
+    entry = ui_dir / "src" / "index.js"
+    try:
+        _run([node, "--check", str(entry)], cwd=str(ui_dir))
+    except Exception as exc:
+        console.print(f"[yellow]终端 UI 入口校验失败：{exc}[/yellow]")
+        return
+
+    console.print("[green]Node 终端 UI 已就绪，无需安装 npm 依赖。[/green]")
 
 
 def _report_search_readiness() -> None:
