@@ -36,3 +36,5 @@ Windows 定向验证进一步发现 artifact 下载在 staging 文件设为只�
 Archive Admission 的并发测试还暴露 `ReleaseSlotStore.install()` 缺少进程内互斥：多个服务线程可同时创建同一 content-addressed slot，在 Windows 上产生路径 canonical 校验漂移或冲突。Store 现以可重入锁串行化单实例安装事务，数据库与 immutable slot 收口保持原有幂等语义。
 
 `test_engine.py` 在 Linux coverage 模式下超过统一 10 分钟文件上限，但此前已持续执行并非死锁。CI 仍对普通 unit 文件保留 10 分钟上限，仅为该已知大文件设置 20 分钟；长期修复仍是拆分超大的 Engine 与测试文件。`/evolution` 命令索引也补回 rollback execute/outcome 的明确语法，避免通配提示掩盖真实可用子命令。
+
+命令索引模型将语法提示限制为 300 字符；补充 rollback 子命令后一度越界。提示现将四个 discover 子命令折叠为 `discover-*`，保留需要被明确发现和测试的 approval 与 rollback 子命令，总长度为 299 字符。
