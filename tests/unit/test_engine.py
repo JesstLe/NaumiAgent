@@ -3280,6 +3280,7 @@ class TestSubagentVisualization:
         self,
         engine: AgentEngine,
     ) -> None:
+        engine.subagent_manager._agent_worker_process_factory = None
         session = await engine.get_or_create_session()
         engine.task_store.set_session(session.id)
         task = await engine.task_store.create_task(subject="让 coder 检查实现")
@@ -3342,6 +3343,7 @@ class TestSubagentVisualization:
         self,
         engine: AgentEngine,
     ) -> None:
+        engine.subagent_manager._agent_worker_process_factory = None
         session = await engine.get_or_create_session()
         engine.task_store.set_session(session.id)
         task = await engine.task_store.create_task(subject="让 coder 处理失败用例")
@@ -3388,6 +3390,7 @@ class TestSubagentVisualization:
         self,
         engine: AgentEngine,
     ) -> None:
+        engine.subagent_manager._agent_worker_process_factory = None
         session = await engine.get_or_create_session()
         engine.task_store.set_session(session.id)
         task = await engine.task_store.create_task(subject="让 coder 处理异常")
