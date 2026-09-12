@@ -1,39 +1,28 @@
-import { useEffect } from 'react'
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, useLocation } from 'react-router-dom'
-import { Web2 } from '@naumi/web2'
 import { WorkspaceProvider } from '@naumi/shared/hooks/WorkspaceProvider'
-import { ConnectionBootstrap } from '@/components/ConnectionBootstrap'
-import { PlatformProvider, usePlatform } from '@naumi/shared/platform'
-import { useLocaleStore } from '@/stores/localeStore'
-import '@/i18n'
+import { PlatformProvider } from '@naumi/shared/platform'
 import '@/index.css'
 
-function LocaleInitializer() {
+const Web2 = lazy(() => import('@naumi/web2').then((module) => ({ default: module.Web2 })))
+const LegacyApp = lazy(() => import('@/LegacyApp').then((module) => ({ default: module.LegacyApp })))
+
+function AppLoading() {
+  return <main aria-busy="true" aria-label="正在加载界面" style={{ minHeight: '100vh', background: '#f7f8f5' }} />
+}
+
+function AppSurface() {
   const location = useLocation()
-  const platform = usePlatform()
-  const initializeLocale = useLocaleStore((state) => state.initialize)
-
-  useEffect(() => {
-    let cancelled = false
-    platform.getSetting('locale').then((savedLocale) => {
-      if (!cancelled) {
-        initializeLocale(savedLocale)
-      }
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [platform, initializeLocale])
-
   const launchedView = new URLSearchParams(location.search).get('naumiView')
-  return launchedView === 'web2' || location.pathname === '/web2' || location.pathname.startsWith('/web2/') ? <Web2 /> : <ConnectionBootstrap />
+  const web2 = launchedView === 'web2' || location.pathname === '/web2' || location.pathname.startsWith('/web2/')
+  return <Suspense fallback={<AppLoading />}>{web2 ? <Web2 /> : <LegacyApp />}</Suspense>
 }
 
 function App() {
   return (
     <BrowserRouter>
       <PlatformProvider>
-        <WorkspaceProvider><LocaleInitializer /></WorkspaceProvider>
+        <WorkspaceProvider><AppSurface /></WorkspaceProvider>
       </PlatformProvider>
     </BrowserRouter>
   )

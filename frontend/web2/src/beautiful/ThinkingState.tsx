@@ -167,7 +167,6 @@ export function ThinkingState({
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(timer)
   }, [w.busy])
-  if (!stages.length) return null
   const terminal = [...w.liveEvents].reverse().find(event => ['agent_end', 'agent_error'].includes(event.type))
   const liveWorking = useLive && w.busy && !terminal
   const liveStatus = terminal?.type === 'agent_error'
@@ -195,6 +194,7 @@ export function ThinkingState({
     () => useLive ? liveExecutionActivity(w.liveEvents, steps, liveWorking, { objective, workspace }, now) : undefined,
     [useLive, w.liveEvents, steps, liveWorking, objective, workspace, now],
   )
+  if (!stages.length) return null
   return <div className="bui-root bui-execution" aria-label="执行过程" data-run-id={run?.id || 'live'}>
     <AgentAvatar seed={run?.id || `live:${w.sessionId || 'new'}`} size={25} working={liveWorking} />
     <div className="bui-execution-body">

@@ -12,6 +12,15 @@ export default defineConfig({
   build: {
     minify: 'oxc',
     sourcemap: false,
+    rolldownOptions: {
+      output: {
+        manualChunks(id) {
+          const moduleId = id.replaceAll('\\', '/')
+          if (/\/node_modules\/(highlight\.js|lowlight|rehype-highlight)\//.test(moduleId)) return 'rich-highlight'
+          if (/\/node_modules\/(katex|rehype-katex|remark-math|micromark-extension-math|mdast-util-math)\//.test(moduleId)) return 'rich-math'
+        },
+      },
+    },
   },
   resolve: {
     dedupe: ['react', 'react-dom'],
