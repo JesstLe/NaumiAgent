@@ -229,6 +229,42 @@ describe('public execution activity', () => {
       Date.parse('2026-09-12T00:00:01.000Z'),
     )
     expect(activity.headline).toBe('正在分析任务，准备在 E:/Workspace/NaumiAgent 执行')
+    expect(activity.summary).toBe('正在围绕“创建复杂页面”梳理上下文，尚未开始工具操作。')
+  })
+  it('updates the short reasoning summary from observable execution facts', () => {
+    const started = '2026-09-12T00:00:00.000Z'
+    const initialEvents = [{ id: '1', type: 'turn_start', timestamp: started, data: {} }]
+    const initialRows = liveExecutionTimeline(initialEvents, true)
+    expect(liveExecutionActivity(initialEvents, initialRows, true, {}, Date.parse('2026-09-12T00:00:01.000Z')).summary)
+      .toBe('正在梳理当前请求和上下文，尚未开始工具操作。')
+
+    const runningEvents = [...initialEvents, {
+      id: '2', type: 'tool_call_start', timestamp: '2026-09-12T00:00:02.000Z', data: {
+        call_id: 'read', name: 'read_file', activity_summary: '读取文件：README.md',
+      },
+    }]
+    const runningRows = liveExecutionTimeline(runningEvents, true)
+    expect(liveExecutionActivity(runningEvents, runningRows, true, {}, Date.parse('2026-09-12T00:00:03.000Z')).summary)
+      .toBe('已进入执行阶段，当前操作完成后会根据实际结果继续。')
+
+    const completedEvents = [...runningEvents, {
+      id: '3', type: 'tool_call_end', timestamp: '2026-09-12T00:00:04.000Z', data: {
+        call_id: 'read', name: 'read_file', status: 'success', activity_summary: '读取文件：README.md',
+      },
+    }]
+    const completedRows = liveExecutionTimeline(completedEvents, true)
+    expect(liveExecutionActivity(completedEvents, completedRows, true, {}, Date.parse('2026-09-12T00:00:05.000Z')).summary)
+      .toBe('已记录 1 项完成，正在结合结果准备下一步。')
+    expect(JSON.stringify(completedRows)).not.toContain('PRIVATE_REASONING')
+
+    const failedEvents = [...runningEvents, {
+      id: '4', type: 'tool_call_error', timestamp: '2026-09-12T00:00:04.000Z', data: {
+        call_id: 'read', name: 'read_file', message: '文件不存在', activity_summary: '读取文件：README.md',
+      },
+    }]
+    const failedRows = liveExecutionTimeline(failedEvents, true)
+    expect(liveExecutionActivity(failedEvents, failedRows, true, {}, Date.parse('2026-09-12T00:00:05.000Z')).summary)
+      .toBe('已记录 1 项失败，正在结合结果准备下一步。')
   })
   it('prefers a running tool, resets freshness on new public progress, and stops at terminal state', () => {
     const events = [
