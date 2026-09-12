@@ -98,6 +98,8 @@
           "tool_call_id": "tool-golden-1",
           "status": "success",
           "duration_ms": 12,
+          "error_code": "",
+          "retryable": false,
           "content_preview": "ok\n",
           "content_length": 3,
           "content_bytes": 3,
