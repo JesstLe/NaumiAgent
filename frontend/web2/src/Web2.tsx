@@ -57,7 +57,11 @@ import {
   savePreference,
 } from '@naumi/shared/api/WorkbenchRuntimeClient'
 import { errorText } from '@naumi/shared/hooks/useWorkspaceController'
-import { assistantActionsReady, runsByUserMessage } from '@naumi/shared/api/activity'
+import {
+  assistantActionsReady,
+  precedingUserMessages,
+  runsByUserMessage,
+} from '@naumi/shared/api/activity'
 import './web2.css'
 import { MenuBar } from './MenuBar'
 import { TodoPanel } from './TodoPanel'
@@ -371,6 +375,7 @@ export function Web2() {
     () => runsByUserMessage(messages, w.runs),
     [messages, w.runs],
   )
+  const retryUsers = useMemo(() => precedingUserMessages(messages), [messages])
   const currentSessionBusy = w.busy && w.runningSessionId === w.sessionId
   const detachedLiveRun = currentSessionBusy && !messages.some(
     (message) => message.id === w.runningUserMessageId,
@@ -384,8 +389,12 @@ export function Web2() {
   const currentWriteLocked = (id: string) =>
     w.mutating || (w.busy && w.runningSessionId === id)
   const branch = w.diff?.branch || w.snapshot?.worktrees[0]?.branch
-  const filteredSessions = w.sessions.filter((item) =>
-    (item.title || item.id).toLowerCase().includes(query.trim().toLowerCase()),
+  const normalizedQuery = query.trim().toLowerCase()
+  const filteredSessions = useMemo(
+    () => w.sessions.filter((item) =>
+      (item.title || item.id).toLowerCase().includes(normalizedQuery),
+    ),
+    [normalizedQuery, w.sessions],
   )
   const layoutStyle = {
     '--w2-sidebar-width': `${leftWidth}px`,
@@ -875,8 +884,8 @@ export function Web2() {
               filteredSessions,
               workspaceRoot,
             )
-            const projectMatchesQuery = project.name.toLowerCase().includes(query.trim().toLowerCase())
-            if (query.trim() && !projectMatchesQuery && !projectSessionItems.length && !active) return null
+            const projectMatchesQuery = project.name.toLowerCase().includes(normalizedQuery)
+            if (normalizedQuery && !projectMatchesQuery && !projectSessionItems.length && !active) return null
             return <Fragment key={project.id}>
               <button
                 className={`w2-project ${active ? 'active' : ''}`}
@@ -1032,9 +1041,7 @@ export function Web2() {
                   {messages.map((message, index) => {
                     const run = message.role === 'user' ? messageRuns.get(message.id) : undefined
                     const sources = message.role === 'assistant' ? messageSources(message) : []
-                    const retryUser = message.role === 'assistant'
-                      ? [...messages.slice(0, index)].reverse().find(item => item.role === 'user')
-                      : undefined
+                    const retryUser = retryUsers[index]
                     const retryRun = retryUser ? messageRuns.get(retryUser.id) : undefined
                     const isEditing = editingMessage !== null && editingMessage.id === message.id
                     const showAssistantActions = !savingEdit && message.role === 'assistant' && assistantActionsReady({

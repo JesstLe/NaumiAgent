@@ -287,7 +287,7 @@ export async function mockWorkbenchApi(page: Page): Promise<void> {
     if (url.includes('/sessions/') && url.includes('/environment')) {
       return route.fulfill({ status: 200, json: chatEnvironment })
     }
-    if (url.includes('/sessions/') && url.includes('/git-diff')) {
+    if (url.includes('/workspace/git-diff') || (url.includes('/sessions/') && url.includes('/git-diff'))) {
       return route.fulfill({ status: 200, json: gitDiff })
     }
     if (url.includes('/issues') && !url.includes('/claim')) {

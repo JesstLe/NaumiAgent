@@ -405,17 +405,15 @@ async def get_chat_environment(
     )
 
 
-@router.get(
-    "/sessions/{session_id}/git-diff",
-    response_model=GitDiffResponse,
-)
+@router.get("/workspace/git-diff", response_model=GitDiffResponse)
+@router.get("/sessions/{session_id}/git-diff", response_model=GitDiffResponse)
 async def get_git_diff(
-    session_id: str,
     request: Request,
     auth: str = AuthDep,
+    session_id: str | None = None,
 ):
     engine = request.app.state.engine
-    if not await engine.session_store.load(session_id):
+    if session_id is not None and not await engine.session_store.load(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
     try:
         diff = await ChatEnvironmentCollector(

@@ -272,6 +272,13 @@ export class WorkbenchApiClient {
     })
   }
 
+  async fetchWorkspaceGitDiff(): Promise<GitDiffResponse> {
+    return this.request<GitDiffResponse>({
+      method: 'GET',
+      url: '/workspace/git-diff',
+    })
+  }
+
   async addChatSource(sessionId: string, source: ChatSourceCreate): Promise<ChatSource> {
     return this.request<ChatSource>({
       method: 'POST',

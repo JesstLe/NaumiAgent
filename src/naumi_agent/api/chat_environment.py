@@ -169,32 +169,53 @@ class ChatEnvironmentCollector:
 
     async def _collect_diff_files(self) -> list[GitDiffFile]:
         """Parse porcelain status and fetch per-file patches."""
-        output = await self._git("status", "--porcelain=v1")
-        files: list[GitDiffFile] = []
-        seen_paths: set[str] = set()
-        for line in output.splitlines():
-            if len(line) < 4:
+        output, staged_stats, unstaged_stats = await asyncio.gather(
+            self._git("status", "--porcelain=v1", "--untracked-files=all", "-z"),
+            self._git("diff", "--cached", "--numstat", "-z"),
+            self._git("diff", "--numstat", "-z"),
+        )
+        descriptors: list[tuple[str, str, str, bool]] = []
+        entries = output.split("\0")
+        index = 0
+        while index < len(entries):
+            entry = entries[index]
+            index += 1
+            if len(entry) < 4:
                 continue
-            index_status = line[0]
-            worktree_status = line[1]
-            raw_path = line[3:]
-            # Porcelain may include rename/copy origin after ' -> '.
-            path = raw_path.split(" -> ", 1)[-1]
+            index_status = entry[0]
+            worktree_status = entry[1]
+            path = entry[3:]
+            # In porcelain -z output, rename/copy destinations come first and
+            # the following NUL-delimited field contains the original path.
+            if index_status in {"R", "C"} or worktree_status in {"R", "C"}:
+                index += 1
             if index_status not in (" ", "?"):
-                files.append(
-                    await self._collect_file_diff(path, index_status, "staged")
-                )
-                seen_paths.add(f"{path}:staged")
+                descriptors.append((path, index_status, "staged", False))
             if worktree_status not in (" ", "?"):
-                files.append(
-                    await self._collect_file_diff(path, worktree_status, "unstaged")
-                )
-                seen_paths.add(f"{path}:unstaged")
+                descriptors.append((path, worktree_status, "unstaged", False))
             if index_status == "?" and worktree_status == "?":
-                files.append(
-                    await self._collect_file_diff(path, "A", "unstaged", untracked=True)
+                descriptors.append((path, "A", "unstaged", True))
+
+        stats = {
+            "staged": _parse_numstat(staged_stats),
+            "unstaged": _parse_numstat(unstaged_stats),
+        }
+        semaphore = asyncio.Semaphore(8)
+
+        async def collect(
+            descriptor: tuple[str, str, str, bool],
+        ) -> GitDiffFile:
+            path, status, stage, untracked = descriptor
+            async with semaphore:
+                return await self._collect_file_diff(
+                    path,
+                    status,
+                    stage,
+                    untracked=untracked,
+                    stats=stats[stage].get(path, (0, 0)),
                 )
-                seen_paths.add(f"{path}:unstaged")
+
+        files = list(await asyncio.gather(*(collect(item) for item in descriptors)))
         # Preserve the order Git reports.
         files.sort(key=lambda f: (f.stage, f.path))
         return files
@@ -206,14 +227,16 @@ class ChatEnvironmentCollector:
         stage: str,
         *,
         untracked: bool = False,
+        stats: tuple[int, int] = (0, 0),
     ) -> GitDiffFile:
         if untracked:
-            patch = await self._untracked_patch(path)
+            patch, additions, deletions = await self._untracked_patch_and_stats(path)
         elif stage == "staged":
             patch = await self._git("diff", "--cached", "--", path)
+            additions, deletions = stats
         else:
             patch = await self._git("diff", "--", path)
-        additions, deletions = await self._numstat_for_path(path, stage, untracked)
+            additions, deletions = stats
         return GitDiffFile(
             path=path,
             status=status,
@@ -223,43 +246,18 @@ class ChatEnvironmentCollector:
             patch=patch,
         )
 
-    async def _untracked_patch(self, path: str) -> str:
-        """Return the raw content of an untracked file as its 'patch'."""
+    async def _untracked_patch_and_stats(self, path: str) -> tuple[str, int, int]:
+        """Read an untracked text file once for both patch content and stats."""
         target = self._workspace_root / path
         try:
             if target.is_file() and target.stat().st_size <= 1_000_000:
                 text = target.read_text(encoding="utf-8", errors="replace")
-                # Prefix every line so it looks like a diff for display.
-                return "".join(f"+{line}\n" for line in text.splitlines()) + "\n"
+                lines = text.splitlines()
+                patch = "".join(f"+{line}\n" for line in lines) + "\n"
+                return patch, len(lines), 0
         except (OSError, UnicodeError):
             pass
-        return ""
-
-    async def _numstat_for_path(
-        self, path: str, stage: str, untracked: bool
-    ) -> tuple[int, int]:
-        if untracked:
-            target = self._workspace_root / path
-            try:
-                if target.is_file():
-                    text = target.read_text(encoding="utf-8", errors="replace")
-                    lines = text.splitlines()
-                    return len(lines), 0
-            except (OSError, UnicodeError):
-                pass
-            return 0, 0
-
-        args = ("diff", "--numstat", "--", path)
-        if stage == "staged":
-            args = ("diff", "--cached", "--numstat", "--", path)
-        output = await self._git(*args)
-        for line in output.splitlines():
-            parts = line.split("\t", 2)
-            if len(parts) < 2:
-                continue
-            if parts[0].isdigit() and parts[1].isdigit():
-                return int(parts[0]), int(parts[1])
-        return 0, 0
+        return "", 0, 0
 
     async def _ahead_behind(self) -> tuple[int, int]:
         output = await self._git(
@@ -383,3 +381,31 @@ def _safe_command_summary(command: str, *, max_chars: int = 200) -> str:
         sanitized.append(token)
     summary = " ".join(sanitized)
     return summary if len(summary) <= max_chars else summary[: max_chars - 1] + "…"
+
+
+def _parse_numstat(output: str) -> dict[str, tuple[int, int]]:
+    """Parse NUL-delimited git numstat output, including rename records."""
+    stats: dict[str, tuple[int, int]] = {}
+    entries = output.split("\0")
+    index = 0
+    while index < len(entries):
+        entry = entries[index]
+        index += 1
+        if not entry:
+            continue
+        parts = entry.split("\t", 2)
+        if len(parts) != 3:
+            continue
+        additions_raw, deletions_raw, path = parts
+        additions = int(additions_raw) if additions_raw.isdigit() else 0
+        deletions = int(deletions_raw) if deletions_raw.isdigit() else 0
+        if not path:
+            # Rename/copy records encode old and new paths in the next fields.
+            if index + 1 >= len(entries):
+                break
+            index += 1
+            path = entries[index]
+            index += 1
+        if path:
+            stats[path] = (additions, deletions)
+    return stats

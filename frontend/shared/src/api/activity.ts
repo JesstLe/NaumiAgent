@@ -11,6 +11,16 @@ const TERMINAL_RUN_STATUSES = new Set([
   'blocked',
 ])
 
+export function precedingUserMessages(
+  messages: MessageResponse[],
+): Array<MessageResponse | undefined> {
+  let latestUser: MessageResponse | undefined
+  return messages.map((message) => {
+    if (message.role === 'user') latestUser = message
+    return message.role === 'assistant' ? latestUser : undefined
+  })
+}
+
 export function assistantActionsReady({
   content,
   assistantPending,
