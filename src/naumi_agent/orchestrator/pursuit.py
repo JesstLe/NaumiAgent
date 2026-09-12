@@ -461,6 +461,7 @@ class PursuitRun:
     waiting_on: list[PursuitBackgroundWait] | None = None
     evidence: list[PursuitEvidence] | None = None
     boundary_decision: PursuitBoundaryDecision | None = None
+    boundary_decision_recorded_at: float = 0.0
 
     def add_evidence(self, item: PursuitEvidence) -> None:
         if self.evidence is None:
@@ -1891,6 +1892,9 @@ class GoalPursuitLoop:
             ))
         for item in evidence or []:
             self._run.add_evidence(item)
+        recorded_at = time.time()
+        self._run.boundary_decision_recorded_at = recorded_at
+        self._run.updated_at = recorded_at
         self._persist_run()
 
     def _run_boundary_facts(
