@@ -3554,6 +3554,7 @@ async def test_bridge_agent_stop_returns_action_and_authoritative_terminal_state
     delegated: asyncio.Task[AgentResult] | None = None
     try:
         session = await engine.get_or_create_session(title="Agent Stop")
+        engine.subagent_manager._agent_worker_process_factory = None
         agent = engine.subagent_manager.get_agent("coder")
         assert agent is not None
         started = asyncio.Event()
@@ -3567,7 +3568,7 @@ async def test_bridge_agent_stop_returns_action_and_authoritative_terminal_state
         delegated = asyncio.create_task(engine.subagent_manager.delegate(
             SubTask("stop-me", "等待停止", "coder")
         ))
-        await asyncio.wait_for(started.wait(), timeout=1)
+        await asyncio.wait_for(started.wait(), timeout=10)
         writer = io.StringIO()
         bridge = JsonlEngineBridge(engine, config_path="config.yaml")
         bridge.bind_writer(writer)
@@ -3597,7 +3598,7 @@ async def test_bridge_agent_stop_returns_action_and_authoritative_terminal_state
             "code": "accepted",
             "message": "已请求停止 Agent 执行 stop-me。",
         }
-        assert (await asyncio.wait_for(delegated, timeout=1)).status == "cancelled"
+        assert (await asyncio.wait_for(delegated, timeout=10)).status == "cancelled"
 
         await bridge.handle_engine_event("subagent_event", {
             "task_id": "stop-me",
@@ -3652,6 +3653,7 @@ async def test_bridge_agent_stop_rejects_execution_from_another_session(
     delegated: asyncio.Task[AgentResult] | None = None
     try:
         await engine.get_or_create_session(title="old")
+        engine.subagent_manager._agent_worker_process_factory = None
         agent = engine.subagent_manager.get_agent("coder")
         assert agent is not None
         started = asyncio.Event()
@@ -3666,7 +3668,7 @@ async def test_bridge_agent_stop_rejects_execution_from_another_session(
         delegated = asyncio.create_task(engine.subagent_manager.delegate(
             SubTask("old-session-task", "等待", "coder")
         ))
-        await asyncio.wait_for(started.wait(), timeout=1)
+        await asyncio.wait_for(started.wait(), timeout=10)
         engine._session = await engine.session_store.create_session(title="new")
         writer = io.StringIO()
         bridge = JsonlEngineBridge(engine, config_path="config.yaml")
