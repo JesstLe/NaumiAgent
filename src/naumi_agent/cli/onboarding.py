@@ -8,8 +8,9 @@ import re
 import shutil
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
+import httpx
 import yaml
 from rich.console import Console
 from rich.panel import Panel
@@ -86,7 +87,7 @@ def run_onboarding(config_path: Path, *, project_root: Path | None = None) -> bo
     preset = dict(_PROVIDER_PRESETS[provider])
 
     # 3. API Key
-    api_key = _prompt_api_key(preset["name"])
+    api_key = _prompt_api_key(preset["name"], provider=provider)
     if not api_key:
         console.print(
             "[yellow]未提供 API Key，跳过配置。"
@@ -94,22 +95,34 @@ def run_onboarding(config_path: Path, *, project_root: Path | None = None) -> bo
         )
         return False
 
-    environment_key = os.environ.get("NAUMI_MODELS__API_KEY", "")
-    if environment_key != api_key:
-        try:
-            store_model_api_key(api_key, provider=provider)
-        except (CredentialStoreError, ValueError) as exc:
-            console.print(f"[red]{exc}[/red]")
-            return False
-        os.environ["NAUMI_MODELS__API_KEY"] = api_key
-        console.print("[green]模型凭据已保存到系统安全存储。[/green]")
-
     # 4. 自定义 base URL / model
     if provider == "custom":
         preset["api_base"] = Prompt.ask("API Base URL", default="http://localhost:8000/v1")
         preset["default_model"] = Prompt.ask("默认模型", default=preset["default_model"])
         preset["fast_model"] = Prompt.ask("快速模型", default=preset["default_model"])
         preset["reasoning_model"] = Prompt.ask("推理模型", default=preset["default_model"])
+
+    while api_key:
+        validation = _validate_provider_api_key(provider, preset, api_key)
+        if validation != "invalid":
+            break
+        console.print("[red]API Key 验证失败，请检查 Key 与所选提供商是否匹配。[/red]")
+        api_key = _prompt_api_key(
+            preset["name"],
+            provider=provider,
+            offer_saved=False,
+        )
+    if not api_key:
+        console.print("[yellow]未获得有效 API Key，配置未完成。[/yellow]")
+        return False
+
+    try:
+        store_model_api_key(api_key, provider=provider)
+    except (CredentialStoreError, ValueError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        return False
+    os.environ["NAUMI_MODELS__API_KEY"] = api_key
+    console.print("[green]模型凭据已保存到系统安全存储。[/green]")
 
     # 5. Permission mode
     permission_mode = Prompt.ask(
@@ -169,19 +182,78 @@ def _choose_provider() -> str:
     )
 
 
-def _prompt_api_key(provider_name: str) -> str:
-    """优先读取环境变量；否则交互式输入。"""
-    env_key = os.environ.get("NAUMI_MODELS__API_KEY", "")
-    if env_key:
-        masked = f"{env_key[:4]}...{env_key[-4:]}" if len(env_key) >= 8 else "***"
-        console.print(f"检测到环境变量 NAUMI_MODELS__API_KEY: [dim]{masked}[/dim]")
-        if Confirm.ask("是否使用此 Key", default=True):
-            return env_key
+def _prompt_api_key(
+    provider_name: str,
+    *,
+    provider: str | None = None,
+    offer_saved: bool = True,
+) -> str:
+    """优先使用 provider 专属凭据，再考虑通用环境变量。"""
+    if offer_saved and provider:
+        try:
+            stored_key = load_model_api_key(
+                provider=provider,
+                fallback_to_legacy=False,
+            )
+        except CredentialStoreError as exc:
+            console.print(f"[yellow]{exc}[/yellow]")
+        else:
+            if stored_key:
+                console.print(f"检测到已保存的 {provider_name} 凭据。")
+                if Confirm.ask("是否使用已保存凭据", default=True):
+                    return stored_key
+
+    if offer_saved:
+        env_key = os.environ.get("NAUMI_MODELS__API_KEY", "")
+        if env_key:
+            masked = f"{env_key[:4]}...{env_key[-4:]}" if len(env_key) >= 8 else "***"
+            console.print(f"检测到环境变量 NAUMI_MODELS__API_KEY: [dim]{masked}[/dim]")
+            if Confirm.ask("是否使用此 Key", default=True):
+                return env_key
 
     console.print(f"\n请输入 [bold]{provider_name}[/bold] 的 API Key")
     console.print("[dim]输入时不会显示，也可直接回车跳过[/dim]")
     key = getpass.getpass("API Key: ").strip()
     return key
+
+
+def _validate_provider_api_key(
+    provider: str,
+    preset: dict[str, Any],
+    api_key: str,
+) -> Literal["valid", "invalid", "unverified"]:
+    """Validate credentials without sending prompts or retaining response bodies."""
+    api_base = str(preset.get("api_base") or "").strip().rstrip("/")
+    if not api_base:
+        console.print("[yellow]未配置 API Base，暂时无法验证凭据。[/yellow]")
+        return "unverified"
+
+    headers = {"Authorization": f"Bearer {api_key}"}
+    if provider == "anthropic":
+        headers = {
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+        }
+    try:
+        response = httpx.get(
+            f"{api_base}/models",
+            headers=headers,
+            timeout=3,
+        )
+    except httpx.HTTPError:
+        console.print("[yellow]暂时无法连接模型服务，凭据将在首次请求时再次验证。[/yellow]")
+        return "unverified"
+
+    if 200 <= response.status_code < 300:
+        console.print("[green]模型凭据验证通过。[/green]")
+        return "valid"
+    if response.status_code in {401, 403}:
+        return "invalid"
+    console.print(
+        f"[yellow]模型服务返回 HTTP {response.status_code}，"
+        "暂时无法确认凭据状态。[/yellow]"
+    )
+    return "unverified"
 
 
 def _build_config(

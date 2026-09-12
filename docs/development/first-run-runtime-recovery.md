@@ -18,6 +18,10 @@ Python bridge 初始化时因 `PIL` 缺失退出；随后 Textual 回退复用�
   产品运行不需要的 npm 依赖；
 - Node 与 Textual 启动前共同检查 Pillow。若安装环境残缺，直接给出一次可执行的恢复命令，
   避免先打开 Node UI、退出、再让 Textual 重复失败。
+- provider 专属系统凭据优先于通用 `NAUMI_MODELS__API_KEY`，避免另一提供商的环境变量覆盖
+  已验证凭据；首次引导也会先发现已保存凭据，并通过 provider 的 `/models` 接口验证后再写入。
+- 认证失败文案不再把“服务拒绝凭据”笼统描述成“未设置”，改为提示核对 provider 并运行
+  `naumi configure`，Windows 用户不会再看到仅适用于 Unix shell 的 `export` 命令。
 
 ## 验证范围
 

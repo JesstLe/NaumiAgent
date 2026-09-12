@@ -117,9 +117,13 @@ class TestSmokeConfig:
         with pytest.raises(ValidationError):
             SafetyConfig(**{field: -1})
 
-    def test_yaml_config(self) -> None:
+    def test_yaml_config(self, monkeypatch) -> None:
         os.environ["NAUMI_MODELS__API_KEY"] = "test-key"
         try:
+            monkeypatch.setattr(
+                "naumi_agent.config.settings.load_model_api_key",
+                lambda **_kwargs: None,
+            )
             config = AppConfig.from_yaml(EXAMPLE_CONFIG)
             assert config.models.default_model == "openai/kimi-for-coding"
             assert config.models.api_key == "test-key"
