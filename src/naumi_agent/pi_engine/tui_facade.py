@@ -126,9 +126,6 @@ class PiTuiEngine(PiWebEngine):
     async def start_long_running_services(self) -> None:
         return None
 
-    async def shutdown(self) -> None:
-        await self.stop()
-
     def start_session_retention_worker(self) -> None:
         return None
 

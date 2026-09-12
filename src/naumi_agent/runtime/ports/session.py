@@ -16,6 +16,7 @@ class SessionPort(Protocol[SessionT]):
         title: str | None = None,
         model: str | None = None,
         system_prompt: str | None = None,
+        engine: str | None = None,
     ) -> SessionT:
         """Create and durably persist a new session."""
         ...

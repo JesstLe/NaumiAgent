@@ -1817,32 +1817,59 @@ def run(
     asyncio.run(_run_task(task, config))
 
 
+def _create_single_task_engine(config: AppConfig):
+    """Build the engine behind `naumi run`, honoring engine.provider."""
+    if config.engine.provider == "pi":
+        import shutil as _shutil
+
+        from naumi_agent.memory.session import SessionStore
+        from naumi_agent.pi_engine.web_facade import PiWebEngine
+
+        if _shutil.which(config.engine.pi.binary or "pi") is None:
+            console.print(
+                "[red]engine.provider=pi 但未找到 pi 可执行文件；"
+                "请安装 npm install -g @earendil-works/pi-coding-agent"
+                " 或改用 naumi 引擎。[/red]"
+            )
+            raise typer.Exit(1)
+        return PiWebEngine(config, SessionStore(config.memory))
+    from naumi_agent.runtime.composition import create_agent_engine
+
+    return create_agent_engine(config)
+
+
 async def _run_task(task: str, config_path: str) -> None:
     from naumi_agent.log_setup import setup_logging
-    from naumi_agent.runtime.composition import create_agent_engine
 
     resolved = _resolve_config_path(config_path)
     config = AppConfig.from_yaml(resolved)
     setup_logging(config.log_level)
     _check_api_key(config)
-    engine = create_agent_engine(config)
+    engine = _create_single_task_engine(config)
 
     try:
-        await engine.recover_session_reconciliations()
+        recover = getattr(engine, "recover_session_reconciliations", None)
+        if recover is not None:
+            await recover()
         with console.status("[bold green]执行中...[/bold green]"):
             result = await engine.run(task)
     except Exception as e:
         console.print(f"[red]错误: {e}[/red]")
         return
     finally:
-        await engine.shutdown()
+        shutdown = getattr(engine, "shutdown", None)
+        if shutdown is not None:
+            await shutdown()
 
     console.print(Markdown(excerpt_markdown_code_blocks(result.response)))
     console.print()
 
     # Show stats line
     stats = Text()
-    model = engine.router.resolve_model("capable")
+    try:
+        model = engine.router.resolve_model("capable")
+    except Exception:
+        model = "pi"
     stats.append(f"{model}", style="dim")
     stats.append(" | ", style="dim")
     u = result.usage
