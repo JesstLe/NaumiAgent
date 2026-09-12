@@ -36,6 +36,7 @@ from naumi_agent.harness.store import HarnessStore
 from naumi_agent.harness.tools import create_harness_tools
 from naumi_agent.harness.trust import HarnessTrustStore
 from naumi_agent.orchestrator.engine import AgentEngine
+from naumi_agent.ui.protocol import PROTOCOL_CAPABILITIES
 
 PROFILE = """\
 schema_version: 1
@@ -105,14 +106,7 @@ def _engine(tmp_path: Path) -> AgentEngine:
                         "expected": {
                             "outcome": "accepted",
                             "selected_version": 1,
-                            "capabilities": [
-                                "goal_snapshot",
-                                "heartbeat",
-                                "task_snapshot",
-                                "typed_ui_messages",
-                                "workbench_proposal_actions",
-                                "workbench_snapshot",
-                            ],
+                            "capabilities": sorted(PROTOCOL_CAPABILITIES),
                         },
                         "metrics": {
                             "primary": "protocol_outcome_match",
