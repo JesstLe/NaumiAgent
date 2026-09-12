@@ -10,6 +10,7 @@ import logging
 import os
 import platform
 import shutil
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -108,6 +109,7 @@ class ChromeLauncher:
         self.max_port_attempts = DEFAULT_MAX_PORT_ATTEMPTS
         self.staleness_threshold_ms = DEFAULT_STALENESS_MS
         self._chrome_process: subprocess.Popen[bytes] | None = None
+        self._ensure_lock = asyncio.Lock()
 
     # -- Platform detection --
 
@@ -255,15 +257,13 @@ class ChromeLauncher:
     def _find_available_port(self, start_port: int) -> int:
         for port in range(start_port, start_port + self.max_port_attempts):
             try:
-                result = subprocess.run(
-                    ["lsof", "-i", f":{port}", "-sTCP:LISTEN"],
-                    capture_output=True,
-                    timeout=3,
-                )
-                if result.returncode != 0:
-                    return port
-            except Exception:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                    if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+                        probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+                    probe.bind(("127.0.0.1", port))
                 return port
+            except OSError:
+                continue
         raise RuntimeError(
             f"No available port after {self.max_port_attempts} "
             f"attempts from {start_port}"
@@ -312,31 +312,38 @@ class ChromeLauncher:
     async def ensure_ready(
         self, *, force_resync: bool = False
     ) -> dict[str, Any]:
-        if await self._is_cdp_active(self.cdp_port):
+        async with self._ensure_lock:
+            if await self._is_cdp_active(self.cdp_port):
+                return {
+                    "endpoint": f"http://127.0.0.1:{self.cdp_port}",
+                    "launched": False,
+                    "synced": False,
+                    "port": self.cdp_port,
+                }
+
+            synced = False
+            sync_needed = await asyncio.to_thread(
+                self._is_profile_sync_needed, force_resync
+            )
+            if sync_needed:
+                result = await asyncio.to_thread(self._sync_profile)
+                synced = True
+                if result["errors"]:
+                    logger.warning(
+                        "Profile sync warnings: %s", "; ".join(result["errors"])
+                    )
+
+            port = self._find_available_port(self.cdp_port)
+            self._launch_chrome(port)
+            await self._wait_for_cdp(port)
+            self.cdp_port = port
+
             return {
-                "endpoint": f"http://127.0.0.1:{self.cdp_port}",
-                "launched": False,
-                "synced": False,
-                "port": self.cdp_port,
+                "endpoint": f"http://127.0.0.1:{port}",
+                "launched": True,
+                "synced": synced,
+                "port": port,
             }
-
-        synced = False
-        if self._is_profile_sync_needed(force_resync):
-            result = self._sync_profile()
-            synced = True
-            if result["errors"]:
-                logger.warning("Profile sync warnings: %s", "; ".join(result["errors"]))
-
-        port = self._find_available_port(self.cdp_port)
-        self._launch_chrome(port)
-        await self._wait_for_cdp(port)
-
-        return {
-            "endpoint": f"http://127.0.0.1:{port}",
-            "launched": True,
-            "synced": synced,
-            "port": port,
-        }
 
     def kill_chrome(self) -> dict[str, Any]:
         if self._chrome_process is None or self._chrome_process.poll() is not None:

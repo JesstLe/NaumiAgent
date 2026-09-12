@@ -138,3 +138,5 @@ SQLite WAL 配置现收敛到 persistence 公共层：读取当前 journal mode 
 运行 `34701102464` 的分片 10 继续暴露真实 mTLS Result Return 测试的超时层级错误：HTTP 客户端允许 2 秒，但共享 Worker 夹具把外层 Result timeout 固定为 0.2 秒，coverage 下会先取消正常进行中的 TLS 请求并记录 `stable_remote_result_return_return_timeout`。夹具现以可覆盖的默认字典构造策略，该真实网络闭环单独使用 5 秒 HTTP timeout、8 秒 Worker timeout 和 10 秒 claim lease，保持客户端失败先于 Worker lease 收口，同时不修改生产默认值、TLS 身份校验或真实服务路径。Windows 完成 ruff 与 compileall 验证；该 POSIX executable 场景由下一轮 Linux coverage 分片执行。
 
 同文件三个 Store 专项用例也复用了上述完整 release fixture，却漏掉 Windows 平台边界标记；fixture 在 Windows 会按 host target 生成 `.exe` 路径，但测试 bundle 只写入占位字节，启动探针稳定触发 WinError 216，Store 断言根本没有执行。三个用例现与相邻真实 release 链路使用相同的 POSIX-only 标记，Windows 文件级定向结果为 8 skipped；并发 claim、fencing 与 anti-join 行为仍由 Linux CI 原样执行，没有删除或 mock 掉覆盖。
+
+浏览器 ChromeLauncher 的端口探测仍同步调用 Linux 专用 `lsof`；Windows 缺少命令时异常分支会直接把首个端口当成可用，Linux 每个候选端口则可能阻塞异步 `ensure_ready()` 最长 3 秒。启动器现用 Python socket 对 `127.0.0.1` 做跨平台 bind 探测，已占用端口会继续扫描；配置 Profile 的文件与目录复制通过 `asyncio.to_thread` 移出事件循环。同一 Launcher 的并发 `ensure_ready()` 由异步锁合并为单次同步、启动和 CDP 等待，并在选择备用端口后更新实例端点，后续调用复用实际端口。真实监听端口与双并发启动的 3 个定向用例通过。
