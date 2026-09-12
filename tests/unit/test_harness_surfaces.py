@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 import subprocess
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -45,10 +46,14 @@ knowledge:
 checks:
   - id: unit
     label: 单元测试
-    argv: [python3, -c, "print('surface check ok')"]
+    argv: [__PYTHON__, -c, "print('surface check ok')"]
 evals:
   suites: [evals/protocol.yaml]
 """
+
+
+def _profile_text() -> str:
+    return PROFILE.replace("__PYTHON__", json.dumps(sys.executable))
 
 
 def _plain(text: str) -> str:
@@ -75,7 +80,7 @@ def _engine(tmp_path: Path) -> AgentEngine:
     workspace.mkdir()
     profile = workspace / ".naumi" / "harness.yaml"
     profile.parent.mkdir(parents=True)
-    profile.write_text(PROFILE, encoding="utf-8")
+    profile.write_text(_profile_text(), encoding="utf-8")
     (workspace / "AGENTS.md").write_text("HARNESS_SURFACE_RULE", encoding="utf-8")
     fixture = workspace / "evals" / "fixtures" / "hello.json"
     fixture.parent.mkdir(parents=True)
@@ -270,7 +275,9 @@ async def test_harness_slash_flow_previews_confirms_and_revokes_trust(
 
         assert "配置未受信任" in initial
         assert "仅预览" in preview
-        assert "unit: python3 -c" in preview
+        assert "unit:" in preview
+        assert sys.executable in preview
+        assert " -c" in preview
         assert not still_untrusted.trusted
         assert "已信任" in confirmed
         assert "Harness 已就绪" in ready
@@ -804,7 +811,7 @@ async def test_harness_sandbox_retry_slash_resumes_real_cancelled_worker_batch(
     try:
         profile_path = engine.workspace_root / ".naumi" / "harness.yaml"
         profile_path.write_text(
-            PROFILE.replace(
+            _profile_text().replace(
                 "print('surface check ok')",
                 "import time; time.sleep(0.2); print('surface check ok')",
             ),
