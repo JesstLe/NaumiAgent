@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import uuid
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -51,6 +52,54 @@ from naumi_agent.runs.tool_evidence import tool_end_status, tool_metadata, tool_
 from naumi_agent.streaming.events import EventType, StreamEvent, StreamEventSink
 
 router = APIRouter(tags=["sessions", "messages"])
+
+MAX_CHAT_SOURCE_BYTES = 20 * 1024 * 1024
+CHAT_SOURCE_CHUNK_BYTES = 1024 * 1024
+CHAT_SOURCE_PREVIEW_CHARS = 20_000
+
+
+class _ChatSourceTooLargeError(ValueError):
+    pass
+
+
+def _safe_upload_filename(filename: str) -> str:
+    name = filename.replace("\\", "/").rsplit("/", 1)[-1].strip()
+    if (
+        name in {"", ".", ".."}
+        or name.endswith(".")
+        or any(ord(char) < 32 or char in '<>:"|?*' for char in name)
+    ):
+        raise ValueError("附件文件名无效")
+    return name
+
+
+def _persist_chat_upload(source: BinaryIO, target_path: Path) -> None:
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    staging_path = target_path.with_name(f".{target_path.name}.uploading")
+    written = 0
+    try:
+        with staging_path.open("xb") as destination:
+            while True:
+                chunk = source.read(CHAT_SOURCE_CHUNK_BYTES)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > MAX_CHAT_SOURCE_BYTES:
+                    raise _ChatSourceTooLargeError
+                destination.write(chunk)
+            destination.flush()
+            os.fsync(destination.fileno())
+        os.replace(staging_path, target_path)
+    except BaseException:
+        staging_path.unlink(missing_ok=True)
+        raise
+
+
+def _read_chat_source_preview(path: Path) -> str:
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    with path.open(encoding="utf-8", errors="replace") as source:
+        return source.read(CHAT_SOURCE_PREVIEW_CHARS + 1)[:CHAT_SOURCE_PREVIEW_CHARS]
 
 
 # --- Sessions ---
@@ -463,13 +512,28 @@ async def upload_chat_source(
         raise HTTPException(status_code=400, detail="Missing filename")
 
     workspace_root = Path(engine.workspace_root).expanduser().resolve()
-    upload_dir = workspace_root / ".naumi" / "uploads" / session_id
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    target_path = upload_dir / Path(file.filename).name
+    uploads_root = (workspace_root / ".naumi" / "uploads").resolve()
+    upload_dir = (uploads_root / session_id).resolve()
+    try:
+        upload_dir.relative_to(uploads_root)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="会话附件目录越界") from exc
+    try:
+        original_name = _safe_upload_filename(file.filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    source_id = uuid.uuid4().hex[:12]
+    suffix = Path(original_name).suffix[:16]
+    target_path = upload_dir / f"{source_id}{suffix}"
 
     try:
-        content = await file.read()
-        target_path.write_bytes(content)
+        await asyncio.to_thread(_persist_chat_upload, file.file, target_path)
+    except _ChatSourceTooLargeError as exc:
+        limit_mb = MAX_CHAT_SOURCE_BYTES // (1024 * 1024)
+        raise HTTPException(
+            status_code=413,
+            detail=f"附件超过 {limit_mb} MB 上限，请压缩或拆分后重试。",
+        ) from exc
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"Failed to save file: {exc}") from exc
 
@@ -478,12 +542,20 @@ async def upload_chat_source(
     except ValueError as exc:
         raise HTTPException(status_code=500, detail="Upload path is outside workspace") from exc
 
-    source = await _chat_run_store(request).add_source(
-        session_id=session_id,
-        kind="file",
-        title=target_path.name,
-        path=relative_path,
-    )
+    try:
+        source = await _chat_run_store(request).add_source(
+            session_id=session_id,
+            kind="file",
+            title=original_name,
+            path=relative_path,
+            source_id=source_id,
+        )
+    except Exception:
+        try:
+            await asyncio.to_thread(target_path.unlink, missing_ok=True)
+        except OSError:
+            pass
+        raise
     return ChatSourceReferenceResponse(
         id=source.id,
         kind=source.kind,
@@ -882,9 +954,10 @@ async def _build_turn_context(
             path.relative_to(workspace_root)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail="来源路径越界") from exc
-        if not path.is_file():
-            raise HTTPException(status_code=400, detail="来源文件已不存在")
-        content = path.read_text(encoding="utf-8", errors="replace")[:20000]
+        try:
+            content = await asyncio.to_thread(_read_chat_source_preview, path)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=400, detail="来源文件已不存在") from exc
         sections.extend(
             [
                 f"### {source.title}",
