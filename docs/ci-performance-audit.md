@@ -122,3 +122,5 @@ Workbench 右侧 Diff 面板原先为每个文件并发执行 Git，并通过 `c
 同一分片的真实 Engine 流式工具生命周期用例替换了 `execute_tool()`，因此不会实际写入文件，却仍以“写入文件”声明动作型任务。新增的工作区变更完成门禁会正确重试并拒绝这种伪完成，最终回答自然不会发布。用例现明确声明只演示工具生命周期且不创建或修改文件，继续覆盖 `tool_prepare`、`tool_use`、`tool_result` 与最终 token 的真实 Bridge 事件顺序；两个分片 0 根因在普通及 coverage 模式均为 2 passed。
 
 分片 9 的 Installation Daemon 用例确认持久 delivery 已进入 `completed`，但仍用独立的 3 秒循环等待 Worker 在整轮末尾发布内存统计；Linux coverage 下完整 pass 偶尔超过该窗口。用例现通过 Worker 的 `run_once()` 互斥锁等待正在执行的 pass 原子收口，再读取 `returned_count`，既不延长任意睡眠，也不会与后台 pass 并发修改统计。Windows 完整文件为 6 passed、5 个 POSIX executable 场景按既有边界 skipped；该 mTLS 场景由下一轮 Linux CI 验证。
+
+后续异步子进程复扫发现 `code_execute` 虽然最终只显示 100 KiB 输出，却先通过 `communicate()` 将 stdout 与 stderr 全量读入内存，再做字符串截断。失控代码在最长 60 秒窗口内可能持续输出并显著放大 Agent 内存。Docker 与本地降级执行现并发排空两个管道，每路只保留 100 KiB 预览，同时累计真实字节数用于明确截断提示；超时会终止并等待子进程退出后再收口 reader。真实本地 Python 的正常、异常、超时、空输出及双管道各 300 KiB 输出场景共 26 个用例在普通和 coverage 模式均通过。
