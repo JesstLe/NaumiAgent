@@ -23,6 +23,7 @@ class _Engine:
         session_id: str = "session-bridge",
     ) -> None:
         self.terminal_event_store = store
+        self.workspace_root = store.workspace_root
         self._session = SimpleNamespace(id=session_id) if session_id else None
         self._config = SimpleNamespace(ui=SimpleNamespace(show_reasoning=False))
 
