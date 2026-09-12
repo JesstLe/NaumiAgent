@@ -56,3 +56,5 @@ Archive Admission 的并发测试还暴露 `ReleaseSlotStore.install()` 缺少�
 Windows 真实 slash 流程随后暴露了两个生产可执行性问题。Harness Sandbox 快照目录直接拼接 `manual:<session-id>`，冒号会触发 WinError 123；目录名现改为由 run、check 与 source digest 共同生成的固定长度 SHA-256 身份，原始 run id 仍保留在 manifest 和回执中。基础设施异常现在同时显示稳定的 `sandbox_unavailable` 或 `sandbox_infrastructure_error` 错误码，用户可以据此区分缺少隔离后端与其他执行故障。Surface 测试 Profile 也改用当前 `sys.executable`，避免 WindowsApps 的 `python3.exe` 别名存在但不可访问时产生 WinError 1920。Windows 定向结果为 15 passed、4 个真实隔离后端场景按设计 skipped，另有便携快照路径用例通过。
 
 分片 11 继续向后执行后发现 `naumi run` 生命周期测试仍构造只有 `log_level` 的旧配置替身，而单任务入口已根据 `config.engine.provider` 选择 Naumi 或 Pi 引擎。夹具现明确声明 `provider=naumi`，成功与异常路径仍验证 Engine shutdown，4 个定向用例通过。
+
+分片 8 还暴露独立 Agent Worker 的两处时间竞态测试：健康检查把已读取的旧 heartbeat 时间当作当前评估时间，活跃子进程写入下一次 heartbeat 后会被误判为 clock regression；Claim 续租则用固定 350ms 睡眠假设 coverage 下的调度时延。测试现以当前时刻加小幅容差评估健康状态，并轮询持久 `agent_job_claim_renewed` 回执直至有界超时。完整文件及 CI 同等 coverage 模式均为 10 passed。
