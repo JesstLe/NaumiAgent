@@ -128,3 +128,5 @@ Workbench 右侧 Diff 面板原先为每个文件并发执行 Git，并通过 `c
 运行 `34699094393` 的分片 5 随后暴露 Independent Review Store 的首次连接竞态：多个执行器同时打开同一 SQLite 文件时，每个业务方法都会重复执行 schema 初始化并切换 `journal_mode=WAL`，其中一个连接持有初始化锁时，另一个连接会直接收到 `database is locked`。Store 现将 schema 初始化从业务事务中分离，同一实例只执行一次，并为所有连接设置 10 秒 `busy_timeout`；多个 Store 实例同时首次初始化时，WAL 切换对锁冲突进行最长 10 秒的有界重试。真实 SQLite 回归分别覆盖同一 Store 8 路首次 claim 和 8 个 Store 实例同时初始化同一数据库，coverage 模式为 2 passed。
 
 生命周期 Shell Hook 也会通过 `communicate()` 全量缓存外部命令的 stdout 与 stderr；用户配置的 Hook 在超时窗口内持续输出时，可以直接放大主 Agent 内存，调用任务被取消时也没有进入既有的超时回收路径。Hook 现并发排空三个标准流，stdout 只保留前 64 KiB 以解析首行控制 JSON，stderr 只保留末尾 16 KiB 供故障日志使用，并统计真实字节数形成截断告警；超时、取消和标准流异常都会终止并等待整个进程树。真实 300 KiB 双管道输出与运行中取消场景均通过，Shell Hook 文件在 coverage 模式为 13 passed。
+
+附加浏览器录屏的 FFmpeg 编码存在相同的取消泄漏：外层清理步骤会在 60 秒后取消编码协程，原实现的 `communicate()` 不会因此终止 FFmpeg，半成品 WebM 也会留在 artifact 目录；编码 stderr 还会完整进入内存。FFmpeg 探针现以 5 秒上限在线程中执行，避免同步 `subprocess.run` 阻塞事件循环；编码关闭进度输出，仅保留末尾 16 KiB 错误文本，失败或取消都会等待进程退出并尽力删除半成品。三个真实子进程场景覆盖探针线程调度、300 KiB stderr 失败以及运行中取消，完整 Browser Runtime 单元文件为 90 passed。
