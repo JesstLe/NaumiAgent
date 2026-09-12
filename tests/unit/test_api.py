@@ -1038,7 +1038,18 @@ class TestMessageRoutes:
                     ahead=1,
                     behind=0,
                     error="",
-                    files=[],
+                    files=[
+                        SimpleNamespace(
+                            path="large.py",
+                            status="M",
+                            stage="unstaged",
+                            additions=2,
+                            deletions=1,
+                            patch="@@ -1 +1 @@\n-old\n+new",
+                            patch_truncated=True,
+                            patch_notice="补丁超过 512 KiB，仅显示开头部分。",
+                        )
+                    ],
                 )
 
         monkeypatch.setattr(message_routes, "ChatEnvironmentCollector", Collector)
@@ -1046,6 +1057,8 @@ class TestMessageRoutes:
         response = await get_git_diff(request, auth="test")
 
         assert response.branch == "audit"
+        assert response.files[0].patch_truncated is True
+        assert "512 KiB" in response.files[0].patch_notice
         engine.session_store.load.assert_not_awaited()
 
     @pytest.mark.asyncio

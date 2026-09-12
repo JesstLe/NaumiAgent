@@ -142,6 +142,8 @@ class GitDiffFileResponse(BaseModel):
     additions: int = 0
     deletions: int = 0
     patch: str = ""
+    patch_truncated: bool = False
+    patch_notice: str = ""
 
 
 class GitDiffResponse(BaseModel):
