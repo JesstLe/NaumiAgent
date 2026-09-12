@@ -262,10 +262,10 @@ class HarnessSandboxCheckRunner:
                 if overlays
                 else revision_snapshot.tree_sha256
             )
-        snapshot = (
-            self.sandbox_root
-            / f"{run_id}-{check.id}-{source_before_sha256[:12]}"
-        )
+        snapshot_identity = hashlib.sha256(
+            f"{run_id}\0{check.id}\0{source_before_sha256}".encode()
+        ).hexdigest()[:32]
+        snapshot = self.sandbox_root / f"sandbox-{snapshot_identity}"
         if snapshot.exists():
             return _blocked(
                 check=check,
