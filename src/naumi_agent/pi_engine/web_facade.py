@@ -23,12 +23,31 @@ class PiWebEngineError(RuntimeError):
     """User-visible pi web engine failure (safe to serialize)."""
 
 
-def _result(status: str, response: str, error: str, turns: int, cost: float):
+def _empty_usage() -> SimpleNamespace:
+    return SimpleNamespace(
+        turn=0,
+        total_cost_usd=0.0,
+        input_tokens=0,
+        output_tokens=0,
+        cache_tokens=0,
+        total_tokens=0,
+    )
+
+
+def _result(status: str, response: str, error: str, usage) -> SimpleNamespace:
+    """Wrap a translator's usage into the result shape both UIs consume."""
     return SimpleNamespace(
         status=status,
         response=response,
         error=error,
-        usage=SimpleNamespace(turns=turns, total_cost_usd=cost),
+        usage=SimpleNamespace(
+            turns=usage.turn,
+            total_cost_usd=usage.total_cost_usd,
+            total_input_tokens=usage.input_tokens,
+            total_output_tokens=usage.output_tokens,
+            cache_tokens=usage.cache_tokens,
+            total_tokens=usage.total_tokens,
+        ),
     )
 
 
@@ -46,6 +65,8 @@ class PiWebEngine:
         self._pi_session_files: dict[str, str] = {}
         # Which web session currently owns the pi process's active session.
         self._pi_session_owner = ""
+        # Last pi state snapshot for status display.
+        self._state_cache: dict[str, Any] = {}
         self._current_web_session = ""
         self._closed = False
 
@@ -96,14 +117,17 @@ class PiWebEngine:
             try:
                 await rpc.prompt(content)
             except PiRpcError as exc:
-                return _result("error", "", str(exc), 0, 0.0)
+                return _result("error", "", str(exc), _empty_usage())
 
             while True:
                 event = await self._events.get()
                 kind = str(event.get("type") or "")
                 if kind == "__rpc_error__":
                     return _result(
-                        "error", "", str(event.get("error") or "RPC 通道错误。"), 0, 0.0
+                        "error",
+                        "",
+                        str(event.get("error") or "RPC 通道错误。"),
+                        _empty_usage(),
                     )
                 if kind == PiEventType.EXTENSION_UI_REQUEST:
                     await self._answer_extension_dialog(rpc, event)
@@ -121,31 +145,47 @@ class PiWebEngine:
                 session.total_cost_usd += translator.total_cost_usd
                 await self._session_store.save(session)
             status = "error" if error else "completed"
-            return _result(
-                status, response, error, translator.turn, translator.total_cost_usd
-            )
+            return _result(status, response, error, translator)
 
     async def stop(self) -> None:
         self._closed = True
         if self._rpc is not None:
             await self._rpc.stop()
             self._rpc = None
+        close_store = getattr(self._session_store, "close", None)
+        if close_store is not None:
+            try:
+                await close_store()
+            except Exception:
+                pass  # store already closed or never opened
+
+    async def shutdown(self) -> None:
+        """Alias matching the AgentEngine surface consumers call on exit."""
+        await self.stop()
 
     # -- internals -------------------------------------------------------------
 
     async def _ensure_rpc(self) -> PiRpcClient:
         if self._rpc is not None:
             return self._rpc
+        from naumi_agent.pi_engine.extension import (
+            default_pi_env,
+            resolve_default_extension_args,
+        )
+
         pi_config = self._config.engine.pi
+        workspace_root = self._config.resolve_workspace_root()
         self._events = asyncio.Queue()
         self._rpc = await PiRpcClient.start(
             binary=pi_config.binary,
             provider=pi_config.provider,
             model=pi_config.model,
-            extra_args=pi_config.extra_args,
-            cwd=str(self._config.resolve_workspace_root()),
+            extra_args=resolve_default_extension_args(
+                workspace_root, list(pi_config.extra_args)
+            ),
+            cwd=str(workspace_root),
             event_handler=self._events.put_nowait,
-            env=resolve_env_refs(pi_config.env) or None,
+            env=default_pi_env(resolve_env_refs(pi_config.env)),
         )
         return self._rpc
 
@@ -159,6 +199,7 @@ class PiWebEngine:
         """
         session_id = self._current_web_session
         state = await rpc.get_state()
+        self._state_cache = dict(state)
         current_file = str(state.get("sessionFile") or "")
         wanted = self._pi_session_files.get(session_id)
         if wanted and wanted != current_file:

@@ -5217,12 +5217,14 @@ class AgentEngine:
         title: str | None = None,
         model: str | None = None,
         system_prompt: str | None = None,
+        engine: str | None = None,
     ) -> Session:
         """Create and durably bind a session to this Engine workspace."""
         session = await self._session_port.create_session(
             title=title,
             model=model,
             system_prompt=system_prompt,
+            engine=engine,
         )
         session.workspace_root = str(self.workspace_root)
         session.git_branch = self._current_git_branch()

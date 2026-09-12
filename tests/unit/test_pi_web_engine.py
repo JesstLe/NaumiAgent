@@ -161,10 +161,40 @@ class FakeWebRpc:
             self.switched.append(str(fields.get("sessionPath")))
             self.state = {**self.state, "sessionFile": str(fields.get("sessionPath"))}
             return {}
+        if command_type == "get_available_models":
+            return {
+                "models": [
+                    {"id": "glm-4.7", "provider": "zai-coding-cn"},
+                    {"id": "glm-5.2", "provider": "zai-coding-cn"},
+                ]
+            }
+        if command_type == "set_model":
+            self.state = {
+                **self.state,
+                "model": {
+                    "id": str(fields.get("modelId")),
+                    "provider": str(fields.get("provider")),
+                },
+            }
+            return dict(self.state["model"])
+        if command_type == "compact":
+            return {}
         raise AssertionError(f"unexpected command {command_type}")
 
     async def send_extension_ui_response(self, request_id: str, fields: dict) -> None:
         self.dialogs_cancelled.append((request_id, fields))
+
+    async def get_available_models(self) -> list[dict]:
+        data = await self.request("get_available_models")
+        return list(data.get("models") or [])
+
+    async def set_model(self, provider: str, model_id: str) -> dict:
+        return await self.request(
+            "set_model", provider=provider, modelId=model_id
+        )
+
+    async def compact(self, custom_instructions: str | None = None) -> dict:
+        return await self.request("compact")
 
     async def stop(self) -> None:
         return None

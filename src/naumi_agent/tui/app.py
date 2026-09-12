@@ -2616,6 +2616,8 @@ class NaumiApp(App):
     @work(exclusive=True, exit_on_error=False)
     async def _auto_resume_latest(self) -> None:
         """Auto-load the most recent session with user conversation."""
+        if getattr(self.engine, "engine_kind", "") == "pi":
+            return  # pi 会话不自动续接 naumi 历史会话
         try:
             session_id = await _find_latest_user_session_id(self.engine)
         except Exception:
@@ -2830,6 +2832,86 @@ class NaumiApp(App):
             )
         )
 
+    async def _handle_pi_slash_command(self, command: str, arg: str) -> None:
+        """Serve the small pi-compatible command set; block the rest."""
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
+
+        def notice(text: str) -> None:
+            chat.mount(Markdown(text, classes="agent-msg"))
+
+        engine = self.engine
+        current_session_id = (
+            engine._session.id if getattr(engine, "_session", None) else ""
+        )
+        if command in {"/help", "/?"}:
+            notice(
+                "pi 引擎会话可用命令：/engine /model /models /new /compact\n"
+                "其余 NaumiAgent 命令需要 naumi 引擎（重启时 `naumi tui` 且配置 "
+                "engine.provider=naumi）。普通消息直接发送给 pi。"
+            )
+        elif command == "/engine":
+            state = await engine.refresh_state()
+            model = state.get("model") or {}
+            notice(
+                f"engine=pi（pi coding agent）\n"
+                f"provider={model.get('provider', '?')} model={model.get('id', '?')}\n"
+                f"session_id={state.get('sessionId') or current_session_id or '?'}\n"
+                "切换回 naumi：退出后 `naumi --engine naumi` 或修改 engine.provider。"
+            )
+        elif command == "/model":
+            target = arg.strip()
+            if not target:
+                model = (await engine.refresh_state()).get("model") or {}
+                notice(
+                    f"当前模型 provider={model.get('provider', '?')} "
+                    f"model={model.get('id', '?')}\n用法：/model <provider>/<model_id>"
+                )
+            else:
+                provider, _, model_id = target.partition("/")
+                if not model_id:
+                    status.status_text = "用法：/model <provider>/<model_id>"
+                    return
+                try:
+                    await engine.set_pi_model(provider, model_id)
+                    status.status_text = f"pi 模型已切换: {target}"
+                except Exception as exc:
+                    status.status_text = f"切换失败: {exc}"
+        elif command == "/models":
+            try:
+                models = await engine.list_models()
+            except Exception as exc:
+                status.status_text = f"获取模型列表失败: {exc}"
+                return
+            by_provider: dict[str, list[str]] = {}
+            for model in models:
+                by_provider.setdefault(str(model.get("provider") or "?"), []).append(
+                    str(model.get("id") or "?")
+                )
+            lines = [f"共 {len(models)} 个可用模型："]
+            for provider in sorted(by_provider):
+                ids = by_provider[provider]
+                preview = ", ".join(ids[:8]) + ("…" if len(ids) > 8 else "")
+                lines.append(f"- {provider}: {preview}")
+            notice("\n".join(lines))
+        elif command == "/new":
+            try:
+                await engine.new_pi_conversation()
+                status.status_text = "pi 已开启新对话"
+            except Exception as exc:
+                status.status_text = f"新建失败: {exc}"
+        elif command == "/compact":
+            try:
+                await engine.compact_conversation()
+                status.status_text = "pi 上下文压缩完成"
+            except Exception as exc:
+                status.status_text = f"压缩失败: {exc}"
+        else:
+            notice(
+                f"pi 引擎会话暂不支持 `{command}`；可用：/engine /model /models "
+                "/new /compact。"
+            )
+
     def _handle_slash_command(self, text: str) -> None:
         if self.debug_trace is not None:
             self.debug_trace.event("tui.command_start", {"command": text})
@@ -2839,6 +2921,11 @@ class NaumiApp(App):
         parts = raw.split(maxsplit=1)
         command = parts[0].lower()
         arg = parts[1] if len(parts) > 1 else ""
+        if getattr(getattr(self, "engine", None), "engine_kind", "") == "pi":
+            asyncio.get_event_loop().create_task(
+                self._handle_pi_slash_command(command, arg)
+            )
+            return
         if command == "/doctor":
             if re.fullmatch(r"trace(?:\s+.{1,128})?", arg.strip(), re.DOTALL):
                 self._run_cli_slash_command(raw)
@@ -3689,12 +3776,25 @@ class NaumiApp(App):
             self.debug_trace.event("tui.run_cancel_requested", {})
         worker.cancel()
 
+    def _pi_engine_blocks(self, feature: str) -> bool:
+        """Return True (and notify) when a naumi-only feature is opened on pi."""
+        if getattr(self.engine, "engine_kind", "") != "pi":
+            return False
+        try:
+            status = self.query_one(StatusBar)
+            status.status_text = f"{feature}需要 naumi 引擎，pi 会话不可用"
+        except Exception:
+            pass
+        return True
+
     def action_toggle_inspector(self) -> None:
         current = self.screen
         if isinstance(current, RuntimeInspectorScreen):
             self.pop_screen()
             return
         if isinstance(current, ModalScreen):
+            return
+        if self._pi_engine_blocks("运行时 Inspector "):
             return
         self.push_screen(RuntimeInspectorScreen(self.engine))
 
@@ -3709,6 +3809,8 @@ class NaumiApp(App):
         current = self.screen
         if isinstance(current, AgentControlScreen | ModalScreen):
             return
+        if self._pi_engine_blocks("Agent 控制中心 "):
+            return
         self.push_screen(
             AgentControlScreen(
                 self.engine,
@@ -3721,9 +3823,13 @@ class NaumiApp(App):
         current = self.screen
         if isinstance(current, WorkbenchOverviewScreen | ModalScreen):
             return
+        if self._pi_engine_blocks("Workbench 总览 "):
+            return
         self.push_screen(WorkbenchOverviewScreen(self.engine))
 
     def action_toggle_browser(self) -> None:
+        if self._pi_engine_blocks("浏览器面板 "):
+            return
         browser = self.query_one(BrowserPanel)
         browser.show_panel = not browser.show_panel
         if browser.show_panel:
