@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -208,3 +209,18 @@ class TestCodeExecuteTool:
 
         # Reset
         sandbox_mod._docker_available_cache = None
+
+    @pytest.mark.asyncio
+    async def test_docker_check_reaps_timed_out_process(self, monkeypatch):
+        import naumi_agent.tools.sandbox as sandbox_mod
+
+        process = Mock(returncode=None)
+        process.wait = AsyncMock(side_effect=[TimeoutError, -9])
+        process.kill = Mock()
+        spawn = AsyncMock(return_value=process)
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+        sandbox_mod._docker_available_cache = None
+
+        assert await CodeExecuteTool()._check_docker() is False
+        process.kill.assert_called_once()
+        assert process.wait.await_count == 2

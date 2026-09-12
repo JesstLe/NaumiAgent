@@ -94,6 +94,7 @@ class CodeExecuteTool(Tool):
         if _docker_available_cache is not None:
             return _docker_available_cache
 
+        proc: asyncio.subprocess.Process | None = None
         try:
             proc = await asyncio.create_subprocess_exec(
                 "docker",
@@ -103,7 +104,11 @@ class CodeExecuteTool(Tool):
             )
             await asyncio.wait_for(proc.wait(), timeout=5)
             _docker_available_cache = proc.returncode == 0
-        except (TimeoutError, FileNotFoundError):
+        except TimeoutError:
+            if proc is not None:
+                await _kill_process(proc)
+            _docker_available_cache = False
+        except FileNotFoundError:
             _docker_available_cache = False
 
         return _docker_available_cache
@@ -257,6 +262,10 @@ async def _communicate_bounded(
             timeout=timeout,
         )
     except TimeoutError:
+        await _kill_process(proc)
+        await completion
+        raise
+    except asyncio.CancelledError:
         await _kill_process(proc)
         await completion
         raise
