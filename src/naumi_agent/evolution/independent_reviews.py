@@ -480,6 +480,8 @@ class EvolutionIndependentReviewStore:
 
     def __init__(self, db_path: str | Path) -> None:
         self._db_path = Path(db_path).expanduser().resolve()
+        self._schema_lock = asyncio.Lock()
+        self._schema_ready = False
 
     async def get(self, review_id: str) -> EvolutionIndependentReview | None:
         if not isinstance(review_id, str) or re.fullmatch(
@@ -507,9 +509,10 @@ class EvolutionIndependentReviewStore:
         lease_until = current_time + timedelta(seconds=lease_seconds)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_schema()
+            async with aiosqlite.connect(self._db_path, timeout=10) as db:
                 db.row_factory = aiosqlite.Row
-                await _ensure_schema(db)
+                await _configure_connection(db)
                 await db.execute("BEGIN IMMEDIATE")
                 existing_row = await (
                     await db.execute(
@@ -578,9 +581,10 @@ class EvolutionIndependentReviewStore:
                 "Independent Review artifact 超过 16 MiB。",
             )
         try:
-            async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_schema()
+            async with aiosqlite.connect(self._db_path, timeout=10) as db:
                 db.row_factory = aiosqlite.Row
-                await _ensure_schema(db)
+                await _configure_connection(db)
                 await db.execute("BEGIN IMMEDIATE")
                 existing_row = await (
                     await db.execute(
@@ -649,8 +653,9 @@ class EvolutionIndependentReviewStore:
         if not self._db_path.is_file():
             return
         try:
-            async with aiosqlite.connect(self._db_path) as db:
-                await _ensure_schema(db)
+            await self._ensure_schema()
+            async with aiosqlite.connect(self._db_path, timeout=10) as db:
+                await _configure_connection(db)
                 await db.execute(
                     "DELETE FROM evolution_independent_review_claims "
                     "WHERE gate_id = ? AND owner_token = ?",
@@ -671,9 +676,10 @@ class EvolutionIndependentReviewStore:
         if not self._db_path.is_file():
             return None
         try:
-            async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_schema()
+            async with aiosqlite.connect(self._db_path, timeout=10) as db:
                 db.row_factory = aiosqlite.Row
-                await _ensure_schema(db)
+                await _configure_connection(db)
                 row = await (
                     await db.execute(
                         f"SELECT * FROM evolution_independent_reviews WHERE {column} = ?",
@@ -686,6 +692,18 @@ class EvolutionIndependentReviewStore:
                 "independent_review_store_corrupt",
                 "Independent Review artifact 损坏或无法读取。",
             ) from exc
+
+    async def _ensure_schema(self) -> None:
+        if self._schema_ready:
+            return
+        async with self._schema_lock:
+            if self._schema_ready:
+                return
+            self._db_path.parent.mkdir(parents=True, exist_ok=True)
+            async with aiosqlite.connect(self._db_path, timeout=10) as db:
+                await _ensure_schema(db)
+                await db.commit()
+            self._schema_ready = True
 
 
 class EvolutionIndependentReviewExecutor:
@@ -1278,8 +1296,8 @@ def _validate_usage_dict(usage: Mapping[str, int | float]) -> None:
 
 
 async def _ensure_schema(db: aiosqlite.Connection) -> None:
-    await db.execute("PRAGMA journal_mode = WAL")
-    await db.execute("PRAGMA busy_timeout = 10000")
+    await _configure_connection(db)
+    await _ensure_wal_mode(db)
     await db.execute(
         """CREATE TABLE IF NOT EXISTS evolution_independent_reviews (
                review_id TEXT PRIMARY KEY,
@@ -1302,6 +1320,30 @@ async def _ensure_schema(db: aiosqlite.Connection) -> None:
                claimed_at TEXT NOT NULL
            )"""
     )
+
+
+async def _configure_connection(db: aiosqlite.Connection) -> None:
+    await db.execute("PRAGMA busy_timeout = 10000")
+
+
+async def _ensure_wal_mode(db: aiosqlite.Connection) -> None:
+    deadline = asyncio.get_running_loop().time() + 10
+    while True:
+        current = await (await db.execute("PRAGMA journal_mode")).fetchone()
+        if current is not None and str(current[0]).lower() == "wal":
+            return
+        try:
+            updated = await (await db.execute("PRAGMA journal_mode = WAL")).fetchone()
+        except aiosqlite.OperationalError as exc:
+            if "locked" not in str(exc).lower():
+                raise
+            if asyncio.get_running_loop().time() >= deadline:
+                raise
+            await asyncio.sleep(0.02)
+            continue
+        if updated is not None and str(updated[0]).lower() == "wal":
+            return
+        raise aiosqlite.OperationalError("Independent Review 数据库无法启用 WAL。")
 
 
 def _from_row(row: aiosqlite.Row) -> EvolutionIndependentReview:
