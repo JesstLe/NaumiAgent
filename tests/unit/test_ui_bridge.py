@@ -191,10 +191,10 @@ async def test_create_bridge_binds_engine_to_process_launch_directory(
                 "models:",
                 "  provider: openai",
                 "  default_model: test-model",
-                f'workspace_root: "{legacy}"',
+                f"workspace_root: {json.dumps(str(legacy))}",
                 "safety:",
                 "  permission_mode: moderate",
-                f'  allowed_dirs: ["{legacy}"]',
+                f"  allowed_dirs: [{json.dumps(str(legacy))}]",
             ]
         )
         + "\n",
@@ -10085,6 +10085,16 @@ async def test_bridge_commits_durable_interaction_before_ui_release(
     authority = bridge._interaction_authority()
     assert authority is not None
     authority.owner_renew_interval_seconds = 0.02
+    original_renew = authority.renew
+    owner_renewed = asyncio.Event()
+
+    async def renew_once(*, record, now=None):
+        renewed = await original_renew(record=record, now=now)
+        authority.owner_renew_interval_seconds = 60
+        owner_renewed.set()
+        return renewed
+
+    authority.renew = renew_once  # type: ignore[method-assign]
     observed: list[str] = []
 
     async def begin(interaction_id: str, _request: dict[str, Any]) -> None:
@@ -10134,7 +10144,7 @@ async def test_bridge_commits_durable_interaction_before_ui_release(
     assert request["payload"]["request_id"] == "ask-durable-bridge"
     assert request["payload"]["timeout_seconds"] == 60
     assert request["payload"]["expires_at"]
-    await asyncio.sleep(0.08)
+    await asyncio.wait_for(owner_renewed.wait(), timeout=10)
     renewed = await store.get_interaction(
         workspace_root=workspace,
         interaction_id="ask-durable-bridge",
@@ -10428,10 +10438,13 @@ async def test_bridge_recovery_cursor_refills_bounded_card_window(
         },
         request_id="answer-recovery-page",
     )
-    for _ in range(100):
+    for _ in range(1_000):
         if "ask-bridge-recovery-page-50" in bridge._pending_interactions:
             break
         await asyncio.sleep(0.01)
+    else:
+        await bridge.shutdown()
+        pytest.fail("recovery cursor 未在 10 秒内补齐第一页空位")
 
     assert len(bridge._pending_interactions) == 50
     assert "ask-bridge-recovery-page-50" in bridge._pending_interactions
@@ -10461,10 +10474,13 @@ async def test_bridge_recovery_cursor_refills_bounded_card_window(
         },
         request_id="answer-recovery-rescan",
     )
-    for _ in range(100):
+    for _ in range(1_000):
         if "ask-bridge-recovery-page-late" in bridge._pending_interactions:
             break
         await asyncio.sleep(0.01)
+    else:
+        await bridge.shutdown()
+        pytest.fail("recovery rescan 未在 10 秒内补入新记录")
 
     assert len(bridge._pending_interactions) == 50
     assert "ask-bridge-recovery-page-late" in bridge._pending_interactions
