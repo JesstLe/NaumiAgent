@@ -90,3 +90,5 @@ Workbench 右侧 Diff 面板原先为每个文件并发执行 Git，并通过 `c
 分片 4 的 Store Catalog 测试同时引用 `AGENT_JOB_SCHEMA_VERSION` 又硬编码旧值 6；Agent Job Store 已按迁移链升级为 7，Catalog 本身正确。断言现只验证 Catalog 与权威常量一致，避免下一次合法 schema 迁移继续产生伪失败。
 
 分片 9 暴露 Browser TaskRunner 的终态发布顺序：任务字典先写入 `completed` 或等待态，持久 heartbeat 随后才写入 `stopped`/`waiting`，因此 UI 和调用方可以真实观察到“任务已完成但心跳仍 running”的矛盾状态。终态现先提交 heartbeat，再原子更新对外 run status 并发送 `run_finished`；等待和恢复仍在状态持久化前同步 heartbeat snapshot。
+
+分片 7 的 Installation Daemon 端到端测试在持久 delivery 刚写入 `completed` 时立即读取 Worker 快照，偶发落在整轮统计尚未发布的合法窗口。测试现同时等待持久终态与 `returned_count`，保持 Worker 以完整 pass 原子发布统计的语义；该链路依赖 POSIX executable slot，因此 Windows 按既有边界跳过，由 Linux CI 执行。相邻的交互式 Engine 夹具还缺少两个新增 Stable Promotion Worker 及其禁用配置，导致长期服务启动测试在进入目标断言前失败；夹具已补齐当前 composition contract，普通及 coverage 定向模式均通过。
