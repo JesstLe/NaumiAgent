@@ -62,3 +62,7 @@ Windows 真实 slash 流程随后暴露了两个生产可执行性问题。Harne
 同一分片继续到 Agent Control 时，动态 Agent 的首次 delegate 在 coverage 冷启动下超过测试硬编码的 1 秒等待窗，实际执行随后可以正常开始。等待窗调整为 10 秒并仍由 `asyncio.wait_for` 有界控制；普通与 coverage 定向运行均为 5 passed。
 
 分片继续执行到 Unix 安装脚本时，端到端夹具在 Linux runner 上伪造 `Darwin/arm64`，并生成 `macos-arm64` 发布包；安装后的 Python Launcher 会重新读取真实主机并按设计拒绝该包，返回 `release_slot_target_mismatch`。夹具现由真实 Unix 主机计算 release target，同时让 fake `uname` 与该目标保持一致；Windows 只执行脚本静态检查并明确跳过 Unix 安装链路。修复没有绕过或削弱 host target 校验，Windows 定向结果为 6 passed、1 skipped。
+
+下一轮分片暴露 Pursuit 恢复账本无法表达“同一内容的机械裁决再次发生”：`decision_id` 由裁决内容生成，同一个 blocked 状态在第二次恢复时会复用 identity，而单行裁决表仍保留第一次发生时间，导致 terminal outbox 将合法的恢复后终态误判成准入前旧事实。当前保持裁决内容表不可变，新增按 run、decision 与时间记录的 occurrence，并由 `PursuitRun` 明确指向本次发生时间；恢复对账、outbox 与回执读取都校验该 occurrence。原失败文件普通和 coverage 模式通过，相邻恢复、对账、终态与 outbox 链路共 75 个用例通过。
+
+Stable Deployment Intent 的 target 漂移测试还把变化值写死为 `linux-x64`；Linux runner 的真实目标本来就是该值，因此断言的前置条件并未成立。夹具现保存实际原目标并选择一个确定不同的目标，恢复时也回写原值。Windows 因该真实 baseline 用例依赖 POSIX shebang 而按设计跳过，本地已验证当前主机上的替代目标确实不同，Linux 分片负责端到端执行。
