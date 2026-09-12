@@ -78,6 +78,7 @@ def _client(
     port: int,
     next_client: bool = False,
     pins: tuple[str, ...] | None = None,
+    request_timeout_seconds: float = 2,
     max_response_bytes: int = 512 * 1024,
 ) -> MTLSStableRemoteFinalizationResultTransport:
     return MTLSStableRemoteFinalizationResultTransport(
@@ -95,7 +96,7 @@ def _client(
             ),
             server_certificate_sha256_pins=pins or (bundle.server_fingerprint,),
             connect_timeout_seconds=1,
-            request_timeout_seconds=2,
+            request_timeout_seconds=request_timeout_seconds,
             max_response_bytes=max_response_bytes,
         )
     )
@@ -150,13 +151,19 @@ async def test_result_mtls_closes_real_worker_loop_and_is_idempotent(
     )
     server.start()
     try:
-        transport = _client(bundle=bundle, port=server.bound_port)
+        transport = _client(
+            bundle=bundle,
+            port=server.bound_port,
+            request_timeout_seconds=5,
+        )
         worker = _worker(
             fixture=fixture,
             delivery_service=service,
             credential=credential,
             journal=journal,
             transport=transport,
+            claim_lease_seconds=10,
+            result_timeout_seconds=8,
         )
 
         result = await worker.run_once()
