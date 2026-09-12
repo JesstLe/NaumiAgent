@@ -33,6 +33,7 @@ def test_parse_parallel_request_rejects_out_of_range_count(tmp_path: Path) -> No
         parse_parallel_request("11", default_workspace=tmp_path)
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="CREATE_NEW_CONSOLE 仅存在于 Windows")
 def test_launcher_creates_independent_processes_with_slots(tmp_path: Path) -> None:
     config = tmp_path / "config.yaml"
     config.write_text("{}", encoding="utf-8")
