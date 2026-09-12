@@ -149,3 +149,50 @@ async def test_collect_diff_returns_staged_and_unstaged_files(tmp_path: Path) ->
     assert any(
         f.path == "staged.txt" and f.stage == "staged" for f in diff.files
     )
+
+
+@pytest.mark.asyncio
+async def test_collect_diff_handles_renames_unicode_and_nested_untracked_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "workspace"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+    original = repo / "old name.txt"
+    original.write_text("one\ntwo\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "initial")
+
+    renamed = repo / "新 name.txt"
+    _git(repo, "mv", original.name, renamed.name)
+    renamed.write_text("one\ntwo\nthree\n", encoding="utf-8")
+    nested = repo / "notes" / "新 file.md"
+    nested.parent.mkdir()
+    nested.write_text("alpha\nbeta\n", encoding="utf-8")
+
+    collector = ChatEnvironmentCollector(
+        workspace_root=repo,
+        background_store=BackgroundTaskStore(tmp_path / "background"),
+        chat_run_store=ChatRunStore(tmp_path / "runs.db"),
+    )
+    git_calls: list[tuple[str, ...]] = []
+    original_git = collector._git
+
+    async def recording_git(*args: str) -> str:
+        git_calls.append(args)
+        return await original_git(*args)
+
+    monkeypatch.setattr(collector, "_git", recording_git)
+    diff = await collector.collect_diff()
+
+    renamed_entries = [item for item in diff.files if item.path == renamed.name]
+    assert {item.stage for item in renamed_entries} == {"staged", "unstaged"}
+    unstaged = next(item for item in renamed_entries if item.stage == "unstaged")
+    assert (unstaged.additions, unstaged.deletions) == (1, 0)
+    untracked = next(item for item in diff.files if item.path == "notes/新 file.md")
+    assert (untracked.additions, untracked.deletions) == (2, 0)
+    assert untracked.patch == "+alpha\n+beta\n\n"
+    assert sum("--numstat" in call for call in git_calls) == 2
