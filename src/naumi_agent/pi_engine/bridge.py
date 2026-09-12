@@ -144,14 +144,21 @@ class PiTerminalBridge:
             self._rpc = rpc
             self._event_queue = getattr(rpc, "event_queue", self._event_queue)
         else:
+            from naumi_agent.pi_engine.extension import (
+                default_pi_env,
+                resolve_default_extension_args,
+            )
+
             self._rpc = await PiRpcClient.start(
                 binary=self._binary,
                 provider=self._provider,
                 model=self._model,
-                extra_args=self._extra_args,
+                extra_args=resolve_default_extension_args(
+                    self._workspace_root, list(self._extra_args)
+                ),
                 cwd=str(self._workspace_root),
                 event_handler=self._event_queue.put_nowait,
-                env=self._env or None,
+                env=default_pi_env(self._env),
             )
         self._consumer_task = asyncio.get_event_loop().create_task(
             self._consume_pi_events(), name="pi-bridge-consumer"

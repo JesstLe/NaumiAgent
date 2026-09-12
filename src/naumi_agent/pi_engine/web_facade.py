@@ -173,16 +173,24 @@ class PiWebEngine:
     async def _ensure_rpc(self) -> PiRpcClient:
         if self._rpc is not None:
             return self._rpc
+        from naumi_agent.pi_engine.extension import (
+            default_pi_env,
+            resolve_default_extension_args,
+        )
+
         pi_config = self._config.engine.pi
+        workspace_root = self._config.resolve_workspace_root()
         self._events = asyncio.Queue()
         self._rpc = await PiRpcClient.start(
             binary=pi_config.binary,
             provider=pi_config.provider,
             model=pi_config.model,
-            extra_args=pi_config.extra_args,
-            cwd=str(self._config.resolve_workspace_root()),
+            extra_args=resolve_default_extension_args(
+                workspace_root, list(pi_config.extra_args)
+            ),
+            cwd=str(workspace_root),
             event_handler=self._events.put_nowait,
-            env=resolve_env_refs(pi_config.env) or None,
+            env=default_pi_env(resolve_env_refs(pi_config.env)),
         )
         return self._rpc
 
