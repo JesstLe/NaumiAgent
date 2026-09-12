@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import stat
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -89,6 +89,24 @@ async def _admit_job(process: AuthenticatedAgentWorkerProcess) -> str:
     )
     job = await process._agent_jobs.admit(request=request, payload=payload)
     return job.job_id
+
+
+async def _wait_for_job_receipt(
+    process: AuthenticatedAgentWorkerProcess,
+    job_id: str,
+    reason_code: str,
+    *,
+    timeout_seconds: float = 3.0,
+) -> None:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_seconds
+    while True:
+        job = await process._agent_jobs.get(job_id)
+        if job is not None and job.latest_receipt.reason_code == reason_code:
+            return
+        if loop.time() >= deadline:
+            pytest.fail(f"等待 Agent Job 回执超时：{reason_code}")
+        await asyncio.sleep(0.05)
 
 
 def test_constructor_is_lazy_and_rejects_unsafe_configuration(tmp_path: Path) -> None:
@@ -223,7 +241,7 @@ async def test_real_process_registers_pulses_stays_dispatch_disabled_and_revokes
         registry_db_path=tmp_path / "worker-registry.db",
         harness_db_path=tmp_path / "harness.db",
         workspace_root=tmp_path / "workspace",
-        now=pulse.observed_at,
+        now=(datetime.now(UTC) + timedelta(seconds=1)).isoformat(),
     )
     check = _worker_authority_check(authority)
     assert check.status == "warn"
@@ -286,11 +304,11 @@ async def test_real_process_binds_renews_and_releases_exact_prestart_job(
     assert reservation.state is WorkerCapacityReservationState.ACTIVE
     initial_expiry = reservation.expires_at
 
-    await asyncio.sleep(0.35)
-
-    renewed = await process._agent_jobs.get(job_id)
-    assert renewed is not None
-    assert renewed.latest_receipt.reason_code == "agent_job_claim_renewed"
+    await _wait_for_job_receipt(
+        process,
+        job_id,
+        "agent_job_claim_renewed",
+    )
     reservation = await process._registry.get_capacity_reservation(
         binding.reservation_id,
         assessed_at=datetime.now(UTC).isoformat(),
