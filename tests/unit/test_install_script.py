@@ -5,7 +5,10 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from naumi_agent.release.artifact import assemble_release_artifact
+from naumi_agent.release.slots import host_release_target
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE_COMMIT = "a" * 40
@@ -80,6 +83,12 @@ def test_windows_installer_verifies_sha256_and_uses_binary_zip() -> None:
 def test_unix_installer_installs_verified_fixture_and_preserves_it_on_repeat(
     tmp_path: Path,
 ) -> None:
+    if os.name == "nt":
+        pytest.skip("Unix 安装器端到端验证需要 Unix 主机。")
+    target = host_release_target()
+    platform_name, arch = target.split("-", 1)
+    uname_system = "Darwin" if platform_name == "macos" else "Linux"
+    uname_machine = "arm64" if arch == "arm64" else "x86_64"
     backend = tmp_path / "backend"
     backend.mkdir()
     runtime = backend / "naumi-runtime"
@@ -111,14 +120,14 @@ def test_unix_installer_installs_verified_fixture_and_preserves_it_on_repeat(
         config_example=config,
         output_dir=tmp_path / "fixture-release",
         version="1.2.3",
-        target="macos-arm64",
+        target=target,
         source_commit=SOURCE_COMMIT,
         source_tree_sha256=SOURCE_TREE_SHA256,
         archive_format="tar.gz",
     )
     fixture_dir = tmp_path / "downloads"
     fixture_dir.mkdir()
-    stable = fixture_dir / "naumi-macos-arm64.tar.gz"
+    stable = fixture_dir / f"naumi-{target}.tar.gz"
     stable.write_bytes(artifact.archive.read_bytes())
     digest = hashlib.sha256(stable.read_bytes()).hexdigest()
     (fixture_dir / f"{stable.name}.sha256").write_text(
@@ -143,7 +152,8 @@ def test_unix_installer_installs_verified_fixture_and_preserves_it_on_repeat(
     curl.chmod(0o755)
     uname = fake_bin / "uname"
     uname.write_text(
-        "#!/bin/sh\n[ \"${1:-}\" = '-s' ] && echo Darwin || echo arm64\n",
+        "#!/bin/sh\n"
+        f"[ \"${{1:-}}\" = '-s' ] && echo {uname_system} || echo {uname_machine}\n",
         encoding="utf-8",
     )
     uname.chmod(0o755)
@@ -177,7 +187,7 @@ def test_unix_installer_installs_verified_fixture_and_preserves_it_on_repeat(
     command = tmp_path / "bin" / "naumi"
     assert command.is_symlink()
     assert command.resolve() == (
-        tmp_path / "install" / "launchers" / "naumi-1.2.3-macos-arm64" / "naumi"
+        tmp_path / "install" / "launchers" / f"naumi-1.2.3-{target}" / "naumi"
     )
     launched = subprocess.run(
         [str(command), "one", "two words"],
