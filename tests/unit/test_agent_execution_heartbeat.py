@@ -224,14 +224,20 @@ async def test_manager_user_stop_persists_cancelled_without_touching_peer(
     delegated = asyncio.create_task(manager.delegate(
         SubTask("cancel-heartbeat", "wait", "blocking")
     ))
-    await asyncio.wait_for(started.wait(), timeout=1)
+    try:
+        await asyncio.wait_for(started.wait(), timeout=10)
+    except TimeoutError:
+        delegated.cancel()
+        await asyncio.gather(delegated, return_exceptions=True)
+        await engine.shutdown()
+        pytest.fail("Agent 执行未在 10 秒内通过持久启动链路")
     active = next(
         item for item in manager.list_executions()
         if item.task_id == "cancel-heartbeat"
     )
     assert active.heartbeat_phase == "running"
     assert (await manager.stop_execution("cancel-heartbeat")).accepted
-    assert (await asyncio.wait_for(delegated, timeout=1)).status == "cancelled"
+    assert (await asyncio.wait_for(delegated, timeout=10)).status == "cancelled"
 
     terminal = next(
         item for item in manager.list_executions()

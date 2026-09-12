@@ -146,3 +146,5 @@ SQLite WAL 配置现收敛到 persistence 公共层：读取当前 journal mode 
 运行 `34704129021` 再次只有 shard 0 在 `test_ui_bridge.py` 超时。按该文件最后 25 个用例顺序复现后，分页恢复用例会偶发只补回 49 张卡片，并在提前断言时遗留数十个 owner-renew 与 timeout task；成功路径也需要显式关闭 Bridge 才能机械收口全部后台任务。两次补位现各使用 10 秒有界等待，失败前关闭 Bridge，成功末尾继续关闭 Bridge。相邻 durable commit 用例不再以 20ms 间隔持续制造 SQLite 续租写入，而是仍真实续租一次、观测持久 sequence 前进后将后续间隔延长，再执行回答收口。两个根因用例连续三轮普通模式通过，CI 同等 coverage 模式通过；最后 25 个 Bridge 用例 coverage 模式为 25 passed。
 
 Bridge 完整文件在 Windows 还暴露启动目录夹具把绝对路径直接写入 YAML 双引号，`C:\Users` 中的 `\U` 会被 YAML 当作 Unicode 转义。夹具现用 JSON 字符串编码生成 YAML 兼容标量，保留 Windows 反斜杠且不改变产品配置解析；修复后完整文件 coverage 模式为 241 passed in 66.11s。
+
+运行 `34706473221` 的 shard 4 在 `test_agent_execution_heartbeat.py` 首次执行时失败：用户停止用例把从 AgentJob admission、claim、running 到 heartbeat 持久化并进入模型函数的整段冷启动限制为 1 秒，Linux coverage 下在模型函数设置 started 事件前超时。测试现给真实持久启动与取消终态各 10 秒有界等待；若启动仍未完成，会取消委派任务、等待取消传播并关闭 Engine 后明确失败，避免把持久任务和后台协程泄漏给后续文件。根因用例连续三轮通过，完整文件 coverage 模式为 11 passed in 26.92s。
