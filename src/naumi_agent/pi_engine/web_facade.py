@@ -167,6 +167,16 @@ class PiWebEngine:
         if self._rpc is not None:
             await self._rpc.stop()
             self._rpc = None
+        close_store = getattr(self._session_store, "close", None)
+        if close_store is not None:
+            try:
+                await close_store()
+            except Exception:
+                pass  # store already closed or never opened
+
+    async def shutdown(self) -> None:
+        """Alias matching the AgentEngine surface consumers call on exit."""
+        await self.stop()
 
     # -- internals -------------------------------------------------------------
 

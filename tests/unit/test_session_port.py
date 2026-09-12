@@ -79,6 +79,7 @@ class _RecordingSessionPort:
         system_prompt: str | None = None,
         workspace_root: str | None = None,
         git_branch: str | None = None,
+        engine: str | None = None,
     ) -> Session:
         self.calls.append("create_session")
         return await self.delegate.create_session(
@@ -87,6 +88,7 @@ class _RecordingSessionPort:
             system_prompt=system_prompt,
             workspace_root=workspace_root,
             git_branch=git_branch,
+            engine=engine,
         )
 
     async def save(self, session: Session) -> None:
