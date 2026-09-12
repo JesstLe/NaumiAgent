@@ -57,6 +57,9 @@ class PiWebEventTranslator:
         self.error: str = ""
         self.total_cost_usd = 0.0
         self.total_tokens = 0
+        self.input_tokens = 0
+        self.output_tokens = 0
+        self.cache_tokens = 0
 
     def reset(self) -> None:
         self.turn = 0
@@ -64,6 +67,9 @@ class PiWebEventTranslator:
         self.error = ""
         self.total_cost_usd = 0.0
         self.total_tokens = 0
+        self.input_tokens = 0
+        self.output_tokens = 0
+        self.cache_tokens = 0
 
     def feed(self, event: dict[str, Any]) -> list[RuntimeEvent]:
         kind = str(event.get("type") or "")
@@ -154,9 +160,15 @@ class PiWebEventTranslator:
                 total = cost.get("total")
                 if isinstance(total, (int, float)):
                     self.total_cost_usd = float(total)
-            total_tokens = usage.get("totalTokens")
-            if isinstance(total_tokens, int):
-                self.total_tokens = total_tokens
+            for source, target in (
+                ("totalTokens", "total_tokens"),
+                ("input", "input_tokens"),
+                ("output", "output_tokens"),
+                ("cacheRead", "cache_tokens"),
+            ):
+                value = usage.get(source)
+                if isinstance(value, int):
+                    setattr(self, target, value)
         if str(message.get("stopReason") or "") == "error":
             self.error = (
                 str(message.get("error") or "")
