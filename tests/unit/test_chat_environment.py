@@ -148,7 +148,7 @@ async def test_collect_diff_returns_staged_and_unstaged_files(tmp_path: Path) ->
         f.path == "src/app.py" and f.stage == "unstaged" for f in diff.files
     )
     assert any(
-        f.path == "notes.md" and f.stage == "unstaged" for f in diff.files
+        f.path == "notes.md" and f.stage == "untracked" for f in diff.files
     )
     assert any(
         f.path == "staged.txt" and f.stage == "staged" for f in diff.files
@@ -197,6 +197,7 @@ async def test_collect_diff_handles_renames_unicode_and_nested_untracked_files(
     unstaged = next(item for item in renamed_entries if item.stage == "unstaged")
     assert (unstaged.additions, unstaged.deletions) == (1, 0)
     untracked = next(item for item in diff.files if item.path == "notes/新 file.md")
+    assert untracked.stage == "untracked"
     assert (untracked.additions, untracked.deletions) == (2, 0)
     assert untracked.patch == "+alpha\n+beta\n\n"
     assert sum("--numstat" in call for call in git_calls) == 2
