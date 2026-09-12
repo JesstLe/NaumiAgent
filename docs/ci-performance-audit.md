@@ -82,3 +82,5 @@ Stable Deployment Intent 的 target 漂移测试还把变化值写死为 `linux-
 Workbench 右侧 Diff 面板原先为每个文件并发执行 Git，并通过 `communicate()` 把完整 patch 一次性收进内存；8 个大文件会同时放大服务内存，最终 JSON 响应也没有总量上限。Git 输出现按 64 KiB 流式读取：单文件 patch 最多 512 KiB，单次响应最多 4 MiB，Git 元数据设置独立 8 MiB 完整性上限，并禁用 external diff 与 textconv。超限文件保留路径和完整 numstat，在 Web 与 Web2 明确显示“截断”或“未加载”提示；未跟踪文件读取移出事件循环。真实仓库的大 tracked diff、九个大 untracked 文件和慢磁盘调度场景均由定向测试覆盖。
 
 相邻功能检查还确认未跟踪文件一直被后端错误标为 `unstaged`，使 Web2 已提供的“未跟踪”筛选始终为空。后端现返回独立 `untracked` stage；旧 Web 的默认“未暂存”视图显式合并 `unstaged` 与 `untracked`，因此新文件继续可见，同时共享协议和 Web2 筛选语义一致。
+
+审批证据收集也在解析后才截断 Git status/diff，意味着大 worktree 仍会先完整进入内存；原有 30 文件上限还有 off-by-one，实际可能返回 31 个文件，并且所有裁剪都对审核人静默。异步子进程有界读取现下沉到 runtime 公共层，审批 status 限 1 MiB、diff 限 4 MiB，禁用 pager、external diff 与 textconv；状态使用 NUL 协议正确保留空格和 Unicode 路径。200 文件、30 个 diff 文件和单文件 4000 字符的展示上限都会形成明确 warning，Textual 审批页据此显示“待补证据”，不会把不完整 diff 标成可进入人工判断。

@@ -457,6 +457,7 @@ def format_workbench_reviews_markdown(
     runs = _records(evidence.get("validation_runs"))
     files = _records(evidence.get("changed_files"))
     hunks = _records(evidence.get("diff_hunks"))
+    warnings = [str(item) for item in evidence.get("warnings") or () if str(item)]
     failed = [run for run in runs if _normalized(run.get("status")) in {"failed", "error"}]
     if _normalized(worktree.get("status")) != "present":
         gate = "阻塞：变更载体不可用"
@@ -464,6 +465,8 @@ def format_workbench_reviews_markdown(
         gate = "待补证据：尚未运行验证"
     elif failed:
         gate = f"阻塞：{len(failed)} 项验证失败"
+    elif warnings:
+        gate = "待补证据：Git 差异读取不完整"
     else:
         gate = "证据就绪：可进入人工判断"
     lines.extend(
@@ -478,6 +481,8 @@ def format_workbench_reviews_markdown(
             f"- 变更：{len(files)} 个文件",
         ]
     )
+    for warning in warnings:
+        lines.append(f"- 证据提示：{_plain(warning)}")
     if files:
         lines.extend(["", "### 文件"])
         for item in files[:10]:

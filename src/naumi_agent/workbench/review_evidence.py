@@ -18,7 +18,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from naumi_agent.runtime.async_process import BoundedProcessOutput, read_bounded_stdout
 from naumi_agent.workbench.store import WorkbenchStore
+
+_STATUS_MAX_BYTES = 1024 * 1024
+_DIFF_MAX_BYTES = 4 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -31,6 +35,12 @@ class DiffHunk:
 class ChangedFile:
     path: str
     status: str  # e.g. "modified", "added", "deleted", "untracked"
+
+
+@dataclass(frozen=True)
+class _ParsedDiff:
+    hunks: list[dict[str, Any]]
+    truncated: bool = False
 
 
 class ReviewEvidenceCollector:
@@ -74,10 +84,13 @@ class ReviewEvidenceCollector:
 
         changed_files: list[dict[str, Any]] = []
         diff_hunks: list[dict[str, Any]] = []
+        git_warnings: list[str] = []
         worktree_status = "missing"
         if worktree_path is not None and worktree_path.exists():
             worktree_status = "present"
-            changed_files, diff_hunks = await self._collect_git_diff(worktree_path)
+            changed_files, diff_hunks, git_warnings = await self._collect_git_diff(
+                worktree_path
+            )
         elif worktree_name:
             worktree_status = "missing"
         else:
@@ -94,6 +107,7 @@ class ReviewEvidenceCollector:
             "validation_runs": validation_runs,
             "changed_files": changed_files,
             "diff_hunks": diff_hunks,
+            "warnings": git_warnings,
             "agent_notes": agent_notes,
             "events": [_event_to_dict(event) for event in events],
         }
@@ -110,57 +124,95 @@ class ReviewEvidenceCollector:
 
     async def _collect_git_diff(
         self, worktree_path: Path
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
         """Returns (changed_files, diff_hunks) from the worktree's git state."""
-        changed_files = await self._changed_files(worktree_path)
-        diff_hunks = await self._diff_hunks(worktree_path)
-        return changed_files, diff_hunks
+        (changed_files, status_warning), (diff_hunks, diff_warning) = await asyncio.gather(
+            self._changed_files(worktree_path),
+            self._diff_hunks(worktree_path),
+        )
+        warnings = [warning for warning in (status_warning, diff_warning) if warning]
+        return changed_files, diff_hunks, warnings
 
-    async def _changed_files(self, worktree_path: Path) -> list[dict[str, Any]]:
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "git",
-                "-C",
-                str(worktree_path),
-                "status",
-                "--porcelain=v1",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-        except FileNotFoundError:
-            return []
-        stdout, _ = await proc.communicate()
-        if proc.returncode != 0:
-            return []
+    async def _changed_files(
+        self, worktree_path: Path
+    ) -> tuple[list[dict[str, Any]], str]:
+        result = await self._git(
+            worktree_path,
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
+            "-z",
+            max_bytes=_STATUS_MAX_BYTES,
+        )
+        if result.returncode != 0 and not result.truncated:
+            return [], "Git 状态读取失败，变更文件列表不可用。"
         files: list[dict[str, Any]] = []
-        for line in stdout.decode("utf-8", errors="replace").splitlines():
-            if len(line) < 3:
+        entries = result.stdout.decode("utf-8", errors="ignore").split("\0")
+        if result.truncated and entries and entries[-1]:
+            entries.pop()
+        index = 0
+        while index < len(entries):
+            entry = entries[index]
+            index += 1
+            if len(entry) < 4:
                 continue
-            code = line[:2]
-            path = line[3:].strip().strip('"')
+            code = entry[:2]
+            path = entry[3:]
             files.append({"path": path, "status": _git_status_label(code)})
-        return files[:200]
+            if "R" in code or "C" in code:
+                index += 1
+        warning = ""
+        if result.truncated:
+            warning = "Git 状态超过 1 MiB，仅显示已读取的文件。"
+        elif len(files) > 200:
+            warning = "变更文件超过 200 个，仅显示前 200 个。"
+        return files[:200], warning
 
-    async def _diff_hunks(self, worktree_path: Path) -> list[dict[str, Any]]:
+    async def _diff_hunks(
+        self, worktree_path: Path
+    ) -> tuple[list[dict[str, Any]], str]:
+        result = await self._git(
+            worktree_path,
+            "diff",
+            "HEAD",
+            "--no-color",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--unified=3",
+            max_bytes=_DIFF_MAX_BYTES,
+        )
+        if result.returncode != 0 and not result.truncated:
+            return [], "Git 差异读取失败，补丁证据不可用。"
+        parsed = _parse_diff_hunks_with_limits(
+            result.stdout.decode("utf-8", errors="ignore")
+        )
+        warnings: list[str] = []
+        if result.truncated:
+            warnings.append("Git 差异超过 4 MiB，仅显示已读取的补丁证据。")
+        if parsed.truncated:
+            warnings.append("审查预览超过 30 个文件或单文件 4000 字符，仅显示摘要。")
+        return parsed.hunks, " ".join(warnings)
+
+    async def _git(
+        self,
+        worktree_path: Path,
+        *args: str,
+        max_bytes: int,
+    ) -> BoundedProcessOutput:
         try:
             proc = await asyncio.create_subprocess_exec(
                 "git",
                 "-C",
                 str(worktree_path),
-                "diff",
-                "HEAD",
-                "--no-color",
-                "--no-ext-diff",
-                "--unified=3",
+                "--no-pager",
+                *args,
+                stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
             )
         except FileNotFoundError:
-            return []
-        stdout, _ = await proc.communicate()
-        if proc.returncode != 0:
-            return []
-        return _parse_diff_hunks(stdout.decode("utf-8", errors="replace"))
+            return BoundedProcessOutput(stdout=b"", returncode=127)
+        return await read_bounded_stdout(proc, max_bytes=max_bytes)
 
     def _derive_agent_notes(self, events: list[Any]) -> list[dict[str, Any]]:
         """Derives agent notes from review/agent audit events.
@@ -232,25 +284,34 @@ def _git_status_label(code: str) -> str:
 
 def _parse_diff_hunks(diff_text: str) -> list[dict[str, Any]]:
     """Splits a unified diff into per-file hunk dicts, capped for UI use."""
+    return _parse_diff_hunks_with_limits(diff_text).hunks
+
+
+def _parse_diff_hunks_with_limits(diff_text: str) -> _ParsedDiff:
     hunks: list[dict[str, Any]] = []
     current_path = ""
     current_lines: list[str] = []
     max_hunks = 30
     max_patch_chars = 4000
+    truncated = False
 
     def flush() -> None:
-        nonlocal current_path, current_lines
-        if current_path and current_lines:
-            patch = "\n".join(current_lines)[:max_patch_chars]
+        nonlocal current_path, current_lines, truncated
+        if current_path and current_lines and len(hunks) < max_hunks:
+            raw_patch = "\n".join(current_lines)
+            if len(raw_patch) > max_patch_chars:
+                truncated = True
+            patch = raw_patch[:max_patch_chars]
             hunks.append({"path": current_path, "patch": patch})
         current_path = ""
         current_lines = []
 
     for line in diff_text.splitlines():
         if line.startswith("diff --git"):
-            if len(hunks) >= max_hunks:
-                break
             flush()
+            if len(hunks) >= max_hunks:
+                truncated = True
+                break
             # diff --git a/path b/path
             try:
                 parts = shlex.split(line)
@@ -262,7 +323,7 @@ def _parse_diff_hunks(diff_text: str) -> list[dict[str, Any]]:
         elif current_path:
             current_lines.append(line)
     flush()
-    return hunks
+    return _ParsedDiff(hunks=hunks, truncated=truncated)
 
 
 __all__ = [
