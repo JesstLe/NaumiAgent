@@ -471,7 +471,7 @@ async def get_git_diff(
             chat_run_store=_chat_run_store(request),
         ).collect_diff()
     except OSError as exc:
-        raise HTTPException(status_code=500, detail=f"Git diff failed: {exc}") from exc
+        raise HTTPException(status_code=500, detail=f"读取 Git 差异失败：{exc}") from exc
     return GitDiffResponse(
         available=diff.available,
         branch=diff.branch,
@@ -487,6 +487,8 @@ async def get_git_diff(
                 additions=file.additions,
                 deletions=file.deletions,
                 patch=file.patch,
+                patch_truncated=file.patch_truncated,
+                patch_notice=file.patch_notice,
             )
             for file in diff.files
         ],

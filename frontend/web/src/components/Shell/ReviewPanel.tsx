@@ -278,10 +278,19 @@ function DiffFileItem({
           )}
         </div>
       </button>
-      {expanded && file.patch && (
-        <pre className="px-3 py-2 text-[10px] leading-4 text-text-secondary bg-bg-tertiary overflow-x-auto border-t border-border">
-          {file.patch}
-        </pre>
+      {expanded && (
+        <>
+          {file.patch_notice && (
+            <div className="px-3 py-2 text-[11px] leading-4 text-amber-700 bg-amber-50 border-t border-border">
+              {file.patch_notice}
+            </div>
+          )}
+          {file.patch && (
+            <pre className="px-3 py-2 text-[10px] leading-4 text-text-secondary bg-bg-tertiary overflow-x-auto border-t border-border">
+              {file.patch}
+            </pre>
+          )}
+        </>
       )}
     </div>
   )

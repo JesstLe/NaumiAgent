@@ -46,7 +46,10 @@ export function DiffPanel() {
         <button className="w2-diff-file-heading" aria-expanded={opened} onClick={() => setOpenFiles(previous => { const next = new Set(previous); if (next.has(key)) next.delete(key); else next.add(key); return next })}>
           <File size={14} /><span title={file.path}>{file.path}</span><small>{stageName[file.stage] || file.stage}</small><b>+{file.additions}</b><em>−{file.deletions}</em>
         </button>
-        {opened && (!file.patch ? <p className="w2-muted">无文本补丁（二进制文件或仅元数据变化）</p> : <UnifiedDiff patch={file.patch} split={split} label={`${file.path} 差异`} />)}
+        {opened && <>
+          {file.patch_notice && <p className="w2-diff-notice" role="status">{file.patch_notice}</p>}
+          {!file.patch && !file.patch_truncated ? <p className="w2-muted">无文本补丁（二进制文件或仅元数据变化）</p> : file.patch ? <UnifiedDiff patch={file.patch} split={split} label={`${file.path} 差异`} /> : null}
+        </>}
       </section>
     })}
   </div>

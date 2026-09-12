@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import subprocess
+import threading
+import time
 from pathlib import Path
 
 import pytest
 
+import naumi_agent.api.chat_environment as chat_environment
 from naumi_agent.api.chat_environment import ChatEnvironmentCollector
 from naumi_agent.api.chat_runs import ChatRunStore
 from naumi_agent.background.models import BackgroundStatus, BackgroundTask
@@ -196,3 +200,101 @@ async def test_collect_diff_handles_renames_unicode_and_nested_untracked_files(
     assert (untracked.additions, untracked.deletions) == (2, 0)
     assert untracked.patch == "+alpha\n+beta\n\n"
     assert sum("--numstat" in call for call in git_calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_collect_diff_bounds_large_tracked_patch_with_explicit_notice(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "workspace"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+    source = repo / "large.txt"
+    source.write_text("", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "initial")
+    source.write_text("line\n" * 180_000, encoding="utf-8")
+
+    diff = await ChatEnvironmentCollector(
+        workspace_root=repo,
+        background_store=BackgroundTaskStore(tmp_path / "background"),
+        chat_run_store=ChatRunStore(tmp_path / "runs.db"),
+    ).collect_diff()
+
+    changed = next(item for item in diff.files if item.path == "large.txt")
+    assert changed.patch_truncated is True
+    assert "512 KiB" in changed.patch_notice
+    assert len(changed.patch.encode("utf-8")) <= chat_environment._GIT_PATCH_MAX_BYTES
+    assert changed.patch.startswith("diff --git")
+
+
+@pytest.mark.asyncio
+async def test_collect_diff_bounds_total_patch_payload(tmp_path: Path) -> None:
+    repo = tmp_path / "workspace"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+    tracked = repo / "tracked.txt"
+    tracked.write_text("tracked\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "initial")
+    for index in range(9):
+        (repo / f"large-{index}.txt").write_text("x" * 600_000, encoding="utf-8")
+
+    diff = await ChatEnvironmentCollector(
+        workspace_root=repo,
+        background_store=BackgroundTaskStore(tmp_path / "background"),
+        chat_run_store=ChatRunStore(tmp_path / "runs.db"),
+    ).collect_diff()
+
+    total_bytes = sum(len(item.patch.encode("utf-8")) for item in diff.files)
+    omitted = [item for item in diff.files if not item.patch and item.patch_truncated]
+    assert total_bytes <= chat_environment._GIT_PATCH_TOTAL_BYTES
+    assert omitted
+    assert "4 MiB" in omitted[0].patch_notice
+    assert omitted[0].additions == 1
+
+
+@pytest.mark.asyncio
+async def test_untracked_patch_read_does_not_block_event_loop(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = threading.Event()
+    release = threading.Event()
+    worker_threads: list[int] = []
+
+    def slow_read(target: Path) -> tuple[str, int, int]:
+        worker_threads.append(threading.get_ident())
+        started.set()
+        release.wait(timeout=2)
+        return "+ready\n\n", 1, 0
+
+    monkeypatch.setattr(chat_environment, "_read_untracked_patch_and_stats", slow_read)
+    collector = ChatEnvironmentCollector(
+        workspace_root=tmp_path,
+        background_store=BackgroundTaskStore(tmp_path / "background"),
+        chat_run_store=ChatRunStore(tmp_path / "runs.db"),
+    )
+    task = asyncio.create_task(collector._untracked_patch_and_stats("notes.txt"))
+    deadline = time.monotonic() + 2
+    while not started.is_set() and time.monotonic() < deadline:
+        await asyncio.sleep(0.001)
+    assert started.is_set()
+
+    event_loop_progressed = False
+
+    async def tick() -> None:
+        nonlocal event_loop_progressed
+        await asyncio.sleep(0)
+        event_loop_progressed = True
+
+    await tick()
+    release.set()
+    assert await task == ("+ready\n\n", 1, 0)
+    assert event_loop_progressed is True
+    assert len(worker_threads) == 1
+    assert worker_threads[0] != threading.get_ident()

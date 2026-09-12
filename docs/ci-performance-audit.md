@@ -78,3 +78,5 @@ Stable Deployment Intent 的 target 漂移测试还把变化值写死为 `linux-
 后台任务 watcher 原先通过 `proc.communicate()` 在内存中累计完整 stdout，进程结束后才同步写日志；长时间编译、测试或服务输出可能让 Agent 进程内存随日志无限增长，并在最终落盘时阻塞事件循环。当前 stdout 按 64 KiB 异步读取并在线程中直接写入日志，仅保留 8 KiB 原始字节用于生成 2,000 字符预览；日志完成时 flush、fsync、close，取消会等待已派发的单次文件操作安全收口，超时仍终止进程并保存已读输出。输出存储失败会终止仍存活的子进程并形成明确失败回执。后台子系统普通及 CI 同等 coverage 模式均为 36 passed，包含约 2.5 MiB 分块输出和写入故障路径。
 
 分片 2 随后发现 runtime composition 守卫把 `main.py` 中 factory 调用次数硬编码为 3；新增合法 CLI 入口后调用变为 4，测试因此误报架构回退。守卫现通过 Python AST 检查产品入口确实调用 `create_agent_engine`，并禁止直接调用 `AgentEngine`，保留原始架构约束同时允许入口数量演进。
+
+Workbench 右侧 Diff 面板原先为每个文件并发执行 Git，并通过 `communicate()` 把完整 patch 一次性收进内存；8 个大文件会同时放大服务内存，最终 JSON 响应也没有总量上限。Git 输出现按 64 KiB 流式读取：单文件 patch 最多 512 KiB，单次响应最多 4 MiB，Git 元数据设置独立 8 MiB 完整性上限，并禁用 external diff 与 textconv。超限文件保留路径和完整 numstat，在 Web 与 Web2 明确显示“截断”或“未加载”提示；未跟踪文件读取移出事件循环。真实仓库的大 tracked diff、九个大 untracked 文件和慢磁盘调度场景均由定向测试覆盖。
