@@ -1040,13 +1040,23 @@ class AppConfig(BaseSettings):
         with p.open("r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
         config = cls(**data)
-        if not config.models.api_key:
-            try:
+        file_models = data.get("models") if isinstance(data, dict) else None
+        file_api_key = file_models.get("api_key") if isinstance(file_models, dict) else None
+        try:
+            provider_key = None
+            if config.models.provider and not file_api_key:
+                provider_key = load_model_api_key(
+                    provider=config.models.provider,
+                    fallback_to_legacy=False,
+                )
+            if provider_key:
+                config.models.api_key = provider_key
+            elif not config.models.api_key:
                 config.models.api_key = load_model_api_key(
                     provider=config.models.provider,
                 )
-            except CredentialStoreError as exc:
-                logger.warning("System credential store unavailable: %s", exc)
+        except CredentialStoreError as exc:
+            logger.warning("System credential store unavailable: %s", exc)
         config._resolve_runtime_paths(p.parent)
         return config
 
