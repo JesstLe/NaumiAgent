@@ -12,6 +12,7 @@ import pytest
 from textual.widgets import Input
 
 from naumi_agent.config.settings import AppConfig
+from naumi_agent.harness.coordinator import ReconciliationCoordinatorOutcome
 from naumi_agent.harness.store import HarnessStore
 from naumi_agent.runtime.composition import create_agent_engine
 from naumi_agent.tui.app import NaumiApp, StatusBar
@@ -124,6 +125,37 @@ def test_tui_renderer_consumes_same_terminal_run_golden() -> None:
     assert (tool_status, duration_ms, output) == ("success", 12, "ok\n")
     assert len(chat.mounted) == 1
     assert status.status_text == "完成回执：已完成"
+
+
+@pytest.mark.asyncio
+async def test_startup_recovery_does_not_overwrite_newer_run_status() -> None:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    status = SimpleNamespace(status_text="启动恢复中")
+
+    async def start_long_running_services() -> list[SimpleNamespace]:
+        entered.set()
+        await release.wait()
+        return [SimpleNamespace(outcome=ReconciliationCoordinatorOutcome.COMPLETED)]
+
+    engine = SimpleNamespace(
+        start_long_running_services=start_long_running_services,
+        evolution_patch_recovery_status=lambda: {},
+        harness_service=None,
+    )
+    context = SimpleNamespace(
+        engine=engine,
+        query_one=lambda _widget: status,
+    )
+
+    recover = NaumiApp._recover_session_reconciliations.__wrapped__
+    recovery = asyncio.create_task(recover(context))
+    await entered.wait()
+    status.status_text = "已取消当前运行。"
+    release.set()
+    await recovery
+
+    assert status.status_text == "已取消当前运行。"
 
 
 @pytest.mark.asyncio
