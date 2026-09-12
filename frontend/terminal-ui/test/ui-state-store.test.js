@@ -106,6 +106,35 @@ test("ui state store saves session-scoped snapshots atomically", () => {
   }
 });
 
+test("stale parallel writers merge independent session snapshots", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "naumi-ui-state-parallel-"));
+  const filePath = path.join(dir, "state.json");
+  const previous = process.env.NAUMI_TERMINAL_UI_STATE_PATH;
+  process.env.NAUMI_TERMINAL_UI_STATE_PATH = filePath;
+
+  try {
+    const first = loadUiStateStore(process.cwd());
+    const second = loadUiStateStore(process.cwd());
+    setUiSnapshot(first, "session-a", { scrollOffset: 3 });
+    setProjectInputHistory(first, ["任务 A"]);
+    setUiSnapshot(second, "session-b", { scrollOffset: 8 });
+    setProjectInputHistory(second, ["任务 B"]);
+
+    assert.equal(saveUiStateStore(first), true);
+    assert.equal(saveUiStateStore(second), true);
+    assert.equal(second.terminalEventClientId, first.terminalEventClientId);
+
+    const merged = loadUiStateStore(process.cwd());
+    assert.equal(getUiSnapshot(merged, "session-a").scrollOffset, 3);
+    assert.equal(getUiSnapshot(merged, "session-b").scrollOffset, 8);
+    assert.deepEqual(getProjectInputHistory(merged), ["任务 A", "任务 B"]);
+  } finally {
+    if (previous === undefined) delete process.env.NAUMI_TERMINAL_UI_STATE_PATH;
+    else process.env.NAUMI_TERMINAL_UI_STATE_PATH = previous;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("ui state store migrates version one sessions with an empty composer", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "naumi-ui-state-v1-"));
   const filePath = path.join(dir, "state.json");
