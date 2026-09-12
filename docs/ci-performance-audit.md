@@ -130,3 +130,5 @@ Workbench 右侧 Diff 面板原先为每个文件并发执行 Git，并通过 `c
 生命周期 Shell Hook 也会通过 `communicate()` 全量缓存外部命令的 stdout 与 stderr；用户配置的 Hook 在超时窗口内持续输出时，可以直接放大主 Agent 内存，调用任务被取消时也没有进入既有的超时回收路径。Hook 现并发排空三个标准流，stdout 只保留前 64 KiB 以解析首行控制 JSON，stderr 只保留末尾 16 KiB 供故障日志使用，并统计真实字节数形成截断告警；超时、取消和标准流异常都会终止并等待整个进程树。真实 300 KiB 双管道输出与运行中取消场景均通过，Shell Hook 文件在 coverage 模式为 13 passed。
 
 附加浏览器录屏的 FFmpeg 编码存在相同的取消泄漏：外层清理步骤会在 60 秒后取消编码协程，原实现的 `communicate()` 不会因此终止 FFmpeg，半成品 WebM 也会留在 artifact 目录；编码 stderr 还会完整进入内存。FFmpeg 探针现以 5 秒上限在线程中执行，避免同步 `subprocess.run` 阻塞事件循环；编码关闭进度输出，仅保留末尾 16 KiB 错误文本，失败或取消都会等待进程退出并尽力删除半成品。三个真实子进程场景覆盖探针线程调度、300 KiB stderr 失败以及运行中取消，完整 Browser Runtime 单元文件为 90 passed。
+
+最后一处生产 `communicate()` 位于 Skill 动态上下文的同步 shell 命令。命令虽有 10 秒超时，但此前会将两路完整输出留在内存，并把完整 stdout 直接注入模型上下文。同步 shell runtime 现用两个 reader 线程持续排空管道，每路最多保留 64 KiB，stdout 保留开头供动态上下文使用，stderr 保留末尾供诊断，并在回执中标明真实字节数；超时仍终止整个进程树后返回有界的部分证据。真实双管道各 300 KiB 的成功与超时场景均通过。超时回收测试同时发现 Windows 在已退出 PID 上执行 `os.kill(pid, 0)` 会返回 WinError 87，`pid_exists()` 现将除权限不足外的平台 `OSError` 统一识别为不可寻址；runtime shell 文件在 coverage 模式为 15 passed。
