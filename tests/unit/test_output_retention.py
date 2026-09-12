@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from naumi_agent.cli.slash_router import execute_slash_command
+from naumi_agent.clipboard import strip_ansi
 from naumi_agent.config.settings import AppConfig, MemoryConfig
 from naumi_agent.memory.session import Session, SessionStore
 from naumi_agent.orchestrator.engine import AgentEngine
@@ -266,7 +267,7 @@ async def test_tools_and_shared_output_command_use_same_retention_logic(
     result = await execute_slash_command(engine, "/output retention-run 60 10")
     assert "输出资源清理结果" in result
     usage = await execute_slash_command(engine, "/output retention-run bad")
-    assert "用法：/output retention-run" in usage
+    assert "用法：/output retention-run" in strip_ansi(usage)
 
 
 def test_engine_registers_output_asset_retention_tools(tmp_path):
