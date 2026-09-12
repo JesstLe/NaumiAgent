@@ -60,3 +60,5 @@ Windows 真实 slash 流程随后暴露了两个生产可执行性问题。Harne
 分片 8 还暴露独立 Agent Worker 的两处时间竞态测试：健康检查把已读取的旧 heartbeat 时间当作当前评估时间，活跃子进程写入下一次 heartbeat 后会被误判为 clock regression；Claim 续租则用固定 350ms 睡眠假设 coverage 下的调度时延。测试现以当前时刻加小幅容差评估健康状态，并轮询持久 `agent_job_claim_renewed` 回执直至有界超时。完整文件及 CI 同等 coverage 模式均为 10 passed。
 
 同一分片继续到 Agent Control 时，动态 Agent 的首次 delegate 在 coverage 冷启动下超过测试硬编码的 1 秒等待窗，实际执行随后可以正常开始。等待窗调整为 10 秒并仍由 `asyncio.wait_for` 有界控制；普通与 coverage 定向运行均为 5 passed。
+
+分片继续执行到 Unix 安装脚本时，端到端夹具在 Linux runner 上伪造 `Darwin/arm64`，并生成 `macos-arm64` 发布包；安装后的 Python Launcher 会重新读取真实主机并按设计拒绝该包，返回 `release_slot_target_mismatch`。夹具现由真实 Unix 主机计算 release target，同时让 fake `uname` 与该目标保持一致；Windows 只执行脚本静态检查并明确跳过 Unix 安装链路。修复没有绕过或削弱 host target 校验，Windows 定向结果为 6 passed、1 skipped。
