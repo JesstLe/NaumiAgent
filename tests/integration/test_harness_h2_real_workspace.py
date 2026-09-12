@@ -26,7 +26,7 @@ async def test_real_workspace_selects_distinct_bounded_knowledge(
     await service.trust(source="h2_real_workspace_test")
 
     engine = await service.knowledge_context(
-        "修改 AgentEngine 的 Harness 上下文注入",
+        "修改 src/naumi_agent/orchestrator/context_assembly.py 的 Harness 上下文注入",
         model_window=124_000,
     )
     terminal = await service.knowledge_context(
@@ -53,12 +53,8 @@ async def test_real_workspace_selects_distinct_bounded_knowledge(
     assert engine.bundle is not None
     assert terminal.bundle is not None
     assert workbench.bundle is not None
-    assert any(
-        path in engine.bundle.source_paths
-        for path in (
-            "src/naumi_agent/orchestrator/engine.py",
-            "src/naumi_agent/orchestrator/context_assembly.py",
-        )
+    assert "src/naumi_agent/orchestrator/context_assembly.py" in (
+        engine.bundle.source_paths
     )
     assert any(
         path.startswith("frontend/terminal-ui/")

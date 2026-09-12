@@ -17,4 +17,10 @@ Python CI 为规避测试之间的共享状态污染，会为每个 unit 测试�
 
 分片选择器通过定向单元测试，并对真实 `tests/unit` 清单检查：每个文件恰好出现一次、分配结果确定、各 shard 源码体积接近。完整测试由更新后的 GitHub Actions 首次运行验证，本地不重复执行全仓测试。
 
-首次分片运行在约两分钟内定位到 `/evolution` 命令补全元数据遗漏 `approval-principal` 的既有回归，以及 20 份近期文档未纳入治理清单的问题；旧串行 CI 长时间没有到达这些文件。补全提示已与真实可用子命令同步，近期 Web2、终端并行、工具输出、展示和访谈插图文档也已按用途分类。
+首次分片运行在约两分钟内定位到 `/evolution` 命令补全元数据遗漏多个 approval 子命令、两个 Claude 来源校验测试硬编码 Linux 虚拟环境路径、终端断言未剥离 ANSI 样式，以及 20 份近期文档未纳入治理清单的问题；旧串行 CI 长时间没有到达这些文件。相关测试现已改为使用当前 Python 解释器和纯文本断言，补全提示与真实可用子命令同步，近期文档也已按用途分类。
+
+跨平台进化测试夹具原先固定声明 macOS，并受开发机 `core.autocrlf` 影响，导致 Linux runner 拒绝当前 platform lane、Windows 又出现补丁摘要不一致。夹具现绑定实际测试平台，并在临时 Git 仓库关闭自动换行转换，确保同一份 Patch Manifest 在 Windows 与 Linux 使用相同字节。
+
+分片还暴露了三类被旧串行运行长期掩盖的治理债务：Pursuit 恢复健康检查仍构造旧 schema、13 个新模块没有登记 domain ownership、60 个新增测试绕过权威 runtime composition。恢复夹具已升级到 schema v2，新模块已归属到 runtime/tools，新增测试构造已迁回 `create_agent_engine()`，并保留原有 171 个 legacy 构造上限。Agent Worker 篡改测试的冷启动握手窗口也从 2 秒调整为 10 秒，避免 runner 首次加载时把启动抖动误判成认证失败。
+
+后续静态审计中，`ruff check src` 与 `compileall` 通过，721 个模块的 import graph 没有 import-time SCC；Git 跟踪清单中没有缓存、日志、备份或构建产物。零入边模块主要是 CLI 入口、兼容导出和动态注册面，缺少可安全删除的直接证据，因此没有仅凭引用计数删除公共模块。当前仍有一项明确架构债务：`orchestrator/engine.py` 为 435,191 bytes，超过 Harness 单文件知识索引 262,144 bytes 上限；本轮把真实仓库用例改为明确选择 `context_assembly.py`，后续应按职责拆分 Engine，而不是继续放大知识索引上限。
