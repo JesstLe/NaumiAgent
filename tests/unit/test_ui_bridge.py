@@ -136,6 +136,7 @@ from naumi_agent.ui.protocol import (
     negotiate_hello,
     normalize_client_record,
 )
+from naumi_agent.ui.protocol_registry import load_protocol_event_registry
 from naumi_agent.ui.workspace_file_index import (
     WorkspaceFileItem,
     WorkspaceFileSearchResult,
@@ -3890,6 +3891,7 @@ async def test_bridge_status_payload_includes_session_id() -> None:
 
 def test_bridge_status_payload_exposes_authoritative_product_identity() -> None:
     bridge = JsonlEngineBridge(_FakeEngine(), config_path="config.yaml")
+    registry = load_protocol_event_registry()
 
     payload = bridge.status_payload()
 
@@ -3916,9 +3918,10 @@ def test_bridge_status_payload_exposes_authoritative_product_identity() -> None:
     assert payload["protocol_registry"]["client_event_count"] == len(ClientEventType)
     assert payload["protocol_registry"]["server_event_count"] == len(ServerEventType)
     assert len(payload["protocol_registry"]["registry_sha256"]) == 64
-    assert payload["protocol_registry"]["compatible_registry_sha256"] == [
-        payload["protocol_registry"]["registry_sha256"]
-    ]
+    assert payload["protocol_registry"]["registry_sha256"] == registry.registry_sha256
+    assert payload["protocol_registry"]["compatible_registry_sha256"] == list(
+        registry.compatible_registry_sha256
+    )
     assert payload["evolution_patch_recovery"]["total"] == 0
 
 
