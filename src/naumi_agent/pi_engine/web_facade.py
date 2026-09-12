@@ -119,15 +119,34 @@ class PiWebEngine:
             except PiRpcError as exc:
                 return _result("error", "", str(exc), _empty_usage())
 
+            pi_cfg = getattr(getattr(self._config, "engine", None), "pi", None)
+            stall_timeout = float(
+                getattr(pi_cfg, "stall_timeout_seconds", 300) or 300
+            )
             while True:
-                event = await self._events.get()
+                try:
+                    event = await asyncio.wait_for(
+                        self._events.get(), timeout=stall_timeout
+                    )
+                except TimeoutError:
+                    try:
+                        await rpc.abort()
+                    except PiRpcError:
+                        pass
+                    return _result(
+                        "error",
+                        translator.final_text(),
+                        f"pi 引擎已 {int(stall_timeout)} 秒没有任何事件输出，"
+                        "已自动中止。可重试或换用更强模型。",
+                        translator,
+                    )
                 kind = str(event.get("type") or "")
                 if kind == "__rpc_error__":
                     return _result(
                         "error",
-                        "",
+                        translator.final_text(),
                         str(event.get("error") or "RPC 通道错误。"),
-                        _empty_usage(),
+                        translator,
                     )
                 if kind == PiEventType.EXTENSION_UI_REQUEST:
                     await self._answer_extension_dialog(rpc, event)
@@ -170,7 +189,7 @@ class PiWebEngine:
             return self._rpc
         from naumi_agent.pi_engine.extension import (
             default_pi_env,
-            resolve_default_extension_args,
+            resolve_pi_cli_args,
         )
 
         pi_config = self._config.engine.pi
@@ -180,8 +199,10 @@ class PiWebEngine:
             binary=pi_config.binary,
             provider=pi_config.provider,
             model=pi_config.model,
-            extra_args=resolve_default_extension_args(
-                workspace_root, list(pi_config.extra_args)
+            extra_args=resolve_pi_cli_args(
+                workspace_root,
+                list(pi_config.extra_args),
+                getattr(pi_config, "system_prompt_append", None),
             ),
             cwd=str(workspace_root),
             event_handler=self._events.put_nowait,

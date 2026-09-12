@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 from naumi_agent.api.routes import engines as engines_route
 from naumi_agent.api.routes import messages as messages_route
 from naumi_agent.memory.session import Session, SessionStore
-from naumi_agent.pi_engine.rpc import PiEventType
+from naumi_agent.pi_engine.rpc import PiEventType, PiRpcClient, PiRpcError
 from naumi_agent.pi_engine.web_events import PiWebEventTranslator
 from naumi_agent.pi_engine.web_facade import PiWebEngine, PiWebEngineError
 from naumi_agent.runtime.ports.events import RuntimeEventType
@@ -572,3 +572,69 @@ def test_send_message_rejects_pi_history_edit() -> None:
 
     assert response.status_code == 400
     assert "pi 引擎会话暂不支持编辑历史消息" in response.json()["detail"]
+
+
+async def test_facade_fails_fast_when_reader_dies() -> None:
+    """pi 进程退出(EOF)后,运行必须立刻报错而不是永远悬挂。"""
+    rpc = FakeWebRpc()
+    engine, store = await _facade_with_fake(rpc)
+    await engine.load_session("web-1")
+    sink = RecordingSink()
+
+    async def drive() -> None:
+        await asyncio.sleep(0.05)
+        rpc.event_queue.put_nowait(
+            {"type": "__rpc_error__", "error": "pi 引擎进程已退出（退出码 1）。"}
+        )
+
+    driver = asyncio.get_event_loop().create_task(drive())
+    result = await asyncio.wait_for(
+        engine.run_streaming("写页面", sink), timeout=10
+    )
+    await driver
+    assert result.status == "error"
+    assert "已退出" in result.error
+
+
+async def test_rpc_reader_reports_process_exit() -> None:
+    """A real child exiting must surface as __rpc_error__ and fail-fast."""
+    import sys as _sys
+    import tempfile
+    import textwrap
+    from pathlib import Path as _Path
+
+    with tempfile.TemporaryDirectory() as td:
+        script = _Path(td) / "fake_pi.py"
+        script.write_text(
+            textwrap.dedent(
+                """
+                import json, sys
+                for line in sys.stdin:
+                    record = json.loads(line)
+                    sys.stdout.write(json.dumps({
+                        "type": "response",
+                        "id": record.get("id"),
+                        "command": record.get("type"),
+                        "success": True,
+                        "data": {},
+                    }) + "\\n")
+                    sys.stdout.flush()
+                    if record.get("type") == "get_state":
+                        break  # then exit: the reader must notice EOF
+                """
+            ).lstrip(),
+            encoding="utf-8",
+        )
+        client = await PiRpcClient.start(argv=[_sys.executable, str(script)])
+        try:
+            state = await client.get_state()
+            assert state == {}
+            for _ in range(40):
+                await asyncio.sleep(0.1)
+                if client._reader_dead:
+                    break
+            assert client._reader_dead is True
+            with pytest.raises(PiRpcError, match="通道已关闭"):
+                await client.get_state()
+        finally:
+            await client.stop()

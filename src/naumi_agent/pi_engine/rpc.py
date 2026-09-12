@@ -67,6 +67,7 @@ class PiRpcClient:
         self._stderr_task: asyncio.Task[None] | None = None
         self.stderr_tail: deque[str] = deque(maxlen=40)
         self._closed = False
+        self._reader_dead = False
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -164,6 +165,8 @@ class PiRpcClient:
         loop = asyncio.get_event_loop()
         future: asyncio.Future[dict[str, Any]] = loop.create_future()
         self._pending[command_id] = future
+        if self._reader_dead:
+            raise PiRpcError("pi RPC 通道已关闭，无法发送命令。")
         line = json.dumps(command, ensure_ascii=False, separators=(",", ":"))
         try:
             assert self._process.stdin is not None
@@ -246,8 +249,22 @@ class PiRpcClient:
 
     async def _read_stdout(self) -> None:
         assert self._process.stdout is not None
+        failure: PiRpcError | None = None
         try:
-            async for raw in self._process.stdout:
+            while True:
+                try:
+                    raw = await self._process.stdout.readline()
+                except ValueError:
+                    # A single JSONL line exceeded the stream buffer limit
+                    # (e.g. a giant tool result). Drop that line, keep reading.
+                    await self._dispatch_error(
+                        PiRpcError(
+                            "pi 输出了一条超过 1MB 的单行记录（已跳过该行继续）。"
+                        )
+                    )
+                    continue
+                if not raw:
+                    break  # EOF: the pi process is gone
                 text = raw.decode("utf-8", errors="replace").strip()
                 if not text:
                     continue
@@ -267,7 +284,17 @@ class PiRpcClient:
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # channel death must surface to the consumer
-            await self._dispatch_error(PiRpcError(f"pi RPC 读取失败：{exc}"))
+            failure = PiRpcError(f"pi RPC 读取失败：{exc}")
+        if failure is None:
+            code = self._process.returncode
+            tail = " | ".join(list(self.stderr_tail)[-2:])
+            failure = PiRpcError(
+                f"pi 引擎进程已退出（退出码 {code if code is not None else '未知'}）。"
+                + (f"stderr 尾部：{tail}" if tail else "")
+            )
+        self._reader_dead = True
+        self._fail_pending(PiRpcError("pi RPC 通道已关闭。"))
+        await self._dispatch_error(failure)
 
     async def _read_stderr(self) -> None:
         stderr = self._process.stderr
@@ -294,6 +321,12 @@ class PiRpcClient:
         result = handler(record)
         if asyncio.iscoroutine(result):
             await result
+
+    def _fail_pending(self, error: PiRpcError) -> None:
+        for future in self._pending.values():
+            if not future.done():
+                future.set_exception(PiRpcError(str(error)))
+        self._pending.clear()
 
     async def _dispatch_error(self, error: PiRpcError) -> None:
         record = {"type": "__rpc_error__", "error": str(error)}

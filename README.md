@@ -234,6 +234,8 @@ engine:
 
 pi 引擎下对话、流式思考、工具执行卡片与权限确认走完整协议；todo/任务/inspector/workbench 等面板暂不可用（前端按能力自动降级），会话内可用 `/engine`、`/model`、`/models`、`/new`、`/compact` 管理 pi 会话。协议按 pi v0.85.1 实测适配，升级 pi 前请先回归 `tests/integration/test_pi_engine_live.py`。
 
+**身份与系统提示词**：NaumiAgent 启动 pi 时默认追加身份块——助手在任何自我介绍中只自称 NaumiAgent，不披露底层引擎/模型；可用 `engine.pi.system_prompt_append` 自定义（空字符串禁用，自带 `--system-prompt`/`--append-system-prompt` 参数时以用户为准）。
+
 **pi 会话内的 NaumiAgent 分析工具**：源码仓自带扩展 `pi_extensions/naumi-analysis.js`，向 pi 注册 `naumi_chaos` / `naumi_scale` / `naumi_state` 三个确定性静态扫描工具（复用内置引擎同一套扫描器，不调用模型；证据由 pi 的模型推演）。NaumiAgent 启动 pi 时会在工作区发现该扩展时自动加载并注入 `NAUMI_PYTHON`；也可显式配置 `engine.pi.extra_args: ["-e", "pi_extensions/naumi-analysis.js"]` 或独立使用 pi 时手动 `-e` 加载。验证：`node pi_extensions/selftest.mjs <任意源码目录>`。
 
 
