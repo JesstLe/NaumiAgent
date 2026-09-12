@@ -9,10 +9,10 @@ from pathlib import Path
 
 from naumi_agent.background.store import BackgroundTaskStore
 from naumi_agent.runs.store import ChatRunStore
+from naumi_agent.runtime.async_process import BoundedProcessOutput, read_bounded_stdout
 
 _SENSITIVE_NAMES = ("token", "secret", "password", "passwd", "api_key", "apikey")
 _SOURCE_KINDS = {"source", "file", "screenshot"}
-_GIT_OUTPUT_CHUNK_BYTES = 64 * 1024
 _GIT_METADATA_MAX_BYTES = 8 * 1024 * 1024
 _GIT_PATCH_MAX_BYTES = 512 * 1024
 _GIT_PATCH_TOTAL_BYTES = 4 * 1024 * 1024
@@ -82,13 +82,6 @@ class ChatEnvironmentSnapshot:
     git: GitEnvironment
     processes: list[BackgroundProcessEnvironment] = field(default_factory=list)
     sources: list[SourceEnvironment] = field(default_factory=list)
-
-
-@dataclass(frozen=True, slots=True)
-class _GitCommandOutput:
-    stdout: bytes
-    returncode: int
-    truncated: bool = False
 
 
 class ChatEnvironmentCollector:
@@ -334,7 +327,7 @@ class ChatEnvironmentCollector:
         self,
         *args: str,
         max_output_bytes: int,
-    ) -> _GitCommandOutput:
+    ) -> BoundedProcessOutput:
         try:
             process = await asyncio.create_subprocess_exec(
                 "git",
@@ -347,31 +340,8 @@ class ChatEnvironmentCollector:
                 stderr=asyncio.subprocess.DEVNULL,
             )
         except (FileNotFoundError, NotADirectoryError):
-            return _GitCommandOutput(stdout=b"", returncode=127)
-        if process.stdout is None:
-            process.kill()
-            await process.wait()
-            return _GitCommandOutput(stdout=b"", returncode=process.returncode or 1)
-
-        stdout = bytearray()
-        truncated = False
-        while chunk := await process.stdout.read(_GIT_OUTPUT_CHUNK_BYTES):
-            remaining = max_output_bytes - len(stdout)
-            if remaining > 0:
-                stdout.extend(chunk[:remaining])
-            if len(chunk) > remaining and not truncated:
-                truncated = True
-                if process.returncode is None:
-                    try:
-                        process.terminate()
-                    except ProcessLookupError:
-                        pass
-        await process.wait()
-        return _GitCommandOutput(
-            stdout=bytes(stdout),
-            returncode=process.returncode or 0,
-            truncated=truncated,
-        )
+            return BoundedProcessOutput(stdout=b"", returncode=127)
+        return await read_bounded_stdout(process, max_bytes=max_output_bytes)
 
     def _collect_processes(self) -> list[BackgroundProcessEnvironment]:
         processes: list[BackgroundProcessEnvironment] = []
