@@ -704,11 +704,19 @@ async def test_interactive_engine_does_not_start_daemon_owned_result_worker() ->
             harness=SimpleNamespace(
                 agent_publication_recovery=SimpleNamespace(enabled=False),
                 pursuit_terminal_outbox=SimpleNamespace(enabled=False),
+                stable_promotion_runtime_admission_delivery=SimpleNamespace(
+                    enabled=False
+                ),
+                stable_promotion_observation_revision_delivery=SimpleNamespace(
+                    enabled=False
+                ),
                 stable_remote_finalization_delivery=SimpleNamespace(enabled=False),
                 stable_remote_finalization_result_return=SimpleNamespace(enabled=True),
             )
         ),
         subagent_manager=SimpleNamespace(recover_pending_publications=AsyncMock()),
+        evolution_stable_promotion_runtime_admission_delivery_worker=None,
+        evolution_stable_promotion_observation_revision_delivery_worker=None,
         evolution_stable_remote_finalization_delivery_worker=None,
         evolution_stable_remote_finalization_installation_daemon=object(),
         evolution_stable_remote_finalization_result_return_worker=result_worker,
