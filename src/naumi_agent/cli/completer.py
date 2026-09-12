@@ -70,7 +70,7 @@ def _build_commands() -> list[CommandMeta]:
             "/evolution",
             "回注 Outcome、审查 Candidate、签发评测/决策证据或加入 Workbench 队列",
             takes_arg=True,
-            arg_hint="[list|priorities|detail|discover-goal|discover-miss|discover-metric|discover-outcome|evaluation|stable-*|remote-*|rollout-*|decision-*|reflection-*|promotion-*|approval-request|approval-principal|approval-decision|approval-signature|approval-*|revalidation-rollback-execute|revalidation-rollback-outcome|revalidation-*|outcome-*|enqueue] [arguments]",
+            arg_hint="[list|priorities|detail|discover-*|evaluation|stable-*|remote-*|rollout-*|decision-*|reflection-*|promotion-*|approval-request|approval-principal|approval-decision|approval-signature|approval-*|revalidation-rollback-execute|revalidation-rollback-outcome|revalidation-*|outcome-*|enqueue] [arguments]",
             readonly=False,
             category="基础",
         ),
