@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+import naumi_agent.workbench.review_evidence as review_evidence
 from naumi_agent.workbench.models import (
     ApprovalState,
     ParallelMode,
@@ -17,6 +18,7 @@ from naumi_agent.workbench.review_evidence import (
     ReviewEvidenceCollector,
     _git_status_label,
     _parse_diff_hunks,
+    _parse_diff_hunks_with_limits,
 )
 from naumi_agent.workbench.store import WorkbenchStore
 
@@ -113,6 +115,7 @@ async def test_collect_gathers_real_git_diff(tmp_path) -> None:
     assert "new_file.txt" in changed_paths
     # Diff hunks exist for the tracked modified file.
     assert any(h["path"] == "README.md" for h in evidence["diff_hunks"])
+    assert evidence["warnings"] == []
     assert evidence["issue"] is not None
     assert evidence["issue"]["related_worktree"] == "wt-feature"
 
@@ -154,6 +157,65 @@ async def test_collect_rejects_worktree_path_escape(tmp_path) -> None:
     assert evidence["changed_files"] == []
 
 
+@pytest.mark.asyncio
+async def test_collect_bounds_large_git_diff_and_reports_incomplete_evidence(
+    tmp_path: Path,
+) -> None:
+    repo = _make_repo(tmp_path)
+    storage = tmp_path / "worktrees"
+    storage.mkdir()
+    worktree = storage / "wt-large"
+    _run_git(repo, "worktree", "add", "-q", str(worktree), "-b", "large")
+    large = worktree / "large.txt"
+    large.write_text("", encoding="utf-8")
+    _run_git(worktree, "add", "large.txt")
+    _run_git(worktree, "commit", "-q", "-m", "add large file")
+    large.write_text("line\n" * 900_000, encoding="utf-8")
+
+    store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    approval_id = await _seed_approval_and_issue(
+        store, "sess", "task-large", "wt-large"
+    )
+    collector = ReviewEvidenceCollector(
+        store=store, task_store=None, worktree_storage_dir=storage
+    )
+
+    evidence = await collector.collect(session_id="sess", approval_id=approval_id)
+
+    assert evidence is not None
+    assert any("4 MiB" in warning for warning in evidence["warnings"])
+    assert evidence["diff_hunks"]
+    assert sum(
+        len(item["patch"].encode("utf-8")) for item in evidence["diff_hunks"]
+    ) <= review_evidence._DIFF_MAX_BYTES
+
+
+@pytest.mark.asyncio
+async def test_collect_caps_changed_file_list_with_warning(tmp_path: Path) -> None:
+    repo = _make_repo(tmp_path)
+    storage = tmp_path / "worktrees"
+    storage.mkdir()
+    worktree = storage / "wt-many"
+    _run_git(repo, "worktree", "add", "-q", str(worktree), "-b", "many")
+    for index in range(205):
+        (worktree / f"untracked-{index:03}.txt").write_text("new\n", encoding="utf-8")
+
+    store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    approval_id = await _seed_approval_and_issue(
+        store, "sess", "task-many", "wt-many"
+    )
+    collector = ReviewEvidenceCollector(
+        store=store, task_store=None, worktree_storage_dir=storage
+    )
+
+    evidence = await collector.collect(session_id="sess", approval_id=approval_id)
+
+    assert evidence is not None
+    assert len(evidence["changed_files"]) == 200
+    assert evidence["changed_files"][0]["status"] == "untracked"
+    assert any("200" in warning for warning in evidence["warnings"])
+
+
 def test_git_status_label_maps_known_codes() -> None:
     assert _git_status_label("??") == "untracked"
     assert _git_status_label("A ") == "added"
@@ -193,3 +255,15 @@ def test_parse_diff_hunks_preserves_paths_starting_with_b_and_spaces() -> None:
 
 def test_parse_diff_hunks_empty_for_no_diff() -> None:
     assert _parse_diff_hunks("") == []
+
+
+def test_parse_diff_hunks_caps_exactly_thirty_files_and_reports_truncation() -> None:
+    diff = "\n".join(
+        f"diff --git a/{index}.py b/{index}.py\n@@ -1 +1 @@\n-old\n+new"
+        for index in range(31)
+    )
+
+    parsed = _parse_diff_hunks_with_limits(diff)
+
+    assert len(parsed.hunks) == 30
+    assert parsed.truncated is True
