@@ -9982,9 +9982,8 @@ class AgentEngine:
         msg = str(e)
         if "AuthenticationError" in error_type or "api_key" in msg.lower():
             return (
-                "API Key 未设置或无效。请通过环境变量设置:\n"
-                "  export NAUMI_MODELS__API_KEY=your-key\n"
-                "或重新运行首次引导保存到系统凭据库"
+                "模型服务拒绝了当前 API Key。请确认 Key 与所选 provider 匹配，"
+                "或运行 `naumi configure` 更新系统凭据。"
             )
         if "RateLimitError" in error_type:
             return "API 调用频率超限，请稍后重试。"
