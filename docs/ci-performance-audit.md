@@ -102,3 +102,5 @@ Workbench 右侧 Diff 面板原先为每个文件并发执行 Git，并通过 `c
 下一轮 Linux 分片在 Installation Daemon 的并发轮询中发现 Delivery Store 的读取一致性缺口：`get()` 先读取主记录，再用第二条查询验证 append-only 事件链。后台 Worker 在查询之间提交 ACK/completed 转换时，读取方会把旧主记录与新事件链拼成不可能状态，并误报存储损坏。`get()` 现用一条 `LEFT JOIN` 在同一个 SQLite statement snapshot 中读取主记录和完整事件链，既避免撕裂读取，也不延长高频轮询的读锁；重复 enqueue 的既有记录路径也在释放 `BEGIN IMMEDIATE` 前完成验证。回归用例在单语句快照返回后强制启动并发 claim，验证读取方仍返回完整 queued snapshot、写入方随后进入 in-flight。该真实 release fixture 依赖 POSIX executable slot，Windows执行 ruff 与 compileall；Linux coverage 分片中 Installation Daemon 完整文件为 11 passed，确认此前的链损坏误报与统计等待超时均已消失。
 
 分片 11 的 Pi Web API 测试把“接受 engine 字段”与 runner 是否真实安装 `pi` 二进制绑定，Linux 正确返回不可用 400 后被误判为 schema 回归。字段接受用例现显式注入可用性前置条件；独立的不可用用例继续使用不存在的二进制并验证 400。相邻 SessionStore 持久化用例也在 `finally` 关闭连接，避免 pytest 事件循环结束后 aiosqlite 工作线程继续回调。定向普通与 coverage 模式均为 3 passed，完整文件 16 passed，且不再产生线程泄漏 warning。
+
+分片 10 的流式事件穷尽测试复制了一份 transport 类型表，却漏掉产品已明确声明的 `HARNESS_COMPLETION_CORRECTION -> PHASE_SUMMARY` 映射，因此把可读的完成门禁纠偏摘要误判为应保留的原始 runtime event。测试表现已与权威封闭映射同步，保留 phase summary 的结构化 `items` 数据和活动摘要；完整文件普通与 coverage 模式均为 50 passed。
