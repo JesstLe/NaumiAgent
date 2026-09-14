@@ -657,10 +657,16 @@ async def _check_live_model(
 
 async def default_live_model_probe(config: AppConfig) -> ModelResponse:
     """Send exactly one minimal provider request for an explicit Doctor probe."""
+    from naumi_agent.model.catalog import load_provider_catalog
     from naumi_agent.model.router import ModelRouter, ModelTier
 
     probe_config = config.models.model_copy(update={"max_tokens": 8})
-    router = ModelRouter(probe_config)
+    catalog = (
+        load_provider_catalog(probe_config.catalog_path)
+        if probe_config.catalog_path
+        else None
+    )
+    router = ModelRouter(probe_config, catalog=catalog)
     return await router.call(
         messages=[{"role": "user", "content": "Reply with OK."}],
         tier=ModelTier.FAST,

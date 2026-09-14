@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深空观测站 · Deep-Space Observatory</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #02030a; }
+  body { font-family: "Segoe UI", "Microsoft YaHei", monospace; color: #9fd8ff; }
+  #scene { position: fixed; inset: 0; display: block; }
+
+  /* ---------- HUD 通用 ---------- */
+  .hud { position: fixed; pointer-events: none; z-index: 10; }
+  .panel {
+    background: linear-gradient(160deg, rgba(10,25,48,.55), rgba(4,10,24,.35));
+    border: 1px solid rgba(90,190,255,.35);
+    box-shadow: 0 0 18px rgba(40,140,255,.15) inset, 0 0 8px rgba(40,140,255,.12);
+    padding: 10px 14px;
+    backdrop-filter: blur(2px);
+    clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+  }
+  .hud-title { font-size: 12px; letter-spacing: 4px; color: #6fc6ff; opacity: .9; }
+  .hud-big { font-size: 22px; font-weight: 700; letter-spacing: 2px; color: #d8f2ff;
+             text-shadow: 0 0 12px rgba(120,210,255,.8); }
+  .hud-small { font-size: 11px; opacity: .65; letter-spacing: 1px; }
+
+  /* 四角边框 */
+  .corner { width: 26px; height: 26px; border: 2px solid rgba(120,210,255,.55); }
+  .c-tl { top: 14px; left: 14px; border-right: none; border-bottom: none; }
+  .c-tr { top: 14px; right: 14px; border-left: none; border-bottom: none; }
+  .c-bl { bottom: 14px; left: 14px; border-right: none; border-top: none; }
+  .c-br { bottom: 14px; right: 14px; border-left: none; border-top: none; }
+
+  #hud-tl { top: 34px; left: 34px; }
+  #hud-tr { top: 34px; right: 34px; text-align: right; }
+  #hud-bl { bottom: 34px; left: 34px; }
+  #hud-br { bottom: 34px; right: 34px; text-align: right; }
+
+  #reticle { top: 50%; left: 50%; width: 120px; height: 120px;
+             transform: translate(-50%, -50%); opacity: .5; }
+  #reticle::before, #reticle::after {
+    content: ""; position: absolute; inset: 0; border-radius: 50%;
+    border: 1px solid rgba(140,220,255,.6);
+  }
+  #reticle::after { inset: 38px; border-style: dashed; animation: spin 12s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .bar { width: 180px; height: 5px; background: rgba(90,180,255,.15); margin-top: 5px; }
+  .bar > i { display: block; height: 100%; background: linear-gradient(90deg,#2f7fd4,#8fe0ff);
+             box-shadow: 0 0 8px rgba(120,210,255,.9); transition: width .3s; }
+  .row { display: flex; justify-content: space-between; gap: 18px; font-size: 11px;
+         letter-spacing: 1px; opacity: .85; margin-top: 4px; }
+
+  #boot { position: fixed; inset: 0; z-index: 50; background: #02030a;
+          display: flex; align-items: center; justify-content: center;
+          flex-direction: column; gap: 14px; transition: opacity 1.2s; }
+  #boot .hud-big { animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+</style>
+</head>
+<body>
+<canvas id="scene"></canvas>
+
+<!-- HUD -->
+<div class="hud corner c-tl"></div><div class="hud corner c-tr"></div>
+<div class="hud corner c-bl"></div><div class="hud corner c-br"></div>
+
+<div class="hud panel" id="hud-tl">
+  <div class="hud-title">DEEP-SPACE OBSERVATORY</div>
+  <div class="hud-big">深空观测站 · 07 号平台</div>
+  <div class="hud-small">轨道高度 412.7 KM · 倾角 51.6°</div>
+</div>
+
+<div class="hud panel" id="hud-tr">
+  <div class="hud-title">系统状态 SYSTEM</div>
+  <div class="row"><span>核心温度</span><span id="v-temp">-- K</span></div>
+  <div class="row"><span>能级输出</span><span id="v-power">-- %</span></div>
+  <div class="row"><span>相位稳定</span><span id="v-phase">-- %</span></div>
+</div>
+
+<div class="hud panel" id="hud-bl">
+  <div class="hud-title">扫描进度 SCAN</div>
+  <div class="row"><span>粒子银河采样</span><span id="v-scan">0 %</span></div>
+  <div class="bar"><i id="bar-scan" style="width:0%"></i></div>
+  <div class="row" style="margin-top:8px"><span>核心形变周期</span><span id="v-morph">-- s</span></div>
+  <div class="bar"><i id="bar-morph" style="width:0%"></i></div>
+</div>
+
+<div class="hud panel" id="hud-br">
+  <div class="hud-title">遥测 TELEMETRY</div>
+  <div class="row"><span>UTC</span><span id="v-time">--:--:--</span></div>
+  <div class="row"><span>渲染帧率</span><span id="v-fps">-- FPS</span></div>
+  <div class="row"><span>星体计数</span><span id="v-stars">--</span></div>
+</div>
+
+<div class="hud" id="reticle"></div>
+
+<div id="boot"><div class="hud-big">正在初始化观测阵列…</div>
+  <div class="hud-small">INITIALIZING SENSOR ARRAY</div></div>
+
+<script src="three.min.js"></script>
+<script>
+(function () {
+  // ---------- 基础 ----------
+  const canvas = document.getElementById('scene');
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setSize(innerWidth, innerHeight);
+
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x02030a, 0.012);
+
+  const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, .1, 400);
+  camera.position.set(0, 6, 26);
+
+  scene.add(new THREE.AmbientLight(0x224466, .8));
+  const coreLight = new THREE.PointLight(0x66ccff, 2.4, 80);
+  scene.add(coreLight);
+  const rimLight = new THREE.DirectionalLight(0x3366ff, .6);
+  rimLight.position.set(-10, 20, 10);
+  scene.add(rimLight);
+
+  // ---------- 粒子银河（螺旋臂） ----------
+  const GALAXY_N = 12000;
+  const gPos = new Float32Array(GALAXY_N * 3);
+  const gCol = new Float32Array(GALAXY_N * 3);
+  const cIn = new THREE.Color(0x66e0ff), cMid = new THREE.Color(0x3f7fff), cOut = new THREE.Color(0x8a5cff);
+  for (let i = 0; i < GALAXY_N; i++) {
+    const r = Math.pow(Math.random(), .6) * 38;          // 半径偏置中心
+    const arm = (i % 3) * (Math.PI * 2 / 3);
+    const ang = arm + r * .22 + (Math.random() - .5) * .5 * (1 - r / 45);
+    const y = (Math.random() - .5) * (3.2 - r * .05);    // 银盘厚度
+    gPos[i*3]   = Math.cos(ang) * r;
+    gPos[i*3+1] = y;
+    gPos[i*3+2] = Math.sin(ang) * r;
+    const c = r < 10 ? cIn.clone() : r < 24 ? cMid.clone() : cOut.clone();
+    c.multiplyScalar(.55 + Math.random() * .45);
+    gCol[i*3] = c.r; gCol[i*3+1] = c.g; gCol[i*3+2] = c.b;
+  }
+  const gGeo = new THREE.BufferGeometry();
+  gGeo.setAttribute('position', new THREE.BufferAttribute(gPos, 3));
+  gGeo.setAttribute('color', new THREE.BufferAttribute(gCol, 3));
+  const galaxy = new THREE.Points(gGeo, new THREE.PointsMaterial({
+    size: .16, vertexColors: true, transparent: true, opacity: .95,
+    blending: THREE.AdditiveBlending, depthWrite: false
+  }));
+  galaxy.rotation.x = .18;
+  scene.add(galaxy);
+
+  // ---------- 远景星尘 ----------
+  const DUST_N = 1500;
+  const dPos = new Float32Array(DUST_N * 3);
+  for (let i = 0; i < DUST_N * 3; i++) dPos[i] = (Math.random() - .5) * 220;
+  const dGeo = new THREE.BufferGeometry();
+  dGeo.setAttribute('position', new THREE.BufferAttribute(dPos, 3));
+  scene.add(new THREE.Points(dGeo, new THREE.PointsMaterial({
+    size: .35, color: 0x88bbff, transparent: true, opacity: .6,
+    blending: THREE.AdditiveBlending, depthWrite: false
+  })));
+
+  // ---------- 变形核心 ----------
+  const coreGeo = new THREE.IcosahedronGeometry(3, 5);
+  const basePos = coreGeo.attributes.position.array.slice();
+  const core = new THREE.Mesh(coreGeo, new THREE.MeshStandardMaterial({
+    color: 0x113355, emissive: 0x2288ff, emissiveIntensity: .8,
+    metalness: .9, roughness: .25, wireframe: true
+  }));
+  scene.add(core);
+  const coreGlow = new THREE.Mesh(new THREE.IcosahedronGeometry(3.4, 2),
+    new THREE.MeshBasicMaterial({ color: 0x3399ff, transparent: true, opacity: .12,
+      blending: THREE.AdditiveBlending, depthWrite: false }));
+  scene.add(coreGlow);
+
+  // 核心轨道环
+  const rings = [];
+  for (let i = 0; i < 3; i++) {
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(5 + i * 1.4, .04, 8, 120),
+      new THREE.MeshBasicMaterial({ color: 0x55bbff, transparent: true, opacity: .35 - i * .08,
+        blending: THREE.AdditiveBlending }));
+    ring.rotation.x = Math.PI / 2 + i * .4;
+    rings.push(ring); scene.add(ring);
+  }
+
+  // ---------- 噪声（简易伪噪声，无依赖） ----------
+  function noise3(x, y, z) {
+    return Math.sin(x * 1.7 + Math.sin(y * 2.3)) * Math.cos(y * 1.3 + Math.sin(z * 1.9)) * Math.sin(z * 1.1 + x * .7);
+  }
+
+  // ---------- HUD 引用 ----------
+  const $ = id => document.getElementById(id);
+  const vTemp = $('v-temp'), vPower = $('v-power'), vPhase = $('v-phase'),
+        vScan = $('v-scan'), barScan = $('bar-scan'), vMorph = $('v-morph'),
+        barMorph = $('bar-morph'), vTime = $('v-time'), vFps = $('v-fps'),
+        vStars = $('v-stars');
+  vStars.textContent = (GALAXY_N + DUST_N).toLocaleString();
+
+  // ---------- 主循环 ----------
+  const MORPH_PERIOD = 8;                    // 形变周期（秒）
+  let last = performance.now(), fpsAcc = 0, fpsN = 0, fpsShow = 0, scan = 0;
+  const clock = new THREE.Clock();
+
+  function tick() {
+    requestAnimationFrame(tick);
+    const t = clock.getElapsedTime();
+    const now = performance.now(), dt = (now - last) / 1000; last = now;
+    fpsAcc += 1 / Math.max(dt, 1e-4); fpsN++;
+    if (fpsN >= 20) { fpsShow = Math.round(fpsAcc / fpsN); fpsAcc = 0; fpsN = 0; }
+
+    // 银河旋转
+    galaxy.rotation.y = t * .05;
+
+    // 核心形变：顶点沿法线方向做周期性噪声呼吸
+    const pos = coreGeo.attributes.position;
+    const phase = (t % MORPH_PERIOD) / MORPH_PERIOD;          // 0..1
+    const breathe = Math.sin(phase * Math.PI);                 // 0→1→0
+    for (let i = 0; i < pos.count; i++) {
+      const ox = basePos[i*3], oy = basePos[i*3+1], oz = basePos[i*3+2];
+      const n = noise3(ox * .8 + t * .6, oy * .8 + t * .5, oz * .8) * breathe;
+      const s = 1 + n * .28;
+      pos.array[i*3] = ox * s; pos.array[i*3+1] = oy * s; pos.array[i*3+2] = oz * s;
+    }
+    pos.needsUpdate = true;
+    core.rotation.y = t * .3; core.rotation.x = Math.sin(t * .2) * .3;
+    coreGlow.scale.setScalar(1 + breathe * .18);
+    coreGlow.material.opacity = .08 + breathe * .12;
+    coreLight.intensity = 2 + breathe * 1.6;
+    rings.forEach((r, i) => { r.rotation.z = t * (.2 + i * .1); r.rotation.x = Math.PI/2 + i*.4 + Math.sin(t*.3+i)*.15; });
+
+    // 相机缓慢环绕
+    camera.position.x = Math.sin(t * .1) * 26;
+    camera.position.z = Math.cos(t * .1) * 26;
+    camera.position.y = 6 + Math.sin(t * .15) * 2;
+    camera.lookAt(0, 0, 0);
+
+    // HUD 数据
+    scan = Math.min(100, scan + dt * 4);
+    vScan.textContent = scan.toFixed(0) + ' %'; barScan.style.width = scan + '%';
+    vMorph.textContent = MORPH_PERIOD.toFixed(1) + ' s';
+    barMorph.style.width = (phase * 100).toFixed(0) + '%';
+    vTemp.textContent = (3200 + breathe * 900).toFixed(0) + ' K';
+    vPower.textContent = (40 + breathe * 55).toFixed(1) + ' %';
+    vPhase.textContent = (92 + Math.sin(t * .7) * 6).toFixed(1) + ' %';
+    vFps.textContent = fpsShow + ' FPS';
+    const d = new Date();
+    vTime.textContent = [d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds()]
+      .map(n => String(n).padStart(2, '0')).join(':');
+
+    renderer.render(scene, camera);
+  }
+
+  addEventListener('resize', () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+
+  // 启动画面淡出
+  setTimeout(() => {
+    const boot = document.getElementById('boot');
+    boot.style.opacity = '0';
+    setTimeout(() => boot.remove(), 1300);
+  }, 600);
+
+  tick();
+})();
+</script>
+</body>
+</html>
