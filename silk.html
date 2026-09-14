@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>丝 · SILK</title>
+<style>
+  :root{
+    --ink:#0a0a0c;
+    --paper:#e8e2d5;
+    --gold:#c9a86a;
+    --gold-dim:rgba(201,168,106,.38);
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;overflow:hidden;background:var(--ink)}
+  body{
+    font-family:"Songti SC","Noto Serif SC","Source Han Serif SC",STSong,serif;
+    cursor:crosshair;
+    -webkit-font-smoothing:antialiased;
+  }
+  canvas{display:block;position:fixed;inset:0}
+
+  /* 纸面颗粒 */
+  .grain{
+    position:fixed;inset:0;z-index:3;pointer-events:none;
+    opacity:.05;mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  /* 四边暗角 */
+  .vignette{
+    position:fixed;inset:0;z-index:2;pointer-events:none;
+    background:radial-gradient(ellipse 120% 90% at 50% 45%, transparent 55%, rgba(4,4,6,.85) 100%);
+  }
+
+  .ui{position:fixed;z-index:5;pointer-events:none;color:var(--paper)}
+
+  /* 左上题字 */
+  .title{top:7vh;left:7vw}
+  .title h1{
+    font-size:clamp(64px,11vw,150px);
+    font-weight:400;letter-spacing:.18em;line-height:1;
+    color:var(--paper);text-indent:.18em;
+    text-shadow:0 0 60px rgba(232,226,213,.12);
+  }
+  .title .seal{
+    display:inline-block;margin-top:18px;
+    font-size:12px;letter-spacing:.5em;text-indent:.5em;
+    color:var(--gold);border:1px solid var(--gold-dim);
+    padding:7px 14px 6px;border-radius:2px;
+    position:relative;
+  }
+  .title .seal::before{
+    content:"";position:absolute;inset:3px;
+    border:1px solid rgba(201,168,106,.18);border-radius:1px;
+  }
+
+  /* 右下散文 */
+  .verse{right:7vw;bottom:9vh;text-align:right}
+  .verse p{
+    font-size:14px;letter-spacing:.32em;line-height:2.6;
+    color:rgba(232,226,213,.55);writing-mode:horizontal-tb;
+  }
+  .verse .num{
+    font-size:11px;letter-spacing:.4em;color:var(--gold-dim);
+    display:block;margin-bottom:10px;
+  }
+
+  /* 底部提示 */
+  .hint{
+    left:50%;bottom:4.5vh;transform:translateX(-50%);
+    font-size:11px;letter-spacing:.55em;text-indent:.55em;
+    color:rgba(232,226,213,.28);white-space:nowrap;
+    animation:breathe 4s ease-in-out infinite;
+  }
+  @keyframes breathe{0%,100%{opacity:.35}50%{opacity:.9}}
+
+  /* 加载淡入 */
+  .fade{animation:fadein 2.6s ease both}
+  @keyframes fadein{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+  .fade-2{animation-delay:.9s}
+  .fade-3{animation-delay:1.7s}
+
+  @media (max-width:640px){
+    .verse p{font-size:11px;letter-spacing:.2em}
+    .hint{letter-spacing:.3em;font-size:10px}
+  }
+</style>
+</head>
+<body>
+
+<canvas id="silk"></canvas>
+<div class="vignette"></div>
+<div class="grain"></div>
+
+<div class="ui title fade">
+  <h1>丝</h1>
+  <span class="seal">流 動 即 永 恆</span>
+</div>
+
+<div class="ui verse fade fade-2">
+  <span class="num">卷 一 · 墨 上 行 雲</span>
+  <p>風過無痕，水去有聲。</p>
+  <p>一縷之柔，可繞萬鈞。</p>
+</div>
+
+<div class="ui hint fade fade-3">移 動 拂 絲 &nbsp;·&nbsp; 單 擊 泛 漪</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('silk');
+  const ctx = canvas.getContext('2d');
+  let W, H, DPR;
+
+  // 鼠标状态(惯性平滑)
+  const mouse = { x: -9999, y: -9999, tx: -9999, ty: -9999, vel: 0 };
+
+  // 涟漪池
+  const ripples = [];
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = W * DPR; canvas.height = H * DPR;
+    canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.fillStyle = '#0a0a0c';
+    ctx.fillRect(0, 0, W, H);
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  window.addEventListener('pointermove', e => {
+    const dx = e.clientX - mouse.x, dy = e.clientY - mouse.y;
+    mouse.vel = Math.min(Math.hypot(dx, dy), 60);
+    mouse.tx = e.clientX; mouse.ty = e.clientY;
+  });
+  window.addEventListener('pointerdown', e => {
+    ripples.push({ x: e.clientX, y: e.clientY, r: 0, life: 1 });
+    if (ripples.length > 12) ripples.shift();
+  });
+  window.addEventListener('pointerleave', () => { mouse.tx = -9999; mouse.ty = -9999; });
+
+  // 伪噪声:多组无理数频率叠加,避免 Math.random 的"生涩感"
+  function field(x, y, t) {
+    return Math.sin(x * 0.0021 + t * 0.35)
+         + Math.sin(y * 0.0031 - t * 0.22) * 0.8
+         + Math.sin((x + y) * 0.0013 + t * 0.15) * 1.2
+         + Math.sin(x * 0.0007 - y * 0.0011 + t * 0.5) * 0.6;
+  }
+
+  // 丝绸条带定义:每层独立的相位与速度
+  const strands = [];
+  const LAYERS = 26;
+  for (let i = 0; i < LAYERS; i++) {
+    const f = i / (LAYERS - 1);
+    strands.push({
+      phase: f * Math.PI * 2,
+      speed: 0.4 + f * 0.9,
+      amp: 30 + Math.sin(f * Math.PI) * 90,
+      yBase: 0.18 + f * 0.68,           // 纵向分布
+      hue: f,                            // 0 墨 -> 1 金
+      width: 0.6 + Math.sin(f * Math.PI) * 1.6,
+      alpha: 0.05 + Math.sin(f * Math.PI) * 0.22,
+      drift: (f - 0.5) * 0.0006,         // 缓慢横向漂移
+      offset: f * 137.5                  // 黄金角错位
+    });
+  }
+
+  let t = 0;
+  let last = performance.now();
+
+  function draw(now) {
+    const dt = Math.min((now - last) / 1000, 0.05);
+    last = now;
+    t += dt;
+
+    // 鼠标惯性
+    if (mouse.x < -999) { mouse.x = mouse.tx; mouse.y = mouse.ty; }
+    mouse.x += (mouse.tx - mouse.x) * 0.06;
+    mouse.y += (mouse.ty - mouse.y) * 0.06;
+    mouse.vel *= 0.94;
+
+    // 拖尾:半透明覆盖而非清空 —— 丝缎般的残影
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = 'rgba(10,10,12,0.16)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.globalCompositeOperation = 'lighter';
+
+    const mSpeed = mouse.vel / 60;   // 0..1
+    const brushR = Math.max(W, H) * 0.28;
+
+    for (const s of strands) {
+      ctx.beginPath();
+      const step = 14;
+      for (let x = -40; x <= W + 40; x += step) {
+        const n = field(x + s.offset, s.yBase * H, t * s.speed);
+        let y = s.yBase * H
+              + n * s.amp * 0.4
+              + Math.sin(x * 0.004 + s.phase + t * 0.6) * s.amp * 0.35;
+
+        // 鼠标扰动:近处被"拨动"
+        const dx = x - mouse.x, dy = y - mouse.y;
+        const d = Math.hypot(dx, dy);
+        if (d < brushR) {
+          const force = (1 - d / brushR);
+          const push = force * force * (50 + mSpeed * 160);
+          y += (dy === 0 ? 1 : dy / (d || 1)) * push;
+        }
+
+        // 涟漪扰动:环形波
+        for (const rp of ripples) {
+          const rd = Math.abs(Math.hypot(x - rp.x, y - rp.y) - rp.r);
+          if (rd < 90) {
+            const wave = (1 - rd / 90) * rp.life * 46;
+            y += Math.sin(rp.r * 0.05 - t * 6) * wave;
+          }
+        }
+
+        x === -40 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      }
+
+      // 墨到鎏金的插值
+      const k = s.hue;
+      const r = Math.round(38 + (201 - 38) * Math.pow(k, 2.2));
+      const g = Math.round(42 + (168 - 42) * Math.pow(k, 2.2));
+      const b = Math.round(52 + (106 - 52) * Math.pow(k, 2.2));
+      ctx.strokeStyle = `rgba(${r},${g},${b},${s.alpha + mSpeed * 0.12})`;
+      ctx.lineWidth = s.width;
+      ctx.lineCap = 'round';
+      ctx.stroke();
+    }
+
+    // 涟漪生命衰减 + 描一圈金边
+    ctx.globalCompositeOperation = 'source-over';
+    for (let i = ripples.length - 1; i >= 0; i--) {
+      const rp = ripples[i];
+      rp.r += (Math.max(W, H) * 0.35) * dt;
+      rp.life -= dt * 0.55;
+      if (rp.life <= 0) { ripples.splice(i, 1); continue; }
+      ctx.beginPath();
+      ctx.arc(rp.x, rp.y, rp.r, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(201,168,106,${rp.life * 0.28})`;
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+    }
+
+    requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

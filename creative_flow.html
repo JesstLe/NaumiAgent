@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🎨 创意模式 · 流光画板 Flow Canvas</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #05060a;
+    color: #f0f0f8;
+    font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+    overflow: hidden;
+    height: 100vh;
+    cursor: crosshair;
+  }
+
+  canvas { position: fixed; inset: 0; }
+
+  .ui {
+    position: fixed;
+    z-index: 10;
+    pointer-events: none;
+  }
+
+  .top {
+    top: 28px; left: 32px;
+  }
+  .top h1 {
+    font-size: clamp(26px, 4vw, 44px);
+    font-weight: 900;
+    letter-spacing: 6px;
+    background: linear-gradient(90deg, #43e97b, #38f9d7, #e0c3fc, #43e97b);
+    background-size: 250% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: flow 7s linear infinite;
+  }
+  @keyframes flow { to { background-position: 250% 0; } }
+  .top small {
+    display: block;
+    margin-top: 6px;
+    color: #7a7a92;
+    letter-spacing: 3px;
+    font-size: 12px;
+  }
+
+  .panel {
+    bottom: 28px; left: 32px;
+    pointer-events: auto;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    max-width: 70vw;
+  }
+
+  .chip {
+    padding: 9px 18px;
+    border-radius: 999px;
+    border: 1px solid rgba(255,255,255,.18);
+    background: rgba(255,255,255,.05);
+    backdrop-filter: blur(10px);
+    color: #d8d8e8;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all .2s;
+    user-select: none;
+  }
+  .chip:hover { background: rgba(255,255,255,.14); transform: translateY(-2px); }
+  .chip.active {
+    border-color: #38f9d7;
+    color: #38f9d7;
+    box-shadow: 0 0 16px #38f9d744;
+  }
+
+  .stats {
+    bottom: 28px; right: 32px;
+    text-align: right;
+    font-size: 12px;
+    color: #5c5c74;
+    line-height: 1.8;
+    letter-spacing: 1px;
+  }
+  .stats b { color: #38f9d7; font-weight: 600; }
+
+  .hint {
+    top: 28px; right: 32px;
+    font-size: 12px;
+    color: #5c5c74;
+    text-align: right;
+    line-height: 1.8;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<div class="ui top">
+  <h1>FLOW CANVAS</h1>
+  <small>创意模式 · 移动鼠标绘制流光，点击任意处绽放烟花</small>
+</div>
+
+<div class="ui hint">
+  🖱 移动 = 流场作画<br>
+  👆 单击 = 烟花<br>
+  ⌨ C = 清屏 · 空格 = 换色板
+</div>
+
+<div class="ui panel" id="palette"></div>
+
+<div class="ui stats">
+  粒子 <b id="stParticles">0</b><br>
+  烟花 <b id="stFireworks">0</b>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H;
+function resize(){ W = canvas.width = innerWidth; H = canvas.height = innerHeight; }
+resize();
+addEventListener('resize', () => { resize(); ctx.fillStyle='#05060a'; ctx.fillRect(0,0,W,H); });
+
+/* 预渲染暗色底，制造拖尾残影 */
+ctx.fillStyle = '#05060a';
+ctx.fillRect(0, 0, W, H);
+
+/* ---------- 简易 Perlin 噪声（简化版 value noise） ---------- */
+const perm = new Uint8Array(512);
+(() => {
+  const p = [...Array(256).keys()];
+  for (let i = 255; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [p[i], p[j]] = [p[j], p[i]];
+  }
+  for (let i = 0; i < 512; i++) perm[i] = p[i & 255];
+})();
+function fade(t){ return t*t*t*(t*(t*6-15)+10); }
+function lerp(a,b,t){ return a+(b-a)*t; }
+function grad(h,x,y){ return ((h&1)?-x:x) + ((h&2)?-y:y); }
+function noise(x,y){
+  const X = Math.floor(x)&255, Y = Math.floor(y)&255;
+  x -= Math.floor(x); y -= Math.floor(y);
+  const u = fade(x), v = fade(y);
+  const aa = perm[perm[X]+Y], ab = perm[perm[X]+Y+1];
+  const ba = perm[perm[X+1]+Y], bb = perm[perm[X+1]+Y+1];
+  return lerp(
+    lerp(grad(aa,x,y), grad(ba,x-1,y), u),
+    lerp(grad(ab,x,y-1), grad(bb,x-1,y-1), u),
+    v) * .5 + .5; // 0..1
+}
+
+/* ---------- 色板 ---------- */
+const PALETTES = [
+  { name: '🌊 青波',   colors: ['#43e97b','#38f9d7','#4facfe','#00f2fe'] },
+  { name: '🌸 樱粉',   colors: ['#ff9a9e','#fecfef','#f6d365','#fda085'] },
+  { name: '🌌 霓虹',   colors: ['#f953c6','#b91d73','#8e2de2','#4a00e0'] },
+  { name: '🍯 暖阳',   colors: ['#f6d365','#fda085','#fddb92','#d4fc79'] },
+  { name: '🌑 银月',   colors: ['#e0eafc','#cfdef3','#a6c0fe','#f0f0f8'] },
+];
+let palIdx = 0;
+
+const panel = document.getElementById('palette');
+PALETTES.forEach((p, i) => {
+  const el = document.createElement('span');
+  el.className = 'chip' + (i === 0 ? ' active' : '');
+  el.textContent = p.name;
+  el.onclick = () => {
+    palIdx = i;
+    document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+    el.classList.add('active');
+  };
+  panel.appendChild(el);
+});
+
+/* ---------- 画笔粒子 ---------- */
+const brush = [];
+const mouse = { x: -999, y: -999, px: -999, py: -999 };
+let zOff = 0;
+const BRUSH_N = 90;
+
+function spawnBrush(x, y) {
+  for (let i = 0; i < 3; i++) {
+    brush.push({
+      x, y,
+      vx: 0, vy: 0,
+      life: 1,
+      decay: .004 + Math.random() * .008,
+      size: .6 + Math.random() * 1.8,
+      color: PALETTES[palIdx].colors[Math.floor(Math.random()*4)],
+    });
+  }
+  if (brush.length > 1600) brush.splice(0, brush.length - 1600);
+}
+
+addEventListener('mousemove', e => {
+  mouse.px = mouse.x; mouse.py = mouse.y;
+  mouse.x = e.clientX; mouse.y = e.clientY;
+  const steps = Math.ceil(Math.hypot(mouse.x - mouse.px, mouse.y - mouse.py) / 6);
+  for (let i = 0; i < steps; i++) {
+    const t = i / steps;
+    spawnBrush(mouse.px + (mouse.x - mouse.px) * t, mouse.py + (mouse.y - mouse.py) * t);
+  }
+});
+
+/* ---------- 烟花 ---------- */
+const fireworks = [];
+let fwCount = 0;
+addEventListener('click', e => {
+  const colors = PALETTES[palIdx].colors;
+  const main = colors[Math.floor(Math.random() * colors.length)];
+  const n = 90 + Math.floor(Math.random() * 60);
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2 + Math.random() * .2;
+    const sp = 2 + Math.random() * 4.5;
+    fireworks.push({
+      x: e.clientX, y: e.clientY,
+      vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+      life: 1, decay: .008 + Math.random() * .012,
+      size: 1 + Math.random() * 2,
+      color: Math.random() < .7 ? main : colors[Math.floor(Math.random()*4)],
+      gravity: .045,
+    });
+  }
+  fwCount++;
+  document.getElementById('stFireworks').textContent = fwCount;
+});
+
+/* ---------- 键盘 ---------- */
+addEventListener('keydown', e => {
+  if (e.code === 'KeyC') {
+    ctx.fillStyle = '#05060a';
+    ctx.fillRect(0, 0, W, H);
+  }
+  if (e.code === 'Space') {
+    e.preventDefault();
+    palIdx = (palIdx + 1) % PALETTES.length;
+    document.querySelectorAll('.chip').forEach((c, i) =>
+      c.classList.toggle('active', i === palIdx));
+  }
+});
+
+/* ---------- 主循环 ---------- */
+function loop() {
+  /* 半透明覆盖 => 拖尾 */
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = 'rgba(5,6,10,0.08)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.globalCompositeOperation = 'lighter';
+  zOff += .0022;
+
+  // 画笔粒子沿流场流动
+  for (let i = brush.length - 1; i >= 0; i--) {
+    const p = brush[i];
+    const a = noise(p.x * .0016, p.y * .0016 + zOff) * Math.PI * 4;
+    p.vx += Math.cos(a) * .12;
+    p.vy += Math.sin(a) * .12;
+    p.vx *= .94; p.vy *= .94;
+    p.x += p.vx; p.y += p.vy;
+    p.life -= p.decay;
+    if (p.life <= 0) { brush.splice(i, 1); continue; }
+    ctx.globalAlpha = p.life * .85;
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // 烟花
+  for (let i = fireworks.length - 1; i >= 0; i--) {
+    const f = fireworks[i];
+    f.vy += f.gravity;
+    f.vx *= .985; f.vy *= .985;
+    f.x += f.vx; f.y += f.vy;
+    f.life -= f.decay;
+    if (f.life <= 0) { fireworks.splice(i, 1); continue; }
+    ctx.globalAlpha = f.life;
+    ctx.fillStyle = f.color;
+    ctx.beginPath();
+    ctx.arc(f.x, f.y, f.size * f.life, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.globalAlpha = 1;
+  document.getElementById('stParticles').textContent = brush.length + fireworks.length;
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+
+</body>
+</html>

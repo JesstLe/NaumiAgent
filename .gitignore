@@ -35,3 +35,5 @@ frontend/terminal-ui/.packaging-smoke/
 # Local dev runtime logs (uvicorn/naumi serve output captured at repo root)
 backend.log
 *.log
+nul
+.naumi/terminal-ui-debug.jsonl
