@@ -16,6 +16,7 @@ import type {
 import {
   readPreference,
   savePreference,
+  buildWorkbenchEventStreamUrl,
   WorkbenchRuntimeClient,
   type ModelConfig,
   type Run,
@@ -289,11 +290,10 @@ export function useWorkspaceController() {
     const open = async () => {
       if (!daemon.event_stream_url_template) return
       try {
-        const url = new URL(
-          daemon.event_stream_url_template.replace(
-            '{session_id}',
-            encodeURIComponent(id),
-          ),
+        const url = buildWorkbenchEventStreamUrl(
+          daemon.event_stream_url_template,
+          id,
+          platform.supportsDaemon ? undefined : location.origin,
         )
         const auth = await platform.getToken()
         if (disposed) return

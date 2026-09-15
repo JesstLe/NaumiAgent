@@ -8,7 +8,6 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 
 from naumi_agent import __version__
 from naumi_agent.api.permission_broker import PermissionApprovalBroker
@@ -55,13 +54,6 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
     from naumi_agent.api.routes import (
         commands,
         engines,
@@ -84,10 +76,15 @@ def create_app() -> FastAPI:
     app.include_router(commands.router, prefix="/api/v1")
     app.include_router(ws.router, prefix="/api/v1")
 
-    from naumi_agent.api.middleware import AuthMiddleware, RateLimitMiddleware
+    from naumi_agent.api.middleware import (
+        AuthMiddleware,
+        ConfiguredCORSMiddleware,
+        RateLimitMiddleware,
+    )
 
     app.add_middleware(RateLimitMiddleware, requests_per_minute=60)
     app.add_middleware(AuthMiddleware)
+    app.add_middleware(ConfiguredCORSMiddleware)
 
     return app
 

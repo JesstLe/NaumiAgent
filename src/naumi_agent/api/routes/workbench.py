@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSock
 from pydantic import BaseModel, Field
 
 from naumi_agent import __version__
-from naumi_agent.api.deps import AuthDep, extract_api_key_from_connection
+from naumi_agent.api.deps import AuthDep, is_connection_api_key_valid
 from naumi_agent.api.schemas import SessionListResponse
 from naumi_agent.workbench.market import TaskMarket
 from naumi_agent.workbench.models import (
@@ -650,13 +650,15 @@ def _engine_allowed_validation_commands(engine: Any | None) -> list[list[str]]:
 
 
 def _is_workbench_websocket_api_key_valid(websocket: WebSocket) -> bool:
-    config = getattr(websocket.app.state, "config", None)
-    api_keys = getattr(getattr(config, "api", None), "api_keys", [])
-    if not api_keys:
-        return True
+    return is_connection_api_key_valid(websocket)
 
-    api_key = extract_api_key_from_connection(websocket)
-    return bool(api_key and api_key in api_keys)
+
+async def _accept_authenticated_workbench_websocket(websocket: WebSocket) -> bool:
+    if not _is_workbench_websocket_api_key_valid(websocket):
+        await websocket.close(code=4401, reason="Invalid or missing API key")
+        return False
+    await websocket.accept()
+    return True
 
 
 @router.get("/workbench/daemon/status", response_model=DaemonStatusResponse)
@@ -910,11 +912,7 @@ async def get_workbench_event(
 
 @router.websocket("/workbench/sessions/{session_id}/events/stream")
 async def websocket_workbench_events(websocket: WebSocket, session_id: str):
-    await websocket.accept()
-
-    if not _is_workbench_websocket_api_key_valid(websocket):
-        await websocket.send_json({"type": "error", "message": "Invalid API key"})
-        await websocket.close()
+    if not await _accept_authenticated_workbench_websocket(websocket):
         return
 
     engine = websocket.app.state.engine

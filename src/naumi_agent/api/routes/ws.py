@@ -8,6 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from naumi_agent.api.deps import is_connection_api_key_valid
 from naumi_agent.streaming.events import EventType, StreamEvent, StreamEventSink
 
 router = APIRouter(tags=["websocket"])
@@ -15,7 +16,8 @@ router = APIRouter(tags=["websocket"])
 
 @router.websocket("/ws/sessions/{session_id}")
 async def websocket_session(websocket: WebSocket, session_id: str):
-    await websocket.accept()
+    if not await _accept_authenticated_websocket(websocket):
+        return
     engine = websocket.app.state.engine
 
     session = await engine.session_store.load(session_id)
@@ -66,7 +68,8 @@ async def websocket_session(websocket: WebSocket, session_id: str):
 @router.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket):
     """快捷聊天 — 自动创建会话."""
-    await websocket.accept()
+    if not await _accept_authenticated_websocket(websocket):
+        return
     engine = websocket.app.state.engine
 
     from naumi_agent.memory.session import Session
@@ -101,6 +104,15 @@ async def websocket_chat(websocket: WebSocket):
 
     except WebSocketDisconnect:
         pass
+
+
+async def _accept_authenticated_websocket(websocket: WebSocket) -> bool:
+    """Authenticate before accepting so public deployments cannot leak sessions."""
+    if not is_connection_api_key_valid(websocket):
+        await websocket.close(code=4401, reason="Invalid or missing API key")
+        return False
+    await websocket.accept()
+    return True
 
 
 async def _run_streaming_to_websocket(

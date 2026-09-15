@@ -44,6 +44,7 @@ def validate_deployment(
     *,
     create_dirs: bool = False,
     require_api_key: bool = False,
+    require_api_auth: bool = False,
 ) -> ValidationReport:
     """Validate the deployment config and optionally create runtime directories."""
     report = ValidationReport(ok=True)
@@ -79,8 +80,15 @@ def validate_deployment(
             report.errors.append(f"目录不存在: {label}={required_path}")
 
     if config.api.api_keys:
-        report.messages.append("API 鉴权已启用: 需要 X-API-Key 或 api_key 查询参数。")
+        report.messages.append(
+            "API 鉴权已启用: 需要 Authorization Bearer、X-API-Key 或 api_key 查询参数。"
+        )
     else:
+        if require_api_auth:
+            report.ok = False
+            report.errors.append(
+                "公网部署必须启用 API 鉴权。请设置 NAUMI_API__API_KEYS 为非空 JSON 数组。"
+            )
         report.messages.append(
             "API 鉴权未启用: 适合本机或受信任内网，公开部署前请配置 api.api_keys。"
         )
@@ -100,6 +108,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     validate.add_argument("--create-dirs", action="store_true", help="缺失目录时自动创建")
     validate.add_argument("--require-api-key", action="store_true", help="缺少模型 API Key 时失败")
+    validate.add_argument(
+        "--require-api-auth",
+        action="store_true",
+        help="未启用客户端 API 鉴权时失败",
+    )
     return parser
 
 
@@ -112,6 +125,7 @@ def main(argv: list[str] | None = None) -> int:
             args.config,
             create_dirs=args.create_dirs,
             require_api_key=args.require_api_key,
+            require_api_auth=args.require_api_auth,
         )
         report.emit()
         return 0 if report.ok else 1

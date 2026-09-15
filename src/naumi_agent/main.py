@@ -1934,6 +1934,11 @@ def serve(
     ),
     config: str = typer.Option(DEFAULT_CONFIG_PATH, "--config", "-c", help="配置文件路径"),
     reload: bool = typer.Option(False, "--reload", help="开发模式热重载"),
+    access_log: bool = typer.Option(
+        True,
+        "--access-log/--no-access-log",
+        help="是否记录 HTTP 访问日志；公网反向代理模式建议关闭，避免查询参数进入日志",
+    ),
 ) -> None:
     """启动 REST API 服务."""
     import uvicorn
@@ -1951,6 +1956,7 @@ def serve(
             port=final_port,
             reload=True,
             reload_dirs=["src/naumi_agent"],
+            access_log=access_log,
         )
     else:
         uvicorn.run(
@@ -1959,6 +1965,7 @@ def serve(
             port=final_port,
             workers=1,
             log_level="info",
+            access_log=access_log,
         )
 
 

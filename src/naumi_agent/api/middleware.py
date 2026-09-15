@@ -3,12 +3,46 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 
+from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from naumi_agent.api.deps import extract_api_key
+
+
+class ConfiguredCORSMiddleware:
+    """Apply the active ``api.cors_origins`` without loading config at import time."""
+
+    def __init__(self, app) -> None:
+        self.app = app
+        self._origins: tuple[str, ...] | None = None
+        self._delegate = None
+
+    def _configured_origins(self, scope) -> tuple[str, ...]:
+        application = scope.get("app")
+        config = getattr(getattr(application, "state", None), "config", None)
+        origins = getattr(getattr(config, "api", None), "cors_origins", ["*"])
+        if not isinstance(origins, Sequence) or isinstance(origins, (str, bytes)):
+            return ("*",)
+        return tuple(str(origin).strip() for origin in origins if str(origin).strip())
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] not in {"http", "websocket"}:
+            await self.app(scope, receive, send)
+            return
+        origins = self._configured_origins(scope)
+        if origins != self._origins or self._delegate is None:
+            self._origins = origins
+            self._delegate = CORSMiddleware(
+                self.app,
+                allow_origins=list(origins),
+                allow_methods=["*"],
+                allow_headers=["*"],
+            )
+        await self._delegate(scope, receive, send)
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
