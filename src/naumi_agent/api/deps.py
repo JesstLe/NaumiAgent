@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import secrets
 from typing import Any
 
 from fastapi import Depends, HTTPException, Request
@@ -42,6 +43,19 @@ def extract_api_key(request: Request) -> str | None:
     return extract_api_key_from_connection(request)
 
 
+def is_connection_api_key_valid(connection: Any) -> bool:
+    """Validate HTTP or WebSocket credentials against the active API config."""
+    config: AppConfig | None = getattr(connection.app.state, "config", None)
+    api_keys = getattr(getattr(config, "api", None), "api_keys", [])
+    if not api_keys:
+        return True
+    api_key = extract_api_key_from_connection(connection)
+    return bool(
+        api_key
+        and any(secrets.compare_digest(api_key, configured_key) for configured_key in api_keys)
+    )
+
+
 async def verify_api_key(request: Request) -> str:
     api_key = extract_api_key(request)
     config: AppConfig | None = getattr(request.app.state, "config", None)
@@ -49,9 +63,10 @@ async def verify_api_key(request: Request) -> str:
     if not config or not config.api.api_keys:
         return "anonymous"
 
-    if not api_key or api_key not in config.api.api_keys:
+    if not is_connection_api_key_valid(request):
         raise HTTPException(status_code=401, detail="Invalid API key")
 
+    assert api_key is not None
     return api_key
 
 

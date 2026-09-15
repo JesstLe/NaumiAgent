@@ -83,6 +83,37 @@ def test_validate_deployment_requires_api_key(tmp_path, monkeypatch) -> None:
     assert any("API Key" in error for error in report.errors)
 
 
+def test_validate_public_deployment_requires_client_auth(tmp_path) -> None:
+    config_path = tmp_path / "config.yaml"
+    _write_config(config_path, tmp_path, include_key=True)
+
+    report = validate_deployment(
+        config_path,
+        create_dirs=True,
+        require_api_key=True,
+        require_api_auth=True,
+    )
+
+    assert not report.ok
+    assert any("公网部署必须启用 API 鉴权" in error for error in report.errors)
+
+
+def test_validate_public_deployment_accepts_client_auth(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("NAUMI_API__API_KEYS", '["public-client-key"]')
+    config_path = tmp_path / "config.yaml"
+    _write_config(config_path, tmp_path, include_key=True)
+
+    report = validate_deployment(
+        config_path,
+        create_dirs=True,
+        require_api_key=True,
+        require_api_auth=True,
+    )
+
+    assert report.ok
+    assert "API 鉴权已启用" in "\n".join(report.messages)
+
+
 def test_container_config_allows_env_secret_override(monkeypatch) -> None:
     monkeypatch.setenv("NAUMI_MODELS__API_KEY", "env-key")
     monkeypatch.setenv("NAUMI_MODELS__API_BASE", "https://example.test/v1")

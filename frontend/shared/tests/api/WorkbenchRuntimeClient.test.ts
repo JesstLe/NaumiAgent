@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   consumeEvents,
+  buildWorkbenchEventStreamUrl,
   readPreference,
   safeWebUrl,
   savePreference,
@@ -95,6 +96,18 @@ describe('browser URL validation', () => {
     ]) {
       expect(() => safeWebUrl(url)).toThrow()
     }
+  })
+
+  it('rewrites daemon loopback WebSocket URLs to the public browser origin', () => {
+    expect(
+      buildWorkbenchEventStreamUrl(
+        'ws://127.0.0.1:8765/api/v1/workbench/sessions/{session_id}/events/stream',
+        'session/one',
+        'https://agent.example.com:8443',
+      ).toString(),
+    ).toBe(
+      'wss://agent.example.com:8443/api/v1/workbench/sessions/session%2Fone/events/stream',
+    )
   })
 })
 

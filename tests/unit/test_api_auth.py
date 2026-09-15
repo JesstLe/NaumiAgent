@@ -9,7 +9,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from naumi_agent.api.deps import extract_api_key, verify_api_key
-from naumi_agent.api.middleware import AuthMiddleware
+from naumi_agent.api.middleware import AuthMiddleware, ConfiguredCORSMiddleware
+from naumi_agent.api.routes.workbench import _accept_authenticated_workbench_websocket
+from naumi_agent.api.routes.ws import _accept_authenticated_websocket
 
 
 class _FakeRequest:
@@ -26,8 +28,34 @@ class _FakeRequest:
         self.app = SimpleNamespace(state=SimpleNamespace(config=config))
 
 
-def _fake_config(api_keys: list[str]) -> SimpleNamespace:
-    return SimpleNamespace(api=SimpleNamespace(api_keys=api_keys))
+def _fake_config(
+    api_keys: list[str],
+    cors_origins: list[str] | None = None,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        api=SimpleNamespace(
+            api_keys=api_keys,
+            cors_origins=["*"] if cors_origins is None else cors_origins,
+        )
+    )
+
+
+class _FakeWebSocket(_FakeRequest):
+    def __init__(
+        self,
+        *,
+        api_keys: list[str],
+        query: dict[str, str] | None = None,
+    ) -> None:
+        super().__init__(query=query, config=_fake_config(api_keys))
+        self.accepted = False
+        self.closed: tuple[int, str] | None = None
+
+    async def accept(self) -> None:
+        self.accepted = True
+
+    async def close(self, code: int, reason: str) -> None:
+        self.closed = (code, reason)
 
 
 class TestExtractAPIKey:
@@ -118,6 +146,7 @@ class TestAuthMiddleware:
         app = FastAPI()
         app.state.config = _fake_config(["valid-key"])
         app.add_middleware(AuthMiddleware)
+        app.add_middleware(ConfiguredCORSMiddleware)
 
         @app.get("/api/v1/protected")
         def protected():
@@ -161,3 +190,70 @@ class TestAuthMiddleware:
         response = client.get("/api/v1/health")
         assert response.status_code == 200
         assert response.json() == {"status": "up"}
+
+    def test_cors_uses_configured_origin_instead_of_wildcard(self) -> None:
+        app = FastAPI()
+        app.state.config = _fake_config(
+            [],
+            cors_origins=["https://agent.example.com"],
+        )
+        app.add_middleware(ConfiguredCORSMiddleware)
+
+        @app.get("/api/v1/protected")
+        def protected():
+            return {"ok": True}
+
+        client = TestClient(app)
+        allowed = client.options(
+            "/api/v1/protected",
+            headers={
+                "Origin": "https://agent.example.com",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        blocked = client.options(
+            "/api/v1/protected",
+            headers={
+                "Origin": "https://attacker.example",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+
+        assert allowed.headers["access-control-allow-origin"] == "https://agent.example.com"
+        assert "access-control-allow-origin" not in blocked.headers
+
+
+class TestWebSocketAuthentication:
+    async def test_rejects_missing_key_before_accepting(self) -> None:
+        websocket = _FakeWebSocket(api_keys=["valid-key"])
+
+        assert await _accept_authenticated_websocket(websocket) is False
+        assert websocket.accepted is False
+        assert websocket.closed == (4401, "Invalid or missing API key")
+
+    async def test_accepts_valid_query_key(self) -> None:
+        websocket = _FakeWebSocket(
+            api_keys=["valid-key"],
+            query={"api_key": "valid-key"},
+        )
+
+        assert await _accept_authenticated_websocket(websocket) is True
+        assert websocket.accepted is True
+        assert websocket.closed is None
+
+    async def test_workbench_rejects_missing_key_before_accepting(self) -> None:
+        websocket = _FakeWebSocket(api_keys=["valid-key"])
+
+        assert await _accept_authenticated_workbench_websocket(websocket) is False
+        assert websocket.accepted is False
+        assert websocket.closed == (4401, "Invalid or missing API key")
+
+    async def test_workbench_accepts_valid_query_key(self) -> None:
+        websocket = _FakeWebSocket(
+            api_keys=["valid-key"],
+            query={"api_key": "valid-key"},
+        )
+
+        assert await _accept_authenticated_workbench_websocket(websocket) is True
+        assert websocket.accepted is True
+        assert websocket.closed is None

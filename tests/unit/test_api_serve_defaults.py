@@ -74,3 +74,17 @@ def test_serve_explicit_port_override_still_works(monkeypatch, runner: CliRunner
     assert result.exit_code == 0, result.output
     assert len(calls) == 1
     assert calls[0]["kwargs"]["port"] == 8080
+
+
+def test_serve_can_disable_access_log_for_public_proxy(monkeypatch, runner: CliRunner) -> None:
+    calls = _patch_uvicorn_run(monkeypatch)
+    example_config = str(Path(__file__).resolve().parents[2] / "config.yaml.example")
+
+    result = runner.invoke(
+        app,
+        ["serve", "--config", example_config, "--no-access-log"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert len(calls) == 1
+    assert calls[0]["kwargs"]["access_log"] is False

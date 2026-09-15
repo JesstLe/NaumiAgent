@@ -121,6 +121,21 @@ export function safeWebUrl(value: string): string {
   return url.href
 }
 
+export function buildWorkbenchEventStreamUrl(
+  template: string,
+  sessionId: string,
+  browserOrigin?: string,
+): URL {
+  const expanded = template.replace('{session_id}', encodeURIComponent(sessionId))
+  const url = new URL(expanded, browserOrigin)
+  if (browserOrigin) {
+    const origin = new URL(browserOrigin)
+    url.protocol = origin.protocol === 'https:' ? 'wss:' : 'ws:'
+    url.host = origin.host
+  }
+  return url
+}
+
 // Decode complete SSE frames; chunks may split both UTF-8 characters and CRLF.
 export async function consumeEvents(
   body: ReadableStream<Uint8Array>,

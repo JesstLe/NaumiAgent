@@ -1,8 +1,11 @@
 .git
+.naumi
 .venv
 venv
 __pycache__
 *.pyc
+**/__pycache__
+**/*.pyc
 .pytest_cache
 .ruff_cache
 .mypy_cache
@@ -14,6 +17,13 @@ build
 data
 workspace
 node_modules
+**/node_modules
+apps
+frontend/**/dist
+frontend/**/.vite
+frontend/**/coverage
+frontend/**/test-results
+frontend/**/playwright-report
 .env
 config.yaml
 .DS_Store

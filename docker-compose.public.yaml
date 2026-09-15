@@ -1,0 +1,92 @@
+services:
+  naumi-bootstrap:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        UID: ${HOST_UID:-1000}
+        GID: ${HOST_GID:-1000}
+    image: naumi-agent:public
+    user: "0:0"
+    environment: &naumi-environment
+      NAUMI_CONFIG: /app/config.yaml
+      NAUMI_BOOTSTRAP: "0"
+      NAUMI_MODELS__API_KEY: ${NAUMI_MODELS__API_KEY:?Set NAUMI_MODELS__API_KEY in .env.public}
+      NAUMI_MODELS__API_BASE: ${NAUMI_MODELS__API_BASE:-https://api.kimi.com/coding/v1}
+      NAUMI_API__API_KEYS: ${NAUMI_API__API_KEYS:?Set NAUMI_API__API_KEYS to a non-empty JSON array in .env.public}
+      NAUMI_API__CORS_ORIGINS: ${NAUMI_API__CORS_ORIGINS:-[]}
+      NAUMI_SAFETY__MAX_BUDGET_USD: ${NAUMI_SAFETY__MAX_BUDGET_USD:-5.0}
+      NAUMI_WORKSPACE_ROOT: /workspace
+    volumes:
+      - naumi-public-data:/app/data
+      - ${NAUMI_WORKSPACE_PATH:-./workspace}:/workspace
+      - ./deploy/config.container.yaml:/app/config.yaml:ro
+    entrypoint: ["/bin/sh", "-lc"]
+    command:
+      - >
+        mkdir -p /app/data /workspace &&
+        chown -R ${HOST_UID:-1000}:${HOST_GID:-1000} /app/data /workspace &&
+        naumi-deploy validate --config /app/config.yaml --create-dirs
+        --require-api-key --require-api-auth
+    restart: "no"
+
+  naumi-api:
+    image: naumi-agent:public
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        UID: ${HOST_UID:-1000}
+        GID: ${HOST_GID:-1000}
+    depends_on:
+      naumi-bootstrap:
+        condition: service_completed_successfully
+    environment:
+      <<: *naumi-environment
+      FORWARDED_ALLOW_IPS: "*"
+    expose:
+      - "8080"
+    volumes:
+      - naumi-public-data:/app/data
+      - ${NAUMI_WORKSPACE_PATH:-./workspace}:/workspace
+      - ./deploy/config.container.yaml:/app/config.yaml:ro
+    command:
+      [
+        "naumi",
+        "serve",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8080",
+        "--config",
+        "/app/config.yaml",
+        "--no-access-log",
+      ]
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/v1/health', timeout=3)",
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+  naumi-web:
+    image: naumi-agent-web:public
+    build:
+      context: .
+      dockerfile: docker/public/Dockerfile
+    depends_on:
+      naumi-api:
+        condition: service_healthy
+    ports:
+      - "${NAUMI_PUBLIC_BIND:-0.0.0.0}:${NAUMI_PUBLIC_PORT:-8080}:80"
+    restart: unless-stopped
+
+volumes:
+  naumi-public-data:

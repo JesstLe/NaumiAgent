@@ -4,6 +4,8 @@
   <p>能阅读、执行、记忆、协作并自我改进的本地 Agent 系统。</p>
 </div>
 
+公网 Web2 部署请参阅 [docs/public-deployment.md](docs/public-deployment.md)。公网模式只发布一个 Web 入口，API 保持在容器内网，并强制客户端令牌认证。
+
 ## 当前状态
 
 `naumi` 默认启动新一代 Node Terminal UI，并以当前目录作为工作区；启动失败时自动回退到 Textual TUI。主界面聚焦对话与执行时间线，工具、权限、任务和运行状态通过结构化卡片持续更新。旧 Prompt Toolkit CLI 已退出公共入口，但实现代码继续保留。
