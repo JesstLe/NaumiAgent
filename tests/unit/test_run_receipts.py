@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import os
 import shlex
 import subprocess
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -123,6 +127,53 @@ async def test_git_probe_reports_unavailable_without_inventing_changes(tmp_path)
     assert delta.changes == ()
     assert delta.warnings
     assert all("Git" in warning for warning in delta.warnings)
+
+
+@pytest.mark.asyncio
+async def test_git_probe_bounds_large_status_output(tmp_path, monkeypatch):
+    from naumi_agent.runs import git_probe
+
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    for index in range(20):
+        (repo / f"untracked-{index:02d}-{'x' * 40}.txt").write_text(
+            "content\n",
+            encoding="utf-8",
+        )
+    monkeypatch.setattr(git_probe, "_MAX_GIT_STATUS_BYTES", 64)
+
+    snapshot = await git_probe.GitWorkspaceProbe(repo).capture()
+
+    assert snapshot.available
+    assert len(snapshot.paths) < 20
+    assert any("Git 状态输出超过" in warning for warning in snapshot.warnings)
+
+
+@pytest.mark.asyncio
+async def test_git_probe_counts_untracked_lines_off_event_loop(tmp_path, monkeypatch):
+    from naumi_agent.runs import git_probe
+
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    (repo / "untracked.txt").write_text("one\ntwo\n", encoding="utf-8")
+    event_loop_thread = threading.get_ident()
+    count_threads: list[int] = []
+    original = git_probe._count_file_lines
+
+    def slow_count_file_lines(repository_root: Path, relative_path: str) -> int:
+        count_threads.append(threading.get_ident())
+        time.sleep(0.25)
+        return original(repository_root, relative_path)
+
+    monkeypatch.setattr(git_probe, "_count_file_lines", slow_count_file_lines)
+    pending = asyncio.create_task(git_probe.GitWorkspaceProbe(repo).capture())
+    await asyncio.sleep(0.02)
+
+    assert not pending.done()
+    snapshot = await pending
+    assert snapshot.paths["untracked.txt"].additions == 2
+    assert count_threads
+    assert event_loop_thread not in count_threads
 
 
 @pytest.mark.asyncio
@@ -327,7 +378,7 @@ async def test_receipt_builder_fails_rm_postcondition_when_target_remains(tmp_pa
         {
             "name": "bash_run",
             "call_id": "delete-residual",
-            "args": json.dumps({"command": f"rm -rf {target}"}),
+            "args": json.dumps({"command": "rm -rf still-here"}),
         },
     )
     builder.observe(
@@ -356,7 +407,12 @@ async def test_receipt_builder_verifies_deleting_symlink_without_following_targe
     _init_repo(repo)
     target = repo / "tracked.txt"
     link = repo / "temporary-link"
-    link.symlink_to(target)
+    try:
+        link.symlink_to(target)
+    except OSError as exc:
+        if os.name == "nt" and exc.winerror == 1314:
+            pytest.skip("当前 Windows 账户没有创建符号链接的权限")
+        raise
     builder = await RunReceiptBuilder.start(workspace_root=repo, run_id="run-delete-link")
     builder.observe(
         "tool_start",

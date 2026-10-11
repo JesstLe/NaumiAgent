@@ -7,6 +7,7 @@ import sqlite3
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -568,6 +569,7 @@ async def test_resume_reconciles_terminal_background_receipt_and_continues(
     action = store.prepare_action(_action_record())
     store.mark_action_dispatched(action.action_key, updated_at=2.0)
     background_store = BackgroundTaskStore(tmp_path / "background")
+    completed_at = datetime.now().isoformat()
     background_store.save(BackgroundTask(
         id="bg_0042",
         command="echo reconcile",
@@ -575,8 +577,8 @@ async def test_resume_reconciles_terminal_background_receipt_and_continues(
         status=BackgroundStatus.COMPLETED,
         output_path=str(background_store.artifacts_dir / "bg_0042.log"),
         exit_code=0,
-        started_at="2026-07-18T12:00:00",
-        completed_at="2026-07-18T12:00:01",
+        started_at=completed_at,
+        completed_at=completed_at,
         idempotency_key=action.dispatch_token,
     ))
     background_runner = BackgroundRunner(background_store)

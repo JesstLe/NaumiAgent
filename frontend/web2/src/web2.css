@@ -1733,3 +1733,4 @@
 .w2-split-cell { display: flex; min-height: 20px; border-right: 1px solid #e4e8dd; }
 .w2-split-cell code { padding-right: 12px; } .w2-split-cell.empty { background: #f5f6f3; }
 .w2-diff-file > .w2-muted { padding: 12px; }
+.w2-diff-notice { margin: 0; padding: 8px 11px; border-top: 1px solid #eceee8; background: #fff9e9; color: #8a6b22; font-size: 11px; line-height: 1.45; }

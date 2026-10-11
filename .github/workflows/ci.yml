@@ -6,44 +6,95 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - run: pip install ruff
-      - run: ruff check src/ tests/
+      - run: ruff check src/ tests/ scripts/select_test_shard.py
 
-  test:
+  test-shard:
+    name: test shard ${{ matrix.shard }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
-      - name: Run tests with process-isolated coverage
+      - name: Select balanced unit-test shard
+        run: >-
+          python scripts/select_test_shard.py
+          --root tests/unit
+          --shard-count 12
+          --shard-index ${{ matrix.shard }}
+          --output unit-tests.txt
+      - name: Run process-isolated tests
         shell: bash
+        env:
+          COVERAGE_FILE: .coverage.shard-${{ matrix.shard }}
         run: |
           set -euo pipefail
           python -m coverage erase
-          pytest tests/e2e tests/integration -q --tb=short \
-            --cov=src/naumi_agent --cov-append --cov-report=
-          while IFS= read -r test_file; do
-            pytest "$test_file" -q --tb=short \
+          if [[ "${{ matrix.shard }}" == "0" ]]; then
+            timeout 20m pytest tests/e2e tests/integration -q --tb=short \
               --cov=src/naumi_agent --cov-append --cov-report=
-          done < <(find tests/unit -maxdepth 1 -name 'test_*.py' -print | sort)
+          fi
+          while IFS= read -r test_file; do
+            echo "::group::$test_file"
+            test_timeout=10m
+            if [[ "$test_file" == "tests/unit/test_engine.py" ]]; then
+              test_timeout=20m
+            fi
+            timeout "$test_timeout" pytest "$test_file" -q --tb=short \
+              --cov=src/naumi_agent --cov-append --cov-report=
+            echo "::endgroup::"
+          done < unit-tests.txt
+      - uses: actions/upload-artifact@v5
+        with:
+          name: coverage-shard-${{ matrix.shard }}
+          path: .coverage.shard-${{ matrix.shard }}
+          include-hidden-files: true
+          retention-days: 1
+
+  test:
+    name: test
+    needs: test-shard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install coverage
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: coverage-shard-*
+          path: coverage-data
+          merge-multiple: true
+      - name: Combine coverage
+        run: |
+          python -m coverage combine coverage-data
           python -m coverage report --fail-under=50
 
   typecheck:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]"

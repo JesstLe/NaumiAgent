@@ -123,7 +123,12 @@ async def test_typed_detail_reflects_durable_cooldown_and_significant_evidence(
     )
     review = EvolutionReviewService(
         evolution_store,
-        governance_reader=workbench,
+        governance_reader=SimpleNamespace(
+            evaluate_source_cooldowns=lambda sources: workbench.evaluate_source_cooldowns(
+                sources,
+                now=NOW,
+            )
+        ),
     )
 
     blocked = evolution_review_payload(

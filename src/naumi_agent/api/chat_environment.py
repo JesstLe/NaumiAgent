@@ -9,9 +9,14 @@ from pathlib import Path
 
 from naumi_agent.background.store import BackgroundTaskStore
 from naumi_agent.runs.store import ChatRunStore
+from naumi_agent.runtime.async_process import BoundedProcessOutput, read_bounded_stdout
 
 _SENSITIVE_NAMES = ("token", "secret", "password", "passwd", "api_key", "apikey")
 _SOURCE_KINDS = {"source", "file", "screenshot"}
+_GIT_METADATA_MAX_BYTES = 8 * 1024 * 1024
+_GIT_PATCH_MAX_BYTES = 512 * 1024
+_GIT_PATCH_TOTAL_BYTES = 4 * 1024 * 1024
+_GIT_PATCH_CONCURRENCY = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +39,8 @@ class GitDiffFile:
     additions: int = 0
     deletions: int = 0
     patch: str = ""
+    patch_truncated: bool = False
+    patch_notice: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,7 +127,7 @@ class ChatEnvironmentCollector:
                 upstream=upstream,
                 ahead=ahead,
                 behind=behind,
-                error=f"Git diff failed: {exc}",
+                error=f"读取 Git 差异失败：{exc}",
             )
         return GitDiff(
             available=True,
@@ -194,30 +201,58 @@ class ChatEnvironmentCollector:
             if worktree_status not in (" ", "?"):
                 descriptors.append((path, worktree_status, "unstaged", False))
             if index_status == "?" and worktree_status == "?":
-                descriptors.append((path, "A", "unstaged", True))
+                descriptors.append((path, "A", "untracked", True))
 
         stats = {
             "staged": _parse_numstat(staged_stats),
             "unstaged": _parse_numstat(unstaged_stats),
+            "untracked": {},
         }
-        semaphore = asyncio.Semaphore(8)
-
         async def collect(
             descriptor: tuple[str, str, str, bool],
         ) -> GitDiffFile:
             path, status, stage, untracked = descriptor
-            async with semaphore:
-                return await self._collect_file_diff(
-                    path,
-                    status,
-                    stage,
-                    untracked=untracked,
-                    stats=stats[stage].get(path, (0, 0)),
-                )
+            return await self._collect_file_diff(
+                path,
+                status,
+                stage,
+                untracked=untracked,
+                stats=stats[stage].get(path, (0, 0)),
+            )
 
-        files = list(await asyncio.gather(*(collect(item) for item in descriptors)))
-        # Preserve the order Git reports.
-        files.sort(key=lambda f: (f.stage, f.path))
+        async def omit(
+            descriptor: tuple[str, str, str, bool],
+        ) -> GitDiffFile:
+            path, status, stage, untracked = descriptor
+            additions, deletions = stats[stage].get(path, (0, 0))
+            if untracked:
+                additions, deletions = await asyncio.to_thread(
+                    _read_untracked_stats,
+                    self._workspace_root / path,
+                )
+            return GitDiffFile(
+                path=path,
+                status=status,
+                stage=stage,
+                additions=additions,
+                deletions=deletions,
+                patch_truncated=True,
+                patch_notice="差异总量超过 4 MiB，本文件补丁未加载。",
+            )
+
+        descriptors.sort(key=lambda item: (item[2], item[0]))
+        files: list[GitDiffFile] = []
+        remaining_patch_bytes = _GIT_PATCH_TOTAL_BYTES
+        for offset in range(0, len(descriptors), _GIT_PATCH_CONCURRENCY):
+            batch = descriptors[offset : offset + _GIT_PATCH_CONCURRENCY]
+            if remaining_patch_bytes <= 0:
+                files.extend(await asyncio.gather(*(omit(item) for item in batch)))
+                continue
+            collected = await asyncio.gather(*(collect(item) for item in batch))
+            for item in collected:
+                item, consumed = _apply_patch_budget(item, remaining_patch_bytes)
+                remaining_patch_bytes -= consumed
+                files.append(item)
         return files
 
     async def _collect_file_diff(
@@ -231,11 +266,16 @@ class ChatEnvironmentCollector:
     ) -> GitDiffFile:
         if untracked:
             patch, additions, deletions = await self._untracked_patch_and_stats(path)
+            patch_truncated = False
         elif stage == "staged":
-            patch = await self._git("diff", "--cached", "--", path)
+            patch, patch_truncated = await self._git_patch(
+                "diff", "--no-ext-diff", "--no-textconv", "--cached", "--", path
+            )
             additions, deletions = stats
         else:
-            patch = await self._git("diff", "--", path)
+            patch, patch_truncated = await self._git_patch(
+                "diff", "--no-ext-diff", "--no-textconv", "--", path
+            )
             additions, deletions = stats
         return GitDiffFile(
             path=path,
@@ -244,20 +284,18 @@ class ChatEnvironmentCollector:
             additions=additions,
             deletions=deletions,
             patch=patch,
+            patch_truncated=patch_truncated,
+            patch_notice=(
+                "补丁超过 512 KiB，仅显示开头部分。"
+                if patch_truncated
+                else ""
+            ),
         )
 
     async def _untracked_patch_and_stats(self, path: str) -> tuple[str, int, int]:
         """Read an untracked text file once for both patch content and stats."""
         target = self._workspace_root / path
-        try:
-            if target.is_file() and target.stat().st_size <= 1_000_000:
-                text = target.read_text(encoding="utf-8", errors="replace")
-                lines = text.splitlines()
-                patch = "".join(f"+{line}\n" for line in lines) + "\n"
-                return patch, len(lines), 0
-        except (OSError, UnicodeError):
-            pass
-        return "", 0, 0
+        return await asyncio.to_thread(_read_untracked_patch_and_stats, target)
 
     async def _ahead_behind(self) -> tuple[int, int]:
         output = await self._git(
@@ -269,22 +307,41 @@ class ChatEnvironmentCollector:
         return int(parts[1]), int(parts[0])
 
     async def _git(self, *args: str) -> str:
+        result = await self._run_git(*args, max_output_bytes=_GIT_METADATA_MAX_BYTES)
+        if result.truncated:
+            raise OSError(
+                f"Git 元数据超过 {_GIT_METADATA_MAX_BYTES // (1024 * 1024)} MiB 上限"
+            )
+        if result.returncode != 0:
+            return ""
+        # Only strip trailing newlines: leading spaces matter for status and diff output.
+        return result.stdout.decode("utf-8", errors="replace").rstrip("\n")
+
+    async def _git_patch(self, *args: str) -> tuple[str, bool]:
+        result = await self._run_git(*args, max_output_bytes=_GIT_PATCH_MAX_BYTES)
+        if result.returncode != 0 and not result.truncated:
+            return "", False
+        return result.stdout.decode("utf-8", errors="ignore").rstrip("\n"), result.truncated
+
+    async def _run_git(
+        self,
+        *args: str,
+        max_output_bytes: int,
+    ) -> BoundedProcessOutput:
         try:
             process = await asyncio.create_subprocess_exec(
                 "git",
                 "-C",
                 str(self._workspace_root),
+                "--no-pager",
                 *args,
+                stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )
         except (FileNotFoundError, NotADirectoryError):
-            return ""
-        stdout, _ = await process.communicate()
-        if process.returncode != 0:
-            return ""
-        # Only strip trailing newlines: leading spaces matter for status and diff output.
-        return stdout.decode("utf-8", errors="replace").rstrip("\n")
+            return BoundedProcessOutput(stdout=b"", returncode=127)
+        return await read_bounded_stdout(process, max_bytes=max_output_bytes)
 
     def _collect_processes(self) -> list[BackgroundProcessEnvironment]:
         processes: list[BackgroundProcessEnvironment] = []
@@ -381,6 +438,58 @@ def _safe_command_summary(command: str, *, max_chars: int = 200) -> str:
         sanitized.append(token)
     summary = " ".join(sanitized)
     return summary if len(summary) <= max_chars else summary[: max_chars - 1] + "…"
+
+
+def _read_untracked_patch_and_stats(target: Path) -> tuple[str, int, int]:
+    try:
+        if target.is_file() and target.stat().st_size <= 1_000_000:
+            text = target.read_text(encoding="utf-8", errors="replace")
+            lines = text.splitlines()
+            patch = "".join(f"+{line}\n" for line in lines) + "\n"
+            return patch, len(lines), 0
+    except (OSError, UnicodeError):
+        pass
+    return "", 0, 0
+
+
+def _read_untracked_stats(target: Path) -> tuple[int, int]:
+    try:
+        if target.is_file() and target.stat().st_size <= 1_000_000:
+            with target.open("r", encoding="utf-8", errors="replace") as handle:
+                return sum(1 for _line in handle), 0
+    except (OSError, UnicodeError):
+        pass
+    return 0, 0
+
+
+def _apply_patch_budget(
+    item: GitDiffFile,
+    remaining_bytes: int,
+) -> tuple[GitDiffFile, int]:
+    raw = item.patch.encode("utf-8")
+    allowed = min(len(raw), _GIT_PATCH_MAX_BYTES, max(remaining_bytes, 0))
+    if allowed == len(raw):
+        return item, allowed
+
+    if remaining_bytes <= 0:
+        notice = "差异总量超过 4 MiB，本文件补丁未加载。"
+    elif len(raw) > _GIT_PATCH_MAX_BYTES:
+        notice = "补丁超过 512 KiB，仅显示开头部分。"
+    else:
+        notice = "差异总量超过 4 MiB，仅显示本文件开头部分。"
+    return (
+        GitDiffFile(
+            path=item.path,
+            status=item.status,
+            stage=item.stage,
+            additions=item.additions,
+            deletions=item.deletions,
+            patch=raw[:allowed].decode("utf-8", errors="ignore"),
+            patch_truncated=True,
+            patch_notice=notice,
+        ),
+        allowed,
+    )
 
 
 def _parse_numstat(output: str) -> dict[str, tuple[int, int]]:

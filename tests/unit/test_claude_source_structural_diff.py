@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -228,7 +229,7 @@ def test_receipt_integrity_and_real_cli(tmp_path: Path) -> None:
 
     command = subprocess.run(
         [
-            str(Path(__file__).resolve().parents[2] / ".venv" / "bin" / "python"),
+            sys.executable,
             "-m",
             "naumi_agent.claude_source.structural_diff",
             "--manifest",

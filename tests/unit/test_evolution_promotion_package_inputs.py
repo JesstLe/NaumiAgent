@@ -34,6 +34,7 @@ from naumi_agent.evolution.reflection_memories import (
 from naumi_agent.evolution.reflection_memories import (
     _sha256_payload as _reflection_sha256,
 )
+from naumi_agent.harness.eval_identity import capture_eval_platform_identity
 
 
 def _accepted_reflection(
@@ -246,7 +247,7 @@ def _package(
         "mutation_receipt_sha256": mutation.receipt_sha256,
         "final_evaluation_receipt_id": fixed[5][1],
         "final_evaluation_receipt_sha256": fixed[5][2],
-        "required_platforms": ["macos"],
+        "required_platforms": [capture_eval_platform_identity().system],
         "evaluation_lane_count": 2,
         "patch": patch.model_dump(mode="json"),
         "baseline": baseline.model_dump(mode="json"),

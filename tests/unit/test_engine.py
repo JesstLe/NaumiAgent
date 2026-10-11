@@ -198,7 +198,7 @@ def test_agent_engine_loads_model_catalog(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    engine = AgentEngine(
+    engine = create_agent_engine(
         AppConfig(
             models=ModelConfig(provider="local", catalog_path=str(catalog_path)),
             memory=MemoryConfig(
@@ -218,7 +218,7 @@ def test_agent_engine_loads_model_catalog(tmp_path: Path) -> None:
 def test_agent_engine_without_model_catalog_keeps_legacy_resolution(
     tmp_path: Path,
 ) -> None:
-    engine = AgentEngine(
+    engine = create_agent_engine(
         AppConfig(
             memory=MemoryConfig(
                 session_db_path=str(tmp_path / "sessions.db"),
@@ -254,7 +254,7 @@ def _two_safe_tool_response() -> ModelResponse:
 
 @pytest.mark.asyncio
 async def test_shutdown_continues_after_browser_cleanup_failure(tmp_path: Path) -> None:
-    engine = AgentEngine(
+    engine = create_agent_engine(
         AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
     )
     engine._browser_session.stop = AsyncMock(
@@ -273,7 +273,7 @@ async def test_shutdown_continues_after_browser_cleanup_failure(tmp_path: Path) 
 
 @pytest.mark.asyncio
 async def test_react_loop_executes_safe_tool_calls_concurrently(tmp_path) -> None:
-    engine = AgentEngine(AppConfig(
+    engine = create_agent_engine(AppConfig(
         memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
         safety=SafetyConfig(max_parallel_tools=2),
     ))
@@ -323,7 +323,7 @@ async def test_react_loop_executes_safe_tool_calls_concurrently(tmp_path) -> Non
 
 @pytest.mark.asyncio
 async def test_streaming_parallel_tools_emit_batch_metadata(tmp_path) -> None:
-    engine = AgentEngine(AppConfig(
+    engine = create_agent_engine(AppConfig(
         memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
         safety=SafetyConfig(max_parallel_tools=2),
     ))
@@ -404,7 +404,7 @@ async def test_react_loop_requires_todo_reconciliation_before_final(tmp_path) ->
     config = AppConfig(
         memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
     )
-    engine = AgentEngine(config)
+    engine = create_agent_engine(config)
     engine.task_store.set_session("todo-reconcile")
     task = await engine.task_store.create_task("实现后端")
     await engine.task_store.update_task(task.id, status=TaskStatus.IN_PROGRESS)
@@ -452,7 +452,7 @@ async def test_streaming_reconciliation_hides_premature_final_text(tmp_path) -> 
     config = AppConfig(
         memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
     )
-    engine = AgentEngine(config)
+    engine = create_agent_engine(config)
     engine.task_store.set_session("todo-stream-reconcile")
     task = await engine.task_store.create_task("实现流式对账")
     await engine.task_store.update_task(task.id, status=TaskStatus.IN_PROGRESS)
@@ -500,7 +500,7 @@ async def test_todo_reconciliation_blocks_active_task_when_turns_exhausted(tmp_p
         memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
         safety=SafetyConfig(max_turns=1),
     )
-    engine = AgentEngine(config)
+    engine = create_agent_engine(config)
     engine.task_store.set_session("todo-max-turns")
     task = await engine.task_store.create_task("完成收尾")
     await engine.task_store.update_task(task.id, status=TaskStatus.IN_PROGRESS)
@@ -530,7 +530,7 @@ async def test_todo_reconciliation_blocks_active_task_when_turns_exhausted(tmp_p
 @pytest.fixture
 def engine(request: pytest.FixtureRequest) -> AgentEngine:
     config = AppConfig()
-    instance = AgentEngine(config)
+    instance = create_agent_engine(config)
 
     def cleanup() -> None:
         asyncio.run(instance.shutdown())
@@ -568,9 +568,8 @@ def context_budget_engine(
 @pytest.mark.asyncio
 async def test_engine_registers_safe_workbench_tools(tmp_path) -> None:
     from naumi_agent.config.settings import AppConfig, MemoryConfig
-    from naumi_agent.orchestrator.engine import AgentEngine
 
-    engine = AgentEngine(
+    engine = create_agent_engine(
         AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
     )
     try:
@@ -585,7 +584,7 @@ async def test_engine_registers_safe_workbench_tools(tmp_path) -> None:
 
 class TestEngineInit:
     def test_creates_with_default_config(self) -> None:
-        engine = AgentEngine(AppConfig())
+        engine = create_agent_engine(AppConfig())
         assert len(engine.tool_registry) > 0
         assert engine.router is not None
 
@@ -602,7 +601,7 @@ class TestEngineInit:
     @pytest.mark.asyncio
     async def test_bash_output_dir_stays_readable_inside_workspace(self, tmp_path) -> None:
         state_dir = tmp_path / "runtime-data"
-        engine = AgentEngine(
+        engine = create_agent_engine(
             AppConfig(
                 workspace_root=str(tmp_path),
                 memory=MemoryConfig(session_db_path=str(state_dir / "sessions.db")),
@@ -628,7 +627,7 @@ class TestEngineInit:
 
     @pytest.mark.asyncio
     async def test_registered_tools_have_permission_rules(self) -> None:
-        engine = AgentEngine(AppConfig())
+        engine = create_agent_engine(AppConfig())
         checker = PermissionChecker(PermissionMode.MODERATE, allowed_dirs=["/workspace"])
 
         unknown = []
@@ -643,7 +642,7 @@ class TestEngineInit:
         await engine.shutdown()
 
     def test_registered_tools_have_openai_compatible_schemas(self) -> None:
-        engine = AgentEngine(AppConfig())
+        engine = create_agent_engine(AppConfig())
         name_re = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
         errors: list[str] = []
         seen: set[str] = set()
@@ -1076,7 +1075,7 @@ class TestSessionLoading:
         config = AppConfig(
             memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
         )
-        engine = AgentEngine(config)
+        engine = create_agent_engine(config)
         session = Session(title="缺失工具结果")
         session.messages = [
             {"role": "system", "content": "prompt"},
@@ -1110,7 +1109,7 @@ class TestSessionLoading:
         config = AppConfig(
             memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
         )
-        engine = AgentEngine(config)
+        engine = create_agent_engine(config)
         session = Session(title="历史空回复")
         session.messages = [
             {"role": "system", "content": "prompt"},
@@ -1163,7 +1162,7 @@ class TestSessionLoading:
         config = AppConfig(
             memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
         )
-        engine = AgentEngine(config)
+        engine = create_agent_engine(config)
         try:
             previous = await engine.get_or_create_session()
             previous_grant = engine._permission_grant_store.create(
@@ -1197,7 +1196,7 @@ class TestSessionLoading:
         self,
         tmp_path: Path,
     ) -> None:
-        engine = AgentEngine(
+        engine = create_agent_engine(
             AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
         )
         entered = asyncio.Event()
@@ -1254,7 +1253,7 @@ class TestSessionLoading:
         self,
         tmp_path: Path,
     ) -> None:
-        engine = AgentEngine(
+        engine = create_agent_engine(
             AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
         )
         entered = asyncio.Event()
@@ -1315,7 +1314,7 @@ class TestSessionLoading:
         self,
         tmp_path: Path,
     ) -> None:
-        engine = AgentEngine(
+        engine = create_agent_engine(
             AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
         )
         entered = asyncio.Event()
@@ -1376,7 +1375,7 @@ class TestSessionLoading:
         self,
         tmp_path: Path,
     ) -> None:
-        engine = AgentEngine(
+        engine = create_agent_engine(
             AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
         )
         entered = asyncio.Event()
@@ -1385,6 +1384,7 @@ class TestSessionLoading:
         marker = tmp_path / "failed-load-tool-ran"
         try:
             active = await engine.get_or_create_session()
+            replacement = await engine.session_store.create_session(title="replacement")
             grant = engine._permission_grant_store.create(
                 active.id,
                 "shell",
@@ -1404,7 +1404,7 @@ class TestSessionLoading:
                 return "allow_once"
 
             engine.set_permission_confirmer(confirm)
-            load_task = asyncio.create_task(engine.load_session("missing-session"))
+            load_task = asyncio.create_task(engine.load_session(replacement.id))
             await entered.wait()
 
             release.set()
@@ -1437,7 +1437,7 @@ class TestSessionLoading:
         self,
         tmp_path: Path,
     ) -> None:
-        engine = AgentEngine(
+        engine = create_agent_engine(
             AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
         )
         entered = asyncio.Event()
@@ -1478,7 +1478,7 @@ class TestSessionLoading:
         self,
         tmp_path: Path,
     ) -> None:
-        engine = AgentEngine(
+        engine = create_agent_engine(
             AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
         )
         committed = asyncio.Event()
@@ -1568,7 +1568,7 @@ class TestSessionLoading:
         self,
         tmp_path: Path,
     ) -> None:
-        engine = AgentEngine(
+        engine = create_agent_engine(
             AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
         )
         committed = asyncio.Event()
@@ -1682,7 +1682,7 @@ class TestSessionLoading:
         self,
         tmp_path: Path,
     ) -> None:
-        engine = AgentEngine(
+        engine = create_agent_engine(
             AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
         )
         try:
@@ -1713,7 +1713,7 @@ class TestSessionLoading:
         config = AppConfig(
             memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
         )
-        engine = AgentEngine(config)
+        engine = create_agent_engine(config)
         session = await engine.get_or_create_session()
         grant = engine._permission_grant_store.create(
             session.id,
@@ -1743,7 +1743,7 @@ class TestSessionLoading:
         self,
         tmp_path: Path,
     ) -> None:
-        engine = AgentEngine(
+        engine = create_agent_engine(
             AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
         )
         try:
@@ -1818,7 +1818,7 @@ class TestSessionLoading:
         self,
         tmp_path: Path,
     ) -> None:
-        engine = AgentEngine(
+        engine = create_agent_engine(
             AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
         )
         try:
@@ -1852,7 +1852,7 @@ class TestSessionLoading:
         self,
         tmp_path: Path,
     ) -> None:
-        engine = AgentEngine(
+        engine = create_agent_engine(
             AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
         )
         marker = tmp_path / "deleted-session-tool-ran"
@@ -1889,7 +1889,7 @@ class TestSessionAuthorizationGeneration:
         self,
         tmp_path: Path,
     ) -> None:
-        engine = AgentEngine(
+        engine = create_agent_engine(
             AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
         )
         marker = tmp_path / "allow-once-aba-ran"
@@ -1925,7 +1925,7 @@ class TestSessionAuthorizationGeneration:
         self,
         tmp_path: Path,
     ) -> None:
-        engine = AgentEngine(
+        engine = create_agent_engine(
             AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
         )
         marker = tmp_path / "grant-aba-ran"
@@ -1962,7 +1962,7 @@ class TestSessionAuthorizationGeneration:
         self,
         tmp_path: Path,
     ) -> None:
-        engine = AgentEngine(
+        engine = create_agent_engine(
             AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
         )
         first_entered = asyncio.Event()
@@ -2032,7 +2032,7 @@ class TestSessionAuthorizationGeneration:
         self,
         tmp_path: Path,
     ) -> None:
-        engine = AgentEngine(
+        engine = create_agent_engine(
             AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
         )
         entered = asyncio.Event()
@@ -2237,7 +2237,7 @@ class TestToolExecution:
         config.workspace_root = str(workspace)
         config.memory.session_db_path = str(state_dir / "sessions.db")
         config.safety.allowed_dirs = []
-        engine = AgentEngine(config)
+        engine = create_agent_engine(config)
         try:
             result = await engine._execute_tool(
                 ToolCall(
@@ -2854,7 +2854,7 @@ class TestToolExecution:
         config = AppConfig(
             memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
         )
-        engine = AgentEngine(config)
+        engine = create_agent_engine(config)
         session = await engine.get_or_create_session()
         engine.task_store.set_session(session.id)
 
@@ -3166,7 +3166,7 @@ class TestTaskVisualization:
         assert result["todo_items"][0]["subject"] == "创建文件"
 
     def test_append_message_sanitizes_visual_payloads_before_context(self, tmp_path) -> None:
-        engine = AgentEngine(AppConfig(
+        engine = create_agent_engine(AppConfig(
             memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db"))
         ))
         try:
@@ -3268,7 +3268,7 @@ class TestSubagentVisualization:
         self,
         tmp_path,
     ) -> None:
-        engine = AgentEngine(AppConfig(
+        engine = create_agent_engine(AppConfig(
             memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db"))
         ))
         try:
@@ -3280,6 +3280,7 @@ class TestSubagentVisualization:
         self,
         engine: AgentEngine,
     ) -> None:
+        engine.subagent_manager._agent_worker_process_factory = None
         session = await engine.get_or_create_session()
         engine.task_store.set_session(session.id)
         task = await engine.task_store.create_task(subject="让 coder 检查实现")
@@ -3330,7 +3331,7 @@ class TestSubagentVisualization:
         self,
         tmp_path,
     ) -> None:
-        engine = AgentEngine(AppConfig(
+        engine = create_agent_engine(AppConfig(
             memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db"))
         ))
         try:
@@ -3342,6 +3343,7 @@ class TestSubagentVisualization:
         self,
         engine: AgentEngine,
     ) -> None:
+        engine.subagent_manager._agent_worker_process_factory = None
         session = await engine.get_or_create_session()
         engine.task_store.set_session(session.id)
         task = await engine.task_store.create_task(subject="让 coder 处理失败用例")
@@ -3376,7 +3378,7 @@ class TestSubagentVisualization:
         self,
         tmp_path,
     ) -> None:
-        engine = AgentEngine(AppConfig(
+        engine = create_agent_engine(AppConfig(
             memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db"))
         ))
         try:
@@ -3388,6 +3390,7 @@ class TestSubagentVisualization:
         self,
         engine: AgentEngine,
     ) -> None:
+        engine.subagent_manager._agent_worker_process_factory = None
         session = await engine.get_or_create_session()
         engine.task_store.set_session(session.id)
         task = await engine.task_store.create_task(subject="让 coder 处理异常")
@@ -3438,7 +3441,7 @@ class TestBudgetCheck:
         config = AppConfig(
             safety=SafetyConfig(permission_mode="bypass", max_budget_usd=0)
         )
-        engine = AgentEngine(config)
+        engine = create_agent_engine(config)
         result = engine._check_budget()
 
         assert result is not None
@@ -3572,7 +3575,7 @@ class TestContextCompactionPreservation:
         config = AppConfig(
             memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
         )
-        engine = AgentEngine(config)
+        engine = create_agent_engine(config)
         events: list[tuple[str, dict[str, object]]] = []
 
         async def on_event(event: str, data: dict[str, object]) -> None:
@@ -3619,7 +3622,7 @@ class TestContextCompactionPreservation:
         config = AppConfig(
             memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
         )
-        engine = AgentEngine(config)
+        engine = create_agent_engine(config)
         events: list[tuple[str, dict[str, object]]] = []
 
         async def on_event(event: str, data: dict[str, object]) -> None:
@@ -3698,7 +3701,7 @@ class TestErrorRecovery:
         config = AppConfig(
             memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
         )
-        engine = AgentEngine(config)
+        engine = create_agent_engine(config)
         try:
             engine._messages = [
                 {"role": "system", "content": "system prompt"},
@@ -3756,7 +3759,7 @@ class TestErrorRecovery:
         config = AppConfig(
             memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
         )
-        engine = AgentEngine(config)
+        engine = create_agent_engine(config)
         events: list[tuple[str, dict[str, object]]] = []
 
         async def on_event(event: str, data: dict[str, object]) -> None:
@@ -3826,7 +3829,7 @@ class TestErrorRecovery:
         config = AppConfig(
             memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
         )
-        engine = AgentEngine(config)
+        engine = create_agent_engine(config)
         events: list[tuple[str, dict[str, object]]] = []
         call_count = 0
 
@@ -3907,7 +3910,7 @@ class TestErrorRecovery:
         config = AppConfig(
             memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
         )
-        engine = AgentEngine(config)
+        engine = create_agent_engine(config)
         events: list[tuple[str, dict[str, object]]] = []
         call_count = 0
         large_content = "\n".join(f"line_{idx}" for idx in range(600))
@@ -4023,7 +4026,7 @@ class TestErrorRecovery:
         config = AppConfig(
             memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
         )
-        engine = AgentEngine(config)
+        engine = create_agent_engine(config)
         events: list[tuple[str, dict[str, object]]] = []
 
         async def on_event(event: str, data: dict[str, object]) -> None:
@@ -4074,7 +4077,7 @@ class TestErrorRecovery:
         config = AppConfig(
             memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
         )
-        engine = AgentEngine(config)
+        engine = create_agent_engine(config)
         events: list[RuntimeEvent] = []
 
         class RecordingSink:
@@ -4150,7 +4153,7 @@ class TestErrorRecovery:
         config = AppConfig(
             memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
         )
-        engine = AgentEngine(config)
+        engine = create_agent_engine(config)
         try:
             original_messages = [
                 {"role": "system", "content": "system prompt"},
@@ -4221,7 +4224,7 @@ class TestRun:
         config = AppConfig(
             memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
         )
-        engine = AgentEngine(config)
+        engine = create_agent_engine(config)
         mock_response = ModelResponse(
             content="Hello!",
             usage=TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15, cost_usd=0.001),
@@ -4651,7 +4654,7 @@ class TestStreamingStartupLatency:
         config = AppConfig(
             memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
         )
-        engine = AgentEngine(config)
+        engine = create_agent_engine(config)
         events: list[RuntimeEvent] = []
 
         class RecordingSink:
@@ -4701,7 +4704,7 @@ class TestStreamingStartupLatency:
         config = AppConfig(
             memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
         )
-        engine = AgentEngine(config)
+        engine = create_agent_engine(config)
         events: list[tuple[str, dict[str, object]]] = []
 
         async def on_event(event: str, data: dict[str, object]) -> None:
@@ -4744,7 +4747,7 @@ class TestStreamingStartupLatency:
         config = AppConfig(
             memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
         )
-        engine = AgentEngine(config)
+        engine = create_agent_engine(config)
         events: list[tuple[str, dict[str, object]]] = []
 
         async def on_event(event: str, data: dict[str, object]) -> None:
@@ -4792,7 +4795,7 @@ class TestStreamingStartupLatency:
         config = AppConfig(
             memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
         )
-        engine = AgentEngine(config)
+        engine = create_agent_engine(config)
         events: list[tuple[str, dict[str, object]]] = []
         plan = Plan(
             understanding="orchestrate",

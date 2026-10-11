@@ -411,15 +411,18 @@ async def test_session_store_persists_engine_column(tmp_path: Path) -> None:
     from naumi_agent.config.settings import MemoryConfig
 
     store = SessionStore(MemoryConfig(session_db_path=str(tmp_path / "s.db")))
-    await store.create_session(title="pi 会话", engine="pi")
-    await store.create_session(title="普通")
-    sessions, _total = await store.list_sessions(page=1, page_size=10)
-    by_title = {s.title: s for s in sessions}
-    assert by_title["pi 会话"].engine == "pi"
-    assert by_title["普通"].engine == "naumi"
+    try:
+        await store.create_session(title="pi 会话", engine="pi")
+        await store.create_session(title="普通")
+        sessions, _total = await store.list_sessions(page=1, page_size=10)
+        by_title = {s.title: s for s in sessions}
+        assert by_title["pi 会话"].engine == "pi"
+        assert by_title["普通"].engine == "naumi"
 
-    loaded = await store.load(by_title["pi 会话"].id)
-    assert loaded is not None and loaded.engine == "pi"
+        loaded = await store.load(by_title["pi 会话"].id)
+        assert loaded is not None and loaded.engine == "pi"
+    finally:
+        await store.close()
 
 
 # ---------------------------------------------------------------------------
@@ -461,7 +464,8 @@ def test_engines_endpoint_lists_both_engines() -> None:
     assert "编码代理" in by_id["pi"]["description"]
 
 
-def test_create_session_accepts_engine_field() -> None:
+def test_create_session_accepts_engine_field(monkeypatch) -> None:
+    monkeypatch.setattr(messages_route, "_pi_engine_available", lambda request: True)
     app = _api_app()
     client = TestClient(app)
     response = client.post("/sessions", json={"engine": "pi", "title": "pi 对话"})

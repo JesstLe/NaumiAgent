@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from naumi_agent.agent_control import AGENT_CONTROL_SCHEMA_VERSION
 from naumi_agent.agents.base import AgentResult
 from naumi_agent.config.settings import AppConfig, MemoryConfig
 from naumi_agent.daemons.agent_jobs import AgentJobError, AgentJobPublicationState
@@ -355,7 +356,7 @@ async def test_real_recovery_quarantines_poison_and_continues_fifo(
     assert backlog.quarantined == 1
     assert backlog.pending == 0
     assert len(inbox) == 1
-    assert snapshot.schema_version == 6
+    assert snapshot.schema_version == AGENT_CONTROL_SCHEMA_VERSION
     assert snapshot.summary.durable_publications_quarantined == 1
     isolated = [
         item for item in snapshot.recovery_catalog.items

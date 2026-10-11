@@ -978,7 +978,15 @@ class TestPermissionChecker:
         outside_dir = tmp_path / "outside"
         allowed_dir.mkdir()
         outside_dir.mkdir()
-        (allowed_dir / "escape").symlink_to(outside_dir, target_is_directory=True)
+        try:
+            (allowed_dir / "escape").symlink_to(
+                outside_dir,
+                target_is_directory=True,
+            )
+        except OSError as exc:
+            if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+                pytest.skip("当前 Windows 环境未授予创建符号链接的权限")
+            raise
         checker = PermissionChecker(
             PermissionMode.MODERATE,
             allowed_dirs=[str(allowed_dir)],

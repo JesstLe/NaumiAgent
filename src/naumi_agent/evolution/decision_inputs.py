@@ -36,6 +36,11 @@ from naumi_agent.evolution.store import (
     EvolutionStoredCandidate,
     EvolutionStoreError,
 )
+from naumi_agent.persistence.sqlite_runtime import (
+    AsyncSQLiteSchemaGuard,
+    configure_sqlite_connection,
+    ensure_sqlite_wal,
+)
 
 DECISION_INPUT_POLICY = "evolution-decision-input-v1"
 DECISION_CANDIDATE_AUTHORITY_POLICY = "evolution-decision-candidate-authority-v1"
@@ -326,6 +331,7 @@ class EvolutionDecisionInputStore:
 
     def __init__(self, db_path: str | Path) -> None:
         self._db_path = Path(db_path).expanduser().resolve()
+        self._schema_guard = AsyncSQLiteSchemaGuard()
 
     async def record(self, artifact: EvolutionDecisionInput) -> EvolutionDecisionInput:
         try:
@@ -341,9 +347,10 @@ class EvolutionDecisionInputStore:
             )
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_schema()
+            async with aiosqlite.connect(self._db_path, timeout=10) as db:
                 db.row_factory = aiosqlite.Row
-                await _ensure_schema(db)
+                await configure_sqlite_connection(db)
                 await db.execute("BEGIN IMMEDIATE")
                 row = await (
                     await db.execute(
@@ -409,9 +416,10 @@ class EvolutionDecisionInputStore:
         if not self._db_path.is_file():
             return None
         try:
-            async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_schema()
+            async with aiosqlite.connect(self._db_path, timeout=10) as db:
                 db.row_factory = aiosqlite.Row
-                await _ensure_schema(db)
+                await configure_sqlite_connection(db)
                 row = await (
                     await db.execute(
                         f"SELECT * FROM evolution_decision_inputs WHERE {column} = ?",
@@ -423,6 +431,9 @@ class EvolutionDecisionInputStore:
             raise EvolutionDecisionInputError(
                 "decision_input_store_corrupt", "Decision Input 损坏或无法读取。"
             ) from exc
+
+    async def _ensure_schema(self) -> None:
+        await self._schema_guard.ensure(self._db_path, _ensure_schema)
 
 
 class EvolutionDecisionInputExecutor:
@@ -599,8 +610,8 @@ def _constraints_from_experiment(
 
 
 async def _ensure_schema(db: aiosqlite.Connection) -> None:
-    await db.execute("PRAGMA journal_mode = WAL")
-    await db.execute("PRAGMA busy_timeout = 10000")
+    await configure_sqlite_connection(db)
+    await ensure_sqlite_wal(db)
     await db.execute(
         """CREATE TABLE IF NOT EXISTS evolution_decision_inputs (
                decision_input_id TEXT PRIMARY KEY,

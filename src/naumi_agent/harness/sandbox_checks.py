@@ -18,6 +18,7 @@ from naumi_agent.daemons.shell_worker import (
     ShellCommandRequest,
     ShellCommandSpec,
     ShellJobExecutionResult,
+    ShellSandboxUnavailableError,
     ShellWorkerCoordinator,
     ShellWorkerError,
     ShellWorkerStatus,
@@ -261,10 +262,10 @@ class HarnessSandboxCheckRunner:
                 if overlays
                 else revision_snapshot.tree_sha256
             )
-        snapshot = (
-            self.sandbox_root
-            / f"{run_id}-{check.id}-{source_before_sha256[:12]}"
-        )
+        snapshot_identity = hashlib.sha256(
+            f"{run_id}\0{check.id}\0{source_before_sha256}".encode()
+        ).hexdigest()[:32]
+        snapshot = self.sandbox_root / f"sandbox-{snapshot_identity}"
         if snapshot.exists():
             return _blocked(
                 check=check,
@@ -361,12 +362,17 @@ class HarnessSandboxCheckRunner:
             ShellWorkerError,
             subprocess.SubprocessError,
         ) as exc:
+            error_code = (
+                "sandbox_unavailable"
+                if isinstance(exc, ShellSandboxUnavailableError)
+                else "sandbox_infrastructure_error"
+            )
             return _blocked(
                 check=check,
                 run_id=run_id,
                 profile_digest=profile_digest,
                 message=(
-                    "Sandbox Profile check 基础设施失败："
+                    f"Sandbox Profile check 基础设施失败 [{error_code}]："
                     f"{type(exc).__name__}：{str(exc)[:200]}"
                 ),
                 source_revision=(

@@ -10,10 +10,15 @@ import signal
 import subprocess
 import sys
 from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import BinaryIO
 
 Which = Callable[[str], str | None]
 IsFile = Callable[[Path], bool]
+
+_MAX_CAPTURE_BYTES = 64 * 1024
+_READ_CHUNK_BYTES = 64 * 1024
 
 
 class ShellRuntimeError(RuntimeError):
@@ -124,9 +129,9 @@ def run_shell_command(
     kwargs: dict[str, object] = {
         "cwd": str(cwd) if cwd is not None else None,
         "env": dict(env) if env is not None else None,
+        "stdin": subprocess.DEVNULL,
         "stdout": subprocess.PIPE,
         "stderr": subprocess.PIPE,
-        "text": True,
     }
     if sys.platform == "win32":
         kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
@@ -134,18 +139,79 @@ def run_shell_command(
         kwargs["start_new_session"] = True
 
     process = subprocess.Popen(argv, **kwargs)
-    try:
-        stdout, stderr = process.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired as exc:
+    if process.stdout is None or process.stderr is None:
         terminate_pid_tree(process.pid, force=True)
-        stdout, stderr = process.communicate()
-        raise subprocess.TimeoutExpired(
-            command,
-            timeout,
-            output=stdout,
-            stderr=stderr,
-        ) from exc
+        process.wait()
+        raise ShellRuntimeError("Shell 子进程缺少输出管道。")
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="naumi-shell") as executor:
+        stdout_future = executor.submit(
+            _read_bounded_pipe,
+            process.stdout,
+            max_bytes=_MAX_CAPTURE_BYTES,
+            keep_tail=False,
+        )
+        stderr_future = executor.submit(
+            _read_bounded_pipe,
+            process.stderr,
+            max_bytes=_MAX_CAPTURE_BYTES,
+            keep_tail=True,
+        )
+        try:
+            process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            terminate_pid_tree(process.pid, force=True)
+            process.wait()
+            stdout_data, stdout_bytes = stdout_future.result()
+            stderr_data, stderr_bytes = stderr_future.result()
+            stdout = _decode_bounded(stdout_data, total_bytes=stdout_bytes)
+            stderr = _decode_bounded(stderr_data, total_bytes=stderr_bytes)
+            raise subprocess.TimeoutExpired(
+                command,
+                timeout,
+                output=stdout,
+                stderr=stderr,
+            ) from exc
+        except BaseException:
+            terminate_pid_tree(process.pid, force=True)
+            process.wait()
+            raise
+        stdout_data, stdout_bytes = stdout_future.result()
+        stderr_data, stderr_bytes = stderr_future.result()
+    stdout = _decode_bounded(stdout_data, total_bytes=stdout_bytes)
+    stderr = _decode_bounded(stderr_data, total_bytes=stderr_bytes)
     return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
+
+
+def _read_bounded_pipe(
+    stream: BinaryIO,
+    *,
+    max_bytes: int,
+    keep_tail: bool,
+) -> tuple[bytes, int]:
+    retained = bytearray()
+    total_bytes = 0
+    try:
+        while chunk := stream.read(_READ_CHUNK_BYTES):
+            total_bytes += len(chunk)
+            if keep_tail:
+                overflow = max(0, len(retained) + len(chunk) - max_bytes)
+                if overflow:
+                    del retained[:overflow]
+                retained.extend(chunk[-max_bytes:])
+                continue
+            remaining = max_bytes - len(retained)
+            if remaining > 0:
+                retained.extend(chunk[:remaining])
+    finally:
+        stream.close()
+    return bytes(retained), total_bytes
+
+
+def _decode_bounded(data: bytes, *, total_bytes: int) -> str:
+    text = data.decode(errors="replace")
+    if total_bytes <= len(data):
+        return text
+    return text + f"\n... (输出已截断，原始大小 {total_bytes} 字节)"
 
 
 async def terminate_process_tree(
@@ -207,6 +273,8 @@ def pid_exists(pid: int) -> bool:
         return False
     except PermissionError:
         return True
+    except OSError:
+        return False
     return True
 
 

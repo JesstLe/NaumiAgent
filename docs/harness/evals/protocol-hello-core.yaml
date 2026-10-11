@@ -41,11 +41,14 @@ cases:
       selected_version: 1
       capabilities:
         - agent_recovery_actions
+        - agent_result_acknowledgement
         - doctor_export
         - doctor_live_probe
         - doctor_trace_index
         - evolution_evaluation_lane
+        - goal_lifecycle_actions
         - goal_snapshot
+        - goal_terminal_outbox_disposed_cursor
         - heartbeat
         - pursuit_recovery_actions
         - sequence_integrity
@@ -54,8 +57,9 @@ cases:
         - terminal_event_cursor
         - terminal_event_recovery
         - typed_ui_messages
-        - workbench_snapshot
+        - workbench_approval_actions
         - workbench_proposal_actions
+        - workbench_snapshot
     metrics: *protocol_metrics
     budget: *case_budget
 

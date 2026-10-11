@@ -56,6 +56,20 @@ def _worker(*, fixture, delivery_service, credential, journal, transport=None, *
         assert package.installation_member_id == credential.payload.member_id
         return credential
 
+    policy_values = {
+        "interval_seconds": 0.1,
+        "max_empty_backoff_seconds": 1,
+        "max_failure_backoff_seconds": 1,
+        "journal_scan_limit": 10,
+        "return_scan_limit": 10,
+        "claim_lease_seconds": 3,
+        "result_timeout_seconds": 0.2,
+        "retry_base_seconds": 0.1,
+        "retry_max_seconds": 1,
+        "shutdown_drain_seconds": 1,
+        "jitter_ratio": 0,
+    }
+    policy_values.update(policy)
     return EvolutionStableRemoteFinalizationResultReturnWorker(
         journal=journal,
         store=EvolutionStableRemoteFinalizationResultReturnStore(journal.db_path),
@@ -68,20 +82,7 @@ def _worker(*, fixture, delivery_service, credential, journal, transport=None, *
             if transport is not None
             else LocalStableRemoteFinalizationControlPlaneTransport(delivery_service)
         ),
-        policy=EvolutionStableRemoteFinalizationResultReturnWorkerPolicy(
-            interval_seconds=0.1,
-            max_empty_backoff_seconds=1,
-            max_failure_backoff_seconds=1,
-            journal_scan_limit=10,
-            return_scan_limit=10,
-            claim_lease_seconds=3,
-            result_timeout_seconds=0.2,
-            retry_base_seconds=0.1,
-            retry_max_seconds=1,
-            shutdown_drain_seconds=1,
-            jitter_ratio=0,
-            **policy,
-        ),
+        policy=EvolutionStableRemoteFinalizationResultReturnWorkerPolicy(**policy_values),
         owner_id="result-return-test-worker",
         clock=fixture.data.clock,
         random_value=lambda: 0.5,
@@ -199,6 +200,7 @@ async def test_result_return_recovers_writer_after_key_failure_and_expiry(
     assert final is not None and final.latest_event.state == "completed"
 
 
+@pytest.mark.skipif(__import__("os").name == "nt", reason="slot fixture 使用 POSIX executable")
 @pytest.mark.asyncio
 async def test_result_return_store_fences_stale_owner_and_detects_journal_tamper(
     tmp_path: Path,
@@ -241,6 +243,7 @@ async def test_result_return_store_fences_stale_owner_and_detects_journal_tamper
     assert corrupt.value.code == "stable_remote_delivery_journal_corrupt"
 
 
+@pytest.mark.skipif(__import__("os").name == "nt", reason="slot fixture 使用 POSIX executable")
 @pytest.mark.asyncio
 async def test_result_return_claim_is_single_winner_under_concurrency(
     tmp_path: Path,
@@ -267,6 +270,7 @@ async def test_result_return_claim_is_single_winner_under_concurrency(
     assert winners[0].latest_event.claim_epoch == 1
 
 
+@pytest.mark.skipif(__import__("os").name == "nt", reason="slot fixture 使用 POSIX executable")
 @pytest.mark.asyncio
 async def test_result_return_journal_anti_join_does_not_starve_new_records(
     tmp_path: Path,

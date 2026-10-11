@@ -483,6 +483,8 @@ export interface GitDiffFile {
   additions: number
   deletions: number
   patch: string
+  patch_truncated?: boolean
+  patch_notice?: string
 }
 
 export interface GitDiffResponse {

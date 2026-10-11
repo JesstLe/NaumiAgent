@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import Mock
+import asyncio
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -44,14 +45,18 @@ class TestKillProcess:
     @pytest.mark.asyncio
     async def test_kill_calls_proc_kill(self):
         mock_proc = Mock()
+        mock_proc.wait = AsyncMock()
         await _kill_process(mock_proc)
         mock_proc.kill.assert_called_once()
+        mock_proc.wait.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_kill_ignores_process_lookup_error(self):
         mock_proc = Mock()
         mock_proc.kill.side_effect = ProcessLookupError
+        mock_proc.wait = AsyncMock()
         await _kill_process(mock_proc)
+        mock_proc.wait.assert_awaited_once()
 
 
 class TestCodeExecuteTool:
@@ -173,6 +178,25 @@ class TestCodeExecuteTool:
         assert "no output" in result
 
     @pytest.mark.asyncio
+    async def test_local_large_output_is_bounded_while_both_streams_are_drained(self):
+        import naumi_agent.tools.sandbox as sandbox_mod
+
+        sandbox_mod._docker_available_cache = False
+        output_bytes = _MAX_OUTPUT_BYTES * 3
+
+        result = await CodeExecuteTool().execute(
+            code=(
+                "import sys\n"
+                f"sys.stdout.write('o' * {output_bytes})\n"
+                f"sys.stderr.write('e' * {output_bytes})\n"
+            )
+        )
+
+        assert result.count("输出已截断") == 2
+        assert str(output_bytes) in result
+        assert len(result.encode("utf-8")) < (_MAX_OUTPUT_BYTES * 2) + 500
+
+    @pytest.mark.asyncio
     async def test_docker_check_cached(self):
         import naumi_agent.tools.sandbox as sandbox_mod
 
@@ -185,3 +209,18 @@ class TestCodeExecuteTool:
 
         # Reset
         sandbox_mod._docker_available_cache = None
+
+    @pytest.mark.asyncio
+    async def test_docker_check_reaps_timed_out_process(self, monkeypatch):
+        import naumi_agent.tools.sandbox as sandbox_mod
+
+        process = Mock(returncode=None)
+        process.wait = AsyncMock(side_effect=[TimeoutError, -9])
+        process.kill = Mock()
+        spawn = AsyncMock(return_value=process)
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+        sandbox_mod._docker_available_cache = None
+
+        assert await CodeExecuteTool()._check_docker() is False
+        process.kill.assert_called_once()
+        assert process.wait.await_count == 2
