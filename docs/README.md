@@ -6,6 +6,9 @@
 以个人事项、可信记忆、主动执行及结果交付为主线。产品范围已确认；模块路线仍为提案，
 不代表功能已完成。
 
+用户提供的视频进一步明确了“主助理 + 常驻专员团队 + 可见协作”的产品形态，
+完整对齐见[视频能力清单](product/personal-agent/video-capabilities-2026-11-03.md)。
+
 ## 后续开发权威入口
 
 大型后续工程统一从 [`development/README.md`](development/README.md) 进入。该目录包含

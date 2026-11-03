@@ -1,0 +1,730 @@
+{
+  "schema_version": 1,
+  "source": {
+    "name": "2026-11-03 12-13-56.mp4",
+    "sha256": "57905980dff0ced5557f44b7e44fecce7085d02952a9d548373b1e2fff6189c5",
+    "duration_seconds": 483.433333,
+    "width": 1920,
+    "height": 1080,
+    "audio_analysis": "mean_volume=-91.0dB; max_volume=-91.0dB; visual review only",
+    "review_method": "49 timestamped frames at 10-second intervals across full duration; full-resolution targeted inspection; additional frames at 07:55/07:57/07:59"
+  },
+  "scope": "All 24 identified capability requirements retained; no runtime implementation claimed in this change.",
+  "evidence_kinds": {
+    "visible_ui": "可见实体、消息或状态；不代表后台与外部状态已核验",
+    "visible_artifact": "可见可读的产物/对话；其外部事实仍需核验",
+    "assistant_claim": "聊天中的能力说明或成功声明",
+    "ui_entry": "只有入口或参数控件可见，未展示成功执行"
+  },
+  "capabilities": [
+    {
+      "id": "VID-01",
+      "title": "自然语言组建多个专业助手/团队",
+      "status": "planned",
+      "in_scope": true,
+      "verified_in_naumi": false,
+      "owners": [
+        "PA-00"
+      ],
+      "evidence": [
+        {
+          "timestamp": "01:00",
+          "kind": "visible_ui",
+          "observation": "创建运营、信息差、自媒体团队的历史请求与对应侧栏实体同时可见；未展示创建 API。"
+        }
+      ],
+      "existing_source_paths": [
+        "src/naumi_agent/agents/factory.py",
+        "src/naumi_agent/workbench/service.py"
+      ],
+      "requirement": "一句话创建多个可持久存在的专员，不只是临时提示词角色。创建结果有真实身份与可打开入口。",
+      "acceptance": [
+        "三种专员实际创建并逐个对话；重启后 ID 和会话仍一致。",
+        "重复请求按同一操作身份去重，部分创建失败可恢复。"
+      ]
+    },
+    {
+      "id": "VID-02",
+      "title": "每位助手的独立身份、会话与记忆",
+      "status": "planned",
+      "in_scope": true,
+      "verified_in_naumi": false,
+      "owners": [
+        "PA-00",
+        "PA-02"
+      ],
+      "evidence": [
+        {
+          "timestamp": "03:50",
+          "kind": "visible_ui",
+          "observation": "五位专员有不同名称、头像、最近消息和独立聊天入口。"
+        },
+        {
+          "timestamp": "03:50",
+          "kind": "assistant_claim",
+          "observation": "各自有记忆是聊天说明，未演示跨重启记忆召回。"
+        }
+      ],
+      "existing_source_paths": [
+        "src/naumi_agent/workbench/models.py",
+        "src/naumi_agent/memory/long_term.py"
+      ],
+      "requirement": "个人主助理和专员具有长期身份；个人共享偏好与角色私有上下文分开，不把所有角色混进一个对话。",
+      "acceptance": [
+        "两个专员分别保存不同上下文，重启后正确召回。",
+        "未共享的专员资料不跨角色泄露，删除/纠正后旧记忆不再生效。"
+      ]
+    },
+    {
+      "id": "VID-03",
+      "title": "同领域多个策略专员与重复角色澄清",
+      "status": "planned",
+      "in_scope": true,
+      "verified_in_naumi": false,
+      "owners": [
+        "PA-00"
+      ],
+      "evidence": [
+        {
+          "timestamp": "01:40",
+          "kind": "visible_ui",
+          "observation": "已有信息差团队时出现选择卡：再建一个新的、比较两者；新旧角色侧重点不同。"
+        }
+      ],
+      "existing_source_paths": [
+        "src/naumi_agent/agents/factory.py",
+        "src/naumi_agent/tools/user_interaction.py"
+      ],
+      "requirement": "识别同类角色，允许复用、修改或明确新建策略副本；同名不等于同一身份。",
+      "acceptance": [
+        "已有角色与新建副本有不同 ID，策略和记忆互不覆盖。",
+        "用户选择复用时不产生多余角色。"
+      ]
+    },
+    {
+      "id": "VID-04",
+      "title": "专员职责、工具、账户与声音配置",
+      "status": "planned",
+      "in_scope": true,
+      "verified_in_naumi": false,
+      "owners": [
+        "PA-00",
+        "PA-03",
+        "PA-10"
+      ],
+      "evidence": [
+        {
+          "timestamp": "03:50",
+          "kind": "assistant_claim",
+          "observation": "主控说明可修改助手设置并分别设定运营、研究、内容、投资职责。"
+        },
+        {
+          "timestamp": "05:10",
+          "kind": "ui_entry",
+          "observation": "右侧 Details 与角色声音设置可见。"
+        }
+      ],
+      "existing_source_paths": [
+        "src/naumi_agent/agents/base.py",
+        "src/naumi_agent/workbench/models.py"
+      ],
+      "requirement": "职责和行为配置有版本；工具、连接、数据范围和声音按角色绑定，并支持停用与归档。",
+      "acceptance": [
+        "改职责后下一次执行采用新版本，旧 Run 保留旧版本证据。",
+        "取消某个工具/账户授权后新旧待执行任务均重新校验。"
+      ]
+    },
+    {
+      "id": "VID-05",
+      "title": "任务中的选择式澄清与上下文引用",
+      "status": "planned",
+      "in_scope": true,
+      "verified_in_naumi": false,
+      "owners": [
+        "PA-06"
+      ],
+      "evidence": [
+        {
+          "timestamp": "00:30",
+          "kind": "visible_ui",
+          "observation": "先推广哪个仓库的选择卡与选中结果可见。"
+        },
+        {
+          "timestamp": "01:00",
+          "kind": "ui_entry",
+          "observation": "选中文本上方出现 Add to chat 入口。"
+        }
+      ],
+      "existing_source_paths": [
+        "src/naumi_agent/tools/user_interaction.py",
+        "frontend/web2/src/Web2.tsx"
+      ],
+      "requirement": "缺少关键条件时通过短问题/选择卡收敛；用户可引用具体消息或产物片段继续委托。",
+      "acceptance": [
+        "选项提交绑定原任务 ID，过期问题不改写新任务。",
+        "引用保留来源 ID，不把引用中的指令当新的执行授权。"
+      ]
+    },
+    {
+      "id": "VID-06",
+      "title": "主助理查询团队目录与全局进展",
+      "status": "planned",
+      "in_scope": true,
+      "verified_in_naumi": false,
+      "owners": [
+        "PA-00",
+        "PA-06"
+      ],
+      "evidence": [
+        {
+          "timestamp": "03:50",
+          "kind": "visible_ui",
+          "observation": "用户问现在在做什么和展示已组建 agent，主控列出五个助手及职责。"
+        }
+      ],
+      "existing_source_paths": [
+        "src/naumi_agent/agent_control/service.py",
+        "src/naumi_agent/agent_control/models.py"
+      ],
+      "requirement": "主助理基于持久任务状态回答谁在做什么、等待什么、结果在哪里，而非靠对话猜测。",
+      "acceptance": [
+        "多个执行状态与列表同步，已完成/等待确认/失败分开显示。",
+        "状态来源失联时显示未知，不声称全部完成。"
+      ]
+    },
+    {
+      "id": "VID-07",
+      "title": "专员直接互相请求资料与可打开的双方对话",
+      "status": "planned",
+      "in_scope": true,
+      "verified_in_naumi": false,
+      "owners": [
+        "PA-06"
+      ],
+      "evidence": [
+        {
+          "timestamp": "00:40",
+          "kind": "visible_artifact",
+          "observation": "自媒体团队 ↔ 信息差团队对话显示素材请求与八条回应。"
+        },
+        {
+          "timestamp": "05:10",
+          "kind": "visible_artifact",
+          "observation": "信息差助理 ↔ 主助理对话显示具体任务要求与研究回复。"
+        }
+      ],
+      "existing_source_paths": [
+        "src/naumi_agent/agents/message_bus.py",
+        "src/naumi_agent/agents/team_protocol.py"
+      ],
+      "requirement": "真实发送/接收 AgentMessage，用户能打开委托、回应和后续处理，而不是模型伪装多个发言角色。",
+      "acceptance": [
+        "消息有稳定 message_id、sender/recipient、task/run 和交付回执。",
+        "重启、重发和接收方离线后可恢复且不重复处理。"
+      ]
+    },
+    {
+      "id": "VID-08",
+      "title": "主助理组织多角色接力与依赖执行",
+      "status": "planned",
+      "in_scope": true,
+      "verified_in_naumi": false,
+      "owners": [
+        "PA-06"
+      ],
+      "evidence": [
+        {
+          "timestamp": "04:50",
+          "kind": "visible_ui",
+          "observation": "显示研究→内容→投资的接力计划和 Messaged/2 messages with 条目。"
+        },
+        {
+          "timestamp": "07:55",
+          "kind": "visible_artifact",
+          "observation": "三阶段结果汇总可见；没有呈现底层并行/重启过程。"
+        }
+      ],
+      "existing_source_paths": [
+        "src/naumi_agent/orchestrator/subagent_manager.py",
+        "src/naumi_agent/daemons/agent_jobs.py"
+      ],
+      "requirement": "主控拆任务、按依赖派发和收口；支持串行接力及可并行独立分支。并行与恢复属于所需工程验收，不冒充视频实证。",
+      "acceptance": [
+        "至少三位专员各有独立 Run/工具证据，上游完成才解锁依赖步骤。",
+        "失败/取消/未知结果阻断依赖，重启不重复外部动作。"
+      ]
+    },
+    {
+      "id": "VID-09",
+      "title": "跨角色传递上下文、约束与产物版本",
+      "status": "planned",
+      "in_scope": true,
+      "verified_in_naumi": false,
+      "owners": [
+        "PA-06",
+        "PA-08"
+      ],
+      "evidence": [
+        {
+          "timestamp": "05:10",
+          "kind": "visible_artifact",
+          "observation": "研究回复同时附完整简报卡。"
+        },
+        {
+          "timestamp": "05:30",
+          "kind": "visible_artifact",
+          "observation": "主控把研究摘要和来源转给自媒体，要求300字以内、只写草稿、不要发布。"
+        }
+      ],
+      "existing_source_paths": [
+        "src/naumi_agent/runs/models.py",
+        "src/naumi_agent/tools/output_publish.py"
+      ],
+      "requirement": "交接传递具体产物版本和来源，不丢失长度、渠道、未核验状态或禁止发布等任务约束。",
+      "acceptance": [
+        "下游结果引用上游 artifact_id/version 与源证据。",
+        "上游更新、权限撤销和约束变化可解释地影响后续步骤。"
+      ]
+    },
+    {
+      "id": "VID-10",
+      "title": "异步工作、执行状态与主动结果回传",
+      "status": "planned",
+      "in_scope": true,
+      "verified_in_naumi": false,
+      "owners": [
+        "PA-01",
+        "PA-06"
+      ],
+      "evidence": [
+        {
+          "timestamp": "04:20",
+          "kind": "visible_ui",
+          "observation": "显示来自主助理的消息和查找信息差机会活动。"
+        },
+        {
+          "timestamp": "06:20",
+          "kind": "visible_ui",
+          "observation": "出现检索市场行情数据状态；后续生成回答。"
+        }
+      ],
+      "existing_source_paths": [
+        "src/naumi_agent/daemons/agent_jobs.py",
+        "src/naumi_agent/agent_control/service.py"
+      ],
+      "requirement": "长任务不中断用户继续使用产品；执行、等待、完成和送达分别记录，并主动回传可打开的结果。",
+      "acceptance": [
+        "关闭聊天界面、保持执行服务在线时仍继续，重新打开能接上。",
+        "超时/重启/取消与回执确认一致，不用状态动画代替真实执行。"
+      ]
+    },
+    {
+      "id": "VID-11",
+      "title": "有来源的调研、趋势和竞品研究",
+      "status": "planned",
+      "in_scope": true,
+      "verified_in_naumi": false,
+      "owners": [
+        "PA-07"
+      ],
+      "evidence": [
+        {
+          "timestamp": "00:10",
+          "kind": "visible_artifact",
+          "observation": "研究清单有来源、成本、适用条件与下一步建议。"
+        },
+        {
+          "timestamp": "01:20",
+          "kind": "visible_artifact",
+          "observation": "开源与商业 Agent 的竞品清单可见，内容事实未在视频中独立核查。"
+        }
+      ],
+      "existing_source_paths": [
+        "src/naumi_agent/tools/search.py",
+        "src/naumi_agent/tools/web.py",
+        "src/naumi_agent/tools/browser/tools.py"
+      ],
+      "requirement": "实际搜索并读取来源，区分事实、估算、未知、抓取时间和失效条件，形成适合用户的判断。",
+      "acceptance": [
+        "引用可定位到支持结论的正文；失效或过时来源触发明确标记。",
+        "至少一个真实研究任务完成检索→证据→结论→可重开产物。"
+      ]
+    },
+    {
+      "id": "VID-12",
+      "title": "运营计划、目标拆解、排期和复盘",
+      "status": "planned",
+      "in_scope": true,
+      "verified_in_naumi": false,
+      "owners": [
+        "PA-01",
+        "PA-04",
+        "PA-07"
+      ],
+      "evidence": [
+        {
+          "timestamp": "00:30",
+          "kind": "assistant_claim",
+          "observation": "运营角色提出仓库体检、受众渠道、内容协作和按数据复盘方案。"
+        }
+      ],
+      "existing_source_paths": [
+        "src/naumi_agent/tasks/models.py",
+        "src/naumi_agent/orchestrator/goal_store.py"
+      ],
+      "requirement": "把运营目标分解为可执行事项、交付物、指标与复盘，不停留于泛化建议；同一模式也适用个人工作与生活目标。",
+      "acceptance": [
+        "真实指定项目产生任务、负责人、截止时间和可追溯产物。",
+        "复盘使用真实数据，未知/未连接项不伪造。"
+      ]
+    },
+    {
+      "id": "VID-13",
+      "title": "GitHub 项目连接与编码任务",
+      "status": "planned",
+      "in_scope": true,
+      "verified_in_naumi": false,
+      "owners": [
+        "PA-03",
+        "PA-06",
+        "PA-09"
+      ],
+      "evidence": [
+        {
+          "timestamp": "00:30",
+          "kind": "visible_ui",
+          "observation": "仓库选择结果与 Coding 区 Merged #1 任务卡可见。"
+        },
+        {
+          "timestamp": "00:30",
+          "kind": "assistant_claim",
+          "observation": "助手称可读取仓库/Issue/PR并创建云端编码任务；未打开远端验证。"
+        }
+      ],
+      "existing_source_paths": [
+        "src/naumi_agent/tools/subagent.py",
+        "src/naumi_agent/worktree/",
+        "src/naumi_agent/runs/git_probe.py"
+      ],
+      "requirement": "个人主助理可把工作委托派到实际编码环境，链接仓库、任务、提交/PR和状态；云端执行作为平台实现单独验收。",
+      "acceptance": [
+        "真实测试仓库完成读取→隔离改动→测试→PR/提交读回；不触碰无关工作。",
+        "Merged 只来自远端状态核验，不以模型回复作为合并证据。"
+      ]
+    },
+    {
+      "id": "VID-14",
+      "title": "多渠道内容生产与格式转换",
+      "status": "planned",
+      "in_scope": true,
+      "verified_in_naumi": false,
+      "owners": [
+        "PA-09"
+      ],
+      "evidence": [
+        {
+          "timestamp": "05:30",
+          "kind": "visible_artifact",
+          "observation": "小红书草稿包含标题、正文、标签和配图建议，并注明仅草稿、上游数据未逐条复核。"
+        }
+      ],
+      "existing_source_paths": [
+        "src/naumi_agent/skills/loader.py",
+        "src/naumi_agent/tools/output_publish.py"
+      ],
+      "requirement": "由同一材料生成不同平台需要的文稿、标题、标签和素材要求，保留引用及审核状态。",
+      "acceptance": [
+        "字符/字数、平台格式和禁发约束可机械检查。",
+        "草稿、配图建议和真正生成的附件分开，未核验来源不被洗成事实。"
+      ]
+    },
+    {
+      "id": "VID-15",
+      "title": "审稿、预填链接、直接发布与外部回执",
+      "status": "planned",
+      "in_scope": true,
+      "verified_in_naumi": false,
+      "owners": [
+        "PA-03",
+        "PA-09"
+      ],
+      "evidence": [
+        {
+          "timestamp": "05:00",
+          "kind": "visible_ui",
+          "observation": "用户批准、预填链接、直接代发要求及查看帖子链接可见。"
+        },
+        {
+          "timestamp": "05:00",
+          "kind": "assistant_claim",
+          "observation": "助手称长文已发布；视频未打开原帖或核验平台回执。"
+        }
+      ],
+      "existing_source_paths": [
+        "src/naumi_agent/tools/browser/tools.py",
+        "src/naumi_agent/daemons/permission_decisions.py"
+      ],
+      "requirement": "支持预填与代发两条真实路径；审批绑定账户、内容、附件、版本与时间，核验外部对象后才显示成功。",
+      "acceptance": [
+        "批准后改稿触发重新确认；重复点击/超时恢复不重复发布。",
+        "原帖 ID/URL读回与批准版本对应；未知提交先对账。"
+      ]
+    },
+    {
+      "id": "VID-16",
+      "title": "每个专员的单次/周期例行任务",
+      "status": "planned",
+      "in_scope": true,
+      "verified_in_naumi": false,
+      "owners": [
+        "PA-01",
+        "PA-04"
+      ],
+      "evidence": [
+        {
+          "timestamp": "05:00",
+          "kind": "visible_ui",
+          "observation": "Created routine 与次日20:00单次任务卡、启用开关可见。"
+        },
+        {
+          "timestamp": "07:55",
+          "kind": "assistant_claim",
+          "observation": "主控建议把团队流程设为每周一早上自动跑，尚未看到确认与触发。"
+        }
+      ],
+      "existing_source_paths": [
+        "src/naumi_agent/scheduler/models.py",
+        "src/naumi_agent/scheduler/runner.py"
+      ],
+      "requirement": "自然语言创建/修改角色级计划，支持时区、once/cron、交易日等明确日历语义与开关；接通真实执行与送达。",
+      "acceptance": [
+        "在真实到期时触发一次，执行回执可重开，重启和重复扫描无重复。",
+        "提议、已创建、启用、已触发、已执行、已送达分别显示。"
+      ]
+    },
+    {
+      "id": "VID-17",
+      "title": "富文档/Page、目录与结构化表格",
+      "status": "planned",
+      "in_scope": true,
+      "verified_in_naumi": false,
+      "owners": [
+        "PA-08"
+      ],
+      "evidence": [
+        {
+          "timestamp": "02:20",
+          "kind": "visible_artifact",
+          "observation": "独立简报Page实际打开，含重点结论、目录、机会总表。"
+        },
+        {
+          "timestamp": "02:30",
+          "kind": "visible_ui",
+          "observation": "分类与判断筛选控件可见；未看到筛选切换结果。"
+        }
+      ],
+      "existing_source_paths": [
+        "frontend/web2/src/rich/RichWidget.tsx",
+        "frontend/web2/src/rich/schema.ts"
+      ],
+      "requirement": "交付能独立重开的文档而非长气泡；目录、筛选、排序与数据导出真实工作。",
+      "acceptance": [
+        "退出会话后按产物ID重开；筛选改变实际数据行。",
+        "空数据、长文本、窄屏和大表格均可用，数据不由静态示例替代。"
+      ]
+    },
+    {
+      "id": "VID-18",
+      "title": "引用卡、事实/估算/未知与研究判断",
+      "status": "planned",
+      "in_scope": true,
+      "verified_in_naumi": false,
+      "owners": [
+        "PA-07",
+        "PA-08"
+      ],
+      "evidence": [
+        {
+          "timestamp": "02:40",
+          "kind": "visible_artifact",
+          "observation": "各机会显示成本、窗口期、风险与来源卡。"
+        },
+        {
+          "timestamp": "04:20",
+          "kind": "visible_artifact",
+          "observation": "摘要区分估算与未查到的数据。"
+        }
+      ],
+      "existing_source_paths": [
+        "frontend/web2/src/community/AiSources.tsx",
+        "src/naumi_agent/runs/tool_evidence.py"
+      ],
+      "requirement": "来源是结构化证据而非随意链接；明确做/观望/不做的前提和不确定性。",
+      "acceptance": [
+        "事实字段有证据引用，估算有方法或前提，未知字段保持未知。",
+        "来源失效/反证到达时能够修订结果并保留版本。"
+      ]
+    },
+    {
+      "id": "VID-19",
+      "title": "聊天产物卡、资料库、复用与分享",
+      "status": "planned",
+      "in_scope": true,
+      "verified_in_naumi": false,
+      "owners": [
+        "PA-02",
+        "PA-08"
+      ],
+      "evidence": [
+        {
+          "timestamp": "04:20",
+          "kind": "visible_artifact",
+          "observation": "聊天内有简报预览卡，并可打开独立Page。"
+        },
+        {
+          "timestamp": "02:20",
+          "kind": "ui_entry",
+          "observation": "Share按钮可见；专员Library页签可见，分享结果与资料上传未演示。"
+        }
+      ],
+      "existing_source_paths": [
+        "src/naumi_agent/tools/output_publish.py",
+        "frontend/web2/src/rich/PublishedAsset.tsx"
+      ],
+      "requirement": "资料与产物可收集、检索、版本化、跨角色引用和显式分享，具有明确访问范围与撤销机制。",
+      "acceptance": [
+        "上传资料→检索引用→生成产物→重开/导出形成闭环。",
+        "跨角色权限和分享撤销有效，旧链接不越权。"
+      ]
+    },
+    {
+      "id": "VID-20",
+      "title": "投资研究专员与关注清单",
+      "status": "planned",
+      "in_scope": true,
+      "verified_in_naumi": false,
+      "owners": [
+        "PA-07",
+        "PA-04"
+      ],
+      "evidence": [
+        {
+          "timestamp": "06:50",
+          "kind": "visible_artifact",
+          "observation": "投资专员返回跨市场研究、时间、结论、置信度与失效条件。"
+        }
+      ],
+      "existing_source_paths": [
+        "src/naumi_agent/tools/search.py",
+        "src/naumi_agent/skills/loader.py"
+      ],
+      "requirement": "纳入行情/新闻研究、个人关注清单和定期报告；使用可追溯数据与明确不确定性。视频未展示证券账户下单。",
+      "acceptance": [
+        "证券代码/市场/币种/交易时间与来源对齐，过期数据清楚显示。",
+        "结论附前提、反证和风险，研究与实际交易状态不混同。"
+      ]
+    },
+    {
+      "id": "VID-21",
+      "title": "主助理复核专家结果并指出矛盾",
+      "status": "planned",
+      "in_scope": true,
+      "verified_in_naumi": false,
+      "owners": [
+        "PA-06",
+        "PA-07"
+      ],
+      "evidence": [
+        {
+          "timestamp": "07:55",
+          "kind": "visible_artifact",
+          "observation": "主控指出专家止损价距现价不到0.5%过窄，建议行动前重算；未展示重算结果。"
+        }
+      ],
+      "existing_source_paths": [
+        "src/naumi_agent/validation/",
+        "src/naumi_agent/agents/team_protocol.py"
+      ],
+      "requirement": "汇总前检查数值、单位、来源、前提和约束，提出修正或退回重做，不只是拼接各角色回答。",
+      "acceptance": [
+        "注入错误比例、币种或来源，主控识别并要求修复。",
+        "重算/修订有独立产物版本，修复前不宣称通过。"
+      ]
+    },
+    {
+      "id": "VID-22",
+      "title": "个人账户与外部应用连接",
+      "status": "planned",
+      "in_scope": true,
+      "verified_in_naumi": false,
+      "owners": [
+        "PA-03"
+      ],
+      "evidence": [
+        {
+          "timestamp": "01:00",
+          "kind": "ui_entry",
+          "observation": "Connect apps入口可见；具体OAuth与同步过程未演示。"
+        }
+      ],
+      "existing_source_paths": [
+        "src/naumi_agent/mcp/client.py",
+        "src/naumi_agent/config/credentials.py"
+      ],
+      "requirement": "账户连接、能力发现、续期/失效、断连、最小访问范围、事件游标与角色授权一起交付。",
+      "acceptance": [
+        "至少一个真实服务完成连接→读取→受控写入→读回→撤权。",
+        "失效凭据和断线有真实状态，不能只显示静态应用图标。"
+      ]
+    },
+    {
+      "id": "VID-23",
+      "title": "专员电脑/浏览器操作与执行环境",
+      "status": "planned",
+      "in_scope": true,
+      "verified_in_naumi": false,
+      "owners": [
+        "PA-11"
+      ],
+      "evidence": [
+        {
+          "timestamp": "00:00",
+          "kind": "ui_entry",
+          "observation": "Computer页显示Computer is asleep，未展示agent实际操作电脑。"
+        }
+      ],
+      "existing_source_paths": [
+        "src/naumi_agent/tools/browser/runtime/browser_runtime.py",
+        "src/naumi_agent/tools/browser/tools.py"
+      ],
+      "requirement": "提供角色执行环境、观察/操作/验证、用户接管与离线状态；浏览器、原生桌面和云环境分别验收。",
+      "acceptance": [
+        "真实应用完成观察→点击/输入→结果读回，工具轨迹可见。",
+        "用户接管、窗口变化、休眠/断线和取消停止后续动作。"
+      ]
+    },
+    {
+      "id": "VID-24",
+      "title": "语音输入/回复与专员声音设置",
+      "status": "planned",
+      "in_scope": true,
+      "verified_in_naumi": false,
+      "owners": [
+        "PA-10"
+      ],
+      "evidence": [
+        {
+          "timestamp": "05:10",
+          "kind": "ui_entry",
+          "observation": "麦克风、Voice/Speed/Language及不同专员声音选项可见。"
+        }
+      ],
+      "existing_source_paths": [],
+      "requirement": "真实语音识别、语音回复、角色声音、语速和语言，支持打断及文字回退；本视频音轨接近静音。",
+      "acceptance": [
+        "真实麦克风到识别→执行/澄清→播报端到端通过。",
+        "噪声、权限拒绝、切换角色、断流与用户打断均有明确结果。"
+      ]
+    }
+  ]
+}
