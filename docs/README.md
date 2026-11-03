@@ -1,5 +1,11 @@
 # NaumiAgent 文档地图
 
+## 当前产品方向
+
+[Personal Agent 产品方向](product/personal-agent/README.md)：覆盖个人执行、工作和生活，
+以个人事项、可信记忆、主动执行及结果交付为主线。产品范围已确认；模块路线仍为提案，
+不代表功能已完成。
+
 ## 后续开发权威入口
 
 大型后续工程统一从 [`development/README.md`](development/README.md) 进入。该目录包含
