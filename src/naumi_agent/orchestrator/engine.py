@@ -784,6 +784,10 @@ from naumi_agent.orchestrator.tool_batches import (
     build_tool_batches,
     execute_tool_batch,
 )
+from naumi_agent.personal import runtime as personal_runtime
+from naumi_agent.personal.service import PersonalAgentService
+from naumi_agent.personal.store import PersonalAgentStore
+from naumi_agent.personal.tools import PersonalAgentsTool
 from naumi_agent.release import (
     ReleaseArtifactDownloadStore,
     ReleaseArtifactFetchService,
@@ -4239,6 +4243,10 @@ class AgentEngine:
         self.scheduler_runner = SchedulerRunner(
             SchedulerStore(self._runtime_data_dir / "scheduler")
         )
+        self.personal_agents = PersonalAgentService(
+            self, PersonalAgentStore(config.personal.data_dir)
+        )
+        self._personal_turn_snapshot = None
         self.goal_store = resources.goal_store
         self.pursuit_store = resources.pursuit_store
         terminal_outbox_config = config.harness.pursuit_terminal_outbox
@@ -4363,6 +4371,7 @@ class AgentEngine:
         self._tool_registry.register(DoctorTraceIndexTool(self))
         self._tool_registry.register(ExtensionDiscoveryTool(self))
         self._tool_registry.register(RequestUserInputTool(self))
+        self._tool_registry.register(PersonalAgentsTool(self.personal_agents))
         self._tool_registry.register(OutputPublishTool(self))
         self._tool_registry.register(OutputAssetRetentionPreviewTool(self))
         self._tool_registry.register(OutputAssetRetentionRunTool(self))
@@ -4517,7 +4526,7 @@ class AgentEngine:
         if self._openai_tools_cache is None or cache_key != self._openai_tools_cache_key:
             self._openai_tools_cache_key = cache_key
             self._openai_tools_cache = [tool.to_openai_tool() for tool in tools]
-        return self._openai_tools_cache
+        return personal_runtime.filter_schemas(self, self._openai_tools_cache)
 
     @staticmethod
     def _should_preplan_streaming(task: str) -> bool:
@@ -6169,6 +6178,8 @@ class AgentEngine:
 
     async def _inject_relevant_memories(self, user_message: str) -> None:
         """自动召回与用户消息相关的长期记忆，注入到上下文中."""
+        if personal_runtime.current_agent(self) is not None:
+            return
         if not self._config.memory.long_term_enabled:
             return
         session_id = self._session.id if self._session else ""
@@ -6207,6 +6218,8 @@ class AgentEngine:
 
     async def _auto_extract_memories(self, task: str, result: AgentResult) -> None:
         """Store high-confidence facts/preferences/decisions from a completed turn."""
+        if personal_runtime.current_agent(self) is not None:
+            return
         if not self._config.memory.long_term_enabled:
             return
         if result.status != "completed":
@@ -6281,6 +6294,8 @@ class AgentEngine:
         events: EngineEventPublisher | LegacyEventCallback | None = None,
     ) -> None:
         """Inject newly completed background task notifications into context."""
+        if personal_runtime.current_agent(self) is not None:
+            return
         events = self._coerce_engine_events(events)
         notifications = self.background_runner.collect_notifications()
         if not notifications:
@@ -6303,6 +6318,8 @@ class AgentEngine:
         events: EngineEventPublisher | LegacyEventCallback | None = None,
     ) -> None:
         """Inject due schedule notifications into context."""
+        if personal_runtime.current_agent(self) is not None:
+            return
         events = self._coerce_engine_events(events)
         notifications = self.scheduler_runner.collect_notifications()
         if not notifications:
@@ -6359,14 +6376,17 @@ class AgentEngine:
 
     def _build_system_prompt(self) -> str:
         """Build the default prompt from named sections plus safe runtime facts."""
+        schemas = personal_runtime.filter_schemas(
+            self, [tool.to_openai_tool() for tool in self._tool_registry.all()]
+        )
         return build_system_prompt(
             PromptAssemblyInput(
                 workspace_root=str(self.workspace_root),
                 permission_mode=self._config.safety.permission_mode,
-                tool_names=tuple(sorted(self._tool_registry.names)),
+                tool_names=tuple(sorted(t["function"]["name"] for t in schemas or [])),
                 skill_names=tuple(sorted(skill.name for skill in self.skill_loader.all())),
             )
-        )
+        ) + personal_runtime.role_prompt(self)
 
     def _replace_generated_system_prompt_in_full_history(self, prompt: str) -> None:
         for index, message in enumerate(self._full_history):
@@ -6461,6 +6481,8 @@ class AgentEngine:
 
     async def _build_compaction_runtime_snapshot(self) -> tuple[str, list[str], list[str]]:
         """Build deterministic state that must survive history compaction."""
+        if personal_runtime.current_agent(self) is not None:
+            return personal_runtime.role_prompt(self), ["personal_agent"], []
         sections: list[str] = []
         preserved: list[str] = []
         warnings: list[str] = []
@@ -6672,6 +6694,8 @@ class AgentEngine:
         cause: Exception | None = None,
     ) -> Any:
         """Call the model and recover once from prompt-too-long failures."""
+        tier = personal_runtime.model_tier(self, tier)
+        tools = personal_runtime.filter_schemas(self, tools)
         try:
             if cause is not None and _is_prompt_too_long_error(cause):
                 raise cause
@@ -6701,6 +6725,8 @@ class AgentEngine:
                 self._messages,
                 update_engine_context=True,
             )
+            tier = personal_runtime.model_tier(self, tier)
+            tools = personal_runtime.filter_schemas(self, tools)
             return await self._model_port.call(
                 messages=safe_messages,
                 tier=tier,
@@ -6926,6 +6952,8 @@ class AgentEngine:
             session_id=session_id,
         ), events)
         if start_ctx.should_abort:
+            return
+        if personal_runtime.current_agent(self) is not None:
             return
         snapshot = await self._harness_context.assemble(
             HarnessContextInput(
@@ -7410,9 +7438,9 @@ class AgentEngine:
 
     async def run(self, task: str, turn_context: str = "") -> AgentResult:
         """执行任务 — 自适应规划 + ReAct 主循环."""
-        self._ensure_system_prompt()
-
         session = await self.get_or_create_session()
+        personal_runtime.begin_turn(self)
+        self._ensure_system_prompt()
         self.task_store.set_session(session.id)
 
         hooked_task = await self._fire_user_prompt_submit(task)
@@ -7446,11 +7474,17 @@ class AgentEngine:
         ))
 
         try:
-            plan = await self._planner.plan(task)
+            plan = (
+                None if personal_runtime.current_agent(self) is not None
+                else await self._planner.plan(task)
+            )
             exceeded = self._check_budget()
             if exceeded:
                 result = exceeded
-            elif plan.mode == ExecutionMode.ORCHESTRATOR and hasattr(self, "subagent_manager"):
+            elif (
+                plan is not None and plan.mode == ExecutionMode.ORCHESTRATOR
+                and hasattr(self, "subagent_manager")
+            ):
                 result = await self._run_orchestrated(plan, tools)
             else:
                 result = await self._react_loop(tools, plan=plan)
@@ -7494,6 +7528,7 @@ class AgentEngine:
     ) -> AgentResult:
         """Execute and durably record one streamed Agent run."""
         session = await self.get_or_create_session()
+        personal_runtime.begin_turn(self)
         self.task_store.set_session(session.id)
         try:
             usage_before = RunUsageTotals.capture(self._usage)
@@ -7780,7 +7815,10 @@ class AgentEngine:
 
         try:
             phase_start = time.perf_counter()
-            if self._should_preplan_streaming(task):
+            if (
+                personal_runtime.current_agent(self) is None
+                and self._should_preplan_streaming(task)
+            ):
                 plan = await self._planner.plan(task)
                 planning_mode = str(plan.mode)
             else:
@@ -8523,7 +8561,7 @@ class AgentEngine:
         if events is None:
             raise TypeError("流式 ReAct 循环需要事件 Publisher")
         max_turns = self._config.safety.max_turns
-        model_str = self._model_port.resolve_model(ModelTier.CAPABLE)
+        model_str = self._model_port.resolve_model(personal_runtime.model_tier(self))
         session_id = self._session.id if self._session else ""
         tool_call_history: list[str] = []
         todo_reconciliation_attempted = False
@@ -8636,8 +8674,8 @@ class AgentEngine:
                 turn_tools, tool_choice = self._model_tools_for_action_turn(tools)
                 stream_kwargs: dict[str, Any] = {
                     "messages": stream_messages,
-                    "tier": ModelTier.CAPABLE,
-                    "tools": turn_tools,
+                    "tier": personal_runtime.model_tier(self),
+                    "tools": personal_runtime.filter_schemas(self, turn_tools),
                 }
                 if tool_choice is not None:
                     stream_kwargs["tool_choice"] = tool_choice
@@ -9107,6 +9145,10 @@ class AgentEngine:
             raise TypeError("不能同时传入 events 和旧 on_event 回调")
         if events is None:
             events = self._coerce_engine_events(on_event)
+        denial = (None if agent_name == "cli" and tc.name == "personal_agents"
+                  else personal_runtime.tool_denial(self, tc.name))
+        if denial:
+            return ToolResult(call_id=tc.id, status="error", content=denial)
         tool = self._tool_registry.get(tc.name)
         if tool is None:
             return ToolResult(
@@ -9410,6 +9452,11 @@ class AgentEngine:
                         "权限拒绝：当前工具缺少本次调用的持久权限回执。"
                     ),
                 )
+
+        denial = (None if agent_name == "cli" and tc.name == "personal_agents"
+                  else personal_runtime.tool_denial(self, tc.name))
+        if denial:
+            return ToolResult(call_id=tc.id, status="error", content=denial)
 
         try:
             with bind_permission_receipt(execution_authorization_receipt):

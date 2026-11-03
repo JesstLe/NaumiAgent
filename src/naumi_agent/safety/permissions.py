@@ -1540,6 +1540,17 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         risk_level=PermissionRiskLevel.HIGH,
         tool_family="session_retention",
     ),
+    "personal_agents": PermissionRule(
+        tool_name="personal_agents",
+        allowed_modes=[
+            PermissionMode.BYPASS, PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE, PermissionMode.STRICT,
+        ],
+        requires_confirmation=True,
+        max_calls_per_session=100,
+        risk_level=PermissionRiskLevel.MEDIUM,
+        tool_family="personal_agents",
+    ),
     "goal_create": PermissionRule(
         tool_name="goal_create",
         allowed_modes=[

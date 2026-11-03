@@ -36,7 +36,7 @@ _SUPPORTED = frozenset(
 /chaos /scale /state /vibe /eval /page /heal /dspy /graph /mcts /route
 /speculate /jit /pointer /cooe /sleep /entropy /ooda /probe /hook /vision
 /spar /world /fusion /consensus /pid /zkp /genesis /macro /cosmos /watchdog
-/supervisor /autopsy /feedback /evolution
+/supervisor /autopsy /feedback /evolution /assistants
 """.split()
 )
 
@@ -71,6 +71,17 @@ def validate_command(value: str) -> str:
         ("pursue", "interaction")
     ):
         raise HTTPException(422, "追踪执行与交互接管请使用 CLI 或 TUI；Web 可查看追踪证据")
+    if canonical == "/assistants":
+        from naumi_agent.personal.commands import parse_assistants_command
+
+        argument = normalized[len(token) :].strip()
+        if argument not in {"help", "--help", "-h"}:
+            try:
+                parsed = parse_assistants_command(argument)
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
+            if parsed["operation"] == "open":
+                raise HTTPException(422, "请从“我的助理”侧栏打开专员会话。")
     return canonical + normalized[len(token) :]
 
 

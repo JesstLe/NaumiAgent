@@ -253,6 +253,9 @@ export async function mockWorkbenchApi(page: Page): Promise<void> {
     const url = route.request().url()
     const method = route.request().method()
     const pathname = new URL(url).pathname
+    if (pathname.endsWith('/personal/agents')) return route.fulfill({ json: { agents: [] } })
+    if (pathname.endsWith('/personal/current')) return route.fulfill({ json: { agent: null } })
+    if (pathname.endsWith('/personal/tools')) return route.fulfill({ json: { tools: [] } })
     if (pathname.endsWith('/config')) return route.fulfill({ json: { models: [{ id: 'kimi', name: 'Kimi', tier: 'capable' }], tools: [{ name: 'read_file', description: '读取文件' }], model_warnings: [] } })
     if (pathname.endsWith('/runs')) return route.fulfill({ json: { runs: [], total: 0 } })
     if (pathname.endsWith('/sessions') && method === 'GET') return route.fulfill({ json: { sessions: bootstrap.sessions, total: 1, page: 1, page_size: 100 } })

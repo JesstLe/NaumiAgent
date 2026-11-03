@@ -971,6 +971,21 @@ class HarnessConfig(BaseSettings):
         return self
 
 
+class PersonalConfig(BaseSettings):
+    """Owner-local persistent catalog, independent from a coding workspace."""
+
+    model_config = SettingsConfigDict(env_prefix="NAUMI_PERSONAL__")
+
+    data_dir: str = Field(default_factory=lambda: str(Path.home() / ".naumi" / "personal"))
+
+    @field_validator("data_dir")
+    @classmethod
+    def validate_data_dir(cls, value: str) -> str:
+        if not value.strip() or "\x00" in value:
+            raise ValueError("个人助理目录不能为空")
+        return str(Path(value).expanduser().resolve())
+
+
 class AppConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="NAUMI_",
@@ -982,6 +997,7 @@ class AppConfig(BaseSettings):
 
     models: ModelConfig = Field(default_factory=ModelConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
+    personal: PersonalConfig = Field(default_factory=PersonalConfig)
     safety: SafetyConfig = Field(default_factory=SafetyConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     api: APIConfig = Field(default_factory=APIConfig)

@@ -4790,6 +4790,7 @@ class JsonlEngineBridge:
         """Execute a slash command through the legacy CLI command handlers."""
         from naumi_agent.cli.slash_router import execute_slash_command
 
+        previous_session_id = getattr(getattr(self.engine, "_session", None), "id", None)
         parse_reasoning_toggle = None
         try:
             from naumi_agent.main import _parse_reasoning_toggle as parse_reasoning_toggle
@@ -4822,6 +4823,15 @@ class JsonlEngineBridge:
             )
             return
 
+        current_session_id = getattr(getattr(self.engine, "_session", None), "id", None)
+        if (
+            re.match(r"^/assistants\s+open(?:\s|$)", cmd.strip(), re.IGNORECASE)
+            and current_session_id
+            and current_session_id != previous_session_id
+        ):
+            await self.resume_session(
+                {"session_id": current_session_id}, request_id=request_id,
+            )
         plain_output = strip_ansi(output).strip()
         if plain_output.startswith("未知命令:"):
             command = str(cmd).split(maxsplit=1)[0]

@@ -3058,6 +3058,7 @@ class NaumiApp(App):
             text = command + (f" {parts[1]}" if len(parts) > 1 else "")
 
         status.status_text = "命令执行中..."
+        previous_session_id = getattr(getattr(self.engine, "_session", None), "id", None)
         try:
             raw_output = await execute_slash_command(
                 self.engine,
@@ -3077,6 +3078,13 @@ class NaumiApp(App):
             status.status_text = "命令执行失败"
             return
 
+        current_session_id = getattr(getattr(self.engine, "_session", None), "id", None)
+        if (
+            re.match(r"^/assistants\s+open(?:\s|$)", text.strip(), re.IGNORECASE)
+            and current_session_id
+            and current_session_id != previous_session_id
+        ):
+            self._show_current_session()
         output = strip_ansi(raw_output).strip()
         if output:
             chat.mount(
@@ -3939,7 +3947,6 @@ class NaumiApp(App):
 
     @work(exclusive=True, exit_on_error=False)
     async def _load_and_show_session(self, session_id: str) -> None:
-        chat = self.query_one(ChatPanel)
         status = self.query_one(StatusBar)
 
         loaded = await self.engine.load_session(session_id)
@@ -3947,7 +3954,15 @@ class NaumiApp(App):
             status.status_text = f"会话 {session_id} 不存在"
             return
 
+        self._show_current_session()
+
+    def _show_current_session(self) -> None:
+        """Replay the engine's authoritative loaded session after an explicit switch."""
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
         session = self.engine._session
+        if session is None:
+            return
         status.session_text = f"会话:{session.id[:8]}"
         chat.clear()
         self._pending_harness_receipts.clear()
@@ -4034,7 +4049,7 @@ class NaumiApp(App):
         )
         chat.scroll_end(animate=False)
 
-        title = session.title or session_id
+        title = session.title or session.id
         msg_count = len(session.messages)
         status.status_text = (
             f"已加载: {title} | {msg_count}条消息 | "

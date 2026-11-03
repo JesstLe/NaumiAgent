@@ -42,6 +42,7 @@ class Session:
     git_branch: str = ""
     summary: str = ""
     engine: str = "naumi"
+    personal_agent_id: str = ""
 
     def add_message(self, role: str, content: str, **metadata: Any) -> None:
         msg: dict[str, Any] = {
@@ -71,6 +72,7 @@ class Session:
             "git_branch": self.git_branch,
             "summary": self.summary,
             "engine": self.engine,
+            "personal_agent_id": self.personal_agent_id,
         }
 
     @classmethod
@@ -88,15 +90,9 @@ class Session:
                 row.get("last_accessed_at") or row["updated_at"]
             ),
             archived_at=(
-                datetime.fromisoformat(row["archived_at"])
-                if row.get("archived_at")
-                else None
+                datetime.fromisoformat(row["archived_at"]) if row.get("archived_at") else None
             ),
-            pinned_at=(
-                datetime.fromisoformat(row["pinned_at"])
-                if row.get("pinned_at")
-                else None
-            ),
+            pinned_at=(datetime.fromisoformat(row["pinned_at"]) if row.get("pinned_at") else None),
             status=row["status"],
             total_tokens=row.get("total_tokens", 0),
             total_cost_usd=row.get("total_cost_usd", 0.0),
@@ -104,6 +100,7 @@ class Session:
             git_branch=row.get("git_branch", ""),
             summary=row.get("summary", ""),
             engine=row.get("engine") or "naumi",
+            personal_agent_id=row.get("personal_agent_id") or "",
         )
 
 
@@ -124,7 +121,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     workspace_root TEXT NOT NULL DEFAULT '',
     git_branch TEXT NOT NULL DEFAULT '',
     summary TEXT NOT NULL DEFAULT '',
-    engine TEXT NOT NULL DEFAULT 'naumi'
+    engine TEXT NOT NULL DEFAULT 'naumi',
+    personal_agent_id TEXT NOT NULL DEFAULT ''
 )
 """
 
@@ -133,9 +131,9 @@ INSERT INTO sessions
     (
         id, title, model, messages, created_at, updated_at, status, total_tokens,
         total_cost_usd, workspace_root, git_branch, summary, engine,
-        last_accessed_at, archived_at, pinned_at
+        last_accessed_at, archived_at, pinned_at, personal_agent_id
     )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
     title = excluded.title,
     model = excluded.model,
@@ -158,7 +156,11 @@ ON CONFLICT(id) DO UPDATE SET
     archived_at = CASE
         WHEN sessions.status = 'archived' AND excluded.status = 'active'
         THEN sessions.archived_at ELSE excluded.archived_at END,
-    pinned_at = excluded.pinned_at
+    pinned_at = excluded.pinned_at,
+    personal_agent_id = CASE
+        WHEN sessions.personal_agent_id <> '' THEN sessions.personal_agent_id
+        ELSE excluded.personal_agent_id END
+RETURNING personal_agent_id
 """
 
 _GET = "SELECT * FROM sessions WHERE id = ?"
@@ -176,6 +178,7 @@ _EXTRA_COLUMNS = {
     "last_accessed_at": "TEXT",
     "archived_at": "TEXT",
     "pinned_at": "TEXT",
+    "personal_agent_id": "TEXT NOT NULL DEFAULT ''",
 }
 
 _PAYLOAD_BYTES_SQL = """
@@ -190,6 +193,7 @@ length(CAST(id AS BLOB)) + length(CAST(title AS BLOB))
 + length(CAST(COALESCE(workspace_root, '') AS BLOB))
 + length(CAST(COALESCE(git_branch, '') AS BLOB))
 + length(CAST(COALESCE(summary, '') AS BLOB))
++ length(CAST(COALESCE(personal_agent_id, '') AS BLOB))
 """
 
 _EFFECTIVE_ACCESS_SQL = """
@@ -243,6 +247,7 @@ class SessionStore:
         workspace_root: str | None = None,
         git_branch: str | None = None,
         engine: str | None = None,
+        personal_agent_id: str = "",
     ) -> Session:
         session = Session(
             title=title or "新会话",
@@ -250,6 +255,7 @@ class SessionStore:
             workspace_root=str(workspace_root or "").strip(),
             git_branch=str(git_branch or "").strip(),
             engine=engine or "naumi",
+            personal_agent_id=personal_agent_id,
         )
         if system_prompt:
             session.add_message("system", system_prompt)
@@ -257,6 +263,13 @@ class SessionStore:
         return session
 
     async def save(self, session: Session) -> None:
+        marker = session.personal_agent_id
+        if (
+            not isinstance(marker, str)
+            or len(marker) > 128
+            or any(ord(character) < 33 or ord(character) == 127 for character in marker)
+        ):
+            raise ValueError("个人助理身份标记必须是无空白的字符串，最多 128 字符。")
         db = await self._get_db()
         if session.status == "active":
             timestamp = datetime.now()
@@ -264,7 +277,7 @@ class SessionStore:
             session.last_accessed_at = timestamp
             session.archived_at = None
         row = session.to_row()
-        await db.execute(
+        cursor = await db.execute(
             _UPSERT,
             (
                 row["id"],
@@ -283,9 +296,14 @@ class SessionStore:
                 row["last_accessed_at"],
                 row["archived_at"],
                 row["pinned_at"],
+                row["personal_agent_id"],
             ),
         )
+        # Ownership is sticky in SQL even when a stale caller saves an unmarked object.
+        saved = await cursor.fetchone()
         await db.commit()
+        if saved is not None:
+            session.personal_agent_id = saved["personal_agent_id"]
 
     async def load(self, session_id: str) -> Session | None:
         db = await self._get_db()
@@ -367,9 +385,7 @@ class SessionStore:
                 status=str(row["status"]),
                 last_accessed_at=datetime.fromisoformat(row["last_accessed_at"]),
                 archived_at=(
-                    datetime.fromisoformat(row["archived_at"])
-                    if row["archived_at"]
-                    else None
+                    datetime.fromisoformat(row["archived_at"]) if row["archived_at"] else None
                 ),
                 payload_bytes=int(row["payload_bytes"] or 0),
             )
@@ -473,6 +489,7 @@ class SessionStore:
             workspace_root=source.workspace_root,
             git_branch=source.git_branch,
             summary=source.summary,
+            personal_agent_id=source.personal_agent_id,
         )
         await self.save(duplicate)
         return duplicate

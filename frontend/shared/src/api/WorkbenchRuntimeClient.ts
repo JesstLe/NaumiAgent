@@ -62,6 +62,28 @@ export interface StreamEvent {
   data: Record<string, unknown>
 }
 
+export interface PersonalAgent {
+  id: string
+  name: string
+  description: string
+  instructions: string
+  model_tier: 'fast' | 'capable' | 'reasoning'
+  tool_names: string[]
+  kind: 'specialist' | 'team'
+  member_ids: string[]
+  status: 'active' | 'paused' | 'archived'
+  version: number
+  created_at: string
+  updated_at: string
+}
+export type PersonalAgentInput = Pick<PersonalAgent,
+  'name' | 'description' | 'instructions' | 'model_tier' | 'tool_names' | 'kind' | 'member_ids'
+>
+export type PersonalAgentUpdate = Partial<Omit<PersonalAgentInput, 'kind'> & Pick<PersonalAgent, 'status'>> & {
+  expected_version: number
+}
+export interface PersonalTool { name: string; description: string }
+
 function preferenceNamespace(): string {
   try {
     return new URLSearchParams(location.search).get('naumiWindow')?.trim() || ''
@@ -206,6 +228,27 @@ export class WorkbenchRuntimeClient extends WorkbenchApiClient {
   }
   async config(): Promise<ModelConfig> {
     return (await this.fetch('/config')).json()
+  }
+  async personalAgents(includeArchived = false): Promise<{ agents: PersonalAgent[] }> {
+    return (await this.fetch(`/personal/agents?include_archived=${includeArchived}`)).json()
+  }
+  async personalTools(): Promise<{ tools: PersonalTool[] }> {
+    return (await this.fetch('/personal/tools')).json()
+  }
+  async createPersonalAgent(body: PersonalAgentInput & { request_id: string }): Promise<PersonalAgent> {
+    return (await this.fetch('/personal/agents', { method: 'POST', body: JSON.stringify(body) })).json()
+  }
+  async updatePersonalAgent(id: string, body: PersonalAgentUpdate): Promise<PersonalAgent> {
+    return (await this.fetch(`/personal/agents/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) })).json()
+  }
+  async personalAgentHistory(id: string): Promise<{ revisions: PersonalAgent[] }> {
+    return (await this.fetch(`/personal/agents/${encodeURIComponent(id)}/history`)).json()
+  }
+  async openPersonalSession(id: string): Promise<{ session_id: string; agent_id: string; version: number }> {
+    return (await this.fetch(`/personal/agents/${encodeURIComponent(id)}/session`, { method: 'POST' })).json()
+  }
+  async currentPersonalAgent(sessionId: string): Promise<{ agent: PersonalAgent | null }> {
+    return (await this.fetch(`/personal/current?session_id=${encodeURIComponent(sessionId)}`)).json()
   }
   async outputAsset(path: string, signal?: AbortSignal): Promise<Blob> {
     if (!/^\/api\/v1\/output-assets\/[a-f0-9]{64}\.(svg|png|jpg|webp|gif|pdf|csv|json|txt|md)$/.test(path)) throw new Error('文件地址无效')

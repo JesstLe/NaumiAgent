@@ -2978,6 +2978,11 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             await _run_todo(engine, arg)
         case "/team":
             await _run_team(engine, arg)
+        case "/assistants":
+            from naumi_agent.personal.commands import run_assistants_command
+
+            output = await run_assistants_command(engine, arg)
+            console.print(output, markup=False, highlight=False, soft_wrap=True)
         case "/agents":
             await _run_agents(engine, arg)
         case "/runtime":
@@ -3261,6 +3266,7 @@ def _print_help() -> None:
         ("/schedule <子命令>", "调度提醒 — create/list/cancel/pause/resume"),
         ("/todo <子命令>", "todo 清单 — list/add/start/done/pending/delete/clear"),
         ("/team <子命令>", "团队协议 — status/handoff/blocker/decision/request/result"),
+        ("/assistants [子命令]", "个人助理 — 创建、配置、打开、暂停与归档"),
         (
             "/agents result ack <投递ID> <SHA256>",
             "Agent Control — 确认一条持久结果已读",

@@ -168,6 +168,7 @@ def _build_commands() -> list[CommandMeta]:
         CommandMeta("/schedule", "调度提醒 — create/list/cancel/pause/resume", takes_arg=True, arg_hint="<子命令>", readonly=False, category="元命令"),
         CommandMeta("/todo", "todo 清单 — list/add/start/done/pending/delete/clear", takes_arg=True, arg_hint="<子命令>", readonly=False, category="元命令"),
         CommandMeta("/team", "团队协议 — status/handoff/blocker/decision/request/result", takes_arg=True, arg_hint="<子命令>", readonly=False, category="元命令"),
+        CommandMeta("/assistants", "个人助理 — 创建、配置、打开、暂停与归档", takes_arg=True, arg_hint="[list|get|tools|create|create-json|update-json|open|pause|resume|archive|history] [参数]", readonly=False, category="元命令"),
         CommandMeta("/runtime", "运行时状态 — all/context/todo/team/subagent/hooks/resources", takes_arg=True, arg_hint="[分区]", readonly=True, category="元命令"),
         CommandMeta("/browse", "打开 URL 并显示 SoM 元素", takes_arg=True, arg_hint="<url>", readonly=False, category="元命令"),
         CommandMeta("/autobrowse", "自主浏览器任务", takes_arg=True, arg_hint="<任务>", readonly=False, category="元命令"),

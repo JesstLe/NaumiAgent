@@ -9,7 +9,7 @@
     "audio_analysis": "mean_volume=-91.0dB; max_volume=-91.0dB; visual review only",
     "review_method": "49 timestamped frames at 10-second intervals across full duration; full-resolution targeted inspection; additional frames at 07:55/07:57/07:59"
   },
-  "scope": "All 24 identified capability requirements retained; no runtime implementation claimed in this change.",
+  "scope": "All 24 capability requirements retained. PA-00 catalog, scoped sessions and execution are locally verified; remaining capabilities are not claimed complete.",
   "evidence_kinds": {
     "visible_ui": "可见实体、消息或状态；不代表后台与外部状态已核验",
     "visible_artifact": "可见可读的产物/对话；其外部事实仍需核验",
@@ -20,7 +20,7 @@
     {
       "id": "VID-01",
       "title": "自然语言组建多个专业助手/团队",
-      "status": "planned",
+      "status": "partial",
       "in_scope": true,
       "verified_in_naumi": false,
       "owners": [
@@ -41,12 +41,14 @@
       "acceptance": [
         "三种专员实际创建并逐个对话；重启后 ID 和会话仍一致。",
         "重复请求按同一操作身份去重，部分创建失败可恢复。"
-      ]
+      ],
+      "implementation_note": "PA-00已实现用户动态创建、档案版本与独立会话/工具执行；团队运行、语义记忆、声音/账户配置仍待后续模块。",
+      "implementation_record": "../../development/personal-agent/PA-00.md"
     },
     {
       "id": "VID-02",
       "title": "每位助手的独立身份、会话与记忆",
-      "status": "planned",
+      "status": "partial",
       "in_scope": true,
       "verified_in_naumi": false,
       "owners": [
@@ -73,12 +75,14 @@
       "acceptance": [
         "两个专员分别保存不同上下文，重启后正确召回。",
         "未共享的专员资料不跨角色泄露，删除/纠正后旧记忆不再生效。"
-      ]
+      ],
+      "implementation_note": "PA-00已实现用户动态创建、档案版本与独立会话/工具执行；团队运行、语义记忆、声音/账户配置仍待后续模块。",
+      "implementation_record": "../../development/personal-agent/PA-00.md"
     },
     {
       "id": "VID-03",
       "title": "同领域多个策略专员与重复角色澄清",
-      "status": "planned",
+      "status": "partial",
       "in_scope": true,
       "verified_in_naumi": false,
       "owners": [
@@ -99,12 +103,14 @@
       "acceptance": [
         "已有角色与新建副本有不同 ID，策略和记忆互不覆盖。",
         "用户选择复用时不产生多余角色。"
-      ]
+      ],
+      "implementation_note": "PA-00已实现用户动态创建、档案版本与独立会话/工具执行；团队运行、语义记忆、声音/账户配置仍待后续模块。",
+      "implementation_record": "../../development/personal-agent/PA-00.md"
     },
     {
       "id": "VID-04",
       "title": "专员职责、工具、账户与声音配置",
-      "status": "planned",
+      "status": "partial",
       "in_scope": true,
       "verified_in_naumi": false,
       "owners": [
@@ -132,7 +138,9 @@
       "acceptance": [
         "改职责后下一次执行采用新版本，旧 Run 保留旧版本证据。",
         "取消某个工具/账户授权后新旧待执行任务均重新校验。"
-      ]
+      ],
+      "implementation_note": "PA-00已实现用户动态创建、档案版本与独立会话/工具执行；团队运行、语义记忆、声音/账户配置仍待后续模块。",
+      "implementation_record": "../../development/personal-agent/PA-00.md"
     },
     {
       "id": "VID-05",

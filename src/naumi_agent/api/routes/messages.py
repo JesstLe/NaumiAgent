@@ -82,6 +82,12 @@ async def update_session(
     session = await engine.session_store.load(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    personal = getattr(engine, "personal_agents", None)
+    if getattr(session, "personal_agent_id", "") or (
+        personal is not None and personal.current(session_id) is not None
+    ):
+        if body.model is not None or body.system_prompt is not None:
+            raise HTTPException(409, "该会话属于专员，请在助理设置中修改职责和模型")
     if body.model is not None:
         session.model = body.model
     if body.title is not None:
@@ -136,6 +142,12 @@ async def archive_session(session_id: str, request: Request, auth: str = AuthDep
 @router.post("/sessions/{session_id}/duplicate", response_model=SessionResponse, status_code=201)
 async def duplicate_session(session_id: str, request: Request, auth: str = AuthDep):
     engine = request.app.state.engine
+    original = await engine.session_store.load(session_id)
+    personal = getattr(engine, "personal_agents", None)
+    if getattr(original, "personal_agent_id", "") or (
+        personal is not None and personal.current(session_id) is not None
+    ):
+        raise HTTPException(409, "专员会话不复制到主助理；请创建新专员并明确共享所需资料")
     session = await engine.session_store.duplicate(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -212,6 +224,21 @@ async def send_message(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     engine, is_pi = _conversation_engine_for(session, request)
+    personal = getattr(engine, "personal_agents", None)
+    if personal is not None:
+        from naumi_agent.personal.models import PersonalAgentError
+        try:
+            profile = personal.current(session_id)
+            if getattr(session, "personal_agent_id", "") and (
+                profile is None or profile.id != session.personal_agent_id
+            ):
+                raise PersonalAgentError(
+                    "binding_conflict", "专员身份与会话归属不一致，请恢复后继续"
+                )
+            if profile is not None:
+                personal._executable(profile.id)
+        except PersonalAgentError as exc:
+            raise HTTPException(409, exc.message) from exc
     if is_pi and body.edit_message_id:
         raise HTTPException(
             status_code=400,

@@ -95,6 +95,8 @@ import {
   type WorkspaceProjectCandidate,
 } from '@naumi/shared/projects/workspaceProjects'
 import { ProjectCreationDialog, type ProjectCreationInput } from './ProjectCreationDialog'
+import { PersonalAgents } from './personal/PersonalAgents'
+import { usePersonalAgents } from './personal/usePersonalAgents'
 
 type Panel =
   | 'home'
@@ -273,6 +275,10 @@ function PluginPanel() {
 export function Web2() {
   const w = useWorkspace()
   const platform = usePlatform()
+  const personal = usePersonalAgents({
+    api: w.api, sessionId: w.sessionId, busy: w.busy,
+    connected: Boolean(w.daemon), onSelect: w.select,
+  })
   const completion = useCommandCompletion(w.commands, w.draft, w.setDraft)
   const [sidebar, setSidebar] = useState(
     () => readPreference('sidebar', String(window.innerWidth > 580)) === 'true',
@@ -353,7 +359,9 @@ export function Web2() {
   const detachedLiveRun = currentSessionBusy && !messages.some(
     (message) => message.id === w.runningUserMessageId,
   )
-  const composerLocked = w.busy || w.uploading || w.loading || w.connecting
+  const personalLocked = Boolean(personal.opening) || personal.currentPending || Boolean(personal.currentError)
+    || Boolean(personal.current && personal.current.status !== 'active')
+  const composerLocked = w.busy || w.uploading || w.loading || w.connecting || personalLocked
   useEffect(() => {
     setEditingMessage(null)
     setSavingEdit(false)
@@ -650,6 +658,7 @@ export function Web2() {
   })
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if (event.target instanceof Element && event.target.closest('.pa-editor')) return
       if (event.key === 'Escape') {
         setSearching(false)
         setSummaryOpen(false)
@@ -797,6 +806,7 @@ export function Web2() {
           <button onClick={() => openPanel('schedules')} className={panel === 'schedules' ? 'selected' : ''}><Clock3 />定时任务</button>
           <button onClick={() => openPanel('plugins')} className={panel === 'plugins' ? 'selected' : ''}><Plug />插件</button>
         </nav>
+        <PersonalAgents api={w.api} state={personal} busy={w.busy} connected={Boolean(w.daemon)} />
         {searching && (
           <div className="w2-search">
             <Search size={14} />
@@ -936,7 +946,10 @@ export function Web2() {
         <div className="w2-workspace">
           <section className="w2-chat" aria-label="对话">
             <div className="w2-chat-heading">
-              <span>{current?.title || '新对话'}</span>
+              <span className="pa-current-heading">
+                <span>{personal.current?.name || current?.title || '主助理'}</span>
+                {personal.current && personal.current.status !== 'active' && <small className="pa-current-status">{personal.current.status === 'paused' ? '已暂停' : '已归档'}</small>}
+              </span>
               <div className="w2-summary-anchor" ref={summaryRef}>
                 <button
                   type="button"
@@ -981,7 +994,7 @@ export function Web2() {
                 <div className="w2-welcome">
                   <Logo className="w2-welcome-logo" />
                   <h1>
-                    你想让我们在 <span>{workspace}</span> 中构建什么？
+                    {personal.current ? personal.current.name : <>你想让我们在 <span>{workspace}</span> 中构建什么？</>}
                   </h1>
                 </div>
               ) : (
@@ -1084,13 +1097,14 @@ export function Web2() {
               )}
             </div>
             <div className="w2-composer-wrap">
+              {personal.currentError && <div className="pa-current-error" role="alert"><span>{personal.currentError}</span><button onClick={() => void personal.refresh()}>重新确认助理</button></div>}
               {w.error && (
                 <div className="w2-error" role="alert">
                   <span>{w.error}</span>
                   <div>
                     {w.failedMessage && w.daemon && (
                       <button
-                        disabled={w.busy || w.connecting}
+                        disabled={composerLocked}
                         onClick={() => void w.retryFailedSend()}
                       >
                         重试发送
@@ -1148,7 +1162,7 @@ export function Web2() {
                         key={id}
                         type="button"
                         className={w.engine === id ? 'on' : ''}
-                        disabled={!info?.available || w.busy || w.connecting}
+                        disabled={!info?.available || w.busy || w.connecting || personalLocked || Boolean(personal.current)}
                         title={
                           info?.available === false
                             ? 'pi 引擎不可用：未检测到 pi 可执行文件'
@@ -1203,7 +1217,7 @@ export function Web2() {
                       event.keyCode !== 229
                     ) {
                       event.preventDefault()
-                      void w.send()
+                      if (!composerLocked) void w.send()
                     }
                   }}
                 />
@@ -1274,22 +1288,22 @@ export function Web2() {
                   <div className="w2-model">
                     <select
                       aria-label="模型"
-                      value={w.model}
-                      disabled={!w.daemon || w.uploading || (w.busy && w.sessionId === w.runningSessionId)}
+                      value={personal.current ? personal.current.model_tier : w.model}
+                      disabled={!w.daemon || w.uploading || personalLocked || Boolean(personal.current) || (w.busy && w.sessionId === w.runningSessionId)}
                       onChange={(event) =>
                         void w.changeModel(event.target.value)
                       }
                     >
-                      {!w.config?.models.some(
-                        (item) => item.id === w.model,
-                      ) && (
-                        <option value={w.model}>{w.model || '默认模型'}</option>
-                      )}
-                      {w.config?.models.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.name}
-                        </option>
-                      ))}
+                      {personal.current
+                        ? <option value={personal.current.model_tier}>{({ fast: '快速', capable: '标准', reasoning: '深度思考' })[personal.current.model_tier]}</option>
+                        : <>
+                            {!w.config?.models.some((item) => item.id === w.model) && (
+                              <option value={w.model}>{w.model || '默认模型'}</option>
+                            )}
+                            {w.config?.models.map((item) => (
+                              <option key={item.id} value={item.id}>{item.name}</option>
+                            ))}
+                          </>}
                     </select>
                     <ChevronDown size={12} />
                   </div>
