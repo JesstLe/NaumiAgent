@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import { useAppStore, type AppRoute } from '@/stores/appStore'
 import { useWorkspace } from '@naumi/shared/hooks/WorkspaceProvider'
+import brandLogo from '../../../../../assets/logo.svg'
 
 import { ProjectPanel } from './ProjectPanel'
 import { GroupPanel } from './GroupPanel'
@@ -64,7 +65,7 @@ export function MainLayout() {
       {/* Far-left icon rail (matches the UX in the screenshot) */}
       <nav className="flex flex-col w-14 border-r border-border bg-sidebar shrink-0">
         <div className="flex items-center justify-center h-12 border-b border-border">
-          <div className="font-semibold text-xs text-accent">NA</div>
+          <img src={brandLogo} width={28} height={28} alt="NaumiAgent" draggable={false} />
         </div>
 
         <div className="flex-1 overflow-y-auto py-2 space-y-1 px-1">

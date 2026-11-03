@@ -57,6 +57,7 @@ import {
 import { errorText } from '@naumi/shared/hooks/useWorkspaceController'
 import { assistantActionsReady, runsByUserMessage } from '@naumi/shared/api/activity'
 import './web2.css'
+import brandLogo from '../../../assets/logo.svg'
 import { MenuBar } from './MenuBar'
 import { SettingsPage } from './SettingsPage'
 import { TodoPanel } from './TodoPanel'
@@ -148,29 +149,16 @@ function storedWidth(key: string, fallback: number) {
   return Number.isFinite(value) ? value : fallback
 }
 
-function Logo({ className = '' }: { className?: string }) {
+function Logo({ className = '', decorative = false }: { className?: string; decorative?: boolean }) {
   return (
-    <svg
+    <img
       className={className}
-      viewBox="0 0 56 56"
-      fill="none"
-      aria-label="NaumiAgent"
-      role="img"
-    >
-      <path
-        d="M20 9c4-5 12-5 16 0 7-1 13 5 12 12 5 4 5 12 0 16 1 7-5 13-12 12-4 5-12 5-16 0-7 1-13-5-12-12-5-4-5-12 0-16C7 14 13 8 20 9Z"
-        stroke="currentColor"
-        strokeWidth="2.5"
-        strokeLinejoin="round"
-      />
-      <path
-        d="m19 22 5 7-5 7m12 0h8"
-        stroke="currentColor"
-        strokeWidth="2.7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
+      src={brandLogo}
+      width={49}
+      height={49}
+      alt={decorative ? '' : 'NaumiAgent'}
+      draggable={false}
+    />
   )
 }
 function IconButton({
@@ -783,6 +771,7 @@ export function Web2() {
       <aside className="w2-sidebar" aria-label="项目侧栏">
         <div className="w2-brand">
           <button onClick={openWorkspaceMenu}>
+            <Logo className="w2-sidebar-logo" decorative />
             <span>NaumiAgent</span>
             <ChevronDown size={14} />
           </button>

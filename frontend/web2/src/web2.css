@@ -142,6 +142,12 @@
   letter-spacing: -0.4px;
   padding: 6px 0;
 }
+.w2-sidebar-logo {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  margin-right: 2px;
+}
 .w2-nav {
   display: grid;
   gap: 1px;
@@ -557,7 +563,7 @@
 .w2-welcome-logo {
   width: 49px;
   height: 49px;
-  color: #babbb9;
+  display: block;
   margin-bottom: 29px;
 }
 .w2-welcome h1 {

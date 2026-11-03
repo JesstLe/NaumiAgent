@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+  <title>NaumiAgent</title>
+  <rect width="128" height="128" rx="38" fill="#181B23"/>
+  <path d="M38 86L48 42L79 86L89 42" stroke="#FFFFFF" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

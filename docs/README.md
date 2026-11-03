@@ -18,8 +18,9 @@
 - 项目配置、provider 目录和运行数据默认位于 `.naumi/config.yaml`、
   `.naumi/providers.json` 和 `.naumi/data/`；密钥只进入系统凭据库或环境变量。
 - 默认权限模式可配置；`bypass` 表示工具执行全权限通过。默认预算不限，最大 Agent 轮数为 50。
-- 当前品牌图标的唯一文档源是 [`assets/logo.png`](../assets/logo.png)；macOS AppIcon
-  是同一图标的发布格式。旧版深色 N 标志和未采用的 logo variant 已移除。
+- 当前品牌采用用户确认的黑底圆角、白色斜体 N；矢量母版是
+  [`assets/logo.svg`](../assets/logo.svg)，文档保持引用 [`assets/logo.png`](../assets/logo.png)。
+  Web、favicon、Windows、macOS 图标均由同一母版生成，详见[品牌资产说明](brand-identity.md)。
 
 ## 当前使用说明
 

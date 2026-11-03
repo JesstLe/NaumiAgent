@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
 import App from '@/App'
+import brandLogo from '../../../../assets/logo.svg'
 
 vi.mock('@naumi/shared/hooks/useWorkbenchConnection', () => ({
   useWorkbenchConnection: () => ({
@@ -21,5 +22,9 @@ describe('App shell', () => {
   it('renders the chat page as the default view', () => {
     render(<App />)
     expect(screen.getByPlaceholderText('输入问题或指令...')).toBeInTheDocument()
+    const logo = screen.getByRole('img', { name: 'NaumiAgent' })
+    expect(logo).toHaveAttribute('src', brandLogo)
+    expect(logo).toHaveAttribute('width', '28')
+    expect(logo).toHaveAttribute('height', '28')
   })
 })

@@ -1,0 +1,32 @@
+{
+  "source": "assets/logo.svg",
+  "source_sha256": "53229b3fe0fcd8108111aa859c606fe99e8839e78759c8d86db977a426f4fe5e",
+  "palette": [
+    "#181B23",
+    "#FFFFFF"
+  ],
+  "outputs": {
+    "assets/logo.png": "2dd8df89fce616caed2ec17734615b895127e94cde8dc747b80ece10a56f89a0",
+    "apps/windows/NaumiAgentWorkbench/src-tauri/icons/icon.png": "7333f99d96d75f2361c85cf9015b3746d6ea4aed030b332f5170070ed3e8a9ab",
+    "apps/windows/NaumiAgentWorkbench/src-tauri/icons/32x32.png": "c8003a4010a9579eed7be9054a56a7bb21067ae5bdbf23b8dedf46467de1bb74",
+    "apps/windows/NaumiAgentWorkbench/src-tauri/icons/128x128.png": "e2329e608e0ee8a3e755d482b739f21b7998c65c34188e12a37f32638e6f6046",
+    "apps/windows/NaumiAgentWorkbench/src-tauri/icons/128x128@2x.png": "891172f0a619d2b9132ff40658d92f881367b6ffe450b9e32160afa9d4978d24",
+    "apps/windows/NaumiAgentWorkbench/src-tauri/icons/StoreLogo.png": "a0e2c1a1b1f8ff52b7130e8a7c336270bcb6e3ddc54689c6236ca76527b1c9a4",
+    "apps/windows/NaumiAgentWorkbench/src-tauri/icons/Square30x30Logo.png": "19d009da19a40c704c8f817d93b91c39c72332de9bae982af91e7ea71a0d1637",
+    "apps/windows/NaumiAgentWorkbench/src-tauri/icons/Square44x44Logo.png": "68cf92c5aa0bec41e88b133b894699aa93aa740d4c3cedaac9c39c8163fa5e44",
+    "apps/windows/NaumiAgentWorkbench/src-tauri/icons/Square71x71Logo.png": "76194d8f381d2be74479574126491280070b484bb5c1af1f5986d454b08122eb",
+    "apps/windows/NaumiAgentWorkbench/src-tauri/icons/Square89x89Logo.png": "18486ce49f14caad1761e3bc7450778704552b3aac6470e98226ca1e1255a9f2",
+    "apps/windows/NaumiAgentWorkbench/src-tauri/icons/Square107x107Logo.png": "9ad356f7153be9b853a4b1b5b6e49c67ade69b52e33030a43c732efc7f4b1ca2",
+    "apps/windows/NaumiAgentWorkbench/src-tauri/icons/Square142x142Logo.png": "36b418ec92539e26686dd153489bbf2b574231158ffcaebd17ea32b44b0ce70d",
+    "apps/windows/NaumiAgentWorkbench/src-tauri/icons/Square150x150Logo.png": "8a3b7429b8834e8a3516f8f1618de117479d4e904662161cdfcfc851a2628f40",
+    "apps/windows/NaumiAgentWorkbench/src-tauri/icons/Square284x284Logo.png": "6c7c8e0d1622707a720f8b964ab7537972d08375acd2d39195d52f8458a342bd",
+    "apps/windows/NaumiAgentWorkbench/src-tauri/icons/Square310x310Logo.png": "b4d947db6fecbc494a480b277b54a58e44345c9b6651ffe87a8c5fcf717957cd",
+    "apps/windows/NaumiAgentWorkbench/src-tauri/icons/icon.ico": "b6803615836f4f78b0873fd66aa82cae418418447e631c74fbf296c149bcb360",
+    "apps/windows/NaumiAgentWorkbench/src-tauri/icons/icon.icns": "cb32c1ec4923a4d6c4f9135cd7f2caea390351b0331d70d1d72351d509f2e3a0",
+    "apps/macos/NaumiAgentWorkbench/Sources/NaumiAgentWorkbenchCore/Components/NaumiBrandMark.swift": "3c150b8e63e88c6a65bdf24ae992d03e56b6e038e8994e7a13ef1721966c754d",
+    "apps/macos/NaumiAgentWorkbench/Resources/AppIcon.icns": "cb32c1ec4923a4d6c4f9135cd7f2caea390351b0331d70d1d72351d509f2e3a0",
+    "frontend/web/public/brand-mark.svg": "53229b3fe0fcd8108111aa859c606fe99e8839e78759c8d86db977a426f4fe5e",
+    "frontend/web/public/favicon.ico": "b6803615836f4f78b0873fd66aa82cae418418447e631c74fbf296c149bcb360",
+    "frontend/web/public/apple-touch-icon.png": "aa981fc492fbc3a8d4f79ced566be9f6b5302fe1785fe44626c8f5cedd04d5cc"
+  }
+}

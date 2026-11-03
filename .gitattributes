@@ -1,0 +1,5 @@
+# Keep hashed brand source and generated text identical across Windows/macOS checkouts.
+/assets/logo.svg text eol=lf
+/assets/brand-manifest.json text eol=lf
+/frontend/web/public/brand-mark.svg text eol=lf
+/apps/macos/NaumiAgentWorkbench/Sources/NaumiAgentWorkbenchCore/Components/NaumiBrandMark.swift text eol=lf
