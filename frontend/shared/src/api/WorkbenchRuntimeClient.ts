@@ -1,4 +1,5 @@
 import type { PersonalItem, PersonalItemAction, PersonalItemControl, PersonalItemExecution, PersonalItemInput, PersonalItemPage, PersonalItemReadInput, PersonalItemReadReceipt, PersonalItemResult, PersonalItemResultsPage, PersonalItemUpdate } from './personalItems'
+import type { CalendarAction, CalendarActionInput, CalendarActionRevision, CalendarEventItemInput, CalendarEventPage, CalendarMutation, CalendarOAuthIntent, PersonalConnection, PersonalConnectionContext, PersonalConnectionRequest } from './personalConnections'
 import type { PersonalLegacyMemoryPage, PersonalMemory, PersonalMemoryContext, PersonalMemoryGrant, PersonalMemoryHistoryEntry, PersonalMemoryMutationResult, PersonalMemoryPage, PersonalMemoryPrepare, PersonalMemoryQuery, PersonalMemoryRequest, PersonalMemorySearch } from './personalMemories'
 import { WorkbenchApiClient } from '@naumi/shared/api/WorkbenchApiClient'
 import type {
@@ -417,6 +418,68 @@ export class WorkbenchRuntimeClient extends WorkbenchApiClient {
   }
   async config(): Promise<ModelConfig> {
     return (await this.fetch('/config')).json()
+  }
+  async personalConnectionContext(signal?: AbortSignal): Promise<PersonalConnectionContext> {
+    return (await this.fetch('/personal/connections/context', { signal, cache: 'no-store' })).json()
+  }
+  async personalConnections(signal?: AbortSignal): Promise<{ connections: PersonalConnection[] }> {
+    return (await this.fetch('/personal/connections', { signal, cache: 'no-store' })).json()
+  }
+  async personalConnectionRequest(id: string, signal?: AbortSignal): Promise<PersonalConnectionRequest> {
+    return (await this.fetch(`/personal/connections/requests/${encodeURIComponent(id)}`, { signal, cache: 'no-store' })).json()
+  }
+  async configurePersonalCalendarClient(body: { request_id: string; client_json: string }): Promise<PersonalConnectionContext> {
+    return (await this.fetch('/personal/connections/client', { method: 'POST', body: JSON.stringify(body) })).json()
+  }
+  async beginPersonalCalendarOAuth(body: { request_id: string; connection_id?: string; expected_revision?: number; write: boolean }): Promise<CalendarOAuthIntent> {
+    return (await this.fetch('/personal/connections/oauth', { method: 'POST', body: JSON.stringify(body) })).json()
+  }
+  async personalCalendarOAuth(id: string, signal?: AbortSignal): Promise<CalendarOAuthIntent> {
+    return (await this.fetch(`/personal/connections/oauth/${encodeURIComponent(id)}`, { signal, cache: 'no-store' })).json()
+  }
+  async cancelPersonalCalendarOAuth(id: string, body: { request_id: string }): Promise<CalendarOAuthIntent> {
+    return (await this.fetch(`/personal/connections/oauth/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: JSON.stringify(body) })).json()
+  }
+  async syncPersonalCalendar(id: string, body: CalendarMutation): Promise<PersonalConnection> {
+    return (await this.fetch(`/personal/connections/${encodeURIComponent(id)}/sync`, { method: 'POST', body: JSON.stringify(body) })).json()
+  }
+  async disconnectPersonalCalendar(id: string, body: CalendarMutation & { remote_revoke: boolean }): Promise<PersonalConnection> {
+    return (await this.fetch(`/personal/connections/${encodeURIComponent(id)}/disconnect`, { method: 'POST', body: JSON.stringify(body) })).json()
+  }
+  async personalCalendarEvents(id: string, query: { limit?: number; offset?: number } = {}, signal?: AbortSignal): Promise<CalendarEventPage> {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(query)) if (value !== undefined) params.set(key, String(value))
+    return (await this.fetch(`/personal/connections/${encodeURIComponent(id)}/events?${params}`, { signal, cache: 'no-store' })).json()
+  }
+  async createPersonalCalendarItem(id: string, eventId: string, body: CalendarEventItemInput): Promise<PersonalItem> {
+    return (await this.fetch(`/personal/connections/${encodeURIComponent(id)}/events/${encodeURIComponent(eventId)}/items`, { method: 'POST', body: JSON.stringify(body) })).json()
+  }
+  async grantPersonalCalendar(id: string, body: CalendarMutation & { actor_id: string; actor_version: number }): Promise<PersonalConnection> {
+    return (await this.fetch(`/personal/connections/${encodeURIComponent(id)}/grant`, { method: 'POST', body: JSON.stringify(body) })).json()
+  }
+  async revokePersonalCalendarGrant(id: string, body: CalendarMutation & { actor_id: string; actor_version?: number }): Promise<PersonalConnection> {
+    return (await this.fetch(`/personal/connections/${encodeURIComponent(id)}/revoke-grant`, { method: 'POST', body: JSON.stringify(body) })).json()
+  }
+  async personalCalendarActions(signal?: AbortSignal): Promise<{ actions: CalendarAction[] }> {
+    return (await this.fetch('/personal/actions', { signal, cache: 'no-store' })).json()
+  }
+  async personalCalendarAction(id: string, signal?: AbortSignal): Promise<CalendarAction> {
+    return (await this.fetch(`/personal/actions/${encodeURIComponent(id)}`, { signal, cache: 'no-store' })).json()
+  }
+  async createPersonalCalendarAction(body: CalendarActionInput): Promise<CalendarAction> {
+    return (await this.fetch('/personal/actions', { method: 'POST', body: JSON.stringify(body) })).json()
+  }
+  async revisePersonalCalendarAction(id: string, body: CalendarActionRevision): Promise<CalendarAction> {
+    return (await this.fetch(`/personal/actions/${encodeURIComponent(id)}/revise`, { method: 'POST', body: JSON.stringify(body) })).json()
+  }
+  async approvePersonalCalendarAction(id: string, body: CalendarMutation & { expected_digest: string }): Promise<CalendarAction> {
+    return (await this.fetch(`/personal/actions/${encodeURIComponent(id)}/approve`, { method: 'POST', body: JSON.stringify(body) })).json()
+  }
+  async rejectPersonalCalendarAction(id: string, body: CalendarMutation): Promise<CalendarAction> {
+    return (await this.fetch(`/personal/actions/${encodeURIComponent(id)}/reject`, { method: 'POST', body: JSON.stringify(body) })).json()
+  }
+  async reconcilePersonalCalendarAction(id: string, body: CalendarMutation): Promise<CalendarAction> {
+    return (await this.fetch(`/personal/actions/${encodeURIComponent(id)}/reconcile`, { method: 'POST', body: JSON.stringify(body) })).json()
   }
   async personalMemoryContext(actorId = 'main', signal?: AbortSignal): Promise<PersonalMemoryContext> {
     return (await this.fetch(`/personal/memories/context?actor_id=${encodeURIComponent(actorId)}`, { signal, cache: 'no-store' })).json()

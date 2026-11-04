@@ -22,6 +22,9 @@ def protected_roots(engine):
     artifacts = getattr(engine, "personal_artifacts", None)
     if artifacts is not None:
         roots.append(artifacts.runtime_boundary_marker)
+    connections = getattr(engine, "personal_connections", None)
+    if connections is not None:
+        roots.extend([connections.boundary, connections.store.base_dir.resolve()])
     memory = getattr(engine, "personal_memory", None)
     if memory is not None:
         roots.extend([memory.runtime_boundary_marker, memory.owner_boundary_marker,
@@ -108,6 +111,8 @@ class ArtifactToolProxy:
                 "personal_agents",
                 "personal_items",
                 "personal_memories",
+                "personal_connections",
+                "personal_actions",
                 "memory_store",
                 "memory_recall",
             }:

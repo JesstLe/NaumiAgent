@@ -2782,6 +2782,22 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             await _show_history(engine, arg)
         case "/memory":
             await _handle_memory(engine, arg)
+        case "/connections" | "/actions":
+            from naumi_agent.personal.connection_commands import (
+                execute_action_command,
+                execute_connection_command,
+            )
+
+            channel = (
+                "manual_tui" if type(_active_cli).__module__.startswith("naumi_agent.tui.")
+                else "manual_cli"
+            )
+            execute = (
+                execute_action_command if command == "/actions" else execute_connection_command
+            )
+            result = await execute(engine.personal_connections, arg, trusted_channel=channel)
+            console.print(json.dumps(result, ensure_ascii=False, indent=2), markup=False,
+                          highlight=False, soft_wrap=True)
         case "/load" | "/l":
             await _interactive_load(engine, arg)
         case "/resume" | "/r":

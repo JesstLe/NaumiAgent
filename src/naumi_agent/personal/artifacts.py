@@ -174,6 +174,27 @@ class PersonalArtifactService:
         )
         for grant in grants:
             self._scope_current(grant)
+        connections = getattr(self.engine, "personal_connections", None)
+        if connections is not None:
+            await connections.authorize_artifact(snapshot, actor_id)
+        else:
+            stack, seen = [snapshot], set()
+            while stack:
+                value = stack.pop()
+                identity = (value["artifact_id"], value["version"])
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                if len(seen) > 1024:
+                    raise PersonalAgentError("storage_error", "产物来源链超过校验上限")
+                if (value.get("evidence", {}).get("connection_sources")
+                        or value.get("evidence", {}).get("connection_action_refs")):
+                    raise PersonalAgentError(
+                        "connection_source_revoked", "日历资料需要当前账户授权组件"
+                    )
+                for ref in value.get("source_refs", []):
+                    stack.append(await self._call("get", actor_id=actor_id,
+                        artifact_id=ref["artifact_id"], version=ref["version"]))
         return {
             **snapshot,
             "can_revise": snapshot["owner_id"] == actor_id,
@@ -198,7 +219,10 @@ class PersonalArtifactService:
             try:
                 result.append(await self._checked(actor_id, value))
             except PersonalAgentError as exc:
-                if exc.code not in {"version_conflict", "agent_inactive", "not_found"}:
+                if exc.code not in {
+                    "version_conflict", "agent_inactive", "not_found",
+                    "connection_source_revoked", "connection_revoked",
+                }:
                     raise
         return result
 

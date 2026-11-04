@@ -4260,6 +4260,9 @@ class AgentEngine:
         from naumi_agent.personal.items import PersonalItemService
 
         self.personal_items = PersonalItemService(self)
+        from naumi_agent.personal.connections import PersonalConnectionService
+
+        self.personal_connections = PersonalConnectionService(self)
         from naumi_agent.personal.memories import PersonalMemoryService
         from naumi_agent.personal.memory_adapter import ScopedMemoryAdapter
         from naumi_agent.personal.memory_runtime import PersonalMemoryRuntime
@@ -4414,6 +4417,13 @@ class AgentEngine:
         from naumi_agent.personal.item_tools import PersonalItemsTool
 
         self._tool_registry.register(PersonalItemsTool(self.personal_items))
+        from naumi_agent.personal.connection_tools import (
+            PersonalActionsTool,
+            PersonalConnectionsTool,
+        )
+
+        self._tool_registry.register(PersonalConnectionsTool(self.personal_connections))
+        self._tool_registry.register(PersonalActionsTool(self.personal_connections))
         self._tool_registry.register(OutputPublishTool(self))
         self._tool_registry.register(OutputAssetRetentionPreviewTool(self))
         self._tool_registry.register(OutputAssetRetentionRunTool(self))
@@ -5000,6 +5010,7 @@ class AgentEngine:
 
     async def shutdown(self) -> None:
         """释放资源（关闭数据库连接、浏览器、MCP 连接等）."""
+        await self._shutdown_component("personal_connections", self.personal_connections.stop)
         await self._shutdown_component("personal_memory", self.personal_memory.stop)
         await self._shutdown_component("personal_items", self.personal_items.stop)
         await self._shutdown_component("personal_teams", self.personal_teams.stop)
@@ -5700,6 +5711,7 @@ class AgentEngine:
             self.personal_teams.start()
             self.personal_items.start()
             self.personal_memory.start()
+            self.personal_connections.start()
         return recovered
 
     async def enqueue_stable_promotion_runtime_admission_delivery(

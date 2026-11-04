@@ -18,6 +18,8 @@ from naumi_agent.personal.store import PersonalAgentStore
 logger = logging.getLogger(__name__)
 
 _TOOL_LABELS = {
+    "personal_connections": "读取已授权日历来源并生成当前 Agent 的事项",
+    "personal_actions": "提案日历动作、查看原批准与读回结果",
     "personal_memories": "检索当前 Agent 的已确认记忆并提出候选",
     "memory_store": "提出当前 Agent 的待确认记忆候选",
     "memory_recall": "检索当前 Agent 范围内的已确认记忆",
@@ -70,6 +72,8 @@ _TOOL_LABELS = {
 # catalog, global-memory, delegation, or code-generation/registration authority.
 ASSIGNABLE_TOOL_NAMES = frozenset(
     {
+        "personal_connections",
+        "personal_actions",
         "personal_memories",
         "memory_store",
         "memory_recall",

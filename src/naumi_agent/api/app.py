@@ -73,6 +73,7 @@ def create_app() -> FastAPI:
     from naumi_agent.api.routes import (
         artifacts,
         commands,
+        connections,
         engines,
         health,
         items,
@@ -94,6 +95,7 @@ def create_app() -> FastAPI:
     app.include_router(artifacts.router, prefix="/api/v1")
     app.include_router(items.router, prefix="/api/v1")
     app.include_router(memories.router, prefix="/api/v1")
+    app.include_router(connections.router, prefix="/api/v1")
     app.include_router(tools.router, prefix="/api/v1")
     app.include_router(workbench.router, prefix="/api/v1")
     app.include_router(workspace_controls.router, prefix="/api/v1")

@@ -38,6 +38,26 @@ from naumi_agent.personal.models import PersonalAgentError
 from naumi_agent.tools.output_publish import MAX_ASSET_BYTES
 
 _SCHEMA_VERSION = 1
+
+
+def _connection_evidence(evidence):
+    from naumi_agent.personal.connection_models import action_source_ref, source_ref
+
+    if not isinstance(evidence, dict):
+        raise invalid("产物来源证据格式不正确")
+    refs = evidence.get("connection_sources", [])
+    if not isinstance(refs, list) or len(refs) > 64:
+        raise invalid("日历来源引用需要有效列表，且不超过 64 项")
+    for ref in refs:
+        source_ref(ref)
+    actions = evidence.get("connection_action_refs", [])
+    if not isinstance(actions, list) or len(actions) > 64:
+        raise invalid("日历行动来源需要有效列表，且不超过 64 项")
+    for ref in actions:
+        action_source_ref(ref)
+    return bool(refs or actions)
+
+
 _VERSION_FIELDS = {
     "artifact_id",
     "workspace_key",
@@ -259,8 +279,20 @@ class ArtifactStore:
         value = self._stored(row["record_json"])
         if (
             not isinstance(value, dict)
-            or set(value) != _VERSION_FIELDS
+            or set(value) not in (_VERSION_FIELDS, _VERSION_FIELDS | {"authority_version"})
             or digest(value) != row["record_sha256"]
+        ):
+            raise _broken()
+        if not isinstance(value.get("evidence"), dict):
+            raise _broken()
+        try:
+            connection_bound = _connection_evidence(value["evidence"])
+        except PersonalAgentError:
+            raise _broken() from None
+        if connection_bound != (value.get("authority_version") == 2):
+            raise _broken()
+        if "authority_version" in value and (
+            type(value["authority_version"]) is not int or value["authority_version"] != 2
         ):
             raise _broken()
         if (
@@ -548,6 +580,7 @@ class ArtifactStore:
         content, suffix, mime = validate_content(content, suffix, kind=kind)
         refs = normalize_refs([] if source_refs is None else source_refs)
         evidence = json_object({} if evidence is None else evidence, "产物证据")
+        _connection_evidence(evidence)
         if artifact_id is None:
             if expected_version is not None:
                 raise invalid("新资料不需要旧版本编号")
@@ -619,6 +652,10 @@ class ArtifactStore:
                 "request_id": request,
                 "previous_sha256": prior_sha,
             }
+            if _connection_evidence(evidence):
+                # An old reader rejects this unknown top-level field instead
+                # of ignoring the new dynamic source-authorization protocol.
+                record["authority_version"] = 2
             self._publish_blob(content, content_sha, suffix)
             if artifact_id is None:
                 conn.execute(
