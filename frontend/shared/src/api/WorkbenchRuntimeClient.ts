@@ -1,4 +1,5 @@
 import type { PersonalItem, PersonalItemAction, PersonalItemControl, PersonalItemExecution, PersonalItemInput, PersonalItemPage, PersonalItemReadInput, PersonalItemReadReceipt, PersonalItemResult, PersonalItemResultsPage, PersonalItemUpdate } from './personalItems'
+import type { PersonalLegacyMemoryPage, PersonalMemory, PersonalMemoryContext, PersonalMemoryGrant, PersonalMemoryHistoryEntry, PersonalMemoryMutationResult, PersonalMemoryPage, PersonalMemoryPrepare, PersonalMemoryQuery, PersonalMemoryRequest, PersonalMemorySearch } from './personalMemories'
 import { WorkbenchApiClient } from '@naumi/shared/api/WorkbenchApiClient'
 import type {
   EnginesResponse,
@@ -416,6 +417,49 @@ export class WorkbenchRuntimeClient extends WorkbenchApiClient {
   }
   async config(): Promise<ModelConfig> {
     return (await this.fetch('/config')).json()
+  }
+  async personalMemoryContext(actorId = 'main', signal?: AbortSignal): Promise<PersonalMemoryContext> {
+    return (await this.fetch(`/personal/memories/context?actor_id=${encodeURIComponent(actorId)}`, { signal, cache: 'no-store' })).json()
+  }
+  async personalMemories(query: PersonalMemoryQuery, signal?: AbortSignal): Promise<PersonalMemoryPage> {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== '') params.set(key, String(value))
+    return (await this.fetch(`/personal/memories?${params}`, { signal, cache: 'no-store' })).json()
+  }
+  async personalMemory(id: string, actorId = 'main', signal?: AbortSignal): Promise<PersonalMemory> {
+    return (await this.fetch(`/personal/memories/${encodeURIComponent(id)}?actor_id=${encodeURIComponent(actorId)}`, { signal, cache: 'no-store' })).json()
+  }
+  async searchPersonalMemories(query: Omit<PersonalMemoryQuery, 'state' | 'offset'> & { query: string }, signal?: AbortSignal): Promise<PersonalMemorySearch> {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== '') params.set(key, String(value))
+    return (await this.fetch(`/personal/memories/search?${params}`, { signal, cache: 'no-store' })).json()
+  }
+  async personalMemoryHistory(id: string, actorId = 'main', signal?: AbortSignal): Promise<{ history: PersonalMemoryHistoryEntry[] }> {
+    return (await this.fetch(`/personal/memories/${encodeURIComponent(id)}/history?actor_id=${encodeURIComponent(actorId)}`, { signal, cache: 'no-store' })).json()
+  }
+  async personalMemoryGrants(id: string, actorId = 'main', signal?: AbortSignal): Promise<{ grants: PersonalMemoryGrant[] }> {
+    return (await this.fetch(`/personal/memories/${encodeURIComponent(id)}/grants?actor_id=${encodeURIComponent(actorId)}`, { signal, cache: 'no-store' })).json()
+  }
+  async exportPersonalMemories(query: Pick<PersonalMemoryQuery, 'actor_id' | 'scope' | 'item_id'>): Promise<Record<string, unknown>> {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== '') params.set(key, String(value))
+    return (await this.fetch(`/personal/memories/export?${params}`, { cache: 'no-store' })).json()
+  }
+  async legacyPersonalMemories(actorId = 'main', limit = 30, offset = 0, signal?: AbortSignal): Promise<PersonalLegacyMemoryPage> {
+    const params = new URLSearchParams({ actor_id: actorId, limit: String(limit), offset: String(offset) })
+    return (await this.fetch(`/personal/memories/legacy?${params}`, { signal, cache: 'no-store' })).json()
+  }
+  async preparePersonalMemoryRequest(body: PersonalMemoryPrepare): Promise<PersonalMemoryRequest> {
+    return (await this.fetch('/personal/memory-requests', { method: 'POST', body: JSON.stringify(body) })).json()
+  }
+  async personalMemoryRequest(id: string, actorId = 'main'): Promise<PersonalMemoryRequest> {
+    return (await this.fetch(`/personal/memory-requests/${encodeURIComponent(id)}?actor_id=${encodeURIComponent(actorId)}`, { cache: 'no-store' })).json()
+  }
+  async applyPersonalMemoryRequest(id: string, actorId: string, expectedFingerprint: string): Promise<PersonalMemoryMutationResult> {
+    return (await this.fetch(`/personal/memory-requests/${encodeURIComponent(id)}/apply?actor_id=${encodeURIComponent(actorId)}`, { method: 'POST', body: JSON.stringify({ expected_fingerprint: expectedFingerprint }) })).json()
+  }
+  async discardPersonalMemoryRequest(id: string, actorId: string, expectedFingerprint: string): Promise<PersonalMemoryRequest> {
+    return (await this.fetch(`/personal/memory-requests/${encodeURIComponent(id)}/discard?actor_id=${encodeURIComponent(actorId)}`, { method: 'POST', body: JSON.stringify({ expected_fingerprint: expectedFingerprint }) })).json()
   }
   async personalItems(query: { state?: string; query?: string; limit?: number; offset?: number } = {}, signal?: AbortSignal): Promise<PersonalItemPage> {
     const params = new URLSearchParams()

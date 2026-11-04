@@ -726,10 +726,8 @@ from naumi_agent.harness.tools import create_harness_tools
 from naumi_agent.hooks import HookContext, HookManager, HookPoint
 from naumi_agent.inspector import RuntimeInspectorEventSink, RuntimeInspectorService
 from naumi_agent.mcp.client import MCPClientManager, MCPServerConfig, setup_mcp_servers
-from naumi_agent.memory.auto_extract import extract_memory_candidates
 from naumi_agent.memory.compactor import ContextCompactor
 from naumi_agent.memory.lifecycle import SessionDeletePreview
-from naumi_agent.memory.long_term import LongTermMemory, MemoryEntry
 from naumi_agent.memory.session import Session
 from naumi_agent.model.router import ModelTier, TokenUsage
 from naumi_agent.orchestrator.agent_publication_worker import (
@@ -854,7 +852,6 @@ from naumi_agent.tools.browser.runtime.browser_runtime import BrowserRuntime
 from naumi_agent.tools.browser.tools import create_browser_tools
 from naumi_agent.tools.browser_daemon import BrowserDaemonClient, create_browser_daemon_tools
 from naumi_agent.tools.builtin import create_builtin_tools
-from naumi_agent.tools.memory import create_memory_tools
 from naumi_agent.tools.sandbox import create_sandbox_tools
 from naumi_agent.tools.web import create_web_tools
 from naumi_agent.ui.tool_output_archive import ToolOutputArchive
@@ -1516,16 +1513,16 @@ class AgentEngine:
             if self._default_permission_mode == PermissionMode.BYPASS
             else AgentRuntimeMode.DEFAULT
         )
-        self.long_term_memory = LongTermMemory(config.memory)
+        from naumi_agent.personal.memory_adapter import ReadOnlyLegacyMemory
+
+        self._legacy_long_term_memory = ReadOnlyLegacyMemory(config.memory)
+        self.long_term_memory = None
         self._compactor = ContextCompactor(
             config.memory,
             self._model_port,
             threshold=config.memory.compaction_threshold,
-            long_term_memory=(
-                self.long_term_memory
-                if config.memory.long_term_enabled
-                else None
-            ),
+            long_term_memory=None,
+            execution_authorizer=lambda: personal_runtime.authorize_execution(self),
         )
 
         self.emitter = EventEmitter()
@@ -4263,6 +4260,18 @@ class AgentEngine:
         from naumi_agent.personal.items import PersonalItemService
 
         self.personal_items = PersonalItemService(self)
+        from naumi_agent.personal.memories import PersonalMemoryService
+        from naumi_agent.personal.memory_adapter import ScopedMemoryAdapter
+        from naumi_agent.personal.memory_runtime import PersonalMemoryRuntime
+
+        self.personal_memory = PersonalMemoryService(self)
+        self.personal_memory_runtime = PersonalMemoryRuntime(self.personal_memory)
+        self.long_term_memory = ScopedMemoryAdapter(
+            self.personal_memory, self.personal_memory_runtime
+        )
+        self._compactor._long_term_memory = (
+            self.long_term_memory if config.memory.long_term_enabled else None
+        )
         self._personal_turn_snapshot = None
         self.goal_store = resources.goal_store
         self.pursuit_store = resources.pursuit_store
@@ -4335,11 +4344,14 @@ class AgentEngine:
         for tool in create_analysis_tools():
             self._tool_registry.register(tool)
 
-        try:
-            for tool in create_memory_tools(self.long_term_memory):
-                self._tool_registry.register(tool)
-        except Exception:
-            pass  # memory tools optional (chromadb may not be installed)
+        from naumi_agent.personal.memory_tools import (
+            MemoryRecallAlias,
+            MemoryStoreAlias,
+            PersonalMemoryTool,
+        )
+
+        for memory_tool in (PersonalMemoryTool, MemoryStoreAlias, MemoryRecallAlias):
+            self._tool_registry.register(memory_tool(self.personal_memory))
 
         # Task management tools
         from naumi_agent.tasks.tools import create_task_tools
@@ -4988,6 +5000,7 @@ class AgentEngine:
 
     async def shutdown(self) -> None:
         """释放资源（关闭数据库连接、浏览器、MCP 连接等）."""
+        await self._shutdown_component("personal_memory", self.personal_memory.stop)
         await self._shutdown_component("personal_items", self.personal_items.stop)
         await self._shutdown_component("personal_teams", self.personal_teams.stop)
         await self._shutdown_component("personal_collaborations", self.personal_collaborations.stop)
@@ -5686,6 +5699,7 @@ class AgentEngine:
             self.personal_collaborations.start()
             self.personal_teams.start()
             self.personal_items.start()
+            self.personal_memory.start()
         return recovered
 
     async def enqueue_stable_promotion_runtime_admission_delivery(
@@ -6219,77 +6233,16 @@ class AgentEngine:
     # --- 记忆注入 ---
 
     async def _inject_relevant_memories(self, user_message: str) -> None:
-        """自动召回与用户消息相关的长期记忆，注入到上下文中."""
-        if personal_runtime.current_agent(self) is not None:
-            return
-        if not self._config.memory.long_term_enabled:
-            return
-        session_id = self._session.id if self._session else ""
-        if not session_id:
-            return
-        try:
-            results = await self.long_term_memory.recall_for_session(
-                user_message,
-                session_id=session_id,
-                top_k=3,
-                min_relevance=0.4,
-            )
-        except Exception as e:
-            logger.debug("Memory recall for injection failed: %s", e)
-            return
-
-        if not results:
-            return
-
-        lines = ["## 相关记忆"]
-        for r in results:
-            lines.append(f"- [{r.entry.category}] {r.entry.content}")
-        memory_block = "\n".join(lines)
-
-        # Remove any previous memory injection to avoid accumulation
-        self._messages = [
-            m for m in self._messages
-            if not (
-                m.get("role") == "system"
-                and "## 相关记忆" in m.get("content", "")
-            )
-        ]
-
-        self._messages.append({"role": "system", "content": memory_block})
-        logger.info("Injected %d relevant memories into context", len(results))
+        """Prime a query; resolve current memory only at each actual model send."""
+        await self.personal_memory_runtime.prime(user_message)
 
     async def _auto_extract_memories(self, task: str, result: AgentResult) -> None:
-        """Store high-confidence facts/preferences/decisions from a completed turn."""
-        if personal_runtime.current_agent(self) is not None or getattr(
-            self, "_personal_artifact_refs", []
-        ):
-            return
-        if not self._config.memory.long_term_enabled:
-            return
-        if result.status != "completed":
-            return
-        candidates = extract_memory_candidates(task, result.response or "")
-        if not candidates:
-            return
-
-        session_id = self._session.id if self._session else ""
-        for candidate in candidates:
-            scope = "global" if candidate.category == "preference" else "session"
-            entry = MemoryEntry(
-                id="",
-                content=candidate.content,
-                category=candidate.category,
-                metadata={
-                    "source": "auto_extract",
-                    "reason": candidate.reason,
-                    "session_id": session_id,
-                    "scope": scope,
-                },
-            )
+        """Extraction creates reviewable candidates, never confirmed user facts."""
+        if result.status == "completed":
             try:
-                await self.long_term_memory.store(entry)
-            except Exception as e:
-                logger.debug("Auto memory extraction failed: %s", e)
+                await self.personal_memory_runtime.auto_capture(task, result.response or "")
+            except Exception as exc:
+                logger.warning("Memory candidate extraction failed: %s", type(exc).__name__)
 
     # --- 上下文压缩 ---
 
@@ -6516,6 +6469,7 @@ class AgentEngine:
         messages: list[dict[str, Any]],
         *,
         update_engine_context: bool = False,
+        preserve_metadata: bool = False,
     ) -> list[dict[str, Any]]:
         """Return model-ready messages with inline visual payloads summarized."""
         sanitized, replacements = self._compactor.sanitize_visual_payloads(messages)
@@ -6527,10 +6481,21 @@ class AgentEngine:
             )
         if update_engine_context and sanitized != self._messages:
             self._messages = sanitized
+        if preserve_metadata:
+            return sanitized
         return [
             {key: value for key, value in message.items() if key != "metadata"}
             for message in sanitized
         ]
+
+    async def _prepare_messages_for_model(self, messages, *, update_engine_context=False):
+        sanitized = self._sanitize_messages_for_model(
+            messages, update_engine_context=update_engine_context, preserve_metadata=True,
+        )
+        prepared = await self.personal_memory_runtime.prepare_messages(sanitized)
+        # Provenance metadata is consumed before removing non-provider fields.
+        return [{key: value for key, value in message.items() if key != "metadata"}
+                for message in prepared]
 
     async def _build_compaction_runtime_snapshot(self) -> tuple[str, list[str], list[str]]:
         """Build deterministic state that must survive history compaction."""
@@ -6753,7 +6718,7 @@ class AgentEngine:
         try:
             if cause is not None and _is_prompt_too_long_error(cause):
                 raise cause
-            safe_messages = self._sanitize_messages_for_model(
+            safe_messages = await self._prepare_messages_for_model(
                 messages,
                 update_engine_context=messages is self._messages,
             )
@@ -6775,7 +6740,7 @@ class AgentEngine:
             )
             if not recovered:
                 raise
-            safe_messages = self._sanitize_messages_for_model(
+            safe_messages = await self._prepare_messages_for_model(
                 self._messages,
                 update_engine_context=True,
             )
@@ -8769,7 +8734,7 @@ class AgentEngine:
 
             try:
                 llm_start = time.perf_counter()
-                stream_messages = self._sanitize_messages_for_model(
+                stream_messages = await self._prepare_messages_for_model(
                     self._messages,
                     update_engine_context=True,
                 )

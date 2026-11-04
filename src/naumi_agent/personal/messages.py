@@ -386,6 +386,12 @@ class PersonalMessageService:
                 await child_artifacts.propagate(
                     source.session_id, message["receiver_session_id"], profile.id
                 )
+            from naumi_agent.personal.engine_execution import bind_execution_memory
+
+            await bind_execution_memory(
+                engine, actor_id=profile.id, origin_actor_id=source.agent_id,
+                parent=source.engine,
+            )
             observe = self.collaboration._attach_interactions(
                 engine,
                 root.plan,

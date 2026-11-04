@@ -28,6 +28,7 @@ from naumi_agent.memory.session import Session
 from naumi_agent.model.router import ModelTier
 from naumi_agent.personal.artifact_models import normalize_refs, strict_json_loads
 from naumi_agent.personal.engine_execution import (
+    bind_execution_memory,
     bounded_execution,
     make_execution_child,
     renew_execution_lease,
@@ -506,6 +507,14 @@ class PersonalItemExecutionService:
                 intent["execution_session_id"],
                 intent["actor_id"],
                 intent["input_refs"],
+            )
+            source_item = self.store.get(owner_key=self.owner_key, item_id=intent["item_id"])
+            if source_item["definition_sha256"] != intent["definition_sha256"]:
+                raise PersonalAgentError("version_conflict", "事项原始委托已更新，已停止旧执行")
+            await bind_execution_memory(
+                child, actor_id=intent["actor_id"],
+                origin_actor_id=source_item["definition"]["origin"]["actor_id"],
+                item_id=intent["item_id"], parent=self.engine,
             )
             await self._validate(intent)
             await self.jobs.mark_running(

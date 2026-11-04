@@ -3237,7 +3237,7 @@ def _print_help() -> None:
         ("/write <path> <内容>", "写入文件（覆盖）"),
         ("/edit <path> <旧文本> <新文本>", "按文本替换更新文件"),
         ("/history", "查看历史会话列表"),
-        ("/memory [子命令]", "记忆管理 (stats/search/clean/export)"),
+        ("/memory [子命令]", "记忆 — 范围、来源、确认、纠正与删除"),
         ("/load <编号或id>", "加载会话 (无参数显示列表)"),
         ("/resume", "继续最近的对话 (/r)"),
         ("/delete <id>", "删除指定会话"),
@@ -9005,98 +9005,28 @@ async def _run_skill(engine: Any, skill_name: str, arguments: str) -> None:
 
 
 async def _handle_memory(engine: Any, arg: str) -> None:
-    """处理 /memory 命令及其子命令."""
-    parts = arg.strip().split(maxsplit=1) if arg else []
-    subcmd = parts[0] if parts else "stats"
-    sub_arg = parts[1] if len(parts) > 1 else ""
+    """Route all manual memory operations through the scoped personal authority."""
+    from naumi_agent.personal.memory_commands import run_memory_command
 
-    if subcmd == "stats":
-        await _memory_stats(engine)
-    elif subcmd == "search":
-        if not sub_arg:
-            console.print("[yellow]用法: /memory search <查询>[/yellow]")
-        else:
-            await _memory_search(engine, sub_arg)
-    elif subcmd == "clean":
-        await _memory_clean(engine)
-    elif subcmd == "export":
-        await _memory_export(engine)
-    else:
-        console.print("[bold]/memory 子命令:[/bold]")
-        console.print("  [cyan]stats[/cyan]          显示记忆统计")
-        console.print("  [cyan]search <查询>[/cyan]  搜索记忆")
-        console.print("  [cyan]clean[/cyan]          整理记忆（去重+遗忘）")
-        console.print("  [cyan]export[/cyan]         导出所有记忆为 JSON")
+    channel = getattr(engine, "_personal_memory_manual_channel", "manual_cli")
+    output = await run_memory_command(engine, arg, trusted_channel=channel)
+    console.print(output, markup=False, highlight=False, soft_wrap=True)
 
 
 async def _memory_stats(engine: Any) -> None:
-    """显示记忆统计."""
-    from rich.table import Table
-
-    stats = await engine.long_term_memory.stats()
-
-    if stats.total == 0:
-        console.print("[dim]记忆库为空[/dim]")
-        return
-
-    table = Table(title="记忆统计", show_lines=False)
-    table.add_column("指标", style="cyan", width=16)
-    table.add_column("值", justify="right", width=10)
-
-    table.add_row("总计", str(stats.total))
-    table.add_row("活跃", str(stats.active))
-    table.add_row("休眠", str(stats.dormant))
-    table.add_row("平均访问", f"{stats.avg_access_count:.1f}")
-
-    console.print(table)
-
-    if stats.by_category:
-        console.print("\n[bold]按类别:[/bold]")
-        for cat, count in sorted(stats.by_category.items()):
-            bar = "█" * min(count, 20)
-            console.print(f"  {cat:12s} {bar} {count}")
-    console.print()
+    await _handle_memory(engine, "stats")
 
 
 async def _memory_search(engine: Any, query: str) -> None:
-    """搜索记忆."""
-    results = await engine.long_term_memory.search(query, top_k=10)
-    if not results:
-        console.print("[dim]没有找到匹配的记忆[/dim]")
-        return
-
-    console.print(f"[bold]搜索结果 ({len(results)} 条):[/bold]")
-    for r in results:
-        status_tag = ""
-        if r.entry.status == "dormant":
-            status_tag = " [dim][休眠][/dim]"
-        console.print(
-            f"  • [{r.entry.category}] "
-            f"(相关度 {r.relevance:.0%}) "
-            f"{r.entry.content[:80]}{status_tag}",
-        )
-    console.print()
+    await _handle_memory(engine, "search " + query)
 
 
 async def _memory_clean(engine: Any) -> None:
-    """整理记忆."""
-    console.print("[bold yellow]整理记忆中...[/bold yellow]")
-    result = await engine.long_term_memory.consolidate()
-    console.print(
-        f"[green]整理完成:[/green] 去重 {result['deduped']} 条，遗忘 {result['forgotten']} 条",
-    )
+    await _handle_memory(engine, "clean")
 
 
 async def _memory_export(engine: Any) -> None:
-    """导出记忆."""
-    from pathlib import Path
-
-    data = await engine.long_term_memory.export_memories()
-    export_path = Path("memory_export.json")
-    export_path.write_text(data, encoding="utf-8")
-    count = data.count('"id"')
-    console.print(f"[green]已导出 {count} 条记忆到 {export_path}[/green]")
-
+    await _handle_memory(engine, "export")
 
 async def _run_browse(engine: Any, arg: str) -> None:
     """打开 URL 并显示 SoM 交互元素."""

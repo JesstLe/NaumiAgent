@@ -72,6 +72,9 @@ async def authorize_execution(engine: Any) -> None:
     artifacts = getattr(engine, "personal_artifacts", None)
     if artifacts is not None:
         await artifacts.authorize_engine()
+    memory = getattr(engine, "personal_memory_runtime", None)
+    if memory is not None:
+        await memory.authorize()
 
 
 def use_direct_runtime(engine: Any, task: str) -> bool:
@@ -149,6 +152,9 @@ def begin_turn(engine: Any) -> None:
     engine._personal_turn_snapshot = None
     engine._personal_artifact_outputs = []
     engine._personal_artifact_refs = []
+    memory = getattr(engine, "personal_memory_runtime", None)
+    if memory is not None:
+        memory.reset()
     agent = require_current_agent(engine)
     artifacts = getattr(engine, "personal_artifacts", None)
     if artifacts is not None and artifacts.enabled:
@@ -161,12 +167,11 @@ def begin_turn(engine: Any) -> None:
     if agent:
         engine._personal_turn_snapshot = (engine._session.id, agent.id, agent.version)
         engine._session.model = engine.router.resolve_model(ModelTier(agent.model_tier))
-    # Shared semantic memory is not a private per-agent memory store. Keep compaction
-    # extraction away from it until explicit personal scope support is implemented.
+    # Compaction writes only scoped assistant proposals through the shared service.
     engine._compactor._long_term_memory = (
         engine.long_term_memory
-        if agent is None
-        and engine.config.memory.long_term_enabled
+        if memory is not None and memory.enabled
+        and not getattr(engine, "_isolated_child", False)
         and not engine._personal_artifact_refs
         else None
     )
@@ -261,7 +266,8 @@ def filter_schemas(engine: Any, schemas: list[dict[str, Any]] | None):
     if restricted is not None:
         selected = [s for s in selected if s["function"]["name"] in restricted]
     artifacts = getattr(engine, "personal_artifacts", None)
-    if artifacts is not None and artifacts.enabled:
+    memories = getattr(engine, "personal_memory", None)
+    if (artifacts is not None and artifacts.enabled) or (memories is not None and memories.enabled):
         selected = [s for s in selected if not s["function"]["name"].startswith("browser_")]
         selected = [
             {
@@ -299,7 +305,8 @@ def tool_denial(engine: Any, name: str) -> str | None:
 def effective_tools(engine: Any, agent: PersonalAgent) -> set[str]:
     names = set(agent.tool_names)
     artifacts = getattr(engine, "personal_artifacts", None)
-    if artifacts is not None and artifacts.enabled:
+    memories = getattr(engine, "personal_memory", None)
+    if (artifacts is not None and artifacts.enabled) or (memories is not None and memories.enabled):
         names = {name for name in names if not name.startswith("browser_")}
     restricted = getattr(engine, "_personal_effective_tools", None)
     if restricted is not None:

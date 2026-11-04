@@ -14,7 +14,6 @@ import socket
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -895,8 +894,7 @@ async def test_controlled_model_real_read_docker_output_broker_and_run_lineage(
             assert len(actual["artifacts"]) == 1
             output = actual["artifacts"][0]
             assert output["url"] == (
-                f"/web2?artifact={output['artifact_id']}&version=1"
-                f"&actor={artifacts.profiles[1].id}"
+                f"/web2?artifact={output['artifact_id']}&version=1&actor={artifacts.profiles[1].id}"
             )
             assert output["markdown"] == f"[balance.csv]({output['url']})"
             yield StreamChunk(token="实际核算结余825元，产物为balance.csv，来源为已共享的预算v1。")
@@ -1094,29 +1092,38 @@ async def test_main_private_session_auto_extraction_is_blocked_with_public_posit
     runtime.begin_turn(artifacts.engine)
     assert artifacts.engine._personal_artifact_refs
     assert artifacts.engine._compactor._long_term_memory is None
-    stored = []
+    from naumi_agent.memory.auto_extract import MemoryCandidate
 
-    async def observe(entry):
-        stored.append(entry)
-
-    monkeypatch.setattr(artifacts.engine.long_term_memory, "store", observe)
     monkeypatch.setattr(
-        "naumi_agent.orchestrator.engine.extract_memory_candidates",
-        lambda *_: [
-            SimpleNamespace(
-                category="preference", content="CONTROLLED_CANDIDATE", reason="guard probe"
-            ),
+        "naumi_agent.personal.memory_runtime.extract_memory_candidates",
+        lambda task, *_: [
+            MemoryCandidate(
+                content="CONTROLLED_CANDIDATE",
+                category="preference",
+                reason="guard probe",
+                source_role="user",
+                source_quote=task,
+            )
         ],
     )
     completed = AgentResult(status="completed", response="controlled response")
     await artifacts.engine._auto_extract_memories("private source", completed)
-    assert stored == []
+    assert await artifacts.engine.personal_memory._records(actor_id="main") == []
     artifacts.engine.reset()
     await artifacts.engine.get_or_create_session()
     runtime.begin_turn(artifacts.engine)
     assert artifacts.engine._personal_artifact_refs == []
-    await artifacts.engine._auto_extract_memories("public positive control", completed)
-    assert len(stored) == 1 and stored[0].content == "CONTROLLED_CANDIDATE"
+    task = "public positive control"
+    artifacts.engine._append_message({"role": "user", "content": task})
+    await artifacts.engine._save_session()
+    with runtime.run_context(
+        artifacts.engine, artifacts.engine._session.id, "extraction-guard", None
+    ):
+        await artifacts.engine._auto_extract_memories(task, completed)
+    records = await artifacts.engine.personal_memory._records(actor_id="main")
+    assert len(records) == 1 and records[0]["content"] == "CONTROLLED_CANDIDATE"
+    assert records[0]["state"] == "proposed" and records[0]["confirmation"] is None
+    assert artifacts.engine._legacy_long_term_memory._client is None
 
 
 async def test_private_collaboration_rejects_legacy_child_without_artifact_adapter(artifacts):

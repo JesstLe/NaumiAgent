@@ -98,12 +98,19 @@ class ContextCompactor:
         threshold: float = 0.75,
         max_messages: int = 50,
         long_term_memory: Any | None = None,
+        execution_authorizer: Any | None = None,
     ) -> None:
         self._threshold = threshold
         self._max_messages = max_messages
         self._config = config
         self._router = router
         self._long_term_memory = long_term_memory
+        self._execution_authorizer = execution_authorizer
+
+    async def _call_model(self, **kwargs):
+        if self._execution_authorizer is not None:
+            await self._execution_authorizer()
+        return await self._router.call(**kwargs)
 
     def offload_large_tool_results(
         self,
@@ -209,7 +216,7 @@ class ContextCompactor:
 
         # 用 fast model 生成摘要
         try:
-            response = await self._router.call(
+            response = await self._call_model(
                 messages=[
                     {"role": "user", "content": COMPACTION_PROMPT.format(history=history_text)}
                 ],
@@ -301,7 +308,7 @@ class ContextCompactor:
             return
 
         try:
-            response = await self._router.call(
+            response = await self._call_model(
                 messages=[
                     {"role": "user", "content": EXTRACTION_PROMPT.format(history=history_text)}
                 ],

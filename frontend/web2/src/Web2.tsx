@@ -11,6 +11,7 @@ import {
 import {
   ArrowUp,
   ArrowUpRight,
+  BrainCircuit,
   Check,
   Copy,
   ChevronDown,
@@ -98,6 +99,7 @@ import {
 } from '@naumi/shared/projects/workspaceProjects'
 import { ProjectCreationDialog, type ProjectCreationInput } from './ProjectCreationDialog'
 import { PersonalItems } from './personal/items/PersonalItems'
+import { MemoryWorkspace, clearMemoryLocation } from './personal/memories/MemoryWorkspace'
 import type { PersonalArtifactRef } from '@naumi/shared/api/personalArtifacts'
 import { PersonalAgents } from './personal/PersonalAgents'
 import { usePersonalAgents } from './personal/usePersonalAgents'
@@ -284,6 +286,11 @@ function PluginPanel() {
 export function Web2() {
   const w = useWorkspace()
   const platform = usePlatform()
+  const [memoriesOpen, setMemoriesOpen] = useState(() => new URLSearchParams(location.search).get('memories') === '1')
+  const closeMemories = () => {
+    setMemoriesOpen(false)
+    if (new URLSearchParams(location.search).get('memories') === '1') clearMemoryLocation()
+  }
   const [itemsOpen, setItemsOpen] = useState(() => new URLSearchParams(location.search).get('items') === '1')
   const closeItems = () => {
     setItemsOpen(false)
@@ -301,20 +308,22 @@ export function Web2() {
       const accept = () => {
         setLibraryOpen(new URLSearchParams(location.search).get('library') === '1' || new URLSearchParams(location.search).has('artifact'))
         setItemsOpen(new URLSearchParams(location.search).get('items') === '1')
+        setMemoriesOpen(new URLSearchParams(location.search).get('memories') === '1')
       }
-      if (itemsOpen) requestArtifactNavigation(accept, () => history.pushState({}, '', acceptedUrl))
+      if (itemsOpen || memoriesOpen) requestArtifactNavigation(accept, () => history.pushState({}, '', acceptedUrl))
       else accept()
     }
     window.addEventListener('popstate', update)
     return () => window.removeEventListener('popstate', update)
-  }, [itemsOpen])
+  }, [itemsOpen, memoriesOpen])
   const personal = usePersonalAgents({
     api: w.api, sessionId: w.sessionId, busy: w.busy,
-    connected: Boolean(w.daemon), onSelect: id => new Promise((resolve, reject) => requestArtifactNavigation(() => { closeItems(); closeLibrary(); void w.select(id).then(resolve, reject) }, () => resolve(undefined))),
+    connected: Boolean(w.daemon), onSelect: id => new Promise((resolve, reject) => requestArtifactNavigation(() => { closeItems(); closeLibrary(); closeMemories(); void w.select(id).then(resolve, reject) }, () => resolve(undefined))),
   })
   const openLibrary = (selection?: ArtifactSelection) => {
     requestArtifactNavigation(() => {
       closeItems()
+      closeMemories()
       writeArtifactLocation(personal.current?.id || 'main', selection || null)
       setLibraryOpen(true)
       if (window.innerWidth < 580) setSidebar(false)
@@ -322,12 +331,19 @@ export function Web2() {
   }
   const openItems = () => requestArtifactNavigation(() => {
     closeLibrary()
+    closeMemories()
     const url = new URL(location.href); url.searchParams.set('items', '1'); history.pushState({}, '', url)
     setItemsOpen(true)
     if (window.innerWidth < 580) setSidebar(false)
   })
+  const openMemories = () => requestArtifactNavigation(() => {
+    closeItems(); closeLibrary()
+    const url = new URL(location.href); url.searchParams.set('memories', '1'); history.pushState({}, '', url)
+    setMemoriesOpen(true)
+    if (window.innerWidth < 580) setSidebar(false)
+  })
   const openItemArtifact = (actorId: string, ref: PersonalArtifactRef) => {
-    closeItems(); writeArtifactLocation(actorId, { artifact_id: ref.artifact_id, version: ref.version }); setLibraryOpen(true)
+    closeItems(); closeMemories(); writeArtifactLocation(actorId, { artifact_id: ref.artifact_id, version: ref.version }); setLibraryOpen(true)
   }
   const teamProfile = personal.current?.kind === 'team' && !personal.readOnly ? personal.current : null
   const teamWorkspace = useRef(w)
@@ -527,7 +543,7 @@ export function Web2() {
     </div>
   )
   const openPanel = (next: Panel) => {
-    requestArtifactNavigation(() => { closeItems(); closeLibrary(); setPanel(next); setRight(true) })
+    requestArtifactNavigation(() => { closeItems(); closeLibrary(); closeMemories(); setPanel(next); setRight(true) })
   }
   const daemonConfigFor = async (path: string) => {
     if (!platform.getDaemonLaunchConfig)
@@ -551,6 +567,7 @@ export function Web2() {
   const newChat = () => requestArtifactNavigation(() => {
     closeItems()
     closeLibrary()
+    closeMemories()
     if (w.busy && workspaceRoot) {
       setWorkspaceOpening(true)
       setWorkspaceTarget(workspaceRoot)
@@ -874,15 +891,16 @@ export function Web2() {
           </button>
           <button
             onClick={() => openPanel('tools')}
-            className={!itemsOpen && !libraryOpen && panel === 'tools' ? 'selected' : ''}
+            className={!itemsOpen && !libraryOpen && !memoriesOpen && panel === 'tools' ? 'selected' : ''}
           >
             <Workflow />
             工具与扩展
           </button>
           <button onClick={openItems} className={itemsOpen ? 'selected' : ''}><ListTodo />事项</button>
+          <button onClick={openMemories} className={memoriesOpen ? 'selected' : ''}><BrainCircuit />记忆</button>
           <button onClick={() => openLibrary()} className={libraryOpen ? 'selected' : ''}><Library />资料库</button>
-          <button onClick={() => openPanel('schedules')} className={!itemsOpen && !libraryOpen && panel === 'schedules' ? 'selected' : ''}><Clock3 />定时任务</button>
-          <button onClick={() => openPanel('plugins')} className={!itemsOpen && !libraryOpen && panel === 'plugins' ? 'selected' : ''}><Plug />插件</button>
+          <button onClick={() => openPanel('schedules')} className={!itemsOpen && !libraryOpen && !memoriesOpen && panel === 'schedules' ? 'selected' : ''}><Clock3 />定时任务</button>
+          <button onClick={() => openPanel('plugins')} className={!itemsOpen && !libraryOpen && !memoriesOpen && panel === 'plugins' ? 'selected' : ''}><Plug />插件</button>
         </nav>
         <PersonalAgents api={w.api} state={personal} busy={w.busy} connected={Boolean(w.daemon)}
           collaboration={{ api: w.api, sessionId: w.sessionId, onOpenSession: w.select }} />
@@ -929,7 +947,7 @@ export function Web2() {
                 className={`w2-project ${active ? 'active' : ''}`}
                 disabled={!active && (workspaceSwitching || (workspaceOpening && switching) || !platform.startDaemon)}
                 onClick={() => {
-                  if (!active) requestArtifactNavigation(() => { closeItems(); closeLibrary(); void activateWorkspace(project.path, project.name).catch((error) => w.setError(errorText(error))) })
+                  if (!active) requestArtifactNavigation(() => { closeItems(); closeLibrary(); closeMemories(); void activateWorkspace(project.path, project.name).catch((error) => w.setError(errorText(error))) })
                 }}
                 aria-current={active ? 'true' : undefined}
                 title={project.path}
@@ -950,7 +968,7 @@ export function Web2() {
                     disabled={workspaceSwitching}
                     onClick={() => {
                       requestArtifactNavigation(() => {
-                        closeItems(); closeLibrary()
+                        closeItems(); closeLibrary(); closeMemories()
                         if (active) void w.select(session.id)
                         else void activateWorkspace(project.path, project.name, session.id).catch((error) => w.setError(errorText(error)))
                       })
@@ -1024,7 +1042,8 @@ export function Web2() {
         }}
       />
 
-      <main className={`w2-main ${terminal ? 'has-terminal' : ''} ${libraryOpen || itemsOpen ? 'is-library' : ''}`}>
+      <main className={`w2-main ${terminal ? 'has-terminal' : ''} ${libraryOpen || itemsOpen || memoriesOpen ? 'is-library' : ''}`}>
+        {memoriesOpen && <MemoryWorkspace key={`memories:${w.base}:${workspaceRoot || ''}`} api={w.api} namespace={`${w.base}:${workspaceRoot || ''}`} initialActorId={personal.current?.id || 'main'} agents={personal.agents} connected={Boolean(w.daemon)} onClose={closeMemories} />}
         {itemsOpen && <PersonalItems key={`items:${w.base}:${workspaceRoot || ''}`} api={w.api} namespace={`${w.base}:${workspaceRoot || ''}`} agents={personal.agents} connected={Boolean(w.daemon)} originSessionId={w.sessionId || undefined} onClose={closeItems} onOpenArtifact={openItemArtifact} />}
         {libraryOpen && <LibraryWorkspace key={`${w.base}:${workspaceRoot || ''}`} api={w.api} namespace={`${w.base}:${workspaceRoot || ''}`}
           initialActorId={personal.current?.id || 'main'} currentActorId={personal.current?.id || 'main'}

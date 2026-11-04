@@ -9,7 +9,7 @@
     "audio_analysis": "mean_volume=-91.0dB; max_volume=-91.0dB; visual review only",
     "review_method": "49 timestamped frames at 10-second intervals across full duration; full-resolution targeted inspection; additional frames at 07:55/07:57/07:59"
   },
-  "scope": "All 24 capability requirements retained. PA-00 and PA-06 delegation/peer slices retain their own local evidence. The current team-conversation and staged team-execution slice has independent real-model, HTTP/browser and completed-record cold-restart acceptance. Scoped leaf activity and unknown token-breakdown fixes have local regression evidence; 36 final team integration/TUI tests pass; broader regression baseline failures and source-copy rollback are tracked in the current team transaction VERIFICATION.txt. No full-product, deployment or platform-completion claim. PA-08 adds immutable private artifacts, exact-version sharing/revocation, real Page/Library and actual Docker calculation. Generic user-named Agents keep stable identities. Its real provider and browser evidence is recorded separately from deterministic concurrency barriers and baseline regression failures; full-product completion remains unclaimed. PA-01 now has independent real provider/Docker/HTTP/browser/cold-restart evidence for durable one-shot items, exact reports, inbox and explicit human-read receipts. All 24 requirements remain in scope and partial where their original acceptance is incomplete.",
+  "scope": "All 24 capability requirements retained. PA-00 and PA-06 delegation/peer slices retain their own local evidence. The current team-conversation and staged team-execution slice has independent real-model, HTTP/browser and completed-record cold-restart acceptance. Scoped leaf activity and unknown token-breakdown fixes have local regression evidence; 36 final team integration/TUI tests pass; broader regression baseline failures and source-copy rollback are tracked in the current team transaction VERIFICATION.txt. No full-product, deployment or platform-completion claim. PA-08 adds immutable private artifacts, exact-version sharing/revocation, real Page/Library and actual Docker calculation. Generic user-named Agents keep stable identities. Its real provider and browser evidence is recorded separately from deterministic concurrency barriers and baseline regression failures; full-product completion remains unclaimed. PA-01 now has independent real provider/Docker/HTTP/browser/cold-restart evidence for durable one-shot items, exact reports, inbox and explicit human-read receipts. All 24 requirements remain in scope and partial where their original acceptance is incomplete. PA-02 now implements scoped persistent SQLite memory and actual model-send reauthorization, source and human confirmation separation, exact sharing/revocation, hybrid retrieval, erasure, durable opaque requests and real management UI. Current related backend regression is 1902 passed / 1 original ItemStore WAL-bootstrap failure / 2 skipped; full frontend is 311 passed. Real browser CRUD/export/discard is independently recorded. Real-provider failures and repairs, cold restart, rollback and deployment remain separate evidence tiers in the PA-02 verification record. Final PA-02 focused integration after provider-schema and read-only legacy fixes: 433 passed. Six successful real Runs and seven complete provider calls are recorded; one original HTTP400 schema rejection remains failed with unknown billing and zero replay. Actual server cold restart preserves all business records and original Run outcomes, with zero new paid Runs; only the existing UI session last_accessed_at changes through normal resume. Source-copy rollback and guarded artifacts are tracked independently.",
   "evidence_kinds": {
     "visible_ui": "可见实体、消息或状态；不代表后台与外部状态已核验",
     "visible_artifact": "可见可读的产物/对话；其外部事实仍需核验",
@@ -76,8 +76,8 @@
         "两个Agent分别保存不同上下文，重启后正确召回。",
         "未共享的Agent资料不跨角色泄露，删除/纠正后旧记忆不再生效。"
       ],
-      "implementation_note": "专员与团队拥有独立持久对话，团队成员使用独立执行Session/Run，后台append-once结果不覆盖新消息；主会话私有历史不自动传给成员。本轮真实模型/浏览器验证单次交付，新进程读回2个团队回合、7个根Job/Run会话、4条原消息一致且未POST/调用模型/重复消息；分范围语义记忆、纠正/删除和跨工作区召回仍待PA-02，私有文件ACL不由聊天隔离代替。",
-      "implementation_record": "../../development/personal-agent/PA-00.md"
+      "implementation_note": "PA-00/PA-06 的独立身份、会话与协作记录保留。PA-02 已实现 owner/actor 个人、工作区、事项记忆隔离；显式 exact share、来源/人工确认、纠正/删除/导出及模型发送前重新授权。全相关后端1902项通过，唯一PA-01原有WAL首次并发竞态已在原HEAD复现；全前端311项与真实浏览器闭环通过。真实provider中的成功、拒绝与修复、冷重启和源码回滚以PA-02最终记录区分，未把本机验收冒充发布或全产品完成。 最后433项集成通过；真实provider 6成功Run/7完整调用，原HTTP400失败保留、零重放。真实冷重启的业务/授权/记忆/原Run一致，仅原UI会话访问时间按resume更新，新增paid Run为0。",
+      "implementation_record": "../../development/pa02-personal-memory.md"
     },
     {
       "id": "VID-03",
@@ -626,7 +626,7 @@
         "上传资料→检索引用→生成产物→重开/导出形成闭环。",
         "跨角色权限和分享撤销有效，旧链接不越权。"
       ],
-      "implementation_note": "已接通真实上传/查询引用→隔离计算生成产物→聊天卡→独立资料库重开/下载，支持exact版本分享、撤销及新grant不复活旧ref。真实v1/v2、SVG二进制及跨Agent复核已分层记录；私有blob不进入公开output-assets。PA-02语义记忆和适用设备兼容仍待验收。",
+      "implementation_note": "已接通真实上传/查询引用→隔离计算生成产物→聊天卡→独立资料库重开/下载，支持exact版本分享、撤销及新grant不复活旧ref。真实v1/v2、SVG二进制及跨Agent复核已分层记录；私有blob不进入公开output-assets。PA-02语义记忆和适用设备兼容仍待验收。 PA-02 现已接通独立持久记忆、来源/确认/纠正/擦除、确切分享、实际上下文授权及真实记忆管理界面，平台同步和部署不由这些本机证据代替。",
       "implementation_record": "../../development/personal-agent/PA-08.md"
     },
     {

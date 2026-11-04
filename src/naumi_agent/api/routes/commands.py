@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 
 from fastapi import APIRouter, HTTPException, Request
@@ -36,7 +37,7 @@ _SUPPORTED = frozenset(
 /chaos /scale /state /vibe /eval /page /heal /dspy /graph /mcts /route
 /speculate /jit /pointer /cooe /sleep /entropy /ooda /probe /hook /vision
 /spar /world /fusion /consensus /pid /zkp /genesis /macro /cosmos /watchdog
-/supervisor /autopsy /feedback /evolution /assistants /library /items
+/supervisor /autopsy /feedback /evolution /assistants /library /items /memory
 """.split()
 )
 
@@ -98,11 +99,15 @@ class _CommandEngine:
         object.__setattr__(self, "_callback", callback)
         object.__setattr__(self, "failed", False)
         object.__setattr__(self, "_personal_items_manual_channel", "web")
+        object.__setattr__(self, "_personal_memory_manual_channel", "management_web")
 
     def __getattr__(self, name):
         return getattr(self._engine, name)
 
     def __setattr__(self, name, value):
+        if name == "_personal_memory_command_refs":
+            object.__setattr__(self, name, value)
+            return
         setattr(self._engine, name, value)
 
     def mark_manual_command_failed(self):
@@ -131,10 +136,10 @@ async def run_command(
     session = await engine.session_store.load(session_id)
     if not session:
         raise HTTPException(404, "会话不存在")
-    if command.split(maxsplit=1)[0] == "/items" and getattr(
+    if command.split(maxsplit=1)[0] in {"/items", "/memory"} and getattr(
         session, "personal_execution_id", ""
     ):
-        raise HTTPException(409, "这是只读执行记录，请在日常对话或事项页面管理事项")
+        raise HTTPException(409, "这是只读执行记录，请在日常对话或管理页面操作")
     if body.edit_message_id:
         if (getattr(session, "engine", "naumi") or "naumi") == "pi":
             raise HTTPException(
@@ -209,8 +214,21 @@ async def _command_stream(request, session_id, command, mode, *, edit_message_id
                 session = await engine.session_store.load(session_id)
                 if session is None:
                     raise ValueError("会话已不存在，命令结果无法保存")
+                memory_command = command.split(maxsplit=1)[0] == "/memory"
+                refs = (
+                    getattr(adapter, "_personal_memory_command_refs", []) if memory_command else []
+                )
+                persisted_output = (
+                    json.dumps({"type": "personal_memory_refs", "refs": refs}, ensure_ascii=False)
+                    if memory_command else output
+                )
                 session.add_message("user", command)
-                session.add_message("assistant", output)
+                if memory_command:
+                    session.add_message(
+                        "assistant", persisted_output, metadata={"personal_memory_refs": refs},
+                    )
+                else:
+                    session.add_message("assistant", output)
                 await engine.session_store.save(session)
                 await emit(EventType.TOKEN_DELTA, {"token": output})
                 status = "failed" if adapter.failed else "completed"
@@ -220,7 +238,7 @@ async def _command_stream(request, session_id, command, mode, *, edit_message_id
                     stage="command",
                     status=status,
                     summary=command.split(maxsplit=1)[0],
-                    detail=output,
+                    detail=persisted_output,
                 )
                 await store.finish_run(run.id, status=status)
                 await emit(EventType.AGENT_END, {"status": status})

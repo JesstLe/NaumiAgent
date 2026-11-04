@@ -1031,6 +1031,12 @@ class PersonalCollaborationService:
                         source_session_id, step["session_id"], profile.id
                     )
 
+            from naumi_agent.personal.engine_execution import bind_execution_memory
+
+            await bind_execution_memory(
+                child, actor_id=profile.id, origin_actor_id=plan["source_agent_id"] or "main",
+                parent=self.engine,
+            )
             child._personal_effective_tools = frozenset(job.request.tool_scope)
             if plan.get("peer_agents"):
                 from naumi_agent.personal.messages import PeerRoot

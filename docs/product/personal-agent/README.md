@@ -74,7 +74,7 @@ Agent双向消息、独立接收方 Run、双方对话及确认已通过真实�
 
 ### 可以复用的基础
 
-- `src/naumi_agent/memory/long_term.py`：持久向量记忆、分类、去重、衰减和遗忘。
+- `src/naumi_agent/personal/memories.py` 与 `memory_store.py`：owner-bound SQLite 记忆、来源、确认、范围、确切分享与擦除。旧 `memory/long_term.py` 只作显式 legacy 导入来源。
 - `src/naumi_agent/orchestrator/goal_store.py`：SQLite 目标状态和事务转换。
 - `src/naumi_agent/daemons/agent_jobs.py`：持久执行、租约、fencing、终态、结果 inbox 与交付回执。
 - `src/naumi_agent/runs/`：Run 记录、恢复、公开活动和工具证据。
@@ -82,11 +82,11 @@ Agent双向消息、独立接收方 Run、双方对话及确认已通过真实�
 - `src/naumi_agent/tools/` 与 `mcp/client.py`：文件、浏览器、工具和 MCP 桥接。
 - `frontend/web2/`、桌面壳与 CLI/TUI：现有交互入口；不再另造一套执行引擎。
 
-### 四个关键缺口
+### 四个核心协调点
 
-1. **个人档案**：现有 `global` 召回范围不等于跨工作区的个人身份层。
-   `memory/auto_extract.py` 拼接用户和助手文本再提取；相似记忆合并偏向保留更长文本，
-   尚不足以处理来源权威、旧偏好撤销与新偏好覆盖。
+1. **个人档案**：PA-02 已接通 owner/actor 与个人/工作区/事项范围、来源和人工确认、冲突、
+   修订、删除及实际模型发送前的当前授权解析。旧全局 Chroma 不再自动召回；
+   完整设备同步、发布安装及真实平台保留策略仍按各模块单独验收。
 2. **个人事项**：`GoalStore` 保持每工作区一个未结束目标；现有 session Task 偏执行协作。
    个人同时推进多项工作和生活事务，不宜直接放宽执行层不变量来充当事项系统。
 3. **主动执行与送达**：`ScheduleTarget` 已在 PA-01 增加独立的 `personal_item`；
@@ -158,7 +158,7 @@ PA-00 与 PA-06 的已实施切片已并入 `docs/development/module-registry.ya
 **状态：partial。动态Agent创建、持久档案、独立真实会话与工具执行、Web/CLI/TUI入口已实现。**
 
 初始没有任何Agent预置；运营、投资等均只是用户创建示例。
-团队独立日常对话与三阶段执行现已由 PA-06 接通；分范围语义记忆仍待 PA-02，
+团队独立日常对话与三阶段执行现已由 PA-06 接通；PA-02 已接通分范围记忆主链路，
 私有资料 ACL 的本机切片已由 PA-08 接通，平台及完整保留策略仍待验收，不能以会话隔离替代。详见 [PA-00 实施记录](../../development/personal-agent/PA-00.md)
 与 [团队实施记录](../../development/personal-agent/PA-06-teams.md)。
 
@@ -197,10 +197,24 @@ Agent不会未经明确共享就读取另一Agent的私有资料；用户能直�
 
 ### PA-02：可信个人记忆与跨工作区上下文
 
-**状态：planned。依赖 PA-01 的个人身份及事项上下文。**
+**状态：partial。本机主链路已实现，真实验收和发布层级分开记录。**
 
 交付：个人/工作区/事项三层范围，来源区分、显式保存、偏好冲突处理、修订与删除，
 用户可见的记忆面板，以及有范围的检索注入。
+
+当前实现包括 owner-bound SQLite、个人/工作区/事项范围、独立 Agent、人工 exact share、
+来源与确认分离、候选/冲突 CAS、纠正/擦除/导出、旧记忆显式导入、opaque 请求恢复/草稿清理，
+以及 Web/API/Tool/CLI/TUI 共用 Service。自动提取和压缩只形成候选。
+实际模型 call、恢复 call、stream 及压缩内部 call 均经过当前来源与授权边界；
+私有来源资料固定到 Session，不因下一轮检索 miss 失去边界。
+
+当前统一相关后端组为 1902 passed / 1 failed / 2 skipped，唯一失败是未修改的 PA-01 ItemStore
+首次并发建库 WAL 竞态，已在 HEAD 隔离原源码复现。完整前端为 30 files / 311 tests passed；
+真实浏览器已完成创建、纠正、导出、删除和原 ID 草稿清理。最终 schema/只读 legacy/Engine
+集成 433 项通过；实际 provider 形成 6 个成功 Run、7 个完整调用，另保留原 schema 拒绝 Run，
+没有重放原失败请求。真实服务器冷重启后业务与原执行状态不变，仅正常 resume 更新原 UI
+会话访问时间；新增 paid Run 为 0。源码回滚及分层证据见
+[PA-02 实施记录](../../development/pa02-personal-memory.md)，不以本机通过代表全产品完成。
 
 验收：在两个工作区复用已确认个人偏好，不泄露项目资料；助手建议不提升为用户事实；
 纠正后旧条目撤权，删除后不再召回，重启后仍保持结果一致。

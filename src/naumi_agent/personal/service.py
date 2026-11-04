@@ -18,6 +18,9 @@ from naumi_agent.personal.store import PersonalAgentStore
 logger = logging.getLogger(__name__)
 
 _TOOL_LABELS = {
+    "personal_memories": "检索当前 Agent 的已确认记忆并提出候选",
+    "memory_store": "提出当前 Agent 的待确认记忆候选",
+    "memory_recall": "检索当前 Agent 范围内的已确认记忆",
     "personal_items": "安排、查询和控制当前 Agent 范围内的个人事项",
     "personal_artifacts": "读取、创建、修订与分享当前 Agent 的资料和产物",
     "glob": "按文件名查找文件",
@@ -67,6 +70,9 @@ _TOOL_LABELS = {
 # catalog, global-memory, delegation, or code-generation/registration authority.
 ASSIGNABLE_TOOL_NAMES = frozenset(
     {
+        "personal_memories",
+        "memory_store",
+        "memory_recall",
         "personal_items",
         "personal_artifacts",
         "glob",
@@ -143,6 +149,18 @@ class PersonalAgentService:
         for tool in self.engine.tool_registry.all():
             if tool.name not in ASSIGNABLE_TOOL_NAMES or tool.metadata.delegated_tool_names:
                 continue
+            if tool.name in {"personal_memories", "memory_store", "memory_recall"}:
+                from naumi_agent.personal.memory_tools import (
+                    MemoryRecallAlias,
+                    MemoryStoreAlias,
+                    PersonalMemoryTool,
+                )
+
+                if type(tool) not in {PersonalMemoryTool, MemoryStoreAlias, MemoryRecallAlias} or (
+                    tool.service is not getattr(self.engine, "personal_memory", None)
+                    or tool.engine is not self.engine
+                ):
+                    continue
             description = tool.description
             if not re.search(r"[\u4e00-\u9fff]", description):
                 label = tool.user_facing_name

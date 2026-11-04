@@ -151,7 +151,8 @@ async def test_private_conversations_do_not_recall_or_extract_global_memory(engi
     await engine._auto_extract_memories("我喜欢私人资料", AgentResult(status="completed"))
     engine.long_term_memory.recall_for_session.assert_not_called()
     engine.long_term_memory.store.assert_not_called()
-    assert engine._compactor._long_term_memory is None
+    assert engine._compactor._long_term_memory is engine.long_term_memory
+    assert engine._compactor._long_term_memory is not engine._legacy_long_term_memory
 
 
 async def test_independent_sessions_and_return_to_main(engine):

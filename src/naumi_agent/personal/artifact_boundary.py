@@ -22,6 +22,13 @@ def protected_roots(engine):
     artifacts = getattr(engine, "personal_artifacts", None)
     if artifacts is not None:
         roots.append(artifacts.runtime_boundary_marker)
+    memory = getattr(engine, "personal_memory", None)
+    if memory is not None:
+        roots.extend([memory.runtime_boundary_marker, memory.owner_boundary_marker,
+                      memory.store.base_dir.resolve()])
+    vector_path = getattr(engine.config.memory, "vector_db_path", "")
+    if vector_path:
+        roots.append(Path(vector_path).expanduser().resolve())
     runtime = Path(engine.config.memory.session_db_path).resolve().parent
     if runtime != workspace and not workspace.is_relative_to(runtime):
         roots.append(runtime)
@@ -63,10 +70,16 @@ class ArtifactToolProxy:
         service = self.engine.personal_artifacts
         try:
             await service.authorize_engine()
+            memory_runtime = getattr(self.engine, "personal_memory_runtime", None)
+            if memory_runtime is not None:
+                await memory_runtime.authorize()
             item_context = getattr(self.engine, "_personal_item_context", None)
             if item_context is not None:
                 await item_context.authorize_tool(self.name, args)
-            refs = getattr(self.engine, "_personal_artifact_refs", [])
+            refs = list({json.dumps(r, sort_keys=True): r for r in [
+                *getattr(self.engine, "_personal_artifact_refs", []),
+                *getattr(self.engine, "_personal_memory_artifact_refs", []),
+            ]}.values())
             private = bool(refs) or bool(getattr(item_context, "force_private", False))
             actor = service.engine_actor()
             # The authenticated user's Library is distinct from agent browser
@@ -94,6 +107,9 @@ class ArtifactToolProxy:
                 "request_user_input",
                 "personal_agents",
                 "personal_items",
+                "personal_memories",
+                "memory_store",
+                "memory_recall",
             }:
                 raise PersonalAgentError(
                     "artifact_isolation_required", "该工具尚未接入私有资料执行边界，已停止本次操作"
@@ -329,8 +345,10 @@ class ArtifactToolProxy:
 
 def guarded_tool(engine, tool, call_id):
     service = getattr(engine, "personal_artifacts", None)
+    memory = getattr(engine, "personal_memory", None)
     if service is None or not (
-        service.enabled or getattr(engine, "_personal_item_context", None) is not None
+        service.enabled or (memory is not None and memory.enabled)
+        or getattr(engine, "_personal_item_context", None) is not None
     ):
         return tool
     return ArtifactToolProxy(engine, tool, call_id)

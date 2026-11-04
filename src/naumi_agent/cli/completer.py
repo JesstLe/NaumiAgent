@@ -117,7 +117,7 @@ def _build_commands() -> list[CommandMeta]:
         CommandMeta("/file_edit", "按文本替换更新文件", takes_arg=True, arg_hint="<path> <old_text> <new_text>", readonly=False, category="基础"),
         CommandMeta("/resume", "继续最近的对话", readonly=False, category="会话"),
         CommandMeta("/history", "查看历史会话列表", readonly=True, category="会话"),
-        CommandMeta("/memory", "记忆管理 (stats/search/clean/export)", readonly=False, category="会话"),
+        CommandMeta("/memory", "记忆 — 范围、来源、确认、纠正与删除", takes_arg=True, arg_hint="[stats|list|get|search|history|grants|export|legacy|clean|create-json|propose-json|confirm-json|revise-json|delete-json|reject-json|share-json|revoke-json|import-legacy-json] [参数]", readonly=False, category="会话"),
         CommandMeta("/load", "加载指定会话并继续对话", takes_arg=True, arg_hint="<id>", category="会话"),
         CommandMeta("/delete", "删除指定会话", takes_arg=True, arg_hint="<id>", readonly=False, category="会话"),
         CommandMeta("/clear", "清除当前会话（不保存）", readonly=False, category="会话"),
