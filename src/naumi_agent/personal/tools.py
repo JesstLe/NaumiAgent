@@ -20,11 +20,25 @@ _FIELDS = {
     "open": {"agent_id"},
     "create": _CREATE | {"request_id"},
     "update": (_CREATE - {"kind"}) | {"agent_id", "expected_version", "status"},
-    "collaborate": {"request_id", "source_session_id", "title", "context", "steps"},
+    "collaborate": {"request_id", "source_session_id", "title", "context", "steps", "peer_agents"},
     "collaborations": {"source_session_id"},
     "collaboration": {"collaboration_id"},
     "cancel_collaboration": {"collaboration_id"},
     "collaboration_reply": {"collaboration_id", "question_id", "response"},
+    "message_send": {
+        "source_session_id",
+        "request_id",
+        "sender_agent_id",
+        "sender_agent_version",
+        "recipient_agent_id",
+        "recipient_agent_version",
+        "content",
+        "context",
+        "peer_agents",
+    },
+    "messages": {"collaboration_id"},
+    "message": {"message_id"},
+    "message_ack": {"message_id", "expected_response_sha256"},
 }
 _REQUIRED = {
     "tools": set(),
@@ -39,6 +53,17 @@ _REQUIRED = {
     "collaboration": {"collaboration_id"},
     "cancel_collaboration": {"collaboration_id"},
     "collaboration_reply": {"collaboration_id", "question_id", "response"},
+    "message_send": {
+        "request_id",
+        "sender_agent_id",
+        "sender_agent_version",
+        "recipient_agent_id",
+        "recipient_agent_version",
+        "content",
+    },
+    "messages": {"collaboration_id"},
+    "message": {"message_id"},
+    "message_ack": {"message_id", "expected_response_sha256"},
 }
 
 
@@ -60,6 +85,9 @@ class PersonalAgentsTool(Tool):
             "depends_on 指定前置步骤，只共享显式 context 和前置结果。"
             "collaborations/collaboration 查看真实进度和交接；cancel_collaboration 请求停止。"
             "collaboration_reply 仅转交用户针对原 question_id 的真实回答，不替用户作决定。"
+            "peer_agents 显式指定互询对象版本与工具范围，默认没有授权；省略工具范围只准只读与互询。"
+            "message_send 以已有专员发送真实消息；messages/message查询双方对话，"
+            "message_ack确认回答。"
             "团队对话入口仍未接通，协作请明确选择成员步骤。"
         )
 
@@ -115,6 +143,32 @@ class PersonalAgentsTool(Tool):
                 },
                 "title": {"type": "string", "maxLength": 160},
                 "context": {"type": "string", "maxLength": 32000},
+                "content": {"type": "string", "minLength": 1, "maxLength": 16000},
+                "sender_agent_id": {"type": "string", "pattern": "^pa_[0-9a-f]{32}$"},
+                "recipient_agent_id": {"type": "string", "pattern": "^pa_[0-9a-f]{32}$"},
+                "sender_agent_version": {"type": "integer", "minimum": 1},
+                "recipient_agent_version": {"type": "integer", "minimum": 1},
+                "message_id": {"type": "string", "pattern": "^pm_[0-9a-f]{32}$"},
+                "expected_response_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                "peer_agents": {
+                    "type": "array",
+                    "maxItems": 128,
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["agent_id", "agent_version"],
+                        "properties": {
+                            "agent_id": {"type": "string", "pattern": "^pa_[0-9a-f]{32}$"},
+                            "agent_version": {"type": "integer", "minimum": 1},
+                            "tool_names": {
+                                "type": "array",
+                                "maxItems": 128,
+                                "uniqueItems": True,
+                                "items": {"type": "string"},
+                            },
+                        },
+                    },
+                },
                 "steps": {
                     "type": "array",
                     "minItems": 1,
@@ -149,7 +203,23 @@ class PersonalAgentsTool(Tool):
             operation = fields.pop("operation")
             if set(fields) - _FIELDS[operation] or not _REQUIRED[operation] <= set(fields):
                 raise PersonalAgentError("invalid_input", "当前操作缺少必填字段或包含无关字段")
-            if operation in {
+            if operation in {"message_send", "messages", "message", "message_ack"}:
+                service = self.service.engine.personal_collaborations.messages
+                if operation == "message_send":
+                    session = await self.service.engine.get_or_create_session()
+                    source_id = fields.pop("source_session_id", session.id)
+                    if source_id != session.id:
+                        raise PersonalAgentError("session_conflict", "请从原始对话发送专员消息")
+                    result = await service.start_manual(source_session_id=source_id, **fields)
+                elif operation == "messages":
+                    result = {"messages": await service.list(fields["collaboration_id"])}
+                elif operation == "message":
+                    result = await service.get(fields["message_id"])
+                else:
+                    result = await service.acknowledge(
+                        fields["message_id"], fields["expected_response_sha256"]
+                    )
+            elif operation in {
                 "collaborate",
                 "collaborations",
                 "collaboration",

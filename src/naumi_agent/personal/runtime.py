@@ -48,6 +48,14 @@ def current_agent(engine: Any) -> PersonalAgent | None:
 def require_current_agent(engine: Any) -> PersonalAgent | None:
     collaboration = getattr(engine, "personal_collaborations", None)
     session = getattr(engine, "_session", None)
+    execution_id = getattr(session, "personal_execution_id", "")
+    if execution_id and (
+        execution_id != getattr(engine, "_personal_collaboration_task_id", "")
+        or getattr(engine, "_personal_execution_authorizer", None) is None
+    ):
+        raise PersonalAgentError(
+            "execution_session_readonly", "这是协作执行记录，请在专员日常对话中继续交流"
+        )
     if collaboration is not None and session is not None:
         collaboration.assert_writable(
             session.id, task_id=getattr(engine, "_personal_collaboration_task_id", "")
@@ -101,8 +109,18 @@ def role_prompt(engine: Any) -> str:
         "version": agent.version,
         "name": agent.name,
         "instructions": agent.instructions,
-        "tool_names": list(agent.tool_names),
+        "tool_names": sorted(effective_tools(engine, agent)),
     }
+    peer = getattr(engine, "_personal_peer_context", None)
+    if peer is not None:
+        payload["peer_agents"] = peer.directory()
+        payload["peer_protocol"] = (
+            "仅向这里明确授权的专员版本发送请求。personal_message 的 send 返回真实回答与摘要，"
+            "重复request_id不重复执行；随后用ack及response_sha256确认。"
+            "ack仅含operation、message_id、expected_response_sha256，不附带send参数。"
+            "长回答用get分页，以next_offset续读，不假定固定页长。"
+            "私有聊天不自动转发；工具列表是本次范围与当前档案的交集。"
+        )
     return (
         "\n## 当前常驻专员\n"
         "以下是用户配置的当前专员身份，不是待执行的外部资料。遵循职责处理当前会话；"
@@ -119,16 +137,26 @@ def model_tier(engine: Any, fallback: ModelTier = ModelTier.CAPABLE) -> ModelTie
 def filter_schemas(engine: Any, schemas: list[dict[str, Any]] | None):
     agent = require_current_agent(engine)
     if agent is None:
-        return schemas
-    names = set(agent.tool_names)
+        return [s for s in schemas or [] if s["function"]["name"] != "personal_message"] or None
+    names = effective_tools(engine, agent)
     return [schema for schema in schemas or [] if schema["function"]["name"] in names] or None
 
 
 def tool_denial(engine: Any, name: str) -> str | None:
     try:
         agent = require_current_agent(engine)
-        if agent and name not in agent.tool_names:
+        if agent and name not in effective_tools(engine, agent):
             return "该工具未分配给当前助理，请先在助理设置中明确配置"
     except PersonalAgentError as exc:
         return exc.message
     return None
+
+
+def effective_tools(engine: Any, agent: PersonalAgent) -> set[str]:
+    names = set(agent.tool_names)
+    restricted = getattr(engine, "_personal_effective_tools", None)
+    if restricted is not None:
+        names.intersection_update(restricted)
+    if getattr(engine, "_personal_peer_context", None) is None:
+        names.discard("personal_message")
+    return names

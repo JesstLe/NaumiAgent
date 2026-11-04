@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from naumi_agent.personal.models import PersonalAgentError
+from naumi_agent.personal.peer_models import dispatch, grants
 
 _SCHEMA_VERSION = 1
 _COLLABORATION_ID = re.compile(r"^pc_[0-9a-f]{32}$")
@@ -127,7 +128,11 @@ def _steps(value: Any) -> list[dict[str, Any]]:
     steps: list[dict[str, Any]] = []
     ids: set[str] = set()
     for raw in value:
-        if not isinstance(raw, dict) or set(raw) != _STEP_FIELDS:
+        if (
+            not isinstance(raw, dict)
+            or not _STEP_FIELDS <= set(raw)
+            or set(raw) - _STEP_FIELDS - {"message"}
+        ):
             raise _invalid("协作步骤缺少必填字段或包含不支持的字段")
         step_id = _identifier(raw["id"], _STEP_ID, "步骤编号", 64)
         if step_id in ids:
@@ -153,6 +158,8 @@ def _steps(value: Any) -> list[dict[str, Any]]:
                 "depends_on": sorted(normalized),
             }
         )
+        if "message" in raw:
+            steps[-1]["message"] = dispatch(raw["message"])
     for step in steps:
         if set(step["depends_on"]) - ids:
             raise _invalid("前置步骤不存在，请检查步骤编号")
@@ -345,6 +352,7 @@ class CollaborationStore:
         steps: list[dict[str, Any]],
         context: str = "",
         title: str = "",
+        peer_agents: list[dict] | None = None,
     ) -> dict[str, Any]:
         workspace_key = _text(workspace_key, "工作区标识", 2048)
         source_session_id = _text(source_session_id, "来源会话编号", 128)
@@ -362,6 +370,11 @@ class CollaborationStore:
             "context": _text(context, "共享上下文", 32000, required=False, strip=False),
             "steps": normalized_steps,
         }
+        normalized_grants = grants(peer_agents)
+        if normalized_grants:
+            for item in normalized_grants:
+                item.setdefault("tool_names", [])
+            payload["peer_agents"] = normalized_grants
         payload_sha256 = _sha256(_canonical(payload))
         with self._connection(write=True) as conn:
             existing = conn.execute(

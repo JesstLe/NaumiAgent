@@ -53,10 +53,14 @@ from naumi_agent.streaming.events import EventType, StreamEvent, StreamEventSink
 router = APIRouter(tags=["sessions", "messages"])
 
 
-def _assert_writable_session(engine, session_id: str) -> None:
+async def _assert_writable_session(engine, session_id: str) -> None:
+    session = await engine.session_store.load(session_id)
+    if getattr(session, "personal_execution_id", ""):
+        raise HTTPException(409, "这是协作执行记录，请在专员日常对话中继续交流")
     collaboration = getattr(engine, "personal_collaborations", None)
     if collaboration is not None:
         from naumi_agent.personal.models import PersonalAgentError
+
         try:
             collaboration.assert_writable(session_id)
         except PersonalAgentError as exc:
@@ -89,7 +93,7 @@ async def update_session(
     auth: str = AuthDep,
 ):
     engine = request.app.state.engine
-    _assert_writable_session(engine, session_id)
+    await _assert_writable_session(engine, session_id)
     session = await engine.session_store.load(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -142,7 +146,7 @@ async def pin_session(
 @router.post("/sessions/{session_id}/archive", status_code=204)
 async def archive_session(session_id: str, request: Request, auth: str = AuthDep):
     engine = request.app.state.engine
-    _assert_writable_session(engine, session_id)
+    await _assert_writable_session(engine, session_id)
     lock = _engine_lock(request)
     if lock.locked() and getattr(getattr(engine, "_session", None), "id", None) == session_id:
         raise HTTPException(status_code=409, detail="当前会话正在执行，完成或停止后才能归档")
@@ -195,7 +199,7 @@ async def get_session(session_id: str, request: Request, auth: str = AuthDep):
 @router.delete("/sessions/{session_id}", status_code=204)
 async def delete_session(session_id: str, request: Request, auth: str = AuthDep):
     engine = request.app.state.engine
-    _assert_writable_session(engine, session_id)
+    await _assert_writable_session(engine, session_id)
     result = await engine.delete_session_detailed(session_id)
     if result.outcome is ReconciliationCoordinatorOutcome.NOT_FOUND:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -233,7 +237,7 @@ async def send_message(
     auth: str = AuthDep,
 ):
     engine = request.app.state.engine
-    _assert_writable_session(engine, session_id)
+    await _assert_writable_session(engine, session_id)
     session = await engine.session_store.load(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -241,6 +245,7 @@ async def send_message(
     personal = getattr(engine, "personal_agents", None)
     if personal is not None:
         from naumi_agent.personal.models import PersonalAgentError
+
         try:
             profile = personal.current(session_id)
             if getattr(session, "personal_agent_id", "") and (
@@ -268,13 +273,9 @@ async def send_message(
             raise HTTPException(status_code=409, detail="任务仍在执行，结束后才能编辑消息")
         _message_revision_index(session.messages, body.edit_message_id)
     if is_pi and body.workbench_issue is not None:
-        raise HTTPException(
-            status_code=400, detail="pi 引擎会话暂不支持同步创建 Issue。"
-        )
+        raise HTTPException(status_code=400, detail="pi 引擎会话暂不支持同步创建 Issue。")
     if is_pi and (body.source_ids or body.linked_issue_id):
-        raise HTTPException(
-            status_code=400, detail="pi 引擎会话暂不支持附带资料源或关联 Issue。"
-        )
+        raise HTTPException(status_code=400, detail="pi 引擎会话暂不支持附带资料源或关联 Issue。")
     if body.source_ids or body.linked_issue_id:
         turn_context, source_records, linked_issue = await _build_turn_context(
             engine=engine,
@@ -327,8 +328,7 @@ async def send_message(
                 raise HTTPException(
                     status_code=502,
                     detail=(
-                        str(result.error or "").strip()
-                        or "任务结束但未返回可显示结果，请重试"
+                        str(result.error or "").strip() or "任务结束但未返回可显示结果，请重试"
                     ),
                 )
             workbench_metadata = await _create_workbench_issue_from_message(
@@ -684,11 +684,7 @@ async def _stream_response(
     async def on_stream_event(stream_event: StreamEvent) -> None:
         nonlocal received_visible_content, run
         if stream_event.type is EventType.TOKEN_DELTA:
-            token = str(
-                stream_event.data.get("token")
-                or stream_event.data.get("content")
-                or ""
-            )
+            token = str(stream_event.data.get("token") or stream_event.data.get("content") or "")
             if token.strip():
                 received_visible_content = True
         event_run_id = stream_event.run_id

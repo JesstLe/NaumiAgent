@@ -37,6 +37,7 @@ _TOOL_LABELS = {
     "browser_cdp_health": "检查浏览器调试通道", "browser_attach_diagnostics": "诊断浏览器连接",
     "browser_chrome_launcher_info": "查看浏览器启动信息",
     "browser_start": "启动浏览器", "browser_stop": "关闭浏览器",
+    "personal_message": "向协作范围内的专员询问并接收结果",
 }
 
 # Explicit leaf capabilities prevent future registry additions from silently granting
@@ -54,6 +55,7 @@ ASSIGNABLE_TOOL_NAMES = frozenset(
         "web_search",
         "web_fetch",
         "request_user_input",
+        "personal_message",
         "output_publish",
         "yaml_validate",
         "yaml_micro_verify",
@@ -110,7 +112,7 @@ class PersonalAgentService:
         self.workspace_key = hashlib.sha256(identity.encode("utf-8")).hexdigest()
         self._session_lock = asyncio.Lock()
 
-    def assignable_tools(self) -> list[dict[str, str]]:
+    def assignable_tools(self) -> list[dict[str, Any]]:
         tools = []
         for tool in self.engine.tool_registry.all():
             if tool.name not in ASSIGNABLE_TOOL_NAMES or tool.metadata.delegated_tool_names:
@@ -122,7 +124,8 @@ class PersonalAgentService:
                     label if re.search(r"[\u4e00-\u9fff]", label)
                     else _TOOL_LABELS.get(tool.name, tool.name)
                 )
-            tools.append({"name": tool.name, "description": description})
+            tools.append({"name": tool.name, "description": description,
+                          "read_only": bool(tool.metadata.read_only)})
         return sorted(tools, key=lambda item: item["name"])
 
     def validate_tools(self, names: Any) -> tuple[str, ...]:

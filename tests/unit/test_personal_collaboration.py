@@ -43,6 +43,7 @@ class ControlledChild:
 
     async def load_session(self, session_id):
         self.session = await self.session_store.load(session_id)
+        self._session = self.session
         return self.session is not None
 
     def set_permission_confirmer(self, callback):

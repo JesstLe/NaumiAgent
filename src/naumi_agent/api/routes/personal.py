@@ -28,6 +28,15 @@ _ERROR_STATUS = {
     "model_unavailable": 503,
     "execution_session_readonly": 409,
     "question_closed": 409,
+    "peer_scope_denied": 403,
+    "message_scope_denied": 403,
+    "message_not_ready": 409,
+    "peer_unknown": 409,
+    "peer_busy": 409,
+    "peer_cycle": 409,
+    "peer_depth": 409,
+    "peer_limit": 409,
+    "unsupported_schema": 503,
 }
 
 
@@ -125,6 +134,8 @@ async def current_agent(
     result = {"agent": agent.to_dict() if agent is not None else None}
     if plan is not None:
         result.update(read_only=True, collaboration_id=plan["id"])
+    elif getattr(session, "personal_execution_id", ""):
+        result.update(read_only=True)
     return result
 
 
@@ -169,6 +180,13 @@ class CollaborationStepCreate(BaseModel):
     depends_on: list[str] = Field(default_factory=list, max_length=11)
 
 
+class PeerGrantCreate(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+    agent_id: str = Field(pattern=r"^pa_[0-9a-f]{32}$")
+    agent_version: int = Field(ge=1, le=2_147_483_647)
+    tool_names: list[str] | None = Field(default=None, max_length=128)
+
+
 class CollaborationCreate(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
     source_session_id: str = Field(min_length=1, max_length=128)
@@ -176,6 +194,7 @@ class CollaborationCreate(BaseModel):
     title: str = Field(default="", max_length=160)
     context: str = Field(default="", max_length=32000)
     steps: list[CollaborationStepCreate] = Field(min_length=1, max_length=12)
+    peer_agents: list[PeerGrantCreate] = Field(default_factory=list, max_length=128)
 
 
 def _collaborations(request: Request):
@@ -187,7 +206,7 @@ def _collaborations(request: Request):
 
 @router.post("/personal/collaborations", status_code=201)
 async def create_collaboration(body: CollaborationCreate, request: Request, auth: str = AuthDep):
-    return await _collaborations(request).create(**body.model_dump())
+    return await _collaborations(request).create(**body.model_dump(exclude_none=True))
 
 
 @router.get("/personal/collaborations")
@@ -237,4 +256,52 @@ async def reply_collaboration(
         collaboration_id,
         request_id,
         body.model_dump(exclude_none=True),
+    )
+
+
+class MessageCreate(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+    source_session_id: str = Field(min_length=1, max_length=128)
+    request_id: str = Field(min_length=1, max_length=128)
+    sender_agent_id: str = Field(pattern=r"^pa_[0-9a-f]{32}$")
+    sender_agent_version: int = Field(ge=1, le=2_147_483_647)
+    recipient_agent_id: str = Field(pattern=r"^pa_[0-9a-f]{32}$")
+    recipient_agent_version: int = Field(ge=1, le=2_147_483_647)
+    content: str = Field(min_length=1, max_length=16000)
+    context: str = Field(default="", max_length=32000)
+    peer_agents: list[PeerGrantCreate] | None = Field(default=None, max_length=128)
+
+
+class MessageAcknowledge(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+    expected_response_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+@router.post("/personal/messages", status_code=201)
+async def create_message(body: MessageCreate, request: Request, auth: str = AuthDep):
+    return await _collaborations(request).messages.start_manual(
+        **body.model_dump(exclude_none=True)
+    )
+
+
+@router.get("/personal/collaborations/{collaboration_id}/messages")
+async def list_messages(collaboration_id: str, request: Request, auth: str = AuthDep):
+    return {"messages": await _collaborations(request).messages.list(collaboration_id)}
+
+
+@router.get("/personal/messages/{message_id}")
+async def get_message(message_id: str, request: Request, auth: str = AuthDep):
+    return await _collaborations(request).messages.get(message_id)
+
+
+@router.post("/personal/messages/{message_id}/ack")
+async def acknowledge_message(
+    message_id: str,
+    body: MessageAcknowledge,
+    request: Request,
+    auth: str = AuthDep,
+):
+    return await _collaborations(request).messages.acknowledge(
+        message_id,
+        body.expected_response_sha256,
     )
