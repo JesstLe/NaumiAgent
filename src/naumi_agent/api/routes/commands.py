@@ -37,7 +37,7 @@ _SUPPORTED = frozenset(
 /chaos /scale /state /vibe /eval /page /heal /dspy /graph /mcts /route
 /speculate /jit /pointer /cooe /sleep /entropy /ooda /probe /hook /vision
 /spar /world /fusion /consensus /pid /zkp /genesis /macro /cosmos /watchdog
-/supervisor /autopsy /feedback /evolution /assistants /library /items /memory
+/supervisor /autopsy /feedback /evolution /assistants /library /items /memory /routines
 """.split()
 )
 
@@ -99,6 +99,7 @@ class _CommandEngine:
         object.__setattr__(self, "_callback", callback)
         object.__setattr__(self, "failed", False)
         object.__setattr__(self, "_personal_items_manual_channel", "web")
+        object.__setattr__(self, "_personal_routines_manual_channel", "web")
         object.__setattr__(self, "_personal_memory_manual_channel", "management_web")
 
     def __getattr__(self, name):
@@ -132,14 +133,28 @@ async def run_command(
     auth: str = AuthDep,
 ):
     command = validate_command(body.command)
+    routine_command = command.split(maxsplit=1)[0] == "/routines"
+    private_headers = (
+        {"Cache-Control": "no-store", "Pragma": "no-cache"} if routine_command else None
+    )
+    if routine_command:
+        from naumi_agent.api.routes.routines import _authorize
+
+        # The legacy command gateway permits local unauthenticated/query-key
+        # usage; it must not become a weaker alternate routine management API.
+        rejected = _authorize(request)
+        if rejected is not None:
+            return rejected
     engine = request.app.state.engine
     session = await engine.session_store.load(session_id)
     if not session:
-        raise HTTPException(404, "会话不存在")
-    if command.split(maxsplit=1)[0] in {"/items", "/memory"} and getattr(
+        raise HTTPException(404, "会话不存在", headers=private_headers)
+    if command.split(maxsplit=1)[0] in {"/items", "/memory", "/routines"} and getattr(
         session, "personal_execution_id", ""
     ):
-        raise HTTPException(409, "这是只读执行记录，请在日常对话或管理页面操作")
+        raise HTTPException(
+            409, "这是只读执行记录，请在日常对话或管理页面操作", headers=private_headers
+        )
     if body.edit_message_id:
         if (getattr(session, "engine", "naumi") or "naumi") == "pi":
             raise HTTPException(
@@ -148,7 +163,7 @@ async def run_command(
             )
         _message_revision_index(session.messages, body.edit_message_id)
     if _engine_lock(request).locked():
-        raise HTTPException(409, "Agent 正在执行，请等待完成后重试命令")
+        raise HTTPException(409, "Agent 正在执行，请等待完成后重试命令", headers=private_headers)
     return StreamingResponse(
         _command_stream(
             request,
@@ -158,6 +173,7 @@ async def run_command(
             edit_message_id=body.edit_message_id,
         ),
         media_type="text/event-stream",
+        headers=private_headers,
     )
 
 

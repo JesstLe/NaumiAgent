@@ -8,6 +8,7 @@ import sqlite3
 import subprocess
 import uuid
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 
@@ -22,6 +23,40 @@ from naumi_agent.runtime.composition import create_agent_engine
 
 pytestmark = pytest.mark.usefixtures("runtime_payload_key")
 ANSWER = "指定资料的整理结果。没有支付凭证，支付状态保持未知。"
+
+
+def _usage_context(tmp_path, router, routines=None):
+    from naumi_agent.personal.item_execution import PersonalItemExecutionContext
+
+    child = SimpleNamespace(router=router, _execution_data_dir=tmp_path)
+    service = SimpleNamespace(engine=SimpleNamespace(personal_routines=routines))
+    context = PersonalItemExecutionContext(service, {"policy": {}, "input_refs": []}, None, child)
+
+    async def authorize():
+        return None
+
+    context.authorize = authorize
+    context.observe_model_usage()
+    return context
+
+
+class _BudgetHooks:
+    def __init__(self, *, reserve_error=None, complete_error=None):
+        self.events, self.reserve_error, self.complete_error = [], reserve_error, complete_error
+
+    async def reserve_transport_call(self, intent, router, args, kwargs):
+        self.events.append("reserve")
+        if self.reserve_error:
+            raise self.reserve_error
+        return {"call_id": "original-call", "max_tokens": 7}
+
+    async def complete_transport_call(self, permit, usage, evidence):
+        self.events.append(("complete", evidence))
+        if self.complete_error:
+            raise self.complete_error
+
+    async def unknown_transport_call(self, permit, evidence):
+        self.events.append(("unknown", evidence))
 
 
 @pytest.fixture
@@ -77,6 +112,16 @@ async def execution(tmp_path, monkeypatch, request):
             },
         )
     )
+    # This component fixture deliberately injects an independent ItemStore.
+    # Do not ask the engine's separate routine graph to resolve those Items;
+    # direct hook tests and routine integration tests exercise that protocol.
+    routines = getattr(engine, "personal_routines", None)
+    if routines is not None:
+
+        async def ordinary_item_permit(*args, **kwargs):
+            return None
+
+        monkeypatch.setattr(routines, "reserve_transport_call", ordinary_item_permit)
     owner = "a" * 64
     store = PersonalItemStore(tmp_path / "items", owner_key=owner)
 
@@ -589,3 +634,287 @@ async def test_revoked_original_input_redacts_run_steps_receipt_answer_and_error
     assert redacted["answer"] == "" and redacted["artifacts"] == []
     assert redacted["receipt"] is None and redacted["steps"] == []
     assert redacted["status"] == "completed" and redacted["delivery_id"]
+
+
+async def test_nonstream_default_zero_usage_is_not_transport_evidence_and_is_not_retried(tmp_path):
+    from naumi_agent.model.router import ModelResponse
+
+    calls = []
+
+    async def call(**kwargs):
+        calls.append(kwargs)
+        return ModelResponse(content="文本存在不证明用量", finish_reason="stop")
+
+    context = _usage_context(tmp_path, SimpleNamespace(call=call, stream=None))
+    for _ in range(2):
+        with pytest.raises(PersonalAgentError, match="用量"):
+            await context.child.router.call(messages=[])
+    assert len(calls) == 1 and context.model_calls == 1 and context.usage_calls == 0
+    assert context.usage_incomplete is True
+
+
+async def test_real_job_nonstream_missing_usage_becomes_unknown_without_replaying(
+    execution, monkeypatch
+):
+    from naumi_agent.model.router import ModelResponse
+
+    engine, store, owner, service, streamed_calls, _ = execution
+    nonstream_calls = []
+
+    async def no_usage(self, **kwargs):
+        nonstream_calls.append(kwargs)
+        return ModelResponse(content="存在文本但没有真实usage", finish_reason="stop")
+
+    monkeypatch.setattr(ModelRouter, "call", no_usage)
+    original_factory = service._child_factory
+
+    def factory(parent, job):
+        child = original_factory(parent, job)
+        original_run = child.run_streaming
+
+        async def run(*args, **kwargs):
+            await child.router.call(messages=[{"role": "user", "content": "受控辅助请求"}])
+            return await original_run(*args, **kwargs)
+
+        child.run_streaming = run
+        return child
+
+    service._child_factory = factory
+    intent = _prepare(execution)
+    await service.submit(intent)
+    result = await _settle(service, intent)
+    assert result["status"] == "unknown" and result["usage_known"] is False
+    assert result["usage"] is None and result["delivery_id"] == ""
+    assert len(nonstream_calls) == 1 and streamed_calls == []
+    await service.reconcile(intent)
+    assert len(nonstream_calls) == 1
+
+
+async def test_nonstream_explicit_real_zero_is_known_and_budget_precedes_call(tmp_path):
+    from naumi_agent.model.router import ModelCallEvidence, ModelResponse
+
+    hooks, calls = _BudgetHooks(), []
+
+    async def call(**kwargs):
+        calls.append(kwargs)
+        assert hooks.events == ["reserve"]
+        return ModelResponse(
+            content="真实零用量",
+            finish_reason="stop",
+            usage=TokenUsage(),
+            call_evidence=ModelCallEvidence(
+                usage_source="transport_response",
+                cost_source="rate_card_estimate",
+                rate_card_source="config",
+                billing_status="unsupported",
+            ),
+        )
+
+    context = _usage_context(tmp_path, SimpleNamespace(call=call, stream=None), hooks)
+    await context.child.router.call(messages=[], max_tokens=999)
+    assert calls[0]["max_tokens"] == 7
+    assert context.model_calls == context.usage_calls == 1 and context.usage_incomplete is False
+    assert (
+        hooks.events[1][0] == "complete"
+        and hooks.events[1][1]["usage_source"] == "transport_response"
+    )
+
+
+async def test_budget_hook_failure_prevents_any_real_transport_call(tmp_path):
+    hooks = _BudgetHooks(reserve_error=PersonalAgentError("storage_error", "预算原件待核对"))
+    calls = []
+
+    async def call(**kwargs):
+        calls.append(kwargs)
+        raise AssertionError("预算失败后不发出真实请求")
+
+    context = _usage_context(tmp_path, SimpleNamespace(call=call, stream=None), hooks)
+    with pytest.raises(PersonalAgentError) as caught:
+        await context.child.router.call(messages=[])
+    assert caught.value.code == "storage_error" and calls == []
+    assert context.model_calls == context.usage_calls == 0 and hooks.events == ["reserve"]
+
+
+async def test_gate_changed_during_budget_await_prevents_transport_after_permit(tmp_path):
+    hooks, calls = _BudgetHooks(), []
+
+    async def call(**kwargs):
+        calls.append(kwargs)
+        raise AssertionError("原执行gate变化后不发出请求")
+
+    context = _usage_context(tmp_path, SimpleNamespace(call=call, stream=None), hooks)
+
+    async def changed():
+        raise PersonalAgentError("execution_fenced", "原执行租约已失效")
+
+    context.authorize = changed
+    with pytest.raises(PersonalAgentError) as caught:
+        await context.child.router.call(messages=[])
+    assert caught.value.code == "execution_fenced" and calls == []
+    assert context.model_calls == 0 and hooks.events[1][0] == "unknown"
+    assert hooks.events[1][1]["transport_dispatched"] is False
+
+
+async def test_stream_usage_without_complete_terminal_is_unknown_and_not_retried(tmp_path):
+    hooks, calls = _BudgetHooks(), []
+
+    async def stream(**kwargs):
+        calls.append(kwargs)
+        yield StreamChunk(token="部分", usage=TokenUsage(input_tokens=1))
+
+    context = _usage_context(tmp_path, SimpleNamespace(call=None, stream=stream), hooks)
+    for _ in range(2):
+        with pytest.raises(PersonalAgentError) as caught:
+            _ = [chunk async for chunk in context.child.router.stream(messages=[])]
+        assert caught.value.code == "usage_unknown"
+    assert len(calls) == 1 and context.usage_calls == 0 and context.usage_incomplete
+    assert hooks.events[1][0] == "unknown"
+
+
+async def test_stream_exception_after_usage_and_terminal_preserves_unknown_instead_of_zero(
+    tmp_path,
+):
+    hooks = _BudgetHooks()
+
+    async def stream(**kwargs):
+        yield StreamChunk(token="部分", usage=TokenUsage(input_tokens=1), finish_reason="stop")
+        raise RuntimeError("controlled transport disconnect")
+
+    context = _usage_context(tmp_path, SimpleNamespace(call=None, stream=stream), hooks)
+    with pytest.raises(RuntimeError):
+        _ = [chunk async for chunk in context.child.router.stream(messages=[])]
+    assert context.model_calls == 1 and context.usage_calls == 0 and context.usage_incomplete
+    assert hooks.events[1][0] == "unknown" and hooks.events[1][1]["completed"] is False
+
+
+async def test_stream_cancellation_keeps_request_unknown_and_never_settles_partial_usage(tmp_path):
+    hooks = _BudgetHooks()
+
+    async def stream(**kwargs):
+        yield StreamChunk(token="部分", usage=TokenUsage(input_tokens=1), finish_reason="stop")
+        await asyncio.Event().wait()
+
+    context = _usage_context(tmp_path, SimpleNamespace(call=None, stream=stream), hooks)
+    generator = context.child.router.stream(messages=[])
+    await anext(generator)
+    await generator.aclose()
+    assert context.usage_calls == 0 and context.usage_incomplete
+    assert hooks.events[1][0] == "unknown"
+
+
+async def test_transport_settlement_storage_failure_blocks_following_requests(tmp_path):
+    from naumi_agent.model.router import ModelCallEvidence, ModelResponse
+
+    hooks = _BudgetHooks(complete_error=PersonalAgentError("storage_error", "用量回执待核对"))
+    calls = []
+
+    async def call(**kwargs):
+        calls.append(kwargs)
+        return ModelResponse(
+            content="已响应",
+            finish_reason="stop",
+            usage=TokenUsage(),
+            call_evidence=ModelCallEvidence(
+                usage_source="transport_response",
+                cost_source="rate_card_estimate",
+                rate_card_source="config",
+                billing_status="unsupported",
+            ),
+        )
+
+    context = _usage_context(tmp_path, SimpleNamespace(call=call, stream=None), hooks)
+    with pytest.raises(PersonalAgentError):
+        await context.child.router.call(messages=[])
+    with pytest.raises(PersonalAgentError) as caught:
+        await context.child.router.call(messages=[])
+    assert caught.value.code == "usage_unknown" and len(calls) == 1
+    assert context.usage_calls == 0 and hooks.events[-1][0] == "unknown"
+
+
+@pytest.mark.parametrize(
+    "usage",
+    [TokenUsage(input_tokens=-1), TokenUsage(cost_usd=float("nan")), TokenUsage(cost_usd=-1)],
+)
+async def test_malformed_usage_never_counts_as_known_even_for_ordinary_items(tmp_path, usage):
+    async def stream(**kwargs):
+        yield StreamChunk(token="正文", usage=usage, finish_reason="stop")
+
+    context = _usage_context(tmp_path, SimpleNamespace(call=None, stream=stream))
+    with pytest.raises(PersonalAgentError) as caught:
+        _ = [chunk async for chunk in context.child.router.stream(messages=[])]
+    assert caught.value.code == "usage_unknown" and context.usage_calls == 0
+
+
+@pytest.mark.parametrize("mode", ["call", "stream"])
+@pytest.mark.parametrize(
+    "inputs,outputs,known",
+    [
+        (None, 0, False),
+        (0, None, False),
+        (None, None, False),
+        (0, 0, True),
+        (12, 5, True),
+    ],
+)
+async def test_original_router_builder_rejects_partial_raw_usage_fields(
+    tmp_path,
+    mode,
+    inputs,
+    outputs,
+    known,
+):
+    from naumi_agent.model.router import ModelCallEvidence, ModelResponse
+
+    class RawRouter:
+        _build_usage = ModelRouter._build_usage
+
+        def get_cost_rates(self, model):
+            return {"input": 1, "output": 1}
+
+        async def call(self, **kwargs):
+            usage = self._build_usage(
+                SimpleNamespace(
+                    prompt_tokens=inputs,
+                    completion_tokens=outputs,
+                    prompt_tokens_details=None,
+                ),
+                "fixture-model",
+            )
+            return ModelResponse(
+                content="实际原始usage",
+                finish_reason="stop",
+                usage=usage,
+                call_evidence=ModelCallEvidence(
+                    usage_source="transport_response",
+                    cost_source="rate_card_estimate",
+                    rate_card_source="config",
+                    billing_status="unsupported",
+                ),
+            )
+
+        async def stream(self, **kwargs):
+            usage = self._build_usage(
+                SimpleNamespace(
+                    prompt_tokens=inputs,
+                    completion_tokens=outputs,
+                    prompt_tokens_details=None,
+                ),
+                "fixture-model",
+            )
+            yield StreamChunk(token="实际原始usage", finish_reason="stop", usage=usage)
+
+    context = _usage_context(tmp_path, RawRouter())
+
+    async def invoke():
+        if mode == "call":
+            return await context.child.router.call(messages=[])
+        return [chunk async for chunk in context.child.router.stream(messages=[])]
+
+    if known:
+        await invoke()
+        assert context.usage_calls == 1 and context.usage_incomplete is False
+    else:
+        with pytest.raises(PersonalAgentError) as caught:
+            await invoke()
+        assert caught.value.code == "usage_unknown"
+        assert context.usage_calls == 0 and context.usage_incomplete is True

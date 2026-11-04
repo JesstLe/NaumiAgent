@@ -683,6 +683,11 @@ class PersonalItemService:
             actor_id=intent["actor_id"],
             refs=intent["input_refs"],
         )
+        routines = getattr(self.engine, "personal_routines", None)
+        if routines is not None:
+            occurrence = await routines.occurrence_for_item(intent["item_id"])
+            if occurrence is not None:
+                await routines.authorize_occurrence_execution(occurrence, intent)
 
     async def _close_terminal(self, item):
         if item["state"] not in {"active", "paused"}:

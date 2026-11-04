@@ -172,6 +172,7 @@ def _build_commands() -> list[CommandMeta]:
         CommandMeta("/library", "资料库 — 版本、导入、修订、分享与撤销", takes_arg=True, arg_hint="[list|get|read|versions|grants|publish-json|import-json|revise-json|share-json|revoke-json] [参数]", readonly=False, category="元命令"),
         CommandMeta("/items", "事项 — 单次执行、控制、结果与显式已读", takes_arg=True, arg_hint="[list|get|create-json|update-json|pause-json|resume-json|cancel-json|run-now-json|restart-json|close-json|history|occurrences|results|result|read-json] [参数]", readonly=False, category="元命令"),
         CommandMeta("/connections", "账户连接 — 日历、授权、同步与原请求核对", takes_arg=True, arg_hint="[context|list|client|connect|events|sync|disconnect|grant|revoke|request] [参数]", readonly=False, category="元命令"),
+        CommandMeta("/routines", "周期 — 预览、启停、发生与原请求核对", takes_arg=True, arg_hint="[context|list|get|preview-json|create-json|revise-json|pause-json|resume-json|cancel-json|extra-run-json|history|occurrences|requests] [参数]", readonly=False, category="元命令"),
         CommandMeta("/actions", "日历行动 — 草稿、确切批准与原事件读回", takes_arg=True, arg_hint="[list|get|propose|approve|reject|reconcile] [参数]", readonly=False, category="元命令"),
         CommandMeta("/runtime", "运行时状态 — all/context/todo/team/subagent/hooks/resources", takes_arg=True, arg_hint="[分区]", readonly=True, category="元命令"),
         CommandMeta("/browse", "打开 URL 并显示 SoM 元素", takes_arg=True, arg_hint="<url>", readonly=False, category="元命令"),

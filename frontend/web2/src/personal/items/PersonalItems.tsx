@@ -123,7 +123,7 @@ function ResultDetail({ api, occurrenceId, state, refreshToken, onOpenArtifact }
   </article>
 }
 
-function ExecutionCard({ execution, actor, api, onOpenArtifact }: { execution: PersonalItemExecution; actor: string; api: PersonalItemsApi; onOpenArtifact: (actor: string, ref: PersonalArtifactRef) => void }) {
+export function ExecutionCard({ execution, actor, api, onOpenArtifact }: { execution: PersonalItemExecution; actor: string; api: Pick<PersonalItemsApi, 'personalArtifact' | 'runs'>; onOpenArtifact: (actor: string, ref: PersonalArtifactRef) => void }) {
   const error = executionError(execution.error)
   return <section className="pi-execution"><div className="pi-section-title"><h3>执行结果</h3><Status status={execution.status} /></div>{execution.status === 'unknown' && <div className="pi-unknown" role="status">执行结果未知 · 保留原执行身份</div>}{error && <pre className="pi-error">{error}</pre>}
     {execution.answer && <div className="pi-answer"><Markdown remarkPlugins={[remarkGfm]}>{execution.answer}</Markdown></div>}
@@ -132,10 +132,10 @@ function ExecutionCard({ execution, actor, api, onOpenArtifact }: { execution: P
     {execution.run_id && execution.execution_session_id && <RunRecord api={api} execution={execution} />}
   </section>
 }
-function ReportCards({ refs, actor, api, onOpenArtifact }: { refs: PersonalArtifactRef[]; actor: string; api: PersonalItemsApi; onOpenArtifact: (actor: string, ref: PersonalArtifactRef) => void }) {
+function ReportCards({ refs, actor, api, onOpenArtifact }: { refs: PersonalArtifactRef[]; actor: string; api: Pick<PersonalItemsApi, 'personalArtifact'>; onOpenArtifact: (actor: string, ref: PersonalArtifactRef) => void }) {
   return <div className="pi-reports">{refs.map(ref => <ReportCard key={`${actor}:${ref.artifact_id}:${ref.version}:${ref.sha256}`} artifactRef={ref} actor={actor} api={api} onOpenArtifact={onOpenArtifact} />)}</div>
 }
-function ReportCard({ artifactRef: ref, actor, api, onOpenArtifact }: { artifactRef: PersonalArtifactRef; actor: string; api: PersonalItemsApi; onOpenArtifact: (actor: string, ref: PersonalArtifactRef) => void }) {
+function ReportCard({ artifactRef: ref, actor, api, onOpenArtifact }: { artifactRef: PersonalArtifactRef; actor: string; api: Pick<PersonalItemsApi, 'personalArtifact'>; onOpenArtifact: (actor: string, ref: PersonalArtifactRef) => void }) {
   const [artifact, setArtifact] = useState<PersonalArtifactSnapshot | null>(null), [error, setError] = useState('')
   useEffect(() => {
     const controller = new AbortController()
@@ -148,7 +148,7 @@ function ReportCard({ artifactRef: ref, actor, api, onOpenArtifact }: { artifact
   }, [api, actor, ref.artifact_id, ref.version, ref.sha256, ref.grant_id, ref.grant_revision])
   return <div className="pi-report-card"><FileText size={23} /><div><strong>{artifact?.title || '正在核对材料…'}</strong><small>v{ref.version}{artifact ? ` · ${artifact.bytes.toLocaleString()} B` : ''}</small>{error && <span className="pi-report-error" role="alert">{error}</span>}</div><button disabled={!artifact || Boolean(error)} aria-label={`打开${artifact?.title || '材料'}`} onClick={() => requestArtifactNavigation(() => onOpenArtifact(actor, ref))}><ArrowUpRight size={17} /></button></div>
 }
-function RunRecord({ api, execution }: { api: PersonalItemsApi; execution: PersonalItemExecution }) {
+function RunRecord({ api, execution }: { api: Pick<PersonalItemsApi, 'runs'>; execution: PersonalItemExecution }) {
   const [open, setOpen] = useState(false), [run, setRun] = useState<Run | null>(null), [error, setError] = useState('')
   useEffect(() => {
     if (!open) return

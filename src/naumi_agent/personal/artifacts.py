@@ -174,6 +174,29 @@ class PersonalArtifactService:
         )
         for grant in grants:
             self._scope_current(grant)
+        routines = getattr(self.engine, "personal_routines", None)
+        if routines is not None:
+            await routines.authorize_artifact(snapshot, actor_id)
+        else:
+            stack, seen = [snapshot], set()
+            while stack:
+                value = stack.pop()
+                identity = (value["artifact_id"], value["version"])
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                if len(seen) > 1024:
+                    raise PersonalAgentError("storage_error", "周期产物来源链超过校验上限")
+                if (value.get("evidence", {}).get("routine_refs")
+                        or value.get("evidence", {}).get("routine_plan_refs")):
+                    raise PersonalAgentError(
+                        "routine_source_unavailable", "周期资料需要原执行授权组件"
+                    )
+                for ref in value.get("source_refs", []):
+                    stack.append(await self._call(
+                        "get", actor_id=actor_id, artifact_id=ref["artifact_id"],
+                        version=ref["version"],
+                    ))
         connections = getattr(self.engine, "personal_connections", None)
         if connections is not None:
             await connections.authorize_artifact(snapshot, actor_id)

@@ -13,6 +13,13 @@ from starlette.responses import JSONResponse
 from naumi_agent.api.deps import extract_api_key
 
 
+def _routine_headers(request: Request) -> dict[str, str]:
+    path = request.url.path
+    if path == "/api/v1/personal/routines" or path.startswith("/api/v1/personal/routines/"):
+        return {"Cache-Control": "no-store", "Pragma": "no-cache"}
+    return {}
+
+
 class ConfiguredCORSMiddleware:
     """Apply the active ``api.cors_origins`` without loading config at import time."""
 
@@ -66,7 +73,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if config.api.api_keys:
             if not api_key or api_key not in config.api.api_keys:
                 return JSONResponse(
-                    status_code=401, content={"error": "Invalid or missing API key"}
+                    status_code=401,
+                    content={"error": "运行时身份验证未通过"}
+                    if _routine_headers(request)
+                    else {"error": "Invalid or missing API key"},
+                    headers=_routine_headers(request),
                 )
 
         return await call_next(request)
@@ -103,7 +114,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return JSONResponse(
                 status_code=429,
                 content={"error": "Rate limit exceeded"},
-                headers={"Retry-After": "60"},
+                headers={"Retry-After": "60", **_routine_headers(request)},
             )
 
         self._buckets[client_id].append(now)

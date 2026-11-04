@@ -401,7 +401,7 @@
         "真实指定项目产生任务、负责人、截止时间和可追溯产物。",
         "复盘使用真实数据，未知/未连接项不伪造。"
       ],
-      "implementation_note": " PA-01已实现多事项、一次性IANA时区调度、共享AgentJob/独立Run、私有报告、持久收件箱和typed人工已读。工作/生活/学习三项真实provider及Docker计算、GUI管理/收件箱、原三Run冷重启零新增均有本轮独立证据；周期/外部账户/设备送达等原条件未借此标为完成。记录见development/personal-agent/PA-01.md与pa01-20261104事务。 2026-11-05 PA-01首次并发初始化已独立修复：schema保持v1，集中相关后端1960passed/5skipped/exit0；真实历史数据副本8进程幂等与冷读通过，原文件不变、未重放既有Run。见PA-01-bootstrap.md及独立事务VERIFICATION.txt，原模块/产品状态不提升。"
+      "implementation_note": " PA-01已实现多事项、一次性IANA时区调度、共享AgentJob/独立Run、私有报告、持久收件箱和typed人工已读。工作/生活/学习三项真实provider及Docker计算、GUI管理/收件箱、原三Run冷重启零新增均有本轮独立证据；周期/外部账户/设备送达等原条件未借此标为完成。记录见development/personal-agent/PA-01.md与pa01-20261104事务。 2026-11-05 PA-01首次并发初始化已独立修复：schema保持v1，集中相关后端1960passed/5skipped/exit0；真实历史数据副本8进程幂等与冷读通过，原文件不变、未重放既有Run。见PA-01-bootstrap.md及独立事务VERIFICATION.txt，原模块/产品状态不提升。 2026-11-05 PA-04 周期纵向模块已落盘并接入 Web/Tool/API/CLI/TUI：独立原定发生账本、IANA once/cron/真实交易日日历、预览确认、误期/重叠策略、跨修订次数和逐transport估算费用预留，复用原Item/Job/Run/Library/inbox。完整持续助理仍partial；实际测试、受控HTTP、冷重启、真实provider及平台验收分开，原等待窗口失败不改成自动成功。见development/personal-agent/PA-04.md与pa04-recurring-20261105事务VERIFICATION.txt。"
     },
     {
       "id": "VID-13",
@@ -498,7 +498,7 @@
     {
       "id": "VID-16",
       "title": "每个Agent的单次/周期例行任务",
-      "status": "planned",
+      "status": "partial",
       "in_scope": true,
       "verified_in_naumi": false,
       "owners": [
@@ -526,7 +526,7 @@
         "在真实到期时触发一次，执行回执可重开，重启和重复扫描无重复。",
         "提议、已创建、启用、已触发、已执行、已送达分别显示。"
       ],
-      "implementation_note": " PA-01已实现多事项、一次性IANA时区调度、共享AgentJob/独立Run、私有报告、持久收件箱和typed人工已读。工作/生活/学习三项真实provider及Docker计算、GUI管理/收件箱、原三Run冷重启零新增均有本轮独立证据；周期/外部账户/设备送达等原条件未借此标为完成。记录见development/personal-agent/PA-01.md与pa01-20261104事务。 2026-11-05 PA-01首次并发初始化已独立修复：schema保持v1，集中相关后端1960passed/5skipped/exit0；真实历史数据副本8进程幂等与冷读通过，原文件不变、未重放既有Run。见PA-01-bootstrap.md及独立事务VERIFICATION.txt，原模块/产品状态不提升。"
+      "implementation_note": " PA-01已实现多事项、一次性IANA时区调度、共享AgentJob/独立Run、私有报告、持久收件箱和typed人工已读。工作/生活/学习三项真实provider及Docker计算、GUI管理/收件箱、原三Run冷重启零新增均有本轮独立证据；周期/外部账户/设备送达等原条件未借此标为完成。记录见development/personal-agent/PA-01.md与pa01-20261104事务。 2026-11-05 PA-01首次并发初始化已独立修复：schema保持v1，集中相关后端1960passed/5skipped/exit0；真实历史数据副本8进程幂等与冷读通过，原文件不变、未重放既有Run。见PA-01-bootstrap.md及独立事务VERIFICATION.txt，原模块/产品状态不提升。 2026-11-05 PA-04 周期纵向模块已落盘并接入 Web/Tool/API/CLI/TUI：独立原定发生账本、IANA once/cron/真实交易日日历、预览确认、误期/重叠策略、跨修订次数和逐transport估算费用预留，复用原Item/Job/Run/Library/inbox。完整持续助理仍partial；实际测试、受控HTTP、冷重启、真实provider及平台验收分开，原等待窗口失败不改成自动成功。见development/personal-agent/PA-04.md与pa04-recurring-20261105事务VERIFICATION.txt。 最终sidecar/网关修正后新身份自然HTTP+冷重启PASS，9项关键源码SHA稳定，原Run070f36c9223e/报告/inbox及22微美元本地估算回读一致、cold零新增；共享相关集中1261passed/8skip另2个permission边界失败保留，末端网关167pass。真实provider因已配置模型价格来源fallback保持NOT_RUN，不将受控传输记成真实模型/发布验收。"
     },
     {
       "id": "VID-17",
@@ -654,7 +654,8 @@
       "acceptance": [
         "证券代码/市场/币种/交易时间与来源对齐，过期数据清楚显示。",
         "结论附前提、反证和风险，研究与实际交易状态不混同。"
-      ]
+      ],
+      "implementation_note": " 2026-11-05 PA-04 周期纵向模块已落盘并接入 Web/Tool/API/CLI/TUI：独立原定发生账本、IANA once/cron/真实交易日日历、预览确认、误期/重叠策略、跨修订次数和逐transport估算费用预留，复用原Item/Job/Run/Library/inbox。完整持续助理仍partial；实际测试、受控HTTP、冷重启、真实provider及平台验收分开，原等待窗口失败不改成自动成功。见development/personal-agent/PA-04.md与pa04-recurring-20261105事务VERIFICATION.txt。"
     },
     {
       "id": "VID-21",

@@ -1,4 +1,5 @@
 import type { PersonalItem, PersonalItemAction, PersonalItemControl, PersonalItemExecution, PersonalItemInput, PersonalItemPage, PersonalItemReadInput, PersonalItemReadReceipt, PersonalItemResult, PersonalItemResultsPage, PersonalItemUpdate } from './personalItems'
+import type { PersonalRoutine, PersonalRoutineAction, PersonalRoutineConfirm, PersonalRoutineContext, PersonalRoutineControl, PersonalRoutineOccurrence, PersonalRoutineOccurrencesPage, PersonalRoutinePage, PersonalRoutinePreview, PersonalRoutinePreviewInput, PersonalRoutineRequestReceipt, PersonalRoutineRevise, RoutineStatus } from './personalRoutines'
 import type { CalendarAction, CalendarActionInput, CalendarActionRevision, CalendarEventItemInput, CalendarEventPage, CalendarMutation, CalendarOAuthIntent, PersonalConnection, PersonalConnectionContext, PersonalConnectionRequest } from './personalConnections'
 import type { PersonalLegacyMemoryPage, PersonalMemory, PersonalMemoryContext, PersonalMemoryGrant, PersonalMemoryHistoryEntry, PersonalMemoryMutationResult, PersonalMemoryPage, PersonalMemoryPrepare, PersonalMemoryQuery, PersonalMemoryRequest, PersonalMemorySearch } from './personalMemories'
 import { WorkbenchApiClient } from '@naumi/shared/api/WorkbenchApiClient'
@@ -523,6 +524,42 @@ export class WorkbenchRuntimeClient extends WorkbenchApiClient {
   }
   async discardPersonalMemoryRequest(id: string, actorId: string, expectedFingerprint: string): Promise<PersonalMemoryRequest> {
     return (await this.fetch(`/personal/memory-requests/${encodeURIComponent(id)}/discard?actor_id=${encodeURIComponent(actorId)}`, { method: 'POST', body: JSON.stringify({ expected_fingerprint: expectedFingerprint }) })).json()
+  }
+  async personalRoutineContext(signal?: AbortSignal): Promise<PersonalRoutineContext> {
+    return (await this.fetch('/personal/routines/context', { signal, cache: 'no-store' })).json()
+  }
+  async personalRoutines(query: { status?: RoutineStatus; query?: string; limit?: number; after?: string } = {}, signal?: AbortSignal): Promise<PersonalRoutinePage> {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== '') params.set(key, String(value))
+    return (await this.fetch(`/personal/routines?${params}`, { signal, cache: 'no-store' })).json()
+  }
+  async personalRoutine(id: string, signal?: AbortSignal): Promise<PersonalRoutine> {
+    return (await this.fetch(`/personal/routines/${encodeURIComponent(id)}`, { signal, cache: 'no-store' })).json()
+  }
+  async previewPersonalRoutine(body: PersonalRoutinePreviewInput): Promise<PersonalRoutinePreview> {
+    return (await this.fetch('/personal/routines/previews', { method: 'POST', body: JSON.stringify(body) })).json()
+  }
+  async createPersonalRoutine(body: PersonalRoutineConfirm): Promise<PersonalRoutine> {
+    return (await this.fetch('/personal/routines', { method: 'POST', body: JSON.stringify(body) })).json()
+  }
+  async revisePersonalRoutine(id: string, body: PersonalRoutineRevise): Promise<PersonalRoutine> {
+    return (await this.fetch(`/personal/routines/${encodeURIComponent(id)}/revise`, { method: 'POST', body: JSON.stringify(body) })).json()
+  }
+  async controlPersonalRoutine(id: string, action: PersonalRoutineAction, body: PersonalRoutineControl): Promise<PersonalRoutine | PersonalRoutineOccurrence> {
+    return (await this.fetch(`/personal/routines/${encodeURIComponent(id)}/${action}`, { method: 'POST', body: JSON.stringify(body) })).json()
+  }
+  async personalRoutineHistory(id: string, query: { limit?: number; after?: number } = {}, signal?: AbortSignal): Promise<{ history: PersonalRoutine[]; next_after: number | null }> {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(query)) if (value !== undefined) params.set(key, String(value))
+    return (await this.fetch(`/personal/routines/${encodeURIComponent(id)}/history?${params}`, { signal, cache: 'no-store' })).json()
+  }
+  async personalRoutineOccurrences(id: string, query: { limit?: number; after?: string } = {}, signal?: AbortSignal): Promise<PersonalRoutineOccurrencesPage> {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== '') params.set(key, String(value))
+    return (await this.fetch(`/personal/routines/${encodeURIComponent(id)}/occurrences?${params}`, { signal, cache: 'no-store' })).json()
+  }
+  async personalRoutineRequest(requestId: string, signal?: AbortSignal): Promise<PersonalRoutineRequestReceipt> {
+    return (await this.fetch(`/personal/routines/requests/${encodeURIComponent(requestId)}`, { signal, cache: 'no-store' })).json()
   }
   async personalItems(query: { state?: string; query?: string; limit?: number; offset?: number } = {}, signal?: AbortSignal): Promise<PersonalItemPage> {
     const params = new URLSearchParams()

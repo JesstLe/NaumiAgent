@@ -58,6 +58,23 @@ def _connection_evidence(evidence):
     return bool(refs or actions)
 
 
+def _routine_evidence(evidence):
+    from naumi_agent.personal.routine_models import normalize_plan_ref, normalize_routine_ref
+
+    if not isinstance(evidence, dict):
+        raise invalid("周期来源证据格式不正确")
+    found = False
+    for key, normalize in (("routine_refs", normalize_routine_ref),
+                           ("routine_plan_refs", normalize_plan_ref)):
+        refs = evidence.get(key, [])
+        if not isinstance(refs, list) or len(refs) > 64:
+            raise invalid("周期来源引用需要有效列表，且不超过 64 项")
+        for ref in refs:
+            normalize(ref)
+        found = found or bool(refs)
+    return found
+
+
 _VERSION_FIELDS = {
     "artifact_id",
     "workspace_key",
@@ -287,12 +304,14 @@ class ArtifactStore:
             raise _broken()
         try:
             connection_bound = _connection_evidence(value["evidence"])
+            routine_bound = _routine_evidence(value["evidence"])
         except PersonalAgentError:
             raise _broken() from None
-        if connection_bound != (value.get("authority_version") == 2):
+        expected_authority = 3 if routine_bound else 2 if connection_bound else None
+        if value.get("authority_version") != expected_authority:
             raise _broken()
         if "authority_version" in value and (
-            type(value["authority_version"]) is not int or value["authority_version"] != 2
+            type(value["authority_version"]) is not int or value["authority_version"] not in {2, 3}
         ):
             raise _broken()
         if (
@@ -652,7 +671,11 @@ class ArtifactStore:
                 "request_id": request,
                 "previous_sha256": prior_sha,
             }
-            if _connection_evidence(evidence):
+            routine_bound = _routine_evidence(evidence)
+            connection_bound = _connection_evidence(evidence)
+            if routine_bound:
+                record["authority_version"] = 3
+            elif connection_bound:
                 # An old reader rejects this unknown top-level field instead
                 # of ignoring the new dynamic source-authorization protocol.
                 record["authority_version"] = 2

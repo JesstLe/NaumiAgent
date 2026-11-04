@@ -100,6 +100,7 @@ import {
 } from '@naumi/shared/projects/workspaceProjects'
 import { ProjectCreationDialog, type ProjectCreationInput } from './ProjectCreationDialog'
 import { PersonalItems } from './personal/items/PersonalItems'
+import { PersonalRoutines } from './personal/routines/PersonalRoutines'
 import { ConnectionWorkspace } from './personal/connections/ConnectionWorkspace'
 import { MemoryWorkspace, clearMemoryLocation, writeMemoryLocation } from './personal/memories/MemoryWorkspace'
 import type { PersonalArtifactRef } from '@naumi/shared/api/personalArtifacts'
@@ -306,6 +307,12 @@ export function Web2() {
     const url = new URL(location.href)
     if (url.searchParams.has('items')) { url.searchParams.delete('items'); history.pushState({}, '', url) }
   }
+  const [routinesOpen, setRoutinesOpen] = useState(() => new URLSearchParams(location.search).get('routines') === '1')
+  const closeRoutines = () => {
+    setRoutinesOpen(false)
+    const url = new URL(location.href)
+    if (url.searchParams.has('routines')) { url.searchParams.delete('routines'); history.pushState({}, '', url) }
+  }
   const [libraryOpen, setLibraryOpen] = useState(() => new URLSearchParams(location.search).get('library') === '1' || new URLSearchParams(location.search).has('artifact'))
   const closeLibrary = () => {
     setLibraryOpen(false)
@@ -317,22 +324,23 @@ export function Web2() {
       const accept = () => {
         setLibraryOpen(new URLSearchParams(location.search).get('library') === '1' || new URLSearchParams(location.search).has('artifact'))
         setItemsOpen(new URLSearchParams(location.search).get('items') === '1')
+        setRoutinesOpen(new URLSearchParams(location.search).get('routines') === '1')
         setMemoriesOpen(new URLSearchParams(location.search).get('memories') === '1')
         setConnectionsOpen(new URLSearchParams(location.search).get('connections') === '1')
       }
-      if (itemsOpen || memoriesOpen || connectionsOpen) requestArtifactNavigation(accept, () => history.pushState({}, '', acceptedUrl))
+      if (routinesOpen || itemsOpen || memoriesOpen || connectionsOpen) requestArtifactNavigation(accept, () => history.pushState({}, '', acceptedUrl))
       else accept()
     }
     window.addEventListener('popstate', update)
     return () => window.removeEventListener('popstate', update)
-  }, [itemsOpen, memoriesOpen, connectionsOpen])
+  }, [routinesOpen, itemsOpen, memoriesOpen, connectionsOpen])
   const personal = usePersonalAgents({
     api: w.api, sessionId: w.sessionId, busy: w.busy,
-    connected: Boolean(w.daemon), onSelect: id => new Promise((resolve, reject) => requestArtifactNavigation(() => { closeItems(); closeLibrary(); closeMemories(); closeConnections(); void w.select(id).then(resolve, reject) }, () => resolve(undefined))),
+    connected: Boolean(w.daemon), onSelect: id => new Promise((resolve, reject) => requestArtifactNavigation(() => { closeRoutines(); closeItems(); closeLibrary(); closeMemories(); closeConnections(); void w.select(id).then(resolve, reject) }, () => resolve(undefined))),
   })
   const openLibrary = (selection?: ArtifactSelection) => {
     requestArtifactNavigation(() => {
-      closeItems()
+      closeRoutines(); closeItems()
       closeMemories()
       closeConnections()
       writeArtifactLocation(personal.current?.id || 'main', selection || null)
@@ -341,6 +349,7 @@ export function Web2() {
     })
   }
   const openItems = () => requestArtifactNavigation(() => {
+    closeRoutines()
     closeConnections()
     closeLibrary()
     closeMemories()
@@ -348,23 +357,29 @@ export function Web2() {
     setItemsOpen(true)
     if (window.innerWidth < 580) setSidebar(false)
   })
+  const openRoutines = () => requestArtifactNavigation(() => {
+    closeItems(); closeLibrary(); closeMemories(); closeConnections()
+    const url = new URL(location.href); url.searchParams.set('routines', '1'); history.pushState({}, '', url)
+    setRoutinesOpen(true)
+    if (window.innerWidth < 580) setSidebar(false)
+  })
   const openMemories = () => requestArtifactNavigation(() => {
-    closeItems(); closeLibrary(); closeConnections()
+    closeRoutines(); closeItems(); closeLibrary(); closeConnections()
     const url = new URL(location.href); url.searchParams.set('memories', '1'); history.pushState({}, '', url)
     setMemoriesOpen(true)
     if (window.innerWidth < 580) setSidebar(false)
   })
   const openConnections = () => requestArtifactNavigation(() => {
-    closeItems(); closeLibrary(); closeMemories()
+    closeRoutines(); closeItems(); closeLibrary(); closeMemories()
     const url = new URL(location.href); url.searchParams.set('connections', '1'); history.pushState({}, '', url)
     setConnectionsOpen(true)
     if (window.innerWidth < 580) setSidebar(false)
   })
   const openItemArtifact = (actorId: string, ref: PersonalArtifactRef) => {
-    closeItems(); closeMemories(); closeConnections(); writeArtifactLocation(actorId, { artifact_id: ref.artifact_id, version: ref.version }); setLibraryOpen(true)
+    closeRoutines(); closeItems(); closeMemories(); closeConnections(); writeArtifactLocation(actorId, { artifact_id: ref.artifact_id, version: ref.version }); setLibraryOpen(true)
   }
   const openActionMemory = (actorId: string, ref: PersonalMemoryRef, itemId: string | null) => {
-    closeItems(); closeLibrary(); closeConnections()
+    closeRoutines(); closeItems(); closeLibrary(); closeConnections()
     writeMemoryLocation({ actorId, scope: itemId ? 'item' : 'all', itemId: itemId || '', memoryId: ref.memory_id })
     setMemoriesOpen(true)
   }
@@ -566,7 +581,7 @@ export function Web2() {
     </div>
   )
   const openPanel = (next: Panel) => {
-    requestArtifactNavigation(() => { closeItems(); closeLibrary(); closeMemories(); closeConnections(); setPanel(next); setRight(true) })
+    requestArtifactNavigation(() => { closeRoutines(); closeItems(); closeLibrary(); closeMemories(); closeConnections(); setPanel(next); setRight(true) })
   }
   const daemonConfigFor = async (path: string) => {
     if (!platform.getDaemonLaunchConfig)
@@ -589,7 +604,7 @@ export function Web2() {
   }
   const newChat = () => requestArtifactNavigation(() => {
     closeConnections()
-    closeItems()
+    closeRoutines(); closeItems()
     closeLibrary()
     closeMemories()
     if (w.busy && workspaceRoot) {
@@ -856,6 +871,7 @@ export function Web2() {
             { label: '上下文快照', run: () => openPanel('context') },
             { label: '任务依赖图', run: () => openPanel('flow') },
             { label: '会话洞察', run: () => openPanel('insights') },
+            { label: '周期计划', run: openRoutines },
             { label: '定时任务', run: () => openPanel('schedules') },
             { label: '插件', run: () => openPanel('plugins') },
             { label: '任务记录', run: () => openPanel('tasks') },
@@ -915,17 +931,18 @@ export function Web2() {
           </button>
           <button
             onClick={() => openPanel('tools')}
-            className={!itemsOpen && !libraryOpen && !memoriesOpen && !connectionsOpen && panel === 'tools' ? 'selected' : ''}
+            className={!routinesOpen && !itemsOpen && !libraryOpen && !memoriesOpen && !connectionsOpen && panel === 'tools' ? 'selected' : ''}
           >
             <Workflow />
             工具与扩展
           </button>
           <button onClick={openItems} className={itemsOpen ? 'selected' : ''}><ListTodo />事项</button>
+          <button onClick={openRoutines} className={routinesOpen ? 'selected' : ''}><Clock3 />周期计划</button>
           <button onClick={openMemories} className={memoriesOpen ? 'selected' : ''}><BrainCircuit />记忆</button>
           <button onClick={() => openLibrary()} className={libraryOpen ? 'selected' : ''}><Library />资料库</button>
           <button onClick={openConnections} className={connectionsOpen ? 'selected' : ''}><Link2 />连接</button>
-          <button onClick={() => openPanel('schedules')} className={!itemsOpen && !libraryOpen && !memoriesOpen && !connectionsOpen && panel === 'schedules' ? 'selected' : ''}><Clock3 />定时任务</button>
-          <button onClick={() => openPanel('plugins')} className={!itemsOpen && !libraryOpen && !memoriesOpen && !connectionsOpen && panel === 'plugins' ? 'selected' : ''}><Plug />插件</button>
+          <button onClick={() => openPanel('schedules')} className={!routinesOpen && !itemsOpen && !libraryOpen && !memoriesOpen && !connectionsOpen && panel === 'schedules' ? 'selected' : ''}><Clock3 />定时任务</button>
+          <button onClick={() => openPanel('plugins')} className={!routinesOpen && !itemsOpen && !libraryOpen && !memoriesOpen && !connectionsOpen && panel === 'plugins' ? 'selected' : ''}><Plug />插件</button>
         </nav>
         <PersonalAgents api={w.api} state={personal} busy={w.busy} connected={Boolean(w.daemon)}
           collaboration={{ api: w.api, sessionId: w.sessionId, onOpenSession: w.select }} />
@@ -972,7 +989,7 @@ export function Web2() {
                 className={`w2-project ${active ? 'active' : ''}`}
                 disabled={!active && (workspaceSwitching || (workspaceOpening && switching) || !platform.startDaemon)}
                 onClick={() => {
-                  if (!active) requestArtifactNavigation(() => { closeItems(); closeLibrary(); closeMemories(); closeConnections(); void activateWorkspace(project.path, project.name).catch((error) => w.setError(errorText(error))) })
+                  if (!active) requestArtifactNavigation(() => { closeRoutines(); closeItems(); closeLibrary(); closeMemories(); closeConnections(); void activateWorkspace(project.path, project.name).catch((error) => w.setError(errorText(error))) })
                 }}
                 aria-current={active ? 'true' : undefined}
                 title={project.path}
@@ -993,7 +1010,7 @@ export function Web2() {
                     disabled={workspaceSwitching}
                     onClick={() => {
                       requestArtifactNavigation(() => {
-                        closeItems(); closeLibrary(); closeMemories(); closeConnections()
+                        closeRoutines(); closeItems(); closeLibrary(); closeMemories(); closeConnections()
                         if (active) void w.select(session.id)
                         else void activateWorkspace(project.path, project.name, session.id).catch((error) => w.setError(errorText(error)))
                       })
@@ -1067,9 +1084,10 @@ export function Web2() {
         }}
       />
 
-      <main className={`w2-main ${terminal ? 'has-terminal' : ''} ${libraryOpen || itemsOpen || memoriesOpen || connectionsOpen ? 'is-library' : ''}`}>
+      <main className={`w2-main ${terminal ? 'has-terminal' : ''} ${routinesOpen || libraryOpen || itemsOpen || memoriesOpen || connectionsOpen ? 'is-library' : ''}`}>
         {connectionsOpen && <ConnectionWorkspace key={`connections:${w.base}:${workspaceRoot || ''}`} api={w.api} namespace={`${w.base}:${workspaceRoot || ''}`} agents={personal.agents} connected={Boolean(w.daemon)} onClose={closeConnections} onOpenItems={openItems} onOpenArtifact={openItemArtifact} onOpenMemory={openActionMemory} />}
         {memoriesOpen && <MemoryWorkspace key={`memories:${w.base}:${workspaceRoot || ''}`} api={w.api} namespace={`${w.base}:${workspaceRoot || ''}`} initialActorId={personal.current?.id || 'main'} agents={personal.agents} connected={Boolean(w.daemon)} onClose={closeMemories} />}
+        {routinesOpen && <PersonalRoutines key={`routines:${w.base}:${workspaceRoot || ''}`} api={w.api} namespace={`${w.base}:${workspaceRoot || ''}`} agents={personal.agents} connected={Boolean(w.daemon)} onClose={closeRoutines} onOpenArtifact={openItemArtifact} />}
         {itemsOpen && <PersonalItems key={`items:${w.base}:${workspaceRoot || ''}`} api={w.api} namespace={`${w.base}:${workspaceRoot || ''}`} agents={personal.agents} connected={Boolean(w.daemon)} originSessionId={w.sessionId || undefined} onClose={closeItems} onOpenArtifact={openItemArtifact} />}
         {libraryOpen && <LibraryWorkspace key={`${w.base}:${workspaceRoot || ''}`} api={w.api} namespace={`${w.base}:${workspaceRoot || ''}`}
           initialActorId={personal.current?.id || 'main'} currentActorId={personal.current?.id || 'main'}

@@ -84,7 +84,7 @@ export function ItemEditor({ item, agents, api, state, onSave, onClose }: {
   </section>
 }
 
-function MaterialPicker({ api, actor, selected, onSelect, onClose }: { api: PersonalItemsApi; actor: string; selected: PersonalArtifactRef[]; onSelect: (refs: PersonalArtifactRef[]) => void; onClose: () => void }) {
+export function MaterialPicker({ api, actor, selected, onSelect, onClose }: { api: Pick<PersonalItemsApi, 'personalArtifacts'>; actor: string; selected: PersonalArtifactRef[]; onSelect: (refs: PersonalArtifactRef[]) => void; onClose: () => void }) {
   const [artifacts, setArtifacts] = useState<PersonalArtifactSnapshot[]>([]), [query, setQuery] = useState(''), [offset, setOffset] = useState(0)
   const dialogRef = useRef<HTMLElement>(null)
   useEffect(() => {

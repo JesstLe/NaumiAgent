@@ -1591,6 +1591,17 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         risk_level=PermissionRiskLevel.MEDIUM,
         tool_family="personal_items",
     ),
+    "personal_routines": PermissionRule(
+        tool_name="personal_routines",
+        allowed_modes=[
+            PermissionMode.BYPASS, PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE, PermissionMode.STRICT,
+        ],
+        requires_confirmation=True,
+        max_calls_per_session=200,
+        risk_level=PermissionRiskLevel.MEDIUM,
+        tool_family="personal_routines",
+    ),
     "personal_agents": PermissionRule(
         tool_name="personal_agents",
         allowed_modes=[

@@ -9,15 +9,12 @@ dependencies = [
     "litellm>=1.60",
     "langgraph>=0.4",
     "langchain-core>=0.3",
-
     # 工具
     "mcp>=1.0",
     "playwright>=1.50",
-
     # 记忆
     "chromadb>=1.0",
     "aiosqlite>=0.21",
-
     # 接口
     "typer>=0.15",
     "rich>=14.0",
@@ -26,7 +23,6 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn>=0.34",
     "websockets>=14.0",
-
     # 安全与可观测
     "pydantic>=2.10",
     "pydantic-settings>=2.7",
@@ -38,7 +34,6 @@ dependencies = [
     "opentelemetry-api>=1.30",
     "opentelemetry-sdk>=1.30",
     "psutil>=6.1",
-
     # 工具辅助
     "httpx>=0.28",
     "readability-lxml>=0.8",
@@ -48,6 +43,8 @@ dependencies = [
     "pillow>=11.3",
     "pypdf>=6,<8",
     "tzdata>=2025.2",
+    "exchange-calendars>=4.11,<5",
+    "pandas>=2.2,<3",
 ]
 
 [project.optional-dependencies]

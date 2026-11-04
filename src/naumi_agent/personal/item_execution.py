@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import uuid
 from dataclasses import asdict
 from datetime import UTC, datetime
@@ -75,6 +76,7 @@ class PersonalItemExecutionContext:
         self.input_paths = {}
         self.model_calls = 0
         self.usage_calls = 0
+        self.usage_incomplete = False
         self.process_workspace = Path(child._execution_data_dir) / "empty-input-workspace"
         self.process_workspace.mkdir(parents=True, exist_ok=True)
         if self.process_workspace.is_symlink() or any(self.process_workspace.iterdir()):
@@ -92,28 +94,178 @@ class PersonalItemExecutionContext:
 
     def observe_model_usage(self):
         original_stream, original_call = self.child.router.stream, self.child.router.call
+        routines = getattr(self.service.engine, "personal_routines", None)
+        usage_fields = {}
+        original_builder = getattr(self.child.router, "_build_usage", None)
+        if callable(original_builder):
+
+            def build_usage(raw, model):
+                value = original_builder(raw, model)
+                counts = [
+                    getattr(raw, name, None) for name in ("prompt_tokens", "completion_tokens")
+                ]
+                # Keep the object alive: an id reused after GC must not acquire
+                # another response's provenance. Explicit 0 differs from None.
+                usage_fields[id(value)] = (value, all(type(n) is int and n >= 0 for n in counts))
+                return value
+
+            self.child.router._build_usage = build_usage
+
+        async def permit_for(args, kwargs):
+            if self.usage_incomplete:
+                raise PersonalAgentError("usage_unknown", "原模型请求用量待核对，未自动重复请求")
+            permit = None
+            if routines is not None and hasattr(routines, "reserve_transport_call"):
+                permit = await routines.reserve_transport_call(
+                    self.intent, self.child.router, args, kwargs
+                )
+            actual = dict(kwargs)
+            if permit is not None:
+                try:
+                    # Reservation can await a contended writer. Revalidate the
+                    # original Item/Job fence after that await, before transport.
+                    await self.authorize()
+                except BaseException:
+                    await routines.unknown_transport_call(
+                        permit,
+                        {
+                            "reason": "execution_gate_changed_before_dispatch",
+                            "transport_dispatched": False,
+                        },
+                    )
+                    raise
+                maximum = permit.get("max_tokens")
+                if type(maximum) is not int or maximum <= 0:
+                    raise PersonalAgentError("binding_conflict", "模型请求缺少有效预算许可")
+                actual["max_tokens"] = maximum
+            return permit, actual
+
+        async def unknown(permit, reason):
+            self.usage_incomplete = True
+            if permit is not None:
+                await routines.unknown_transport_call(permit, reason)
+
+        async def complete(permit, usage, evidence):
+            original_fields = usage_fields.get(id(usage))
+            if original_fields is not None and not original_fields[1]:
+                raise PersonalAgentError("usage_unknown", "模型原始用量字段不完整，预算保持未知")
+            if (
+                any(
+                    type(getattr(usage, field, None)) is not int or getattr(usage, field) < 0
+                    for field in ("input_tokens", "output_tokens")
+                )
+                or type(getattr(usage, "cost_usd", None)) not in {int, float}
+                or not math.isfinite(usage.cost_usd)
+                or usage.cost_usd < 0
+            ):
+                raise PersonalAgentError("usage_unknown", "模型用量字段未通过校验，预算保持未知")
+            if permit is not None:
+                await routines.complete_transport_call(
+                    permit,
+                    usage,
+                    {
+                        **evidence,
+                        "usage_fields_verified": True,
+                    },
+                )
+            self.usage_calls += 1
 
         async def stream(*args, **kwargs):
+            permit, actual = await permit_for(args, kwargs)
             self.model_calls += 1
-            known = False
+            observed = None
+            terminal, exhausted, settled = False, False, False
             try:
-                async for chunk in original_stream(*args, **kwargs):
-                    known = known or getattr(chunk, "usage", None) is not None
+                async for chunk in original_stream(*args, **actual):
+                    if getattr(chunk, "usage", None) is not None:
+                        observed = chunk.usage
+                    terminal = terminal or getattr(chunk, "finish_reason", None) in {
+                        "stop",
+                        "tool_calls",
+                        "length",
+                        "content_filter",
+                    }
                     yield chunk
+                exhausted = True
+                if observed is None or not terminal:
+                    raise PersonalAgentError(
+                        "usage_unknown", "模型流缺少完整终态用量，预算保持未知"
+                    )
+                await complete(
+                    permit,
+                    observed,
+                    {
+                        "transport": "stream",
+                        "usage_source": "transport_response",
+                        "completed": True,
+                        "terminal": True,
+                    },
+                )
+                settled = True
             finally:
-                if known:
-                    self.usage_calls += 1
+                if not settled:
+                    await unknown(
+                        permit,
+                        {
+                            "transport": "stream",
+                            "reason": "incomplete_transport",
+                            "completed": exhausted,
+                            "terminal": terminal,
+                            "usage_observed": observed is not None,
+                        },
+                    )
 
         async def call(*args, **kwargs):
+            permit, actual = await permit_for(args, kwargs)
             self.model_calls += 1
-            response = await original_call(*args, **kwargs)
-            if getattr(response, "usage", None) is not None:
-                self.usage_calls += 1
-            return response
+            settled = False
+            try:
+                response = await original_call(*args, **actual)
+                usage = getattr(response, "usage", None)
+                provenance = getattr(response, "call_evidence", None)
+                source = getattr(provenance, "usage_source", "unavailable")
+                cost_source = getattr(provenance, "cost_source", "unavailable")
+                terminal = getattr(response, "finish_reason", None) in {
+                    "stop",
+                    "tool_calls",
+                    "length",
+                    "content_filter",
+                }
+                if (
+                    usage is None
+                    or source != "transport_response"
+                    or cost_source == "unavailable"
+                    or not terminal
+                ):
+                    raise PersonalAgentError(
+                        "usage_unknown", "模型响应缺少真实用量来源，预算保持未知"
+                    )
+                await complete(
+                    permit,
+                    usage,
+                    {
+                        "transport": "call",
+                        "usage_source": source,
+                        "cost_source": cost_source,
+                        "rate_card_source": getattr(provenance, "rate_card_source", "unavailable"),
+                        "provider_response_id_sha256": getattr(
+                            provenance, "provider_response_id_sha256", ""
+                        ),
+                        "completed": True,
+                        "terminal": terminal,
+                    },
+                )
+                settled = True
+                return response
+            finally:
+                if not settled:
+                    await unknown(permit, {"transport": "call", "reason": "incomplete_transport"})
 
         self.child.router.stream, self.child.router.call = stream, call
 
     async def authorize(self):
+        if self.usage_incomplete:
+            raise PersonalAgentError("usage_unknown", "原模型请求用量待核对，已停止后续操作")
         await self.service._validate(self.intent)
         current = await self.service.jobs.get(self.job.job_id)
         if (
@@ -512,9 +664,11 @@ class PersonalItemExecutionService:
             if source_item["definition_sha256"] != intent["definition_sha256"]:
                 raise PersonalAgentError("version_conflict", "事项原始委托已更新，已停止旧执行")
             await bind_execution_memory(
-                child, actor_id=intent["actor_id"],
+                child,
+                actor_id=intent["actor_id"],
                 origin_actor_id=source_item["definition"]["origin"]["actor_id"],
-                item_id=intent["item_id"], parent=self.engine,
+                item_id=intent["item_id"],
+                parent=self.engine,
             )
             await self._validate(intent)
             await self.jobs.mark_running(
