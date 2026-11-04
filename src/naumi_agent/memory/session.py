@@ -246,6 +246,8 @@ class SessionStore:
                 db = await aiosqlite.connect(self._db_path)
                 try:
                     db.row_factory = aiosqlite.Row
+                    # Other engine instances may migrate the same legacy file concurrently.
+                    await db.execute("BEGIN IMMEDIATE")
                     await db.execute(_CREATE_TABLE)
                     await self._ensure_schema(db)
                     await db.commit()

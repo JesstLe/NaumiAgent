@@ -1,5 +1,6 @@
 """Regression coverage for atomic session metadata and concurrent persistence."""
 import asyncio
+import sqlite3
 from types import SimpleNamespace
 
 import pytest
@@ -106,3 +107,23 @@ async def test_cancelled_save_rolls_back_before_next_operation(store, monkeypatc
     monkeypatch.setattr(db, "commit", original_commit)
     loaded = await store.resume(session.id)
     assert loaded.title == "old"
+
+
+async def test_separate_stores_migrate_one_legacy_database_atomically(tmp_path):
+    database = tmp_path / "legacy.db"
+    with sqlite3.connect(database) as connection:
+        connection.execute("""CREATE TABLE sessions (
+            id TEXT PRIMARY KEY, title TEXT NOT NULL, model TEXT NOT NULL,
+            messages TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            status TEXT NOT NULL, total_tokens INTEGER DEFAULT 0,
+            total_cost_usd REAL DEFAULT 0
+        )""")
+    stores = [SessionStore(MemoryConfig(session_db_path=str(database))) for _ in range(6)]
+    try:
+        sessions = await asyncio.gather(*(s.create_session(title=str(i))
+                                          for i, s in enumerate(stores)))
+        for s, session in zip(stores, sessions, strict=True):
+            assert (await s.load(session.id)).title == session.title
+        assert (await stores[0].list_sessions())[1] == 6
+    finally:
+        await asyncio.gather(*(s.close() for s in stores))
