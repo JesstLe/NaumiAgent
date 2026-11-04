@@ -5,7 +5,8 @@ implemented_baselines: [HAR-H4.4, HAR-05, HAR-06, HAR-07.5b, HAR-07.5c1, HAR-07.
 modules:
   - {id: PA-02, status: partial, path: pa02-personal-memory.md, depends_on: [PA-00, PA-01, PA-08, PA-06], implemented_slices: [PA-02.store, PA-02.scope, PA-02.provenance, PA-02.confirmation, PA-02.sharing, PA-02.erasure, PA-02.retrieval, PA-02.runtime, PA-02.execution_boundary, PA-02.requests, PA-02.commands, PA-02.api, PA-02.ui]}
   # PA-08 has real provider/Docker/Page/Library and cold-restart evidence; concurrency barriers are separate from live UI, and platform/retention work remains partial.
-  - {id: PA-01, status: partial, path: personal-agent/PA-01.md, depends_on: [PA-00, PA-08, HAR-06, ARC-04, UI-14], implemented_slices: [PA-01.store, PA-01.scheduler, PA-01.execution, PA-01.inputs, PA-01.inbox, PA-01.human_read, PA-01.commands, PA-01.api, PA-01.ui]}
+  - {id: PA-01, status: partial, path: personal-agent/PA-01.md, depends_on: [PA-00, PA-08, HAR-06, ARC-04, UI-14], implemented_slices: [PA-01.store, PA-01.bootstrap, PA-01.scheduler, PA-01.execution, PA-01.inputs, PA-01.inbox, PA-01.human_read, PA-01.commands, PA-01.api, PA-01.ui]}
+  - {id: PA-01.bootstrap, status: implemented, path: personal-agent/PA-01-bootstrap.md, depends_on: [PA-01.store]}
   - {id: PA-08, status: partial, path: personal-agent/PA-08.md, depends_on: [PA-00, PA-06, HAR-06, ARC-04, UI-14], implemented_slices: [PA-08.store, PA-08.content, PA-08.commands, PA-08.private_process, PA-08.broker, PA-08.api, PA-08.library, PA-08.execution_identity]}
   # PA-06 teams have local model, HTTP-browser and cold-restart evidence; 36 final team tests pass; broader baseline failures and copy rollback are recorded in the team transaction VERIFICATION.txt.
   # Scoped leaf activity and unknown token breakdown preserve PA-06's partial status and remaining artifact/ACL requirements.

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import sqlite3
+import stat
 import threading
+import time
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -34,6 +37,7 @@ from naumi_agent.personal.item_models import (
 from naumi_agent.personal.models import PersonalAgentError
 
 _SCHEMA_VERSION = 1
+_BOOTSTRAP_TIMEOUT_SECONDS = 15
 _SCHEMA: tuple[str, ...] = (
     """CREATE TABLE personal_items (
         owner_key TEXT NOT NULL, item_id TEXT NOT NULL, revision INTEGER NOT NULL CHECK(revision>0),
@@ -114,6 +118,15 @@ def _broken() -> PersonalAgentError:
     return PersonalAgentError("storage_error", "个人事项资料库校验未通过，请恢复原资料库后继续")
 
 
+def _busy(*, initializing=False) -> PersonalAgentError:
+    message = (
+        "个人事项资料库正在初始化，请稍后重试"
+        if initializing
+        else "个人事项资料库正在处理其他操作，请稍后重试"
+    )
+    return PersonalAgentError("storage_error", message)
+
+
 def _ordinary(path: Path) -> Path:
     raw = str(path)
     return Path(raw[4:]) if os.name == "nt" and raw.startswith("\\\\?\\") else path
@@ -152,6 +165,7 @@ class PersonalItemStore:
         self._lock = threading.RLock()
         self._seen_database = False
         self._witness = self.base_dir / ".personal-items-v1"
+        self._bootstrap = self.base_dir / ".personal-items-bootstrap.lock"
 
     def _owner(self, owner_key) -> str:
         owner = text(owner_key, "个人事项所有者标识", 64, pattern=SHA256)
@@ -160,24 +174,153 @@ class PersonalItemStore:
         return owner
 
     def _path(self) -> None:
-        base = _ordinary(self.base_dir.resolve())
-        actual = _ordinary(self.db_path.resolve())
+        for path in (self.base_dir, self.db_path, self._witness, self._bootstrap):
+            actual = _ordinary(path.resolve())
+            if os.path.normcase(str(path)) != os.path.normcase(str(actual)) or path.is_symlink():
+                raise _broken()
+            if path.exists():
+                info = path.lstat()
+                if getattr(info, "st_file_attributes", 0) & 0x400:
+                    raise _broken()
+                if path == self.base_dir:
+                    if not stat.S_ISDIR(info.st_mode):
+                        raise _broken()
+                elif not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                    raise _broken()
+
+    def _verified_handle(self, stream, path):
+        self._path()
+        info, named = os.fstat(stream.fileno()), path.lstat()
         if (
-            os.path.normcase(str(base)) != os.path.normcase(str(self.base_dir))
-            or os.path.normcase(str(actual)) != os.path.normcase(str(self.db_path))
-            or self.db_path.is_symlink()
-            or self.db_path.exists()
-            and not self.db_path.is_file()
+            not stat.S_ISREG(info.st_mode)
+            or info.st_nlink != 1
+            or not stat.S_ISREG(named.st_mode)
+            or named.st_nlink != 1
+            or getattr(named, "st_file_attributes", 0) & 0x400
+            or not os.path.samestat(info, named)
         ):
             raise _broken()
+        return info
 
-    def _exists(self) -> bool:
+    @contextmanager
+    def _bootstrap_guard(self, *, create):
+        """Coordinate WAL/schema/witness bootstrap without leasing user transactions."""
+        try:
+            self._path()
+            if create:
+                self.base_dir.mkdir(parents=True, exist_ok=True)
+                self._path()
+            elif not self._bootstrap.exists():
+                yield False
+                return
+            try:
+                stream = self._bootstrap.open("x+b") if create else self._bootstrap.open("r+b")
+            except FileExistsError:
+                stream = self._bootstrap.open("r+b")
+            with stream:
+                self._verified_handle(stream, self._bootstrap)
+                if os.name == "nt":
+                    import msvcrt
+
+                    def lock():
+                        stream.seek(0)
+                        msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+
+                    def unlock():
+                        stream.seek(0)
+                        msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    def lock():
+                        fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+                    def unlock():
+                        fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+                deadline = time.monotonic() + _BOOTSTRAP_TIMEOUT_SECONDS
+                while True:
+                    try:
+                        lock()
+                        break
+                    except OSError as exc:
+                        if exc.errno not in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+                            raise
+                        if time.monotonic() >= deadline:
+                            raise _busy(initializing=True) from exc
+                        time.sleep(0.01)
+                try:
+                    # A path can change while a process waits on the old inode.
+                    # Check both handle and current name again before any write.
+                    self._verified_handle(stream, self._bootstrap)
+                    stream.seek(0)
+                    current = stream.read(2)
+                    if current not in {b"", b"\x00"}:
+                        raise _broken()
+                    if not current and create:
+                        stream.write(b"\x00")
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    yield True
+                finally:
+                    unlock()
+        except PersonalAgentError:
+            raise
+        except (OSError, ValueError, TypeError) as exc:
+            raise _broken() from exc
+
+    def _database_exists_locked(self) -> bool:
         self._path()
         exists = self.db_path.is_file()
         if (self._seen_database or self._witness.exists()) and not exists:
             raise _broken()
-        self._seen_database = self._seen_database or exists
         return exists
+
+    def _observe_database(self, *, locked):
+        try:
+            exists = self._database_exists_locked()
+        except PersonalAgentError:
+            if not locked and self._bootstrap.exists():
+                return None
+            raise
+        # The DB and witness observations may straddle a writer's entire
+        # bootstrap. Accept neither success nor failure from that old sample.
+        if not locked and self._bootstrap.exists():
+            return None
+        return exists
+
+    def _exists(self) -> bool:
+        try:
+            with self._lock:
+                while True:
+                    with self._bootstrap_guard(create=False) as locked:
+                        exists = self._observe_database(locked=locked)
+                        if exists is None:
+                            continue
+                        return exists
+        except PersonalAgentError:
+            raise
+        except (OSError, ValueError, TypeError) as exc:
+            raise _broken() from exc
+
+    def _check_witness(self, identity):
+        with self._witness.open("rb") as stream:
+            info = self._verified_handle(stream, self._witness)
+            if info.st_size != 32 or stream.read(33) != identity.encode("ascii"):
+                raise _broken()
+            if self._verified_handle(stream, self._witness).st_size != 32:
+                raise _broken()
+
+    def _write_witness(self, identity):
+        try:
+            with self._witness.open("xb") as stream:
+                self._verified_handle(stream, self._witness)
+                stream.write(identity.encode("ascii"))
+                stream.flush()
+                os.fsync(stream.fileno())
+                self._verified_handle(stream, self._witness)
+        except FileExistsError:
+            self._check_witness(identity)
 
     def _now(self) -> str:
         value = self._clock()
@@ -252,59 +395,67 @@ class PersonalItemStore:
         connection = None
         try:
             with self._lock:
-                exists = self._exists()
-                if write:
-                    self.base_dir.mkdir(parents=True, exist_ok=True)
-                    self._path()
-                    connection = sqlite3.connect(self.db_path, timeout=10, isolation_level=None)
-                elif exists:
-                    connection = sqlite3.connect(
-                        self.db_path.as_uri() + "?mode=ro",
-                        uri=True,
-                        timeout=10,
-                        isolation_level=None,
-                    )
-                else:
-                    raise _broken()
-                connection.row_factory = sqlite3.Row
-                connection.execute("PRAGMA busy_timeout=10000")
-                connection.execute("PRAGMA foreign_keys=ON")
-                if write and not exists:
-                    connection.execute("PRAGMA journal_mode=WAL")
-                connection.execute("BEGIN IMMEDIATE" if write else "BEGIN")
-                self._validate_schema(connection, create=write and not exists, owner=owner)
-                if write and not exists:
-                    identity = connection.execute(
-                        "SELECT instance_id FROM item_store_meta"
-                    ).fetchone()[0]
-                    try:
-                        with self._witness.open("xb") as witness:
-                            witness.write(identity.encode("ascii"))
-                    except FileExistsError:
-                        if (
-                            self._witness.is_symlink()
-                            or self._witness.read_text("ascii") != identity
-                        ):
-                            raise _broken() from None
-                    connection.commit()
-                    self._seen_database = True
-                    connection.execute("BEGIN IMMEDIATE")
-                if self._witness.exists():
-                    identity = connection.execute(
-                        "SELECT instance_id FROM item_store_meta"
-                    ).fetchone()[0]
-                    if self._witness.is_symlink() or self._witness.read_text("ascii") != identity:
-                        raise _broken()
-                else:
-                    raise _broken()
-                yield connection
-                connection.commit()
-                self._seen_database = True
+                while True:
+                    with self._bootstrap_guard(create=write) as locked:
+                        exists = self._observe_database(locked=locked)
+                        if exists is None:
+                            continue
+                        if write:
+                            connection = sqlite3.connect(
+                                self.db_path, timeout=10, isolation_level=None
+                            )
+                        elif exists:
+                            connection = sqlite3.connect(
+                                self.db_path.as_uri() + "?mode=ro",
+                                uri=True,
+                                timeout=10,
+                                isolation_level=None,
+                            )
+                        else:
+                            raise _broken()
+                        connection.row_factory = sqlite3.Row
+                        connection.execute("PRAGMA busy_timeout=10000")
+                        connection.execute("PRAGMA foreign_keys=ON")
+                        initializing = write and not exists
+                        if initializing:
+                            connection.execute("PRAGMA journal_mode=WAL")
+                        # Existing DBs need only a read transaction under the
+                        # bootstrap guard, never wait for a business writer here.
+                        connection.execute("BEGIN IMMEDIATE" if initializing else "BEGIN")
+                        self._validate_schema(connection, create=initializing, owner=owner)
+                        identity = connection.execute(
+                            "SELECT instance_id FROM item_store_meta"
+                        ).fetchone()[0]
+                        if initializing:
+                            self._write_witness(identity)
+                        self._check_witness(identity)
+                        connection.commit()
+                        self._seen_database = True
+                        break
+            # Release both initialization locks before the actual user transaction.
+            # Recheck after acquiring SQLite's business lock; it remains the sole
+            # arbiter of idempotency and CAS, not the process bootstrap lock.
+            connection.execute("BEGIN IMMEDIATE" if write else "BEGIN")
+            self._validate_schema(connection, create=False, owner=owner)
+            self._check_witness(
+                connection.execute("SELECT instance_id FROM item_store_meta").fetchone()[0]
+            )
+            yield connection
+            connection.commit()
         except PersonalAgentError:
             if connection is not None:
                 connection.rollback()
             raise
-        except (sqlite3.Error, OSError, ValueError, TypeError, KeyError, OverflowError) as exc:
+        except sqlite3.Error as exc:
+            if connection is not None:
+                connection.rollback()
+            if (getattr(exc, "sqlite_errorcode", 0) & 0xFF) in {
+                sqlite3.SQLITE_BUSY,
+                sqlite3.SQLITE_LOCKED,
+            }:
+                raise _busy() from exc
+            raise _broken() from exc
+        except (OSError, ValueError, TypeError, KeyError, OverflowError) as exc:
             if connection is not None:
                 connection.rollback()
             raise _broken() from exc

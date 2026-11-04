@@ -1,6 +1,6 @@
 # NaumiAgent Personal Agent 产品方向
 
-日期：2026-11-04
+日期：2026-11-05
 
 状态：产品范围已确认。PA-00 动态Agent生命周期与独立执行入口已落地；
 PA-06 首个持久协作切片已通过真实模型与浏览器验收；
@@ -175,6 +175,9 @@ Agent不会未经明确共享就读取另一Agent的私有资料；用户能直�
 **状态：partial。一次性事项、真实 Job/Run/私有报告/收件箱/人工已读链路已实现；本机真实 provider、浏览器、报告核算与冷重启验收通过，尚未标为全产品完成。**
 
 [实现与证据记录](../../development/personal-agent/PA-01.md)。
+首次并发建库的独立修复见 [bootstrap 实施记录](../../development/personal-agent/PA-01-bootstrap.md)：
+保持 schema v1，协调真实 OS 进程并在业务事务前释放初始化锁；集中相关回归为
+1960 passed / 5 skipped，原有失败记录和真实执行身份保留，不重复调用 provider。
 
 示例委托：“明天 9 点整理我指定目录里的资料，给我一份带来源的摘要。”
 可以是项目周报，也可以是旅行、学习或生活资料；用同一闭环覆盖三个领域，
@@ -208,13 +211,15 @@ Agent不会未经明确共享就读取另一Agent的私有资料；用户能直�
 实际模型 call、恢复 call、stream 及压缩内部 call 均经过当前来源与授权边界；
 私有来源资料固定到 Session，不因下一轮检索 miss 失去边界。
 
-当前统一相关后端组为 1902 passed / 1 failed / 2 skipped，唯一失败是未修改的 PA-01 ItemStore
+PA-02 原始统一相关后端组为 1902 passed / 1 failed / 2 skipped，唯一失败是当时未修改的 PA-01 ItemStore
 首次并发建库 WAL 竞态，已在 HEAD 隔离原源码复现。完整前端为 30 files / 311 tests passed；
 真实浏览器已完成创建、纠正、导出、删除和原 ID 草稿清理。最终 schema/只读 legacy/Engine
 集成 434 项通过；实际 provider 形成 6 个成功 Run、7 个完整调用，另保留原 schema 拒绝 Run，
 没有重放原失败请求。真实服务器冷重启后业务与原执行状态不变，仅正常 resume 更新原 UI
 会话访问时间；新增 paid Run 为 0。源码回滚及分层证据见
 [PA-02 实施记录](../../development/pa02-personal-memory.md)，不以本机通过代表全产品完成。
+上述 PA-01 首建竞态已在 2026-11-05 的独立 bootstrap 修复中处理；后续统一相关组为
+1960 passed / 5 skipped / 2 warnings，exit 0。该结果不追溯改写 PA-02 原始验收日志。
 
 验收：在两个工作区复用已确认个人偏好，不泄露项目资料；助手建议不提升为用户事实；
 纠正后旧条目撤权，删除后不再召回，重启后仍保持结果一致。
