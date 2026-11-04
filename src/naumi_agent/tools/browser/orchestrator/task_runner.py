@@ -404,6 +404,8 @@ class TaskRunner:
         self._pending_replies: dict[str, asyncio.Future[Any]] = {}
         self._reply_timeouts: dict[str, asyncio.TimerHandle | None] = {}
         self._run_controls: dict[str, dict[str, Any]] = {}
+        self._run_runtimes: dict[str, Any] = {}
+        self._control_locks: dict[str, asyncio.Lock] = {}
         heartbeat_factory = options.get("heartbeat_factory")
         if heartbeat_factory is not None and not isinstance(
             heartbeat_factory,
@@ -782,6 +784,34 @@ class TaskRunner:
 
     # ── Run lifecycle ──
 
+    def _control_lock(self, run_id: str) -> asyncio.Lock:
+        run = self.get_run(run_id)
+        if run is None or run.get("status") in _TERMINAL_STATUSES | {"queued", "starting"}:
+            return asyncio.Lock()
+        return self._control_locks.setdefault(run_id, asyncio.Lock())
+
+    def _runtime_for_run(self, run_id: str) -> Any:
+        runtime = self._run_runtimes.get(run_id)
+        if runtime is not None:
+            return runtime
+        if self._max_concurrent == 1:
+            return self.runtime
+        raise ValueError("该任务的浏览器实例尚未就绪或已释放。")
+
+    def _assert_control_active(self, run: dict[str, Any]) -> None:
+        if (
+            run.get("status") in _TERMINAL_STATUSES | {"aborting"}
+            or self._run_controls.get(run["id"], {}).get("aborted")
+        ):
+            raise ValueError("任务已终止或正在终止，不能继续切换浏览器控制状态。")
+
+    def _assert_current_reply(
+        self, run: dict[str, Any], future: asyncio.Future[Any],
+    ) -> None:
+        self._assert_control_active(run)
+        if future.done() or self._pending_replies.get(run["id"]) is not future:
+            raise ValueError("该任务的等待请求已结束，请刷新任务状态。")
+
     async def reply_to_run(
         self, run_id: str, instruction: str
     ) -> dict[str, Any]:
@@ -795,6 +825,10 @@ class TaskRunner:
             "current page."
         ),
     ) -> dict[str, Any]:
+        async with self._control_lock(run_id):
+            return await self._resume_run_locked(run_id, instruction)
+
+    async def _resume_run_locked(self, run_id: str, instruction: str) -> dict[str, Any]:
         run = self.get_run(run_id)
         if not run:
             raise ValueError(f"Run not found: {run_id}")
@@ -823,19 +857,26 @@ class TaskRunner:
         )
 
         if was_manual:
-            await self.runtime.exit_manual_control()
+            await self._runtime_for_run(run_id).exit_manual_control()
+        self._assert_current_reply(run, future)
 
-        run["summary"] = (
+        resumed = {**run}
+        if run.get("result"):
+            resumed["result"] = {**run["result"]}
+        await self._resume_run_heartbeat(resumed)
+        self._assert_current_reply(run, future)
+
+        resumed["summary"] = (
             "Instruction received. Resuming browser task."
         )
-        run["status"] = "running"
-        run["pendingInput"] = None
-        if run.get("result"):
-            run["result"]["status"] = "running"
-            run["result"]["summary"] = run["summary"]
-            run["result"]["pendingInput"] = None
+        resumed["status"] = "running"
+        resumed["pendingInput"] = None
+        if resumed.get("result"):
+            resumed["result"]["status"] = "running"
+            resumed["result"]["summary"] = resumed["summary"]
+            resumed["result"]["pendingInput"] = None
 
-        await self._resume_run_heartbeat(run)
+        run.update(resumed)
         self._store.persist(self.runs)
         self._emit_update("run_resumed", run)
 
@@ -856,12 +897,17 @@ class TaskRunner:
         run_id: str,
         reason: str = "Manual control requested by operator.",
     ) -> dict[str, Any]:
+        async with self._control_lock(run_id):
+            return await self._request_manual_control_locked(run_id, reason)
+
+    async def _request_manual_control_locked(self, run_id: str, reason: str) -> dict[str, Any]:
         run = self.get_run(run_id)
         if not run:
             raise ValueError(f"Run not found: {run_id}")
 
         if run["status"] in _TERMINAL_STATUSES:
             raise ValueError(f"Run {run_id} is already finished.")
+        self._assert_control_active(run)
 
         if run["status"] in {"queued", "starting"}:
             raise ValueError(
@@ -887,19 +933,31 @@ class TaskRunner:
             ),
         }
 
-        self.runtime.record_event(
+        runtime = self._runtime_for_run(run_id)
+        runtime.record_event(
             "task_runner_manual_control_requested",
             {"runId": run_id, "reason": reason},
         )
 
         if run["status"] == "waiting_for_instruction":
-            await self.runtime.enter_manual_control()
+            future = self._pending_replies.get(run_id)
+            await runtime.enter_manual_control()
+            self._assert_control_active(run)
+            if future is not None:
+                self._assert_current_reply(run, future)
+
+            waiting = {**run}
+            await self._set_run_heartbeat_waiting(waiting, mode="manual_control")
+            self._assert_control_active(run)
+            if future is not None:
+                self._assert_current_reply(run, future)
 
             timeout_handle = self._reply_timeouts.get(run_id)
             if timeout_handle:
                 timeout_handle.cancel()
                 self._reply_timeouts[run_id] = None
 
+            run.update(waiting)
             run["status"] = "manual_control"
             run["summary"] = pending_input["question"]
             run["pendingInput"] = pending_input
@@ -907,10 +965,6 @@ class TaskRunner:
                 run["result"]["status"] = "manual_control"
                 run["result"]["summary"] = pending_input["question"]
                 run["result"]["pendingInput"] = pending_input
-            await self._set_run_heartbeat_waiting(
-                run,
-                mode="manual_control",
-            )
             self._store.persist(self.runs)
             self._emit_update("run_manual_control", run)
             return run
@@ -944,12 +998,18 @@ class TaskRunner:
             raise ValueError(f"Run {run_id} is already finished.")
 
         control = self._get_run_control(run_id)
+        if control.get("finalizing"):
+            raise ValueError("任务执行结果已确定，正在清理浏览器资源。")
         control["aborted"] = True
         control["reason"] = reason
-        self.runtime.record_event(
-            "task_runner_abort_requested",
-            {"runId": run_id, "reason": reason},
-        )
+        runtime = self._run_runtimes.get(run_id)
+        if runtime is None and self._max_concurrent == 1:
+            runtime = self.runtime
+        if runtime is not None:
+            runtime.record_event(
+                "task_runner_abort_requested",
+                {"runId": run_id, "reason": reason},
+            )
 
         if run["status"] in {"queued", "starting"}:
             run["status"] = "aborted"
@@ -1019,6 +1079,69 @@ class TaskRunner:
         finally:
             self._processing = False
 
+    async def _wait_for_run_input(
+        self, run: dict[str, Any], runtime: Any, pending_input: dict[str, Any],
+        timeout_ms: int,
+    ) -> dict[str, Any]:
+        run_id = str(run["id"])
+        async with self._control_lock(run_id):
+            control = self._get_run_control(run_id)
+            if control.get("aborted"):
+                return {"abort": True, "reason": control.get("reason")}
+            previous = self._pending_replies.get(run_id)
+            if previous is not None and not previous.done():
+                raise ValueError("该任务已有等待处理的请求。")
+            future = asyncio.get_running_loop().create_future()
+            self._pending_replies[run_id] = future
+            published = False
+            try:
+                manual = pending_input.get("mode") == "manual_control"
+                if manual:
+                    await runtime.enter_manual_control()
+                if control.get("aborted"):
+                    return {"abort": True, "reason": control.get("reason")}
+                waiting = {
+                    **run,
+                    "status": "manual_control" if manual else "waiting_for_instruction",
+                    "pendingInput": {**pending_input, "requestedAt": _now_iso()},
+                    "summary": pending_input.get("question") or "Waiting for instruction.",
+                }
+                if run.get("result"):
+                    waiting["result"] = {
+                        **run["result"], "status": waiting["status"],
+                        "pendingInput": waiting["pendingInput"],
+                    }
+                await self._set_run_heartbeat_waiting(
+                    waiting, mode=str(pending_input.get("mode") or "instruction"),
+                )
+                if control.get("aborted"):
+                    return {"abort": True, "reason": control.get("reason")}
+                self._assert_current_reply(run, future)
+                if not manual:
+                    timeout_reason = (
+                        "Timed out waiting for instruction after "
+                        f"{_format_timeout_duration(timeout_ms)}."
+                    )
+
+                    def on_timeout() -> None:
+                        if self._pending_replies.get(run_id) is not future or future.done():
+                            return
+                        self.abort_run(run_id, timeout_reason)
+
+                    self._reply_timeouts[run_id] = asyncio.get_running_loop().call_later(
+                        timeout_ms / 1000, on_timeout,
+                    )
+                run.update(waiting)
+                self._store.persist(self.runs)
+                published = True
+                self._emit_update("run_manual_control" if manual else "run_waiting", run)
+            finally:
+                if not published and self._pending_replies.get(run_id) is future:
+                    self._pending_replies.pop(run_id, None)
+                    if not future.done():
+                        future.cancel()
+        return await future
+
     async def _execute_run(self, run: dict[str, Any]) -> None:
         if (
             run.get("status") == "aborted"
@@ -1032,6 +1155,7 @@ class TaskRunner:
         use_isolated_runtime = self._max_concurrent > 1
         run_runtime: Any | None = None
         run_subagent: Any | None = None
+        outcome: dict[str, Any] = {}
 
         run["status"] = "running"
         run["startedAt"] = _now_iso()
@@ -1049,10 +1173,6 @@ class TaskRunner:
             "debug": None,
             "templateEvaluation": None,
         }
-        await self._start_run_heartbeat(run)
-        self._store.persist(self.runs)
-        self._emit_update("run_started", run)
-
         try:
             if use_isolated_runtime:
                 run_runtime = self._runtime_factory(run["id"])
@@ -1060,6 +1180,10 @@ class TaskRunner:
             else:
                 run_runtime = self.runtime
                 run_subagent = self.subagent
+            self._run_runtimes[run["id"]] = run_runtime
+            await self._start_run_heartbeat(run)
+            self._store.persist(self.runs)
+            self._emit_update("run_started", run)
             browser_source = str(run["browserSource"]).strip().lower()
             if use_isolated_runtime and browser_source == "auto":
                 browser_source = "managed"
@@ -1097,68 +1221,9 @@ class TaskRunner:
             async def _on_needs_input(
                 pending_input: dict[str, Any],
             ) -> dict[str, Any]:
-                waiting_status = (
-                    "manual_control"
-                    if pending_input.get("mode") == "manual_control"
-                    else "waiting_for_instruction"
+                return await self._wait_for_run_input(
+                    run, run_runtime, pending_input, run_handoff_ms,
                 )
-                if pending_input.get("mode") == "manual_control":
-                    await run_runtime.enter_manual_control()
-
-                run["status"] = waiting_status
-                run["pendingInput"] = {
-                    **pending_input,
-                    "requestedAt": _now_iso(),
-                }
-                run["summary"] = (
-                    pending_input.get("question")
-                    or "Waiting for instruction."
-                )
-                if run.get("result"):
-                    run["result"]["status"] = waiting_status
-                    run["result"]["pendingInput"] = run["pendingInput"]
-                await self._set_run_heartbeat_waiting(
-                    run,
-                    mode=str(pending_input.get("mode") or "instruction"),
-                )
-                self._store.persist(self.runs)
-                self._emit_update(
-                    "run_manual_control"
-                    if waiting_status == "manual_control"
-                    else "run_waiting",
-                    run,
-                )
-
-                loop = asyncio.get_running_loop()
-                future: asyncio.Future[Any] = loop.create_future()
-                self._pending_replies[run["id"]] = future
-
-                if pending_input.get("mode") != "manual_control":
-                    timeout_reason = (
-                        "Timed out waiting for instruction after "
-                        f"{_format_timeout_duration(run_handoff_ms)}."
-                    )
-                    run_id = run["id"]
-
-                    def _on_timeout() -> None:
-                        self._pending_replies.pop(run_id, None)
-                        self._reply_timeouts.pop(run_id, None)
-                        ctrl = self._get_run_control(run_id)
-                        ctrl["aborted"] = True
-                        ctrl["reason"] = timeout_reason
-                        if not future.done():
-                            future.set_result({
-                                "abort": True,
-                                "reason": timeout_reason,
-                            })
-
-                    self._reply_timeouts[run["id"]] = (
-                        loop.call_later(
-                            run_handoff_ms / 1000, _on_timeout
-                        )
-                    )
-
-                return await future
 
             def _should_abort() -> bool:
                 return self._get_run_control(run["id"])["aborted"]
@@ -1208,57 +1273,66 @@ class TaskRunner:
                         f"Template checks failed: {first_failure}"
                     )
 
-            run["status"] = (
-                "completed"
-                if result.get("status") == "completed"
-                else "aborted"
-                if result.get("status") == "aborted"
-                else "failed"
-            )
-            run["summary"] = result.get("summary", "")
-            run["result"] = result
-            run["artifacts"] = result.get("artifacts")
-            run["reports"] = result.get("reports")
-            run["pendingInput"] = result.get("pendingInput")
-            run["error"] = None
-            self._emit_update("run_updated", run)
-
+            outcome = {
+                "status": (
+                    "completed" if result.get("status") == "completed"
+                    else "aborted" if result.get("status") == "aborted" else "failed"
+                ),
+                "summary": result.get("summary", ""), "result": result,
+                "artifacts": result.get("artifacts"), "reports": result.get("reports"),
+                "pendingInput": result.get("pendingInput"), "error": None,
+            }
+        except asyncio.CancelledError:
+            outcome = {"status": "aborted", "summary": "浏览器任务已取消。",
+                       "pendingInput": None, "error": None}
+            raise
         except Exception as exc:
-            run["status"] = "failed"
-            run["summary"] = str(exc)
-            run["error"] = {"message": str(exc), "stack": None}
-            self._emit_update("run_updated", run)
-
+            outcome = {"status": "failed", "summary": str(exc),
+                       "error": {"message": str(exc), "stack": None}, "pendingInput": None}
         finally:
-            if run_runtime is not None:
-                try:
-                    stop_result = await run_runtime.stop()
-                    if stop_result and stop_result.get("artifacts"):
-                        run["artifacts"] = stop_result["artifacts"]
-                        if run.get("result"):
-                            run["result"]["artifacts"] = (
-                                stop_result["artifacts"]
-                            )
-                except Exception:
-                    logger.debug(
-                        "Browser runtime cleanup failed for run %s",
-                        run["id"],
-                        exc_info=True,
+            async with self._control_lock(run["id"]):
+                finished = {**run, **outcome}
+                control = self._run_controls.get(run["id"], {})
+                if control.get("aborted"):
+                    finished.update(
+                        status="aborted", summary=control.get("reason") or "任务已终止。",
+                        pendingInput=None,
                     )
-
-            run["finishedAt"] = _now_iso()
-            await self._finish_run_heartbeat(run)
-
-            timeout_handle = self._reply_timeouts.pop(run["id"], None)
-            if timeout_handle:
-                timeout_handle.cancel()
-            self._pending_replies.pop(run["id"], None)
-            self._run_controls.pop(run["id"], None)
-            self._trim_run_history()
-            self._store.persist(self.runs)
-            self._emit_update("run_finished", run)
-            self._active_slots = max(0, self._active_slots - 1)
-            self._release_attached_slot(run["id"])
+                    if finished.get("result"):
+                        finished["result"] = {**finished["result"], "status": "aborted",
+                                              "pendingInput": None}
+                # No actions remain after this point. Reject late aborts rather than
+                # acknowledging them and then overwriting their state after an await.
+                control["finalizing"] = True
+                if run_runtime is not None:
+                    try:
+                        stop_result = await run_runtime.stop()
+                        if stop_result and stop_result.get("artifacts"):
+                            finished["artifacts"] = stop_result["artifacts"]
+                            if finished.get("result"):
+                                finished["result"]["artifacts"] = stop_result["artifacts"]
+                    except Exception:
+                        logger.debug("Browser runtime cleanup failed for run %s", run["id"],
+                                     exc_info=True)
+                # Keep externally visible state nonterminal until cleanup and heartbeat settle.
+                await self._finish_run_heartbeat(finished)
+                finished["finishedAt"] = _now_iso()
+                run.update(finished)
+                timeout_handle = self._reply_timeouts.pop(run["id"], None)
+                if timeout_handle:
+                    timeout_handle.cancel()
+                future = self._pending_replies.pop(run["id"], None)
+                if future is not None and not future.done():
+                    future.set_result({"abort": True, "reason": "浏览器任务已结束。"})
+                self._run_controls.pop(run["id"], None)
+                self._run_runtimes.pop(run["id"], None)
+                self._trim_run_history()
+                self._store.persist(self.runs)
+                self._emit_update("run_updated", run)
+                self._emit_update("run_finished", run)
+                self._active_slots = max(0, self._active_slots - 1)
+                self._release_attached_slot(run["id"])
+            self._control_locks.pop(run["id"], None)
             await self.process_queue()
 
     # ── Templates ──
