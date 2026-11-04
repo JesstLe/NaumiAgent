@@ -1302,7 +1302,12 @@ class AgentEngine:
         model_port: ModelPort | None = None,
         tool_execution_port: ToolExecutionPort | None = None,
         event_sink: EventSink | None = None,
+        isolated_child: bool = False,
+        execution_data_dir: Path | None = None,
     ) -> None:
+        self._isolated_child = isolated_child
+        self._execution_data_dir = execution_data_dir
+        self._personal_collaboration_task_id = ""
         self._config = config
         legacy_ports = (
             session_port,
@@ -4238,14 +4243,17 @@ class AgentEngine:
             receipt_store=self.evolution_mutation_receipt_store,
         )
         self.background_runner = BackgroundRunner(
-            BackgroundTaskStore(self._runtime_data_dir / "background")
+            BackgroundTaskStore((execution_data_dir or self._runtime_data_dir) / "background")
         )
         self.scheduler_runner = SchedulerRunner(
-            SchedulerStore(self._runtime_data_dir / "scheduler")
+            SchedulerStore((execution_data_dir or self._runtime_data_dir) / "scheduler")
         )
         self.personal_agents = PersonalAgentService(
             self, PersonalAgentStore(config.personal.data_dir)
         )
+        from naumi_agent.personal.collaboration import PersonalCollaborationService
+
+        self.personal_collaborations = PersonalCollaborationService(self)
         self._personal_turn_snapshot = None
         self.goal_store = resources.goal_store
         self.pursuit_store = resources.pursuit_store
@@ -4313,7 +4321,8 @@ class AgentEngine:
             set_analysis_router,
         )
 
-        set_analysis_router(self._model_port)
+        if not self._isolated_child:
+            set_analysis_router(self._model_port)
         for tool in create_analysis_tools():
             self._tool_registry.register(tool)
 
@@ -4452,7 +4461,8 @@ class AgentEngine:
             self,
             session_id_getter=lambda: self._session.id if self._session else "",
         )
-        set_analysis_subagent_manager(self.subagent_manager)
+        if not self._isolated_child:
+            set_analysis_subagent_manager(self.subagent_manager)
         for tool in create_subagent_tools(
             self.subagent_manager,
             session_id_getter=lambda: (
@@ -4462,17 +4472,18 @@ class AgentEngine:
             self._tool_registry.register(tool)
 
         # Goal pursuit tool
-        set_pursuit_dependencies(
-            router=self._model_port,
-            tool_registry=self._tool_registry,
-            subagent_manager=self.subagent_manager,
-            store=self.pursuit_store,
-            execute_tool_call=self.execute_tool,
-            lease_port=self._harness_store,
-            workspace_root=self.workspace_root,
-            background_reconcile_source=self.background_runner,
-            interaction_port=self._harness_store,
-        )
+        if not self._isolated_child:
+            set_pursuit_dependencies(
+                router=self._model_port,
+                tool_registry=self._tool_registry,
+                subagent_manager=self.subagent_manager,
+                store=self.pursuit_store,
+                execute_tool_call=self.execute_tool,
+                lease_port=self._harness_store,
+                workspace_root=self.workspace_root,
+                background_reconcile_source=self.background_runner,
+                interaction_port=self._harness_store,
+            )
         from naumi_agent.tools.pursuit import create_pursuit_tool
         for tool in create_pursuit_tool(
             terminal_outbox_runner=self.run_pursuit_terminal_outbox_now,
@@ -4956,6 +4967,7 @@ class AgentEngine:
 
     async def shutdown(self) -> None:
         """释放资源（关闭数据库连接、浏览器、MCP 连接等）."""
+        await self._shutdown_component("personal_collaborations", self.personal_collaborations.stop)
         self._advance_session_authorization_generation()
         self._clear_permission_grants(
             reason="引擎关闭时撤销了权限授权。",
@@ -5097,7 +5109,8 @@ class AgentEngine:
                     set_analysis_router,
                 )
 
-                set_analysis_router(self._model_port)
+                if not self._isolated_child:
+                    set_analysis_router(self._model_port)
                 for tool in create_analysis_tools():
                     self._tool_registry.register(tool)
             except Exception as e:
@@ -5646,6 +5659,8 @@ class AgentEngine:
                 await result_worker.run_once()
                 result_worker.start()
         self.start_session_retention_worker()
+        if not self._isolated_child:
+            self.personal_collaborations.start()
         return recovered
 
     async def enqueue_stable_promotion_runtime_admission_delivery(
@@ -6694,6 +6709,7 @@ class AgentEngine:
         cause: Exception | None = None,
     ) -> Any:
         """Call the model and recover once from prompt-too-long failures."""
+        await personal_runtime.authorize_execution(self)
         tier = personal_runtime.model_tier(self, tier)
         tools = personal_runtime.filter_schemas(self, tools)
         try:
@@ -6725,6 +6741,7 @@ class AgentEngine:
                 self._messages,
                 update_engine_context=True,
             )
+            await personal_runtime.authorize_execution(self)
             tier = personal_runtime.model_tier(self, tier)
             tools = personal_runtime.filter_schemas(self, tools)
             return await self._model_port.call(
@@ -7475,7 +7492,7 @@ class AgentEngine:
 
         try:
             plan = (
-                None if personal_runtime.current_agent(self) is not None
+                None if personal_runtime.use_direct_runtime(self, task)
                 else await self._planner.plan(task)
             )
             exceeded = self._check_budget()
@@ -7816,7 +7833,7 @@ class AgentEngine:
         try:
             phase_start = time.perf_counter()
             if (
-                personal_runtime.current_agent(self) is None
+                not personal_runtime.use_direct_runtime(self, task)
                 and self._should_preplan_streaming(task)
             ):
                 plan = await self._planner.plan(task)
@@ -8672,6 +8689,7 @@ class AgentEngine:
                     update_engine_context=True,
                 )
                 turn_tools, tool_choice = self._model_tools_for_action_turn(tools)
+                await personal_runtime.authorize_execution(self)
                 stream_kwargs: dict[str, Any] = {
                     "messages": stream_messages,
                     "tier": personal_runtime.model_tier(self),
@@ -9145,6 +9163,7 @@ class AgentEngine:
             raise TypeError("不能同时传入 events 和旧 on_event 回调")
         if events is None:
             events = self._coerce_engine_events(on_event)
+        await personal_runtime.authorize_execution(self)
         denial = (None if agent_name == "cli" and tc.name == "personal_agents"
                   else personal_runtime.tool_denial(self, tc.name))
         if denial:
@@ -9453,6 +9472,7 @@ class AgentEngine:
                     ),
                 )
 
+        await personal_runtime.authorize_execution(self)
         denial = (None if agent_name == "cli" and tc.name == "personal_agents"
                   else personal_runtime.tool_denial(self, tc.name))
         if denial:

@@ -20,6 +20,11 @@ _FIELDS = {
     "open": {"agent_id"},
     "create": _CREATE | {"request_id"},
     "update": (_CREATE - {"kind"}) | {"agent_id", "expected_version", "status"},
+    "collaborate": {"request_id", "source_session_id", "title", "context", "steps"},
+    "collaborations": {"source_session_id"},
+    "collaboration": {"collaboration_id"},
+    "cancel_collaboration": {"collaboration_id"},
+    "collaboration_reply": {"collaboration_id", "question_id", "response"},
 }
 _REQUIRED = {
     "tools": set(),
@@ -29,6 +34,11 @@ _REQUIRED = {
     "open": {"agent_id"},
     "create": {"name", "instructions", "request_id"},
     "update": {"agent_id", "expected_version"},
+    "collaborate": {"request_id", "steps"},
+    "collaborations": set(),
+    "collaboration": {"collaboration_id"},
+    "cancel_collaboration": {"collaboration_id"},
+    "collaboration_reply": {"collaboration_id", "question_id", "response"},
 }
 
 
@@ -46,7 +56,11 @@ class PersonalAgentsTool(Tool):
             "按用户明确要求管理长期存在的个人专员或团队。初始没有预置专员。"
             "可查看、创建、修改、查看历史和打开独立会话。创建须提供稳定 request_id；"
             "修改须提供当前 expected_version。工具列表为空代表无工具权限。"
-            "团队目前仅保存档案，不声明已具备协作执行能力。"
+            "collaborate 将明确任务委派给已有专员，steps 绑定专员ID与版本；"
+            "depends_on 指定前置步骤，只共享显式 context 和前置结果。"
+            "collaborations/collaboration 查看真实进度和交接；cancel_collaboration 请求停止。"
+            "collaboration_reply 仅转交用户针对原 question_id 的真实回答，不替用户作决定。"
+            "团队对话入口仍未接通，协作请明确选择成员步骤。"
         )
 
     @property
@@ -86,6 +100,43 @@ class PersonalAgentsTool(Tool):
                 "status": {"type": "string", "enum": ["active", "paused", "archived"]},
                 "expected_version": {"type": "integer", "minimum": 1},
                 "include_archived": {"type": "boolean"},
+                "source_session_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                "collaboration_id": {"type": "string", "pattern": "^pc_[0-9a-f]{32}$"},
+                "question_id": {"type": "string", "pattern": "^ask-[0-9a-f]{32}$"},
+                "response": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "kind": {"type": "string", "enum": ["option", "custom"]},
+                        "value": {"type": "string", "maxLength": 80},
+                        "custom_text": {"type": "string", "maxLength": 4000},
+                    },
+                    "required": ["kind"],
+                },
+                "title": {"type": "string", "maxLength": 160},
+                "context": {"type": "string", "maxLength": 32000},
+                "steps": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 12,
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"},
+                            "agent_id": {"type": "string", "pattern": "^pa_[0-9a-f]{32}$"},
+                            "agent_version": {"type": "integer", "minimum": 1},
+                            "task": {"type": "string", "minLength": 1, "maxLength": 16000},
+                            "depends_on": {
+                                "type": "array",
+                                "maxItems": 11,
+                                "uniqueItems": True,
+                                "items": {"type": "string"},
+                            },
+                        },
+                        "required": ["id", "agent_id", "agent_version", "task", "depends_on"],
+                    },
+                },
             },
             "required": ["operation"],
         }
@@ -98,7 +149,33 @@ class PersonalAgentsTool(Tool):
             operation = fields.pop("operation")
             if set(fields) - _FIELDS[operation] or not _REQUIRED[operation] <= set(fields):
                 raise PersonalAgentError("invalid_input", "当前操作缺少必填字段或包含无关字段")
-            if operation == "tools":
+            if operation in {
+                "collaborate",
+                "collaborations",
+                "collaboration",
+                "cancel_collaboration",
+                "collaboration_reply",
+            }:
+                collaboration = getattr(self.service.engine, "personal_collaborations", None)
+                if collaboration is None:
+                    raise PersonalAgentError("configuration_error", "协作服务尚未启动")
+                if operation == "collaborate":
+                    session = await self.service.engine.get_or_create_session()
+                    source_id = fields.pop("source_session_id", session.id)
+                    if source_id != session.id:
+                        raise PersonalAgentError("session_conflict", "请从原始对话发起协作")
+                    result = await collaboration.create(source_session_id=source_id, **fields)
+                elif operation == "collaborations":
+                    result = {"collaborations": await collaboration.list(**fields)}
+                elif operation == "collaboration":
+                    result = await collaboration.get(fields["collaboration_id"])
+                elif operation == "collaboration_reply":
+                    result = await collaboration.reply(
+                        fields["collaboration_id"], fields["question_id"], fields["response"]
+                    )
+                else:
+                    result = await collaboration.cancel(fields["collaboration_id"])
+            elif operation == "tools":
                 result = {"tools": self.service.assignable_tools()}
             elif operation == "list":
                 result = {"agents": [agent.to_dict() for agent in self.service.list(**fields)]}

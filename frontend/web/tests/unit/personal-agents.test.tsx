@@ -23,7 +23,7 @@ function apiMock(agents: PersonalAgent[] = []) {
     updatePersonalAgent: vi.fn().mockResolvedValue(agent({ version: 4 })),
     personalAgentHistory: vi.fn().mockResolvedValue({ revisions: [agent(), agent({ version: 2 })] }),
     openPersonalSession: vi.fn().mockResolvedValue({ session_id: 'session-travel', agent_id: 'pa_travel', version: 3 }),
-    currentPersonalAgent: vi.fn().mockResolvedValue({ agent: null }),
+    currentPersonalAgent: vi.fn<PersonalAgentsApi['currentPersonalAgent']>().mockResolvedValue({ agent: null }),
   } satisfies PersonalAgentsApi
 }
 function Directory({ api, busy = false, sessionId = null, onSelect = vi.fn().mockResolvedValue(undefined) }: {
@@ -102,6 +102,22 @@ describe('personal agent directory', () => {
     const { result } = renderHook(() => usePersonalAgents({ api, sessionId: 'session', busy: false, connected: true, onSelect: vi.fn() }))
     await waitFor(() => expect(result.current.currentError).toBe('身份验证失败'))
     expect(result.current.currentPending).toBe(false)
+  })
+
+  it('keeps collaboration execution sessions read-only without mislabelling identity as an error', async () => {
+    const api = apiMock([agent()])
+    api.currentPersonalAgent.mockResolvedValueOnce({ agent: agent(), read_only: true, collaboration_id: 'pc_test' })
+      .mockResolvedValueOnce({ agent: agent(), read_only: false })
+    const { result, rerender } = renderHook(({ sessionId }) => usePersonalAgents({ api, sessionId, busy: false, connected: true, onSelect: vi.fn() }), { initialProps: { sessionId: 'execution' } })
+    await waitFor(() => expect(result.current.readOnly).toBe(true))
+    expect(result.current.current?.id).toBe('pa_travel')
+    expect(result.current.collaborationId).toBe('pc_test')
+    expect(result.current.currentError).toBe('')
+    rerender({ sessionId: 'daily' })
+    expect(result.current.readOnly).toBe(false)
+    await waitFor(() => expect(result.current.currentPending).toBe(false))
+    expect(result.current.readOnly).toBe(false)
+    expect(result.current.collaborationId).toBe('')
   })
 
   it('rejects a mismatched binding and avoids double-opening on rapid clicks', async () => {

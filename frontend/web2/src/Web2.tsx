@@ -360,15 +360,15 @@ export function Web2() {
     (message) => message.id === w.runningUserMessageId,
   )
   const personalLocked = Boolean(personal.opening) || personal.currentPending || Boolean(personal.currentError)
-    || Boolean(personal.current && personal.current.status !== 'active')
+    || Boolean(personal.current && personal.current.status !== 'active') || personal.readOnly
   const composerLocked = w.busy || w.uploading || w.loading || w.connecting || personalLocked
   useEffect(() => {
     setEditingMessage(null)
     setSavingEdit(false)
   }, [w.sessionId])
-  const uploadLocked = w.busy || w.uploading || !w.daemon
+  const uploadLocked = w.busy || w.uploading || !w.daemon || personal.readOnly
   const currentWriteLocked = (id: string) =>
-    w.mutating || (w.busy && w.runningSessionId === id)
+    w.mutating || (w.busy && w.runningSessionId === id) || (personal.readOnly && w.sessionId === id)
   const branch = w.diff?.branch || w.snapshot?.worktrees[0]?.branch
   const filteredSessions = w.sessions.filter((item) =>
     (item.title || item.id).toLowerCase().includes(query.trim().toLowerCase()),
@@ -806,7 +806,8 @@ export function Web2() {
           <button onClick={() => openPanel('schedules')} className={panel === 'schedules' ? 'selected' : ''}><Clock3 />定时任务</button>
           <button onClick={() => openPanel('plugins')} className={panel === 'plugins' ? 'selected' : ''}><Plug />插件</button>
         </nav>
-        <PersonalAgents api={w.api} state={personal} busy={w.busy} connected={Boolean(w.daemon)} />
+        <PersonalAgents api={w.api} state={personal} busy={w.busy} connected={Boolean(w.daemon)}
+          collaboration={{ api: w.api, sessionId: w.sessionId, onOpenSession: w.select }} />
         {searching && (
           <div className="w2-search">
             <Search size={14} />
@@ -1097,6 +1098,7 @@ export function Web2() {
               )}
             </div>
             <div className="w2-composer-wrap">
+              {personal.readOnly && <div className="pa-current-record" role="status"><span>协作执行记录</span>{personal.current && <button type="button" disabled={w.busy || personal.current.status !== 'active'} onClick={() => void personal.select(personal.current)}>打开日常对话</button>}</div>}
               {personal.currentError && <div className="pa-current-error" role="alert"><span>{personal.currentError}</span><button onClick={() => void personal.refresh()}>重新确认助理</button></div>}
               {w.error && (
                 <div className="w2-error" role="alert">
@@ -1205,7 +1207,7 @@ export function Web2() {
                   aria-activedescendant={completion.items.length ? `w2-command-${completion.index}` : undefined}
                   placeholder="描述任务，或输入 / 使用命令"
                   value={w.draft}
-                  disabled={w.loading || w.connecting}
+                  disabled={w.loading || w.connecting || personal.readOnly}
                   onChange={(event) => w.setDraft(event.target.value)}
                   onKeyDown={(event) => {
                     if (completion.onKeyDown(event)) return

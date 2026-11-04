@@ -26,9 +26,9 @@ async def lifespan(app: FastAPI):
     engine = create_agent_engine(config)
     permission_broker: PermissionApprovalBroker | None = None
     try:
-        app.state.session_reconciliation_recovery = await engine.start_long_running_services()
         permission_broker = PermissionApprovalBroker()
         engine.set_permission_confirmer(permission_broker.confirm)
+        app.state.session_reconciliation_recovery = await engine.start_long_running_services()
         app.state.engine = engine
         app.state.chat_run_store = engine.chat_run_store
         app.state.active_chat_run_tasks = {}

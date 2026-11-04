@@ -84,6 +84,59 @@ export type PersonalAgentUpdate = Partial<Omit<PersonalAgentInput, 'kind'> & Pic
 }
 export interface PersonalTool { name: string; description: string }
 
+export type PersonalCollaborationStatus =
+  | 'admitted' | 'claimed' | 'running' | 'completed' | 'error' | 'timeout'
+  | 'max_turns' | 'cancelled' | 'unknown' | 'blocked' | 'waiting'
+export interface PersonalCollaborationStepInput {
+  id: string
+  agent_id: string
+  agent_version: number
+  task: string
+  depends_on: string[]
+}
+export interface PersonalCollaborationInput {
+  source_session_id: string
+  request_id: string
+  title?: string
+  context?: string
+  steps: PersonalCollaborationStepInput[]
+}
+export interface PersonalCollaborationReply {
+  kind: 'option' | 'custom'
+  value?: string
+  custom_text?: string
+}
+export interface PersonalCollaborationStep extends PersonalCollaborationStepInput {
+  agent_name?: string
+  job_id: string
+  session_id: string
+  status: PersonalCollaborationStatus
+  response: string
+  error: string
+  run_id: string
+}
+export interface PersonalCollaborationEvent {
+  sequence: number
+  key: string
+  kind: string
+  step_id: string
+  data: Record<string, unknown>
+  created_at: string
+}
+export interface PersonalCollaboration {
+  id: string
+  request_id: string
+  source_session_id: string
+  source_agent_id: string
+  title: string
+  context: string
+  created_at: string
+  cancel_requested: boolean
+  status: PersonalCollaborationStatus
+  steps: PersonalCollaborationStep[]
+  events?: PersonalCollaborationEvent[]
+}
+
 function preferenceNamespace(): string {
   try {
     return new URLSearchParams(location.search).get('naumiWindow')?.trim() || ''
@@ -247,8 +300,28 @@ export class WorkbenchRuntimeClient extends WorkbenchApiClient {
   async openPersonalSession(id: string): Promise<{ session_id: string; agent_id: string; version: number }> {
     return (await this.fetch(`/personal/agents/${encodeURIComponent(id)}/session`, { method: 'POST' })).json()
   }
-  async currentPersonalAgent(sessionId: string): Promise<{ agent: PersonalAgent | null }> {
+  async currentPersonalAgent(sessionId: string): Promise<{ agent: PersonalAgent | null; read_only?: boolean; collaboration_id?: string }> {
     return (await this.fetch(`/personal/current?session_id=${encodeURIComponent(sessionId)}`)).json()
+  }
+  async personalCollaborations(sourceSessionId?: string): Promise<{ collaborations: PersonalCollaboration[] }> {
+    const query = sourceSessionId ? `?source_session_id=${encodeURIComponent(sourceSessionId)}` : ''
+    return (await this.fetch(`/personal/collaborations${query}`)).json()
+  }
+  async createPersonalCollaboration(body: PersonalCollaborationInput): Promise<PersonalCollaboration> {
+    return (await this.fetch('/personal/collaborations', { method: 'POST', body: JSON.stringify(body) })).json()
+  }
+  async personalCollaboration(id: string): Promise<PersonalCollaboration> {
+    return (await this.fetch(`/personal/collaborations/${encodeURIComponent(id)}`)).json()
+  }
+  async cancelPersonalCollaboration(id: string): Promise<PersonalCollaboration> {
+    return (await this.fetch(`/personal/collaborations/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: '{}' })).json()
+  }
+  async replyPersonalCollaboration(id: string, requestId: string, body: PersonalCollaborationReply): Promise<{
+    status: 'answered'; request_id: string; response: PersonalCollaborationReply & { label?: string }
+  }> {
+    return (await this.fetch(`/personal/collaborations/${encodeURIComponent(id)}/questions/${encodeURIComponent(requestId)}/reply`, {
+      method: 'POST', body: JSON.stringify(body),
+    })).json()
   }
   async outputAsset(path: string, signal?: AbortSignal): Promise<Blob> {
     if (!/^\/api\/v1\/output-assets\/[a-f0-9]{64}\.(svg|png|jpg|webp|gif|pdf|csv|json|txt|md)$/.test(path)) throw new Error('文件地址无效')

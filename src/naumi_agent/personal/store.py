@@ -501,3 +501,27 @@ class PersonalAgentStore:
                     "ambiguous_session", "会话编号属于不同资料库，请指定会话库"
                 )
             return _profile(rows[0]) if rows else None
+
+    def register_execution_session(
+        self, agent_id: str, workspace_key: str, session_id: str, *, session_db_key: str
+    ) -> None:
+        """Record immutable execution ownership without replacing the daily chat pointer."""
+        agent_id = _agent_id(agent_id)
+        workspace_key = _text(workspace_key, "工作区标识", 2048)
+        session_id = _text(session_id, "会话编号", 128)
+        session_db_key = _text(session_db_key, "会话库标识", 2048)
+        with self._connection(write=True) as conn:
+            profile = self._required(conn, agent_id)
+            if profile.status != "active" or profile.kind != "specialist":
+                raise PersonalAgentError("agent_inactive", "请先启用专员，再发起协作")
+            existing = conn.execute(
+                "SELECT agent_id FROM personal_agent_sessions WHERE workspace_key=? "
+                "AND session_db_key=? AND session_id=?",
+                (workspace_key, session_db_key, session_id),
+            ).fetchone()
+            if existing is not None and existing["agent_id"] != agent_id:
+                raise PersonalAgentError("session_conflict", "执行会话已属于另一位助理")
+            conn.execute(
+                "INSERT OR IGNORE INTO personal_agent_sessions VALUES (?,?,?,?,?)",
+                (workspace_key, session_db_key, session_id, agent_id, _now()),
+            )

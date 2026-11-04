@@ -26,6 +26,8 @@ _ERROR_STATUS = {
     "storage_error": 503,
     "configuration_error": 503,
     "model_unavailable": 503,
+    "execution_session_readonly": 409,
+    "question_closed": 409,
 }
 
 
@@ -118,7 +120,12 @@ async def current_agent(
     marker = getattr(session, "personal_agent_id", "")
     if marker and (agent is None or marker != agent.id):
         raise PersonalAgentError("binding_conflict", "专员身份资料暂不可用，请恢复后继续")
-    return {"agent": agent.to_dict() if agent is not None else None}
+    collaboration = getattr(service.engine, "personal_collaborations", None)
+    plan = collaboration.execution_plan(session_id) if collaboration is not None else None
+    result = {"agent": agent.to_dict() if agent is not None else None}
+    if plan is not None:
+        result.update(read_only=True, collaboration_id=plan["id"])
+    return result
 
 
 @router.post("/personal/agents", status_code=201)
@@ -151,3 +158,83 @@ async def open_agent_session(
     auth: str = AuthDep,
 ):
     return await _service(request).open_session(agent_id)
+
+
+class CollaborationStepCreate(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+    id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
+    agent_id: str = Field(pattern=r"^pa_[0-9a-f]{32}$")
+    agent_version: int = Field(ge=1, le=2_147_483_647)
+    task: str = Field(min_length=1, max_length=16000)
+    depends_on: list[str] = Field(default_factory=list, max_length=11)
+
+
+class CollaborationCreate(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+    source_session_id: str = Field(min_length=1, max_length=128)
+    request_id: str = Field(min_length=1, max_length=128)
+    title: str = Field(default="", max_length=160)
+    context: str = Field(default="", max_length=32000)
+    steps: list[CollaborationStepCreate] = Field(min_length=1, max_length=12)
+
+
+def _collaborations(request: Request):
+    service = getattr(request.app.state.engine, "personal_collaborations", None)
+    if service is None:
+        raise PersonalAgentError("configuration_error", "协作服务尚未启动，请重启应用")
+    return service
+
+
+@router.post("/personal/collaborations", status_code=201)
+async def create_collaboration(body: CollaborationCreate, request: Request, auth: str = AuthDep):
+    return await _collaborations(request).create(**body.model_dump())
+
+
+@router.get("/personal/collaborations")
+async def list_collaborations(
+    request: Request,
+    source_session_id: str | None = Query(default=None, min_length=1, max_length=128),
+    auth: str = AuthDep,
+):
+    return {
+        "collaborations": await _collaborations(request).list(
+            source_session_id=source_session_id,
+        )
+    }
+
+
+@router.get("/personal/collaborations/{collaboration_id}")
+async def get_collaboration(collaboration_id: str, request: Request, auth: str = AuthDep):
+    return await _collaborations(request).get(collaboration_id)
+
+
+@router.post("/personal/collaborations/{collaboration_id}/cancel")
+async def cancel_collaboration(
+    collaboration_id: str,
+    request: Request,
+    body: OpenSessionRequest | None = None,
+    auth: str = AuthDep,
+):
+    return await _collaborations(request).cancel(collaboration_id)
+
+
+class CollaborationReply(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+    kind: Literal["option", "custom"] = "option"
+    value: str | None = Field(default=None, max_length=80)
+    custom_text: str | None = Field(default=None, max_length=4000)
+
+
+@router.post("/personal/collaborations/{collaboration_id}/questions/{request_id}/reply")
+async def reply_collaboration(
+    collaboration_id: str,
+    request_id: str,
+    body: CollaborationReply,
+    request: Request,
+    auth: str = AuthDep,
+):
+    return await _collaborations(request).reply(
+        collaboration_id,
+        request_id,
+        body.model_dump(exclude_none=True),
+    )

@@ -19,6 +19,7 @@ export function usePersonalAgents({ api, sessionId, busy, connected, onSelect }:
   const [error, setError] = useState('')
   const [currentState, setCurrentState] = useState<{
     api: PersonalAgentsApi; sessionId: string | null; agent: PersonalAgent | null; error: string
+    readOnly: boolean; collaborationId: string
   } | null>(null)
   const [opening, setOpening] = useState<string | null>(null)
   const listSequence = useRef(0)
@@ -60,17 +61,18 @@ export function usePersonalAgents({ api, sessionId, busy, connected, onSelect }:
   const refreshCurrent = useCallback(async () => {
     const sequence = ++currentSequence.current
     if (!sessionId || !connected) {
-      setCurrentState({ api, sessionId, agent: null, error: '' })
+      setCurrentState({ api, sessionId, agent: null, error: '', readOnly: false, collaborationId: '' })
       return
     }
     try {
       const result = await api.currentPersonalAgent(sessionId)
       if (!Object.prototype.hasOwnProperty.call(result, 'agent')) throw new Error('未能确认当前助理，请重试')
       if (alive.current && sequence === currentSequence.current)
-        setCurrentState({ api, sessionId, agent: result.agent, error: '' })
+        setCurrentState({ api, sessionId, agent: result.agent, error: '',
+          readOnly: result.read_only === true, collaborationId: result.collaboration_id || '' })
     } catch (cause) {
       if (alive.current && sequence === currentSequence.current)
-        setCurrentState({ api, sessionId, agent: null, error: personalError(cause) })
+        setCurrentState({ api, sessionId, agent: null, error: personalError(cause), readOnly: false, collaborationId: '' })
     }
   }, [api, sessionId, connected])
 
@@ -117,9 +119,11 @@ export function usePersonalAgents({ api, sessionId, busy, connected, onSelect }:
   const resolved = !sessionId || (currentState?.api === api && currentState.sessionId === sessionId)
   const current = resolved && sessionId ? currentState?.agent ?? null : null
   const currentError = resolved && sessionId ? currentState?.error || '' : ''
+  const readOnly = Boolean(resolved && sessionId && currentState?.readOnly)
+  const collaborationId = resolved && sessionId ? currentState?.collaborationId || '' : ''
   const refresh = async () => { await Promise.all([refreshList(), refreshCurrent()]) }
 
-  return { agents, loading, error, current, currentError,
+  return { agents, loading, error, current, currentError, readOnly, collaborationId,
     currentPending: Boolean(sessionId && connected && !resolved), opening, select, refresh }
 }
 

@@ -53,6 +53,16 @@ from naumi_agent.streaming.events import EventType, StreamEvent, StreamEventSink
 router = APIRouter(tags=["sessions", "messages"])
 
 
+def _assert_writable_session(engine, session_id: str) -> None:
+    collaboration = getattr(engine, "personal_collaborations", None)
+    if collaboration is not None:
+        from naumi_agent.personal.models import PersonalAgentError
+        try:
+            collaboration.assert_writable(session_id)
+        except PersonalAgentError as exc:
+            raise HTTPException(409, exc.message) from exc
+
+
 # --- Sessions ---
 
 
@@ -79,6 +89,7 @@ async def update_session(
     auth: str = AuthDep,
 ):
     engine = request.app.state.engine
+    _assert_writable_session(engine, session_id)
     session = await engine.session_store.load(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -131,6 +142,7 @@ async def pin_session(
 @router.post("/sessions/{session_id}/archive", status_code=204)
 async def archive_session(session_id: str, request: Request, auth: str = AuthDep):
     engine = request.app.state.engine
+    _assert_writable_session(engine, session_id)
     lock = _engine_lock(request)
     if lock.locked() and getattr(getattr(engine, "_session", None), "id", None) == session_id:
         raise HTTPException(status_code=409, detail="当前会话正在执行，完成或停止后才能归档")
@@ -183,6 +195,7 @@ async def get_session(session_id: str, request: Request, auth: str = AuthDep):
 @router.delete("/sessions/{session_id}", status_code=204)
 async def delete_session(session_id: str, request: Request, auth: str = AuthDep):
     engine = request.app.state.engine
+    _assert_writable_session(engine, session_id)
     result = await engine.delete_session_detailed(session_id)
     if result.outcome is ReconciliationCoordinatorOutcome.NOT_FOUND:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -220,6 +233,7 @@ async def send_message(
     auth: str = AuthDep,
 ):
     engine = request.app.state.engine
+    _assert_writable_session(engine, session_id)
     session = await engine.session_store.load(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")

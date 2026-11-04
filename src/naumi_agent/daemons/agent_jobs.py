@@ -116,6 +116,13 @@ class AgentJobCapacityExhaustedError(AgentJobError):
     """Raised when durable Agent active or waiting capacity is exhausted."""
 
 
+def agent_job_id_for_request(request: AgentWorkerRequest) -> str:
+    """Resolve the existing immutable admission identity without creating a job."""
+    if not isinstance(request, AgentWorkerRequest):
+        raise TypeError("request 必须是 AgentWorkerRequest。")
+    return _job_id(request.request_sha256)
+
+
 @dataclass(frozen=True, slots=True)
 class AgentJobPublicationReceipt:
     schema_version: int

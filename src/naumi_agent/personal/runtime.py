@@ -9,6 +9,26 @@ from naumi_agent.model.router import ModelTier
 from naumi_agent.personal.models import PersonalAgent, PersonalAgentError
 
 
+async def authorize_execution(engine: Any) -> None:
+    """Revalidate a collaboration fence at every model/tool execution boundary."""
+    authorize = getattr(engine, "_personal_execution_authorizer", None)
+    if authorize is not None:
+        await authorize()
+
+
+def use_direct_runtime(engine: Any, task: str) -> bool:
+    """Do not substitute temporary planner agents for explicitly named personal roles."""
+    if current_agent(engine) is not None or "personal_agents" in task:
+        return True
+    service = getattr(engine, "personal_agents", None)
+    if service is None or not service.store.db_path.exists():
+        return False
+    return any(
+        profile.id in task or (len(profile.name) >= 2 and profile.name in task)
+        for profile in service.list(include_archived=True)
+    )
+
+
 def current_agent(engine: Any) -> PersonalAgent | None:
     service = getattr(engine, "personal_agents", None)
     session = getattr(engine, "_session", None)
@@ -26,6 +46,12 @@ def current_agent(engine: Any) -> PersonalAgent | None:
 
 
 def require_current_agent(engine: Any) -> PersonalAgent | None:
+    collaboration = getattr(engine, "personal_collaborations", None)
+    session = getattr(engine, "_session", None)
+    if collaboration is not None and session is not None:
+        collaboration.assert_writable(
+            session.id, task_id=getattr(engine, "_personal_collaboration_task_id", "")
+        )
     agent = current_agent(engine)
     if agent is None:
         return None
@@ -66,6 +92,9 @@ def role_prompt(engine: Any) -> str:
             "临时子 Agent 与常驻专员不同。工具成功返回真实 id 后才能报告创建成功。"
             "创建先了解职责与所需工具；空工具列表表示仅对话。"
             "需要查看可分配工具时使用 personal_agents operation=tools。"
+            "已有专员之间的协作使用 operation=collaborate，明确各步骤任务、专员版本和 depends_on。"
+            "交接只共享显式资料和前置结果，不要把整个私有对话复制给其他专员。"
+            "派发成功只表示已受理，使用 collaboration 查询真实终态后再报告完成。"
         )
     payload = {
         "agent_id": agent.id,

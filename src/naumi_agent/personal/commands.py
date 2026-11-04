@@ -34,7 +34,12 @@ _HELP = """个人助理命令：
 /assistants update-json <ID> <版本> '<JSON对象>' — 修改指定版本的配置
 /assistants open <ID> — 打开专员会话
 /assistants pause|resume|archive <ID> <版本> — 暂停、恢复或归档
-/assistants history <ID> — 查看配置修订记录"""
+/assistants history <ID> — 查看配置修订记录
+/assistants collaborate-json '<JSON对象>' — 按步骤委派给已有专员
+/assistants collaborations — 查看协作记录
+/assistants collaboration <ID> — 查看交接与结果
+/assistants cancel-collaboration <ID> — 请求停止协作
+/assistants reply-json <协作ID> <问题ID> '<JSON对象>' — 回答协作中的问题"""
 
 
 def _identifier(value: str) -> str:
@@ -69,7 +74,7 @@ def _object(value: str, *, create: bool) -> dict[str, Any]:
 
 def parse_assistants_command(argument: str) -> dict[str, Any]:
     """Parse one bounded command into tool arguments without executing anything."""
-    if len(argument) > 16000:
+    if len(argument) > 256000:
         raise ValueError("命令过长，请缩短职责内容或通过助理配置界面编辑。")
     try:
         parts = shlex.split(argument)
@@ -78,6 +83,39 @@ def parse_assistants_command(argument: str) -> dict[str, Any]:
     if not parts:
         return {"operation": "list"}
     action, *args = parts
+    if action == "collaborations" and not args:
+        return {"operation": "collaborations"}
+    if action == "reply-json" and len(args) == 3:
+        if not re.fullmatch(r"pc_[0-9a-f]{32}", args[0]) or not re.fullmatch(
+            r"ask-[0-9a-f]{32}", args[1]
+        ):
+            raise ValueError("协作或问题 ID 格式不正确，请从原始记录复制。")
+        try:
+            response = json.loads(args[2])
+        except (ValueError, RecursionError) as exc:
+            raise ValueError("回答 JSON 格式有误，请检查引号。") from exc
+        return {
+            "operation": "collaboration_reply",
+            "collaboration_id": args[0],
+            "question_id": args[1],
+            "response": response,
+        }
+    if action in {"collaboration", "cancel-collaboration"} and len(args) == 1:
+        if not re.fullmatch(r"pc_[0-9a-f]{32}", args[0]):
+            raise ValueError("协作 ID 格式无效，请从协作记录复制。")
+        return {"operation": action.replace("-", "_"), "collaboration_id": args[0]}
+    if action == "collaborate-json" and len(args) == 1:
+        try:
+            fields = json.loads(args[0])
+        except (ValueError, RecursionError) as exc:
+            raise ValueError("协作 JSON 格式有误，请检查引号。") from exc
+        if (
+            not isinstance(fields, dict)
+            or set(fields) - {"source_session_id", "request_id", "title", "context", "steps"}
+            or "steps" not in fields
+        ):
+            raise ValueError("协作需要 steps，可指定 title、context、request_id 和来源对话。")
+        return {"operation": "collaborate", "request_id": uuid.uuid4().hex, **fields}
     if action == "list" and (not args or args == ["all"]):
         return {"operation": "list", "include_archived": bool(args)}
     if action == "tools" and not args:
@@ -129,6 +167,29 @@ def _profile_summary(agent: dict[str, Any]) -> str:
 
 
 def _format_result(operation: str, payload: Any) -> str:
+    if operation == "collaboration_reply":
+        return "回答已记录：" + _display(payload.get("request_id"))
+    if operation == "collaborations" and isinstance(payload, dict):
+        values = payload.get("collaborations", [])
+        if not values:
+            return "暂无协作记录。"
+        return "协作记录\n" + "\n".join(
+            f"{_display(p.get('id'))} · {_display(p.get('title'))} · "
+            f"{_collaboration_status(p.get('status'))}"
+            for p in values
+        )
+    if operation in {"collaborate", "collaboration", "cancel_collaboration"}:
+        lines = [
+            f"协作：{_display(payload.get('id'))} · {_collaboration_status(payload.get('status'))}"
+        ]
+        for step in payload.get("steps", []):
+            lines.append(
+                f"{_display(step.get('id'))} · {_display(step.get('agent_id'))} · "
+                f"{_collaboration_status(step.get('status'))}"
+            )
+            if step.get("response") or step.get("error"):
+                lines.append(_display(step.get("response") or step.get("error")))
+        return "\n".join(lines)
     if operation == "tools" and isinstance(payload, dict):
         tools = payload.get("tools")
         if isinstance(tools, list):
@@ -166,6 +227,22 @@ def _format_result(operation: str, payload: Any) -> str:
         lines.append(f"职责：{_display(agent.get('instructions'))}")
         return "\n".join(lines)
     return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def _collaboration_status(value: Any) -> str:
+    return {
+        "waiting": "等待前置步骤",
+        "admitted": "等待执行",
+        "claimed": "准备执行",
+        "running": "执行中",
+        "completed": "已完成",
+        "error": "未完成",
+        "timeout": "已超时",
+        "max_turns": "达到执行轮数",
+        "cancelled": "已停止",
+        "unknown": "结果不明",
+        "blocked": "前置步骤未完成",
+    }.get(str(value), "状态待核对")
 
 
 async def run_assistants_command(engine: Any, argument: str) -> str:

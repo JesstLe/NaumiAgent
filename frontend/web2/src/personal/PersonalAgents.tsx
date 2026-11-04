@@ -1,30 +1,38 @@
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react'
-import { Archive, Bot, Check, ChevronDown, History, Loader2, Pause, Pencil, Play, Plus, RefreshCw, Search, Users, X } from 'lucide-react'
+import { Archive, Bot, Check, ChevronDown, GitBranch, History, Loader2, Pause, Pencil, Play, Plus, RefreshCw, Search, Users, X } from 'lucide-react'
 import type { PersonalAgent, PersonalAgentInput, PersonalTool } from '@naumi/shared/api/WorkbenchRuntimeClient'
 import { personalError, type PersonalAgentsApi, type PersonalAgentsState } from './usePersonalAgents'
+import { PersonalCollaborations, type PersonalCollaborationsApi } from './Collaborations'
 import './personal.css'
 
 const stateLabels = { active: '启用', paused: '已暂停', archived: '已归档' } as const
 const tierLabels = { fast: '快速', capable: '标准', reasoning: '深度思考' } as const
 
-export function PersonalAgents({ api, state, busy, connected }: {
+export function PersonalAgents({ api, state, busy, connected, collaboration }: {
   api: PersonalAgentsApi
   state: PersonalAgentsState
   busy: boolean
   connected: boolean
+  collaboration?: {
+    api: PersonalCollaborationsApi
+    sessionId: string | null
+    onOpenSession?: (sessionId: string) => Promise<unknown>
+  }
 }) {
   const [editor, setEditor] = useState<PersonalAgent | 'create' | null>(null)
   const [archived, setArchived] = useState(false)
+  const [collaborationOpen, setCollaborationOpen] = useState(false)
   const visible = state.agents.filter(agent => archived || agent.status !== 'archived')
   const locked = busy || Boolean(state.opening) || !connected
 
-  useEffect(() => { setEditor(null); setArchived(false) }, [api])
-  useEffect(() => { if (!connected) setEditor(null) }, [connected])
+  useEffect(() => { setEditor(null); setArchived(false); setCollaborationOpen(false) }, [api])
+  useEffect(() => { if (!connected) { setEditor(null); setCollaborationOpen(false) } }, [connected])
 
   return <section className="pa-directory" aria-label="我的助理">
     <header className="pa-directory-heading">
       <strong>我的助理</strong>
       <div>
+        {collaboration && <button type="button" aria-label="协作" title="协作" disabled={!connected} onClick={() => setCollaborationOpen(true)}><GitBranch size={14} /></button>}
         <button type="button" aria-label="刷新助理目录" title="刷新" disabled={!connected || state.loading} onClick={() => void state.refresh()}><RefreshCw size={13} className={state.loading ? 'pa-spin' : ''} /></button>
         <button type="button" aria-label="创建助理" title="创建助理" disabled={locked} onClick={() => setEditor('create')}><Plus size={16} /></button>
       </div>
@@ -50,6 +58,9 @@ export function PersonalAgents({ api, state, busy, connected }: {
     {editor && <PersonalAgentEditor key={editor === 'create' ? 'create' : editor.id}
       api={api} agent={editor === 'create' ? null : editor} agents={state.agents} busy={locked}
       onClose={() => { setEditor(null); void state.refresh() }} onSaved={async () => { await state.refresh(); setEditor(null) }} />}
+    {collaborationOpen && collaboration && <PersonalCollaborations api={collaboration.api} agents={state.agents}
+      sourceSessionId={collaboration.sessionId} busy={busy} onClose={() => setCollaborationOpen(false)}
+      onOpenSession={collaboration.onOpenSession} />}
   </section>
 }
 
