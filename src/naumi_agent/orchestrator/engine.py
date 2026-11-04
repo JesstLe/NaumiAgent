@@ -826,7 +826,7 @@ from naumi_agent.runtime.terminal_runtime import (
     current_terminal_run_release_binding,
 )
 from naumi_agent.safety.budget import BudgetTracker, TokenBudget
-from naumi_agent.safety.guardrails import OutputGuardrail
+from naumi_agent.safety.guardrails import IncrementalRedactor, OutputGuardrail
 from naumi_agent.safety.permission_grants import PermissionGrant, PermissionGrantStore
 from naumi_agent.safety.permissions import PermissionMode, PermissionOutcome
 from naumi_agent.scheduler import SchedulerRunner, SchedulerStore, create_scheduler_tools
@@ -6276,7 +6276,15 @@ class AgentEngine:
                 visual_replacements,
             )
         self._messages.append(safe_msg)
-        self._full_history.append(safe_msg)
+        # Provider-private reasoning may be needed by the next model call, but
+        # display/persisted history must never share its unredacted dictionary.
+        history_msg = dict(safe_msg)
+        if history_msg.get("role") == "assistant":
+            for field in ("content", "reasoning_content"):
+                value = history_msg.get(field)
+                if isinstance(value, str):
+                    history_msg[field] = self._output_guardrail.redact(value)
+        self._full_history.append(history_msg)
 
     def _coerce_engine_events(
         self,
@@ -8534,7 +8542,7 @@ class AgentEngine:
             if harness_gate is not None and harness_gate.status == "needs_correction":
                 continue
             safe_content = self._output_guardrail.redact(final_content)
-            self._append_message({"role": "assistant", "content": final_content})
+            self._append_message({"role": "assistant", "content": safe_content})
             final_status = (
                 harness_gate.status
                 if harness_gate is not None
@@ -8629,6 +8637,11 @@ class AgentEngine:
             text_parts: list[str] = []
             pending_text_parts: list[str] = []
             thinking_parts: list[str] = []
+            visible_parts: list[str] = []
+            visible_thinking: list[str] = []
+            response_redactor = IncrementalRedactor()
+            thinking_redactor = IncrementalRedactor()
+            response_input_chars = 0
             collected_tool_calls: dict[int, dict[str, Any]] = {}
             got_response = False
             got_thinking = False
@@ -8658,9 +8671,13 @@ class AgentEngine:
             llm_start = 0.0
             first_chunk_seen = False
 
-            async def flush_pending_text() -> None:
-                nonlocal got_response
-                if not pending_text_parts:
+            async def publish_text(text: str = "", *, final: bool = False) -> None:
+                nonlocal got_response, response_input_chars
+                response_input_chars += len(text)
+                safe = response_redactor.feed(text)
+                if final:
+                    safe += response_redactor.finish()
+                if not safe:
                     return
                 if not got_response:
                     got_response = True
@@ -8669,11 +8686,37 @@ class AgentEngine:
                         {},
                         turn=turn + 1,
                     )
+                # A sink may fail after another sink received this fragment.
+                # Treat the publish attempt as committed rather than replay it.
+                visible_parts.append(safe)
                 await events.publish(
                     RuntimeEventType.TOKEN,
-                    {"content": "".join(pending_text_parts)},
+                    {"content": safe},
                     turn=turn + 1,
                 )
+
+            async def publish_thinking(text: str = "", *, final: bool = False) -> None:
+                nonlocal got_thinking
+                if text and not got_thinking:
+                    got_thinking = True
+                    await events.publish(
+                        RuntimeEventType.THINKING_START, {}, turn=turn + 1,
+                    )
+                safe = thinking_redactor.feed(text)
+                if final:
+                    safe += thinking_redactor.finish()
+                if safe:
+                    visible_thinking.append(safe)
+                    await events.publish(
+                        RuntimeEventType.THINKING_DELTA,
+                        {"content": safe},
+                        turn=turn + 1,
+                    )
+
+            async def flush_pending_text() -> None:
+                if not pending_text_parts:
+                    return
+                await publish_text("".join(pending_text_parts))
                 pending_text_parts.clear()
 
             await self._fire_hook(HookContext(
@@ -8722,19 +8765,8 @@ class AgentEngine:
                         finish_reason = chunk.finish_reason
 
                     if chunk.thinking:
-                        if not got_thinking:
-                            got_thinking = True
-                            await events.publish(
-                                RuntimeEventType.THINKING_START,
-                                {},
-                                turn=turn + 1,
-                            )
                         thinking_parts.append(chunk.thinking)
-                        await events.publish(
-                            RuntimeEventType.THINKING_DELTA,
-                            {"content": chunk.thinking},
-                            turn=turn + 1,
-                        )
+                        await publish_thinking(chunk.thinking)
 
                     if chunk.tool_call_started:
                         tool_call_started = True
@@ -8814,18 +8846,7 @@ class AgentEngine:
                             continue
                         if pending_text_parts:
                             await flush_pending_text()
-                        elif not got_response:
-                            got_response = True
-                            await events.publish(
-                                RuntimeEventType.RESPONSE_START,
-                                {},
-                                turn=turn + 1,
-                            )
-                        await events.publish(
-                            RuntimeEventType.TOKEN,
-                            {"content": chunk.token},
-                            turn=turn + 1,
-                        )
+                        await publish_text(chunk.token)
 
                     if chunk.tool_call and isinstance(chunk.tool_call, dict):
                         collected_tool_calls.update(chunk.tool_call)
@@ -8843,7 +8864,51 @@ class AgentEngine:
                         turn=turn + 1,
                     )
             except Exception as e:
+                if got_thinking:
+                    # Drop the undecided candidate tail on an interrupted stream.
+                    await events.publish(
+                        RuntimeEventType.THINKING_END,
+                        {"content": "".join(visible_thinking), "interrupted": True},
+                        turn=turn + 1,
+                    )
+                if tool_prepare_started:
+                    await events.publish(
+                        RuntimeEventType.TOOL_PREPARE_END,
+                        {"name": "tool", "interrupted": True},
+                        turn=turn + 1,
+                    )
+                    tool_prepare_started = False
+                if visible_parts:
+                    message = "模型响应连接已中断，已保留收到的部分内容；请重试或继续提问。"
+                    partial = "".join(visible_parts)
+                    self._append_message({"role": "assistant", "content": partial})
+                    self._full_history[-1]["metadata"] = {"interrupted": True}
+                    await events.publish(
+                        RuntimeEventType.ERROR, {"message": message}, turn=turn + 1,
+                    )
+                    await events.publish(RuntimeEventType.RESPONSE_END, {}, turn=turn + 1)
+                    await self._block_unreconciled_todos(events)
+                    await self._fire_agent_stop(
+                        status="failed", response=message, reason="stream_interrupted",
+                        streaming=True, events=events,
+                    )
+                    return AgentResult(
+                        status="failed", response=partial, error=message, usage=self._usage,
+                    )
                 logger.warning("Streaming failed, fallback to non-streaming: %s", e)
+                # A retry can replace only a response that has not been shown.
+                # Do not retain a tool snapshot from a failed provider stream.
+                text_parts.clear()
+                pending_text_parts.clear()
+                thinking_parts.clear()
+                visible_thinking.clear()
+                collected_tool_calls.clear()
+                response_redactor = IncrementalRedactor()
+                thinking_redactor = IncrementalRedactor()
+                response_input_chars = 0
+                got_response = False
+                got_thinking = False
+                tool_call_started = False
                 response = await self._call_model_with_recovery(
                     messages=self._messages,
                     tier=ModelTier.CAPABLE,
@@ -8858,8 +8923,8 @@ class AgentEngine:
                 if response.content:
                     text_parts.append(response.content)
                 if response.reasoning_content:
-                    got_thinking = True
                     thinking_parts.append(response.reasoning_content)
+                    await publish_thinking(response.reasoning_content)
                 if response.tool_calls:
                     collected_tool_calls = {i: tc for i, tc in enumerate(response.tool_calls)}
                 finish_reason = response.finish_reason
@@ -8877,9 +8942,10 @@ class AgentEngine:
             ), events)
 
             if got_thinking:
+                await publish_thinking(final=True)
                 await events.publish(
                     RuntimeEventType.THINKING_END,
-                    {"content": "".join(thinking_parts)},
+                    {"content": "".join(visible_thinking)},
                     turn=turn + 1,
                 )
 
@@ -9054,18 +9120,8 @@ class AgentEngine:
                 continue
             if pending_text_parts:
                 await flush_pending_text()
-            elif text_content and not got_response:
-                got_response = True
-                await events.publish(
-                    RuntimeEventType.RESPONSE_START,
-                    {},
-                    turn=turn + 1,
-                )
-                await events.publish(
-                    RuntimeEventType.TOKEN,
-                    {"content": text_content},
-                    turn=turn + 1,
-                )
+            elif text_content and response_input_chars == 0:
+                await publish_text(text_content)
 
             if _is_output_truncated(finish_reason):
                 continued_content = await self._continue_truncated_final_response(
@@ -9076,28 +9132,18 @@ class AgentEngine:
                 )
                 continuation_suffix = continued_content[len(text_content):]
                 if continuation_suffix:
-                    if not got_response:
-                        got_response = True
-                        await events.publish(
-                            RuntimeEventType.RESPONSE_START,
-                            {},
-                            turn=turn + 1,
-                        )
-                    await events.publish(
-                        RuntimeEventType.TOKEN,
-                        {"content": continuation_suffix},
-                        turn=turn + 1,
-                    )
+                    await publish_text(continuation_suffix)
                 text_content = continued_content
 
+            await publish_text(final=True)
             if got_response:
                 await events.publish(
                     RuntimeEventType.RESPONSE_END,
                     {},
                     turn=turn + 1,
                 )
-            self._append_message({"role": "assistant", "content": text_content})
             safe_content = self._output_guardrail.redact(text_content)
+            self._append_message({"role": "assistant", "content": safe_content})
             final_status = (
                 harness_gate.status
                 if harness_gate is not None
