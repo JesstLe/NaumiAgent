@@ -4254,6 +4254,9 @@ class AgentEngine:
         from naumi_agent.personal.collaboration import PersonalCollaborationService
 
         self.personal_collaborations = PersonalCollaborationService(self)
+        from naumi_agent.personal.teams import PersonalTeamService
+
+        self.personal_teams = PersonalTeamService(self)
         self._personal_turn_snapshot = None
         self.goal_store = resources.goal_store
         self.pursuit_store = resources.pursuit_store
@@ -4384,6 +4387,9 @@ class AgentEngine:
         from naumi_agent.personal.messages import PersonalMessageTool
 
         self._tool_registry.register(PersonalMessageTool(self))
+        from naumi_agent.personal.teams import PersonalTeamTool
+
+        self._tool_registry.register(PersonalTeamTool(self))
         self._tool_registry.register(OutputPublishTool(self))
         self._tool_registry.register(OutputAssetRetentionPreviewTool(self))
         self._tool_registry.register(OutputAssetRetentionRunTool(self))
@@ -4970,6 +4976,7 @@ class AgentEngine:
 
     async def shutdown(self) -> None:
         """释放资源（关闭数据库连接、浏览器、MCP 连接等）."""
+        await self._shutdown_component("personal_teams", self.personal_teams.stop)
         await self._shutdown_component("personal_collaborations", self.personal_collaborations.stop)
         self._advance_session_authorization_generation()
         self._clear_permission_grants(
@@ -5664,6 +5671,7 @@ class AgentEngine:
         self.start_session_retention_worker()
         if not self._isolated_child:
             self.personal_collaborations.start()
+            self.personal_teams.start()
         return recovered
 
     async def enqueue_stable_promotion_runtime_admission_delivery(
@@ -7459,6 +7467,9 @@ class AgentEngine:
     async def run(self, task: str, turn_context: str = "") -> AgentResult:
         """执行任务 — 自适应规划 + ReAct 主循环."""
         session = await self.get_or_create_session()
+        profile = personal_runtime.current_agent(self)
+        if profile is not None and profile.kind == "team" and not session.personal_execution_id:
+            return await self.personal_teams.dispatch_from_engine(task, turn_context)
         personal_runtime.begin_turn(self)
         self._ensure_system_prompt()
         self.task_store.set_session(session.id)
@@ -7548,6 +7559,9 @@ class AgentEngine:
     ) -> AgentResult:
         """Execute and durably record one streamed Agent run."""
         session = await self.get_or_create_session()
+        profile = personal_runtime.current_agent(self)
+        if profile is not None and profile.kind == "team" and not session.personal_execution_id:
+            return await self.personal_teams.dispatch_from_engine(task, turn_context)
         personal_runtime.begin_turn(self)
         self.task_store.set_session(session.id)
         try:

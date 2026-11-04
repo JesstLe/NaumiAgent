@@ -62,6 +62,8 @@ class WorkbenchIssueFromMessage(BaseModel):
 
 class MessageCreate(BaseModel):
     content: str
+    request_id: str | None = Field(default=None, min_length=1, max_length=128, strict=True)
+    expected_team_version: int | None = Field(default=None, ge=1, le=2_147_483_647, strict=True)
     stream: bool = True
     runtime_mode: Literal["default", "plan", "bypass"] = "default"
     edit_message_id: str | None = None

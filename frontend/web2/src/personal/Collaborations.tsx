@@ -40,7 +40,7 @@ const timestamp = (value: string) => {
   return Number.isNaN(date.valueOf()) ? '时间待核实' : date.toLocaleString('zh-CN', { hour12: false })
 }
 
-function validateCollaboration(value: PersonalCollaboration, expectedId?: string) {
+export function validateCollaboration(value: PersonalCollaboration, expectedId?: string) {
   if (!value || typeof value.id !== 'string' || !Array.isArray(value.steps)
     || typeof value.status !== 'string' || (expectedId && value.id !== expectedId)
     || typeof value.cancel_requested !== 'boolean' || typeof value.created_at !== 'string'
@@ -85,13 +85,16 @@ function Status({ status, stopping = false }: { status: string; stopping?: boole
   </span>
 }
 
-export function PersonalCollaborations({ api, agents, sourceSessionId, busy, onClose, onOpenSession }: {
+export function PersonalCollaborations({ api, agents, sourceSessionId, busy, onClose, onOpenSession, scopedCollaborations, initialId, allowCancel = true }: {
   api: PersonalCollaborationsApi
   agents: PersonalAgent[]
   sourceSessionId: string | null
   busy: boolean
   onClose: () => void
   onOpenSession?: (sessionId: string) => Promise<unknown>
+  scopedCollaborations?: PersonalCollaboration[]
+  initialId?: string
+  allowCancel?: boolean
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
   const headingId = useId()
@@ -102,7 +105,7 @@ export function PersonalCollaborations({ api, agents, sourceSessionId, busy, onC
   const [listError, setListError] = useState('')
   const [detailError, setDetailError] = useState('')
   const [actionError, setActionError] = useState('')
-  const [selectedId, setSelectedId] = useState('')
+  const [selectedId, setSelectedId] = useState(initialId || '')
   const [detail, setDetail] = useState<PersonalCollaboration | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [composing, setComposing] = useState(false)
@@ -135,6 +138,15 @@ export function PersonalCollaborations({ api, agents, sourceSessionId, busy, onC
   useEffect(() => {
     let stopped = false
     let timer: ReturnType<typeof setTimeout> | undefined
+    if (scopedCollaborations !== undefined) {
+      try {
+        const values = scopedCollaborations.map(value => validateCollaboration(value))
+        setItems(values); setListError(''); setLoading(false)
+        setSelectedId(current => values.some(item => item.id === current) ? current
+          : values.find(item => item.id === initialId)?.id || values[0]?.id || '')
+      } catch (cause) { setListError(personalError(cause)); setLoading(false) }
+      return
+    }
     const refresh = async () => {
       setLoading(true)
       try {
@@ -151,13 +163,14 @@ export function PersonalCollaborations({ api, agents, sourceSessionId, busy, onC
     }
     void refresh()
     return () => { stopped = true; clearTimeout(timer) }
-  }, [api, revision])
+  }, [api, revision, scopedCollaborations, initialId])
 
   useEffect(() => {
     let stopped = false
     let timer: ReturnType<typeof setTimeout> | undefined
     setCancelConfirm(false); setActionError(''); setDetailError('')
-    if (!selectedId || composing) { setDetail(null); setDetailLoading(false); return }
+    if (!selectedId || composing || (scopedCollaborations !== undefined
+      && !scopedCollaborations.some(value => value.id === selectedId))) { setDetail(null); setDetailLoading(false); return }
     setDetail(null)
     const refresh = async () => {
       setDetailLoading(true)
@@ -221,10 +234,16 @@ export function PersonalCollaborations({ api, agents, sourceSessionId, busy, onC
     }
   }
   const resolved = new Set((selected?.events || []).filter(event => event.kind === 'permission_resolved')
-    .map(event => `${event.step_id}:${String(event.data.call_id || '')}`))
+    .map(event => {
+      // Legacy root receipts lacked a session field. Infer only the known root
+      // session, never use a wildcard that could resolve another peer's call.
+      const sessionId = typeof event.data.session_id === 'string' ? event.data.session_id
+        : !event.data.peer_message_id ? selected?.steps.find(step => step.id === event.step_id)?.session_id || '' : ''
+      return `${event.step_id}:${sessionId}:${String(event.data.call_id || '')}`
+    }))
   const permissions = (selected && activeStatuses.has(selected.status) && !selected.cancel_requested ? selected.events || [] : []).filter(event => event.kind === 'permission_requested'
     && typeof event.data.call_id === 'string' && typeof event.data.session_id === 'string'
-    && !resolved.has(`${event.step_id}:${event.data.call_id}`)
+    && !resolved.has(`${event.step_id}:${event.data.session_id}:${event.data.call_id}`)
     && selected && matchesCollaborationExecution(selected, event))
   const answered = new Set((selected?.events || []).filter(event => ['question_answered', 'question_expired'].includes(event.kind))
     .map(event => String(event.data.request_id || '')))
@@ -256,8 +275,10 @@ export function PersonalCollaborations({ api, agents, sourceSessionId, busy, onC
     </header>
     <div className="pc-workbench">
       <aside className="pc-sidebar" aria-label="协作任务列表">
-        <button type="button" className={`pc-new${composing && composeMode === 'workflow' ? ' selected' : ''}`} disabled={locked} onClick={() => { setComposeMode('workflow'); setComposing(true) }}><Plus size={16} />发起协作</button>
-        <button type="button" className={`pc-new${composing && composeMode === 'message' ? ' selected' : ''}`} disabled={locked} onClick={() => { setComposeMode('message'); setComposing(true) }}><Mail size={16} />专员消息</button>
+        {scopedCollaborations === undefined && <>
+          <button type="button" className={`pc-new${composing && composeMode === 'workflow' ? ' selected' : ''}`} disabled={locked} onClick={() => { setComposeMode('workflow'); setComposing(true) }}><Plus size={16} />发起协作</button>
+          <button type="button" className={`pc-new${composing && composeMode === 'message' ? ' selected' : ''}`} disabled={locked} onClick={() => { setComposeMode('message'); setComposing(true) }}><Mail size={16} />专员消息</button>
+        </>}
         {listError && <div className="pc-error" role="alert">{listError}<button type="button" onClick={refresh}>重试加载列表</button></div>}
         {loading && !items.length && <div className="pc-empty" role="status">正在加载协作…</div>}
         {!loading && !listError && !items.length && <div className="pc-empty">尚无协作任务</div>}
@@ -268,10 +289,10 @@ export function PersonalCollaborations({ api, agents, sourceSessionId, busy, onC
         </button>)}</div>
       </aside>
       <main className="pc-content">
-        <div hidden={!composing || composeMode !== 'workflow'}><CollaborationComposer key={composerKey} api={api} agents={agents} sourceSessionId={sourceSessionId}
+        {scopedCollaborations === undefined && <><div hidden={!composing || composeMode !== 'workflow'}><CollaborationComposer key={composerKey} api={api} agents={agents} sourceSessionId={sourceSessionId}
           onBusy={setSubmitting} onCreated={value => acceptCreated(value, 'workflow')} /></div>
         <div hidden={!composing || composeMode !== 'message'}><ManualMessageComposer key={messageComposerKey} api={api} agents={agents} sourceSessionId={sourceSessionId}
-          onBusy={setSubmitting} onCreated={value => acceptCreated(value, 'message')} /></div>
+          onBusy={setSubmitting} onCreated={value => acceptCreated(value, 'message')} /></div></>}
         {!composing && <>
           {detailError && <div className="pc-error" role="alert">{detailError}<button type="button" onClick={refresh}>重试加载任务</button></div>}
           {actionError && <div className="pc-error" role="alert">{actionError}</div>}
@@ -327,7 +348,7 @@ export function PersonalCollaborations({ api, agents, sourceSessionId, busy, onC
                 <EventData event={event} />
               </div></li>)}</ol> : <div className="pc-empty">尚无执行记录</div>}
             </details>
-            {activeStatuses.has(selected.status) && !selected.cancel_requested && <div className="pc-stop">
+            {allowCancel && activeStatuses.has(selected.status) && !selected.cancel_requested && <div className="pc-stop">
               {cancelConfirm ? <div className="pc-stop-confirm" role="group" aria-label="确认停止协作"><strong>停止这次协作？</strong><div><button type="button" disabled={cancelling} onClick={() => setCancelConfirm(false)}>继续执行</button><button type="button" className="pc-danger" disabled={cancelling} onClick={() => void cancel()}>{cancelling ? '正在停止…' : '确认停止'}</button></div></div>
                 : <button type="button" className="pc-danger" disabled={locked} onClick={() => setCancelConfirm(true)}><CircleStop size={14} />停止协作</button>}
             </div>}

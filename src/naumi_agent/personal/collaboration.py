@@ -139,6 +139,7 @@ class PersonalCollaborationService:
         title: str = "",
         peer_agents: list[dict] | None = None,
         _manual_dispatch: bool = False,
+        _team_execution: dict | None = None,
     ) -> dict:
         session = await self.engine.session_store.load(source_session_id)
         if session is None:
@@ -160,15 +161,39 @@ class PersonalCollaborationService:
             if not _manual_dispatch:
                 raise PersonalAgentError("invalid_input", "请使用专员消息入口派送消息")
         peer_agents = self.messages.normalize_grants(peer_agents, replay=existing is not None)
+        if _team_execution is not None:
+            self.engine.personal_teams.validate_phase_request(
+                _team_execution,
+                source_session_id=source_session_id,
+                request_id=request_id,
+                steps=steps,
+                context=context,
+                title=title,
+                peer_agents=peer_agents,
+            )
         if existing is None:
             if not isinstance(steps, list):
                 raise PersonalAgentError("invalid_input", "协作步骤必须是列表")
             for step in steps:
                 if not isinstance(step, dict) or "agent_id" not in step:
                     raise PersonalAgentError("invalid_input", "每个步骤都需要选择专员")
-                profile = self.personal._executable(step["agent_id"])
+                coordinator = (
+                    _team_execution is not None
+                    and _team_execution["phase"] in {"planning", "summary"}
+                    and step["agent_id"] == _team_execution["team_id"]
+                )
+                profile = (
+                    self.personal.require_active_profile(step["agent_id"])
+                    if coordinator
+                    else self.personal._executable(step["agent_id"])
+                )
                 if profile.version != step.get("agent_version"):
                     raise PersonalAgentError("version_conflict", "专员配置已变更，请刷新后发起协作")
+                if "tool_names" in step and (
+                    _team_execution is None
+                    or not set(step["tool_names"]) <= set(profile.tool_names)
+                ):
+                    raise PersonalAgentError("team_scope_denied", "成员步骤超出本次团队工具范围")
         plan = self.store.create(
             workspace_key=self.workspace_key,
             source_session_id=source_session_id,
@@ -178,6 +203,7 @@ class PersonalCollaborationService:
             context=context,
             title=title,
             peer_agents=peer_agents,
+            team_execution=_team_execution,
         )
         feedback = getattr(self.engine, "_active_feedback_turn", None)
         if existing is None:
@@ -363,7 +389,11 @@ class PersonalCollaborationService:
             elif source["id"] in rejected:
                 step.update(status="blocked", error=rejected[source["id"]]["message"])
             for event in events:
-                if event["step_id"] == source["id"] and event["data"].get("run_id"):
+                if (
+                    event["step_id"] == source["id"]
+                    and event["data"].get("run_id")
+                    and event["data"].get("session_id") == source["session_id"]
+                ):
                     step["run_id"] = event["data"]["run_id"]
             if step["job_id"] and not step["run_id"]:
                 runs = await self.engine.chat_run_store.list_runs(step["session_id"], limit=1)
@@ -484,6 +514,27 @@ class PersonalCollaborationService:
 
     async def _advance(self, plan: dict) -> None:
         view = await self._view(plan)
+        if plan.get("team_execution"):
+            try:
+                await self.engine.personal_teams.authorize_execution(plan)
+            except PersonalAgentError as exc:
+                if exc.code == "team_cancelled":
+                    self.store.request_cancel(plan["id"], self.workspace_key)
+                    plan = self.store.get(plan["id"], self.workspace_key)
+                else:
+                    for source in plan["steps"]:
+                        if not any(
+                            e["kind"] == "dispatch_prepared" and e["step_id"] == source["id"]
+                            for e in view["events"]
+                        ):
+                            self._event(
+                                plan,
+                                f"reject:{source['id']}",
+                                "dispatch_rejected",
+                                step_id=source["id"],
+                                data={"code": exc.code, "message": exc.message},
+                            )
+                    return
         prepared = {
             e["step_id"]: e["data"]["request"]
             for e in view["events"]
@@ -518,6 +569,8 @@ class PersonalCollaborationService:
             if any(steps[key]["status"] != "completed" for key in step["depends_on"]):
                 continue
             context = self._context(plan, step, steps)
+            if plan.get("team_execution"):
+                context = await self.engine.personal_teams.execution_context(plan, step, context)
             if len(context.encode("utf-8")) > 16 * 1024**2:
                 self._event(
                     plan,
@@ -539,11 +592,19 @@ class PersonalCollaborationService:
                     agent_name=profile.id,
                     task=step["task"],
                     context=context,
-                    tool_scope=profile.tool_names,
+                    tool_scope=step.get("tool_names", profile.tool_names),
                     permission_mode=self.engine.config.safety.permission_mode,
                     model_tier=profile.model_tier,
-                    max_turns=self.engine.config.safety.max_turns,
-                    max_budget_usd=self.engine.config.safety.max_budget_usd,
+                    max_turns=(
+                        plan["team_execution"]["max_turns"]
+                        if plan.get("team_execution")
+                        else self.engine.config.safety.max_turns
+                    ),
+                    max_budget_usd=(
+                        plan["team_execution"]["max_budget_usd"]
+                        if plan.get("team_execution")
+                        else self.engine.config.safety.max_budget_usd
+                    ),
                     timeout_seconds=600,
                     message_topic=plan["id"],
                     issued_at=plan["created_at"],
@@ -688,6 +749,8 @@ class PersonalCollaborationService:
             shared["peer_agents"] = plan["peer_agents"]
         if step.get("message"):
             shared["manual_message"] = step["message"]
+        if plan.get("team_execution"):
+            shared["team_execution"] = plan["team_execution"]
         return json.dumps(shared, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
     async def _renew(self, job, execution: asyncio.Task) -> None:
@@ -708,6 +771,8 @@ class PersonalCollaborationService:
                     if not execution.cancelling():
                         execution.cancel()
                     return
+                if plan and plan.get("team_execution"):
+                    await self.engine.personal_teams.authorize_execution(plan)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -851,7 +916,15 @@ class PersonalCollaborationService:
                 claim_epoch=job.claim_epoch,
             )
             renewal = asyncio.create_task(self._renew(job, asyncio.current_task()))
-            profile = self.personal._executable(step["agent_id"])
+            coordinator = (
+                plan.get("team_execution", {}).get("phase") in {"planning", "summary"}
+                and step["agent_id"] == plan["team_execution"]["team_id"]
+            )
+            profile = (
+                self.personal.require_active_profile(step["agent_id"])
+                if coordinator
+                else self.personal._executable(step["agent_id"])
+            )
             if profile.version != step["agent_version"]:
                 raise PersonalAgentError("version_conflict", "专员配置已更新，旧版本任务已停止")
             if job.request.permission_mode != self.engine.config.safety.permission_mode:
@@ -863,6 +936,7 @@ class PersonalCollaborationService:
                 self.workspace_key,
                 step["session_id"],
                 session_db_key=self.personal.session_db_key,
+                allow_team=coordinator,
             )
             existing = await self.engine.session_store.load(step["session_id"])
             if existing is not None:
@@ -895,10 +969,17 @@ class PersonalCollaborationService:
                     "context_sha256": job.request.context_sha256,
                 },
             )
-            child = self._child_factory(step, job)
+            child_step = (
+                {**step, "team_execution": plan["team_execution"]}
+                if plan.get("team_execution")
+                else step
+            )
+            child = self._child_factory(child_step, job)
             if not await child.load_session(step["session_id"]):
                 raise PersonalAgentError("not_found", "专员执行会话未能恢复")
             child._personal_collaboration_task_id = step["task_id"]
+            if plan.get("team_execution"):
+                self.engine.personal_teams.bind_execution(child, plan, step)
 
             async def authorize():
                 authority = await self.jobs.get(job.job_id)
@@ -915,7 +996,13 @@ class PersonalCollaborationService:
                     raise PersonalAgentError(
                         "version_conflict", "执行权限策略已变更，已停止后续动作"
                     )
-                source_profile = self.personal._executable(step["agent_id"])
+                if plan.get("team_execution"):
+                    await self.engine.personal_teams.authorize_execution(plan)
+                source_profile = (
+                    self.personal.require_active_profile(step["agent_id"])
+                    if coordinator
+                    else self.personal._executable(step["agent_id"])
+                )
                 if source_profile.version != step["agent_version"]:
                     raise PersonalAgentError("version_conflict", "发送专员已更新，已停止旧版本协作")
                 current_plan = self.store.get(plan["id"], self.workspace_key)
@@ -1169,6 +1256,9 @@ class PersonalCollaborationService:
             if job.request.max_cost_microusd is None
             else job.request.max_cost_microusd / 1_000_000
         )
+        if step.get("team_execution"):
+            config.safety.max_input_tokens = step["team_execution"]["max_input_tokens"]
+            config.safety.max_output_tokens = step["team_execution"]["max_output_tokens"]
         paths = build_runtime_paths(config)
         # Bound names keep nested resources below Windows' legacy path limit;
         # the complete immutable IDs remain in Job/message records, not filenames.

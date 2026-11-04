@@ -141,6 +141,18 @@ export function useWorkspaceController() {
     return allMessages
   }, [api])
 
+  const conversationRevision = useRef(0)
+  const refreshConversation = useCallback(async (expectedSessionId: string) => {
+    if (activeId.current !== expectedSessionId || operation.current) return false
+    const expectedGeneration = generation.current
+    const revision = ++conversationRevision.current
+    const history = await fetchAllMessages(expectedSessionId)
+    if (generation.current !== expectedGeneration || revision !== conversationRevision.current
+      || activeId.current !== expectedSessionId || operation.current) return false
+    setMessages(history)
+    return true
+  }, [fetchAllMessages])
+
   const select = useCallback(
     async (id: string | null) => {
       const target = id ? sessionsRef.current.find((item) => item.id === id) : undefined
@@ -989,6 +1001,7 @@ export function useWorkspaceController() {
     permissions: permissions.filter((permission) => permission.sessionId === sessionId),
     liveEvents,
     select,
+    refreshConversation,
     connect,
     send,
     regenerate,

@@ -36,6 +36,13 @@ _ERROR_STATUS = {
     "peer_cycle": 409,
     "peer_depth": 409,
     "peer_limit": 409,
+    "team_turn_required": 409,
+    "team_cancelled": 409,
+    "team_scope_denied": 403,
+    "team_depth": 409,
+    "team_limit": 422,
+    "budget_exhausted": 409,
+    "catalog_unavailable": 503,
     "unsupported_schema": 503,
 }
 
@@ -56,12 +63,14 @@ class PersonalRoute(APIRoute):
                     },
                 )
             except PersonalAgentError as exc:
+                details = {"detail": exc.message, "code": exc.code}
+                if isinstance(getattr(exc, "accepted", None), bool):
+                    details["accepted"] = exc.accepted
+                if isinstance(getattr(exc, "turn_id", None), str):
+                    details["turn_id"] = exc.turn_id
                 return JSONResponse(
                     status_code=_ERROR_STATUS.get(exc.code, 422),
-                    content={
-                        "detail": exc.message,
-                        "code": exc.code,
-                    },
+                    content=details,
                 )
 
         return handler
@@ -305,3 +314,51 @@ async def acknowledge_message(
         message_id,
         body.expected_response_sha256,
     )
+
+
+class TeamTurnCreate(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+    source_session_id: str = Field(min_length=1, max_length=128)
+    team_id: str = Field(pattern=r"^pa_[0-9a-f]{32}$")
+    team_version: int = Field(ge=1, le=2_147_483_647)
+    request_id: str = Field(min_length=1, max_length=128)
+    content: str = Field(min_length=1, max_length=16000)
+    context: str = Field(default="", max_length=32000)
+    source_ids: list[str] = Field(default_factory=list, max_length=32)
+    member_grants: list[PeerGrantCreate] | None = Field(default=None, max_length=128)
+
+
+def _teams(request: Request):
+    service = getattr(_service(request).engine, "personal_teams", None)
+    if service is None:
+        raise PersonalAgentError("configuration_error", "团队服务尚未启动，请重启应用")
+    return service
+
+
+@router.post("/personal/team-turns", status_code=201)
+async def create_team_turn(body: TeamTurnCreate, request: Request, auth: str = AuthDep):
+    return await _teams(request).start_turn(**body.model_dump(exclude_none=True))
+
+
+@router.get("/personal/team-turns")
+async def list_team_turns(
+    request: Request,
+    team_session_id: str | None = Query(default=None, min_length=1, max_length=128),
+    auth: str = AuthDep,
+):
+    return {"turns": await _teams(request).list(team_session_id=team_session_id)}
+
+
+@router.get("/personal/team-turns/{turn_id}")
+async def get_team_turn(turn_id: str, request: Request, auth: str = AuthDep):
+    return await _teams(request).get(turn_id)
+
+
+@router.post("/personal/team-turns/{turn_id}/cancel")
+async def cancel_team_turn(
+    turn_id: str,
+    request: Request,
+    body: OpenSessionRequest | None = None,
+    auth: str = AuthDep,
+):
+    return await _teams(request).cancel(turn_id)

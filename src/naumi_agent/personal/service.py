@@ -18,26 +18,47 @@ from naumi_agent.personal.store import PersonalAgentStore
 logger = logging.getLogger(__name__)
 
 _TOOL_LABELS = {
-    "glob": "按文件名查找文件", "grep": "搜索文件内容", "read": "读取文件",
-    "file_read": "读取文件", "file_write": "写入文件", "file_edit": "编辑文件",
-    "bash_run": "执行终端命令", "code_execute": "运行代码",
-    "web_search": "搜索网络资料", "web_fetch": "读取网页内容",
-    "request_user_input": "向用户提问", "output_publish": "交付文件与图片",
-    "yaml_validate": "检查 YAML 格式", "yaml_micro_verify": "验证 YAML 配置",
-    "browser_goto": "打开网页", "browser_observe": "读取页面状态",
-    "browser_click": "点击页面元素", "browser_type": "输入文本",
-    "browser_hover": "悬停页面元素", "browser_keypress": "发送按键",
-    "browser_scroll": "滚动页面", "browser_evaluate": "执行页面脚本",
-    "browser_select_option": "选择表单选项", "browser_handle_dialog": "处理页面对话框",
-    "browser_navigate_back": "返回上一页", "browser_tabs": "查看浏览器标签页",
-    "browser_switch_tab": "切换标签页", "browser_waitFor": "等待页面就绪",
-    "browser_upload": "上传文件", "browser_drag": "拖动页面元素",
-    "browser_drag_file": "拖入文件", "browser_screenshot": "截取页面图片",
-    "browser_debug_state": "查看浏览器诊断状态", "browser_text_layout_audit": "检查文字布局",
-    "browser_cdp_health": "检查浏览器调试通道", "browser_attach_diagnostics": "诊断浏览器连接",
+    "glob": "按文件名查找文件",
+    "grep": "搜索文件内容",
+    "read": "读取文件",
+    "file_read": "读取文件",
+    "file_write": "写入文件",
+    "file_edit": "编辑文件",
+    "bash_run": "执行终端命令",
+    "code_execute": "运行代码",
+    "web_search": "搜索网络资料",
+    "web_fetch": "读取网页内容",
+    "request_user_input": "向用户提问",
+    "output_publish": "交付文件与图片",
+    "yaml_validate": "检查 YAML 格式",
+    "yaml_micro_verify": "验证 YAML 配置",
+    "browser_goto": "打开网页",
+    "browser_observe": "读取页面状态",
+    "browser_click": "点击页面元素",
+    "browser_type": "输入文本",
+    "browser_hover": "悬停页面元素",
+    "browser_keypress": "发送按键",
+    "browser_scroll": "滚动页面",
+    "browser_evaluate": "执行页面脚本",
+    "browser_select_option": "选择表单选项",
+    "browser_handle_dialog": "处理页面对话框",
+    "browser_navigate_back": "返回上一页",
+    "browser_tabs": "查看浏览器标签页",
+    "browser_switch_tab": "切换标签页",
+    "browser_waitFor": "等待页面就绪",
+    "browser_upload": "上传文件",
+    "browser_drag": "拖动页面元素",
+    "browser_drag_file": "拖入文件",
+    "browser_screenshot": "截取页面图片",
+    "browser_debug_state": "查看浏览器诊断状态",
+    "browser_text_layout_audit": "检查文字布局",
+    "browser_cdp_health": "检查浏览器调试通道",
+    "browser_attach_diagnostics": "诊断浏览器连接",
     "browser_chrome_launcher_info": "查看浏览器启动信息",
-    "browser_start": "启动浏览器", "browser_stop": "关闭浏览器",
+    "browser_start": "启动浏览器",
+    "browser_stop": "关闭浏览器",
     "personal_message": "向协作范围内的专员询问并接收结果",
+    "personal_team": "协调当前团队成员并提交真实分工计划",
 }
 
 # Explicit leaf capabilities prevent future registry additions from silently granting
@@ -56,6 +77,7 @@ ASSIGNABLE_TOOL_NAMES = frozenset(
         "web_fetch",
         "request_user_input",
         "personal_message",
+        "personal_team",
         "output_publish",
         "yaml_validate",
         "yaml_micro_verify",
@@ -121,11 +143,18 @@ class PersonalAgentService:
             if not re.search(r"[\u4e00-\u9fff]", description):
                 label = tool.user_facing_name
                 description = (
-                    label if re.search(r"[\u4e00-\u9fff]", label)
+                    label
+                    if re.search(r"[\u4e00-\u9fff]", label)
                     else _TOOL_LABELS.get(tool.name, tool.name)
                 )
-            tools.append({"name": tool.name, "description": description,
-                          "read_only": bool(tool.metadata.read_only)})
+            entry = {
+                "name": tool.name,
+                "description": description,
+                "read_only": bool(tool.metadata.read_only),
+            }
+            if tool.name == "personal_team":
+                entry["kinds"] = ["team"]
+            tools.append(entry)
         return sorted(tools, key=lambda item: item["name"])
 
     def validate_tools(self, names: Any) -> tuple[str, ...]:
@@ -161,11 +190,15 @@ class PersonalAgentService:
         if set(fields) - allowed or not {"name", "instructions", "request_id"} <= set(fields):
             raise PersonalAgentError("invalid_input", "助理资料缺少必填字段或包含不支持的字段")
         fields["tool_names"] = self.validate_tools(fields.get("tool_names", ()))
+        if "personal_team" in fields["tool_names"] and fields.get("kind", "specialist") != "team":
+            raise PersonalAgentError("tool_not_assignable", "团队协调工具只能分配给团队")
         return self.store.create(**fields)
 
     def update(self, agent_id: str, expected_version: int, **fields: Any) -> PersonalAgent:
         if "tool_names" in fields:
             fields["tool_names"] = self.validate_tools(fields["tool_names"])
+            if "personal_team" in fields["tool_names"] and self.get(agent_id).kind != "team":
+                raise PersonalAgentError("tool_not_assignable", "团队协调工具只能分配给团队")
         return self.store.update(agent_id, expected_version, **fields)
 
     def history(self, agent_id: str) -> tuple[PersonalAgent, ...]:
@@ -176,15 +209,19 @@ class PersonalAgentService:
             self.workspace_key, session_id, session_db_key=self.session_db_key
         )
 
-    def _executable(self, agent_id: str) -> PersonalAgent:
+    def require_active_profile(self, agent_id: str) -> PersonalAgent:
         agent = self.get(agent_id)
         if agent.status != "active":
             raise PersonalAgentError("agent_inactive", "助理已停用或归档，请启用后继续")
+        self.validate_tools(agent.tool_names)
+        return agent
+
+    def _executable(self, agent_id: str) -> PersonalAgent:
+        agent = self.require_active_profile(agent_id)
         if agent.kind == "team":
             raise PersonalAgentError(
-                "team_execution_pending", "团队档案已保存；团队协作执行尚未接通，请先与成员专员对话"
+                "team_turn_required", "请通过团队对话发起任务，不将团队当作单个专员执行"
             )
-        self.validate_tools(agent.tool_names)
         return agent
 
     def _session_valid(self, session: Session) -> bool:
@@ -216,7 +253,7 @@ class PersonalAgentService:
     async def _open_session(self, agent_id: str) -> dict[str, Any]:
         async with self._session_lock:
             for _ in range(3):
-                profile = self._executable(agent_id)
+                profile = self.require_active_profile(agent_id)
                 binding = self.store.get_binding(agent_id, self.workspace_key)
                 if binding is not None:
                     if binding.session_db_key != self.session_db_key:
@@ -233,7 +270,11 @@ class PersonalAgentService:
                         if not marker:
                             existing.personal_agent_id = agent_id
                             await self.engine.session_store.save(existing)
-                        current = self._executable(agent_id)
+                        if profile.kind == "team" and not getattr(existing, "personal_team_id", ""):
+                            await self.engine.session_store.bind_personal_team(
+                                existing.id, agent_id
+                            )
+                        current = self.require_active_profile(agent_id)
                         return {
                             "agent_id": agent_id,
                             "session_id": existing.id,
@@ -252,6 +293,7 @@ class PersonalAgentService:
                 session = Session(
                     title=profile.name,
                     personal_agent_id=profile.id,
+                    personal_team_id=profile.id if profile.kind == "team" else "",
                     model=model,
                     engine="naumi",
                     workspace_root=self.workspace_root,
@@ -276,6 +318,6 @@ class PersonalAgentService:
                 if selected.session_id != session.id:
                     await self._discard_unbound(session)
                     continue
-                current = self._executable(agent_id)
+                current = self.require_active_profile(agent_id)
                 return {"agent_id": agent_id, "session_id": session.id, "version": current.version}
             raise PersonalAgentError("binding_conflict", "助理会话正在恢复，请稍后重新打开")

@@ -25,6 +25,7 @@ from textual.message import Message
 from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.suggester import SuggestFromList
+from textual.widget import AwaitMount
 from textual.widgets import (
     Button,
     Collapsible,
@@ -656,12 +657,13 @@ class ChatPanel(VerticalScroll):
 
     # --- 流式响应 ---
 
-    def start_response(self) -> None:
+    def start_response(self) -> AwaitMount:
         self._trace_event("tui.response_start", {})
         self._response_text = ""
         self._response_widget = Markdown("", classes="agent-msg")
-        self.mount(self._response_widget)
+        mounted = self.mount(self._response_widget)
         self.scroll_end(animate=False)
+        return mounted
 
     def add_response_token(self, token: str) -> None:
         self._trace_output("tui.response_token", token)
@@ -3577,11 +3579,20 @@ class NaumiApp(App):
                     },
                 )
 
-            if result.status == "error" and result.error:
+            if result.status == "admitted":
+                # Durable intake does not emit streaming response events.
+                # Mount first so Markdown initialization cannot erase the reply.
+                await chat.start_response()
+                chat.add_response_token(result.response)
+            elif result.status == "error" and result.error:
                 chat.start_response()
                 chat.add_response_token(f"**错误**: {result.error}")
 
-            if result.status in {"completed", "success"}:
+            if result.status == "admitted":
+                # Only the input handoff is complete; background work is not.
+                terminal_state = "completed"
+                terminal_reason = "background_task_admitted"
+            elif result.status in {"completed", "success"}:
                 terminal_state = "completed"
                 terminal_reason = "run_completed"
             else:
@@ -3628,8 +3639,11 @@ class NaumiApp(App):
             ctx = self.engine.get_context_info()
             ctx_pct = ctx["percentage"]
             status_parts.append(f"上下文: {ctx_pct}%")
-            status_prefix = "✅" if terminal_state == "completed" else "❌"
-            status.status_text = f"{status_prefix} " + " | ".join(status_parts)
+            if result.status == "admitted":
+                status.status_text = "后台任务已受理"
+            else:
+                status_prefix = "✅" if terminal_state == "completed" else "❌"
+                status.status_text = f"{status_prefix} " + " | ".join(status_parts)
         except asyncio.CancelledError:
             terminal_state = "cancelled"
             terminal_reason = "run_cancelled"

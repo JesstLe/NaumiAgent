@@ -503,7 +503,13 @@ class PersonalAgentStore:
             return _profile(rows[0]) if rows else None
 
     def register_execution_session(
-        self, agent_id: str, workspace_key: str, session_id: str, *, session_db_key: str
+        self,
+        agent_id: str,
+        workspace_key: str,
+        session_id: str,
+        *,
+        session_db_key: str,
+        allow_team: bool = False,
     ) -> None:
         """Record immutable execution ownership without replacing the daily chat pointer."""
         agent_id = _agent_id(agent_id)
@@ -512,7 +518,9 @@ class PersonalAgentStore:
         session_db_key = _text(session_db_key, "会话库标识", 2048)
         with self._connection(write=True) as conn:
             profile = self._required(conn, agent_id)
-            if profile.status != "active" or profile.kind != "specialist":
+            if profile.status != "active" or (
+                profile.kind != "specialist" and not (allow_team is True and profile.kind == "team")
+            ):
                 raise PersonalAgentError("agent_inactive", "请先启用专员，再发起协作")
             existing = conn.execute(
                 "SELECT agent_id FROM personal_agent_sessions WHERE workspace_key=? "

@@ -10,6 +10,7 @@ from typing import Any
 
 from naumi_agent.personal import peer_models
 from naumi_agent.personal.models import PersonalAgentError
+from naumi_agent.personal.team_models import normalize_client_payload
 from naumi_agent.tools.base import ToolCall
 
 _FIELDS = frozenset(
@@ -34,7 +35,7 @@ _HELP = """个人助理命令：
 /assistants create "名称" "职责" — 创建专员，初始不授予工具
 /assistants create-json '<JSON对象>' — 指定职责、工具与团队成员创建
 /assistants update-json <ID> <版本> '<JSON对象>' — 修改指定版本的配置
-/assistants open <ID> — 打开专员会话
+/assistants open <ID> — 打开专员或团队会话
 /assistants pause|resume|archive <ID> <版本> — 暂停、恢复或归档
 /assistants history <ID> — 查看配置修订记录
 /assistants collaborate-json '<JSON对象>' — 按步骤委派给已有专员
@@ -45,7 +46,11 @@ _HELP = """个人助理命令：
 /assistants message-json '<JSON对象>' — 指定已有专员发送消息
 /assistants messages <协作ID> — 查看双方消息记录
 /assistants message <消息ID> — 查看完整问题、回答与回执
-/assistants message-ack <消息ID> <回答SHA256> — 确认已收到原回答"""
+/assistants message-ack <消息ID> <回答SHA256> — 确认已收到原回答
+/assistants team-json '<JSON对象>' — 向已有团队提交持久任务，team-send-json 同义
+/assistants team-turns [团队会话ID] — 查看团队任务记录
+/assistants team-turn <团队任务ID> — 查看阶段、成员执行与完整结果
+/assistants cancel-team-turn <团队任务ID> — 请求停止团队任务"""
 
 
 def _identifier(value: str) -> str:
@@ -78,6 +83,39 @@ def _object(value: str, *, create: bool) -> dict[str, Any]:
     return fields
 
 
+def _team_object(value: str) -> dict[str, Any]:
+    def unique_fields(pairs):
+        result = {}
+        for key, item in pairs:
+            if key in result:
+                raise ValueError("团队消息 JSON 包含重复字段")
+            result[key] = item
+        return result
+
+    def invalid_constant(_value):
+        raise ValueError("团队消息 JSON 包含非标准数字")
+
+    try:
+        raw = json.loads(value, object_pairs_hook=unique_fields, parse_constant=invalid_constant)
+    except (ValueError, RecursionError) as exc:
+        raise ValueError("团队消息 JSON 格式有误，请检查引号、重复字段和数字。") from exc
+    if not isinstance(raw, dict):
+        raise ValueError("团队消息需要完整 JSON 对象。")
+    fields = dict(raw)
+    source = fields.pop("source_session_id", None)
+    if "source_session_id" in raw and (
+        not isinstance(source, str) or not _IDENTIFIER.fullmatch(source)
+    ):
+        raise ValueError("来源会话 ID 格式不正确，请从原始对话发送。")
+    try:
+        result = normalize_client_payload({"request_id": uuid.uuid4().hex, **fields})
+    except PersonalAgentError as exc:
+        raise ValueError(exc.message) from exc
+    if "source_session_id" in raw:
+        result["source_session_id"] = source
+    return result
+
+
 def parse_assistants_command(argument: str) -> dict[str, Any]:
     """Parse one bounded command into tool arguments without executing anything."""
     if len(argument) > 256000:
@@ -89,6 +127,16 @@ def parse_assistants_command(argument: str) -> dict[str, Any]:
     if not parts:
         return {"operation": "list"}
     action, *args = parts
+    if action in {"team-json", "team-send-json"} and len(args) == 1:
+        return {"operation": "team_send", **_team_object(args[0])}
+    if action == "team-turns" and len(args) <= 1:
+        if args and not _IDENTIFIER.fullmatch(args[0]):
+            raise ValueError("团队会话 ID 格式不正确，请从原始团队对话复制。")
+        return {"operation": "team_turns", **({"team_session_id": args[0]} if args else {})}
+    if action in {"team-turn", "cancel-team-turn"} and len(args) == 1:
+        if not re.fullmatch(r"pt_[0-9a-f]{32}", args[0]):
+            raise ValueError("团队任务 ID 格式无效，请从团队任务记录复制。")
+        return {"operation": action.replace("-", "_"), "turn_id": args[0]}
     if action == "message-json" and len(args) == 1:
         try:
             fields = json.loads(args[0])
@@ -233,6 +281,15 @@ def _profile_summary(agent: dict[str, Any]) -> str:
 
 
 def _format_result(operation: str, payload: Any) -> str:
+    if operation == "team_turns" and isinstance(payload, dict):
+        turns = payload.get("turns", [])
+        if not turns:
+            return "暂无团队任务。"
+        return "团队任务记录\n" + "\n".join(
+            _team_turn_summary(turn) for turn in turns if isinstance(turn, dict)
+        )
+    if operation in {"team_send", "team_turn", "cancel_team_turn"} and isinstance(payload, dict):
+        return _format_team_turn(payload)
     if operation == "messages" and isinstance(payload, dict):
         messages = payload.get("messages", [])
         if not messages:
@@ -323,6 +380,93 @@ def _message_text(value: Any) -> str:
     return re.sub(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]", "", str(value or "").replace("\r\n", "\n"))
 
 
+def _team_turn_summary(turn: dict[str, Any]) -> str:
+    labels = {
+        "queued": "已受理，等待规划",
+        "planning": "任务规划中",
+        "working": "成员执行中",
+        "summarizing": "汇总中",
+        "delivery_pending": "结果待写回",
+        "completed": "已完成",
+        "cancelled": "已停止",
+        "error": "执行未完成",
+        "unknown": "结果待核实",
+        "blocked": "执行受阻",
+    }
+    status = labels.get(str(turn.get("status")), "状态待核对")
+    identity = _display(turn.get("id"))
+    team = _display(turn.get("team_name") or turn.get("team_id"))
+    version = _display(turn.get("team_version"))
+    return f"{identity} · {team} · v{version} · {status}"
+
+
+def _format_team_turn(turn: dict[str, Any]) -> str:
+    lines = ["团队任务：" + _team_turn_summary(turn)]
+    for key, label in (
+        ("request_id", "原请求"),
+        ("source_session_id", "来源会话"),
+        ("team_session_id", "团队对话"),
+        ("result_message_id", "结果消息"),
+    ):
+        if turn.get(key):
+            lines.append(label + "：" + _display(turn[key]))
+    if turn.get("cancel_requested") and turn.get("status") not in {
+        "completed",
+        "cancelled",
+        "error",
+        "unknown",
+        "blocked",
+    }:
+        lines.append("停止请求已记录，等待执行者收口。")
+    roster = turn.get("roster", {})
+    for member in roster.get("agents", []) if isinstance(roster, dict) else []:
+        if isinstance(member, dict):
+            lines.append(
+                f"授权成员：{_display(member.get('agent_id'))} · "
+                f"v{_display(member.get('agent_version'))}"
+            )
+    phase_names = {"planning": "任务规划", "members": "成员分工", "summary": "结果汇总"}
+    for phase in turn.get("phases", []):
+        if not isinstance(phase, dict):
+            continue
+        collaboration = phase.get("collaboration", {})
+        if not isinstance(collaboration, dict):
+            continue
+        name = phase_names.get(str(phase.get("phase")), "执行阶段")
+        lines.append(
+            f"{name}：{_display(phase.get('collaboration_id') or collaboration.get('id'))} · "
+            f"{_collaboration_status(collaboration.get('status'))}"
+        )
+        for item in collaboration.get("steps", []):
+            if not isinstance(item, dict):
+                continue
+            lines.append(
+                f"  {_display(item.get('id'))} · "
+                f"{_display(item.get('agent_name') or item.get('agent_id'))} · "
+                f"{_display(item.get('agent_id'))} · v{_display(item.get('agent_version'))} · "
+                f"{_collaboration_status(item.get('status'))}"
+            )
+            for key, label in (("job_id", "Job"), ("run_id", "Run"), ("session_id", "执行会话")):
+                if item.get(key):
+                    lines.append(f"  {label}：{_display(item[key])}")
+            for key, label in (("response", "阶段结果"), ("error", "阶段异常")):
+                if item.get(key):
+                    lines.append(label + "：\n" + _message_text(item[key]))
+    for key, label in (("response", "完整结果"), ("error", "执行异常")):
+        if turn.get(key):
+            lines.append(label + "：\n" + _message_text(turn[key]))
+    if turn.get("result_sha256"):
+        lines.append("结果 SHA256：" + _display(turn["result_sha256"]))
+    usage = turn.get("usage")
+    if isinstance(usage, dict):
+        lines.append(
+            f"用量：{_display(usage.get('total_tokens', 0))} tokens · "
+            f"{_display(usage.get('job_count', 0))} 个 Job · "
+            f"{_display(usage.get('total_cost_usd', 0))} 美元"
+        )
+    return "\n".join(lines)
+
+
 def _message_summary(message: dict[str, Any]) -> str:
     status = {
         "queued": "等待派送",
@@ -378,7 +522,14 @@ async def run_assistants_command(engine: Any, argument: str) -> str:
         if arguments["operation"] == "open":
             return "助理会话回执格式有误，当前会话保持不变，请重试。"
         return str(result.content)
-    if isinstance(payload, dict) and payload.get("error"):
+    team_snapshot = (
+        arguments["operation"] in {"team_send", "team_turn", "cancel_team_turn"}
+        and isinstance(payload, dict)
+        and isinstance(payload.get("id"), str)
+        and re.fullmatch(r"pt_[0-9a-f]{32}", payload["id"])
+        and isinstance(payload.get("status"), str)
+    )
+    if isinstance(payload, dict) and payload.get("error") and not team_snapshot:
         return f"操作未完成：{_display(payload['error'])}"
     if arguments["operation"] == "open":
         session_id = payload.get("session_id") if isinstance(payload, dict) else None

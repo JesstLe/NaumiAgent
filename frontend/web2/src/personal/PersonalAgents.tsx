@@ -95,9 +95,10 @@ export function PersonalAgentEditor({ api, agent, agents, busy, onClose, onSaved
   const alive = useRef(true)
   const creationIdentity = useRef('')
   const locked = saving || busy
-  const filteredTools = useMemo(() => tools.filter(tool =>
+  const availableTools = useMemo(() => tools.filter(tool => !tool.kinds || tool.kinds.includes(kind)), [tools, kind])
+  const filteredTools = useMemo(() => availableTools.filter(tool =>
     `${tool.name} ${tool.description}`.toLowerCase().includes(toolQuery.trim().toLowerCase()),
-  ), [tools, toolQuery])
+  ), [availableTools, toolQuery])
   const memberOptions = agents.filter(candidate => candidate.id !== agent?.id
     && (candidate.status === 'active' || members.includes(candidate.id)))
 
@@ -165,7 +166,7 @@ export function PersonalAgentEditor({ api, agent, agents, busy, onClose, onSaved
     finally { if (alive.current) setHistoryLoading(false) }
   }
   const toggleTool = (tool: string) => setSelectedTools(value => value.includes(tool) ? value.filter(name => name !== tool) : [...value, tool])
-  const unavailableTools = selectedTools.filter(name => !tools.some(tool => tool.name === name))
+  const unavailableTools = selectedTools.filter(name => !availableTools.some(tool => tool.name === name))
 
   return <dialog ref={dialog} className="pa-editor" aria-labelledby={headingId} onCancel={event => { event.preventDefault(); if (!locked) onClose() }}>
     <header className="pa-editor-heading"><div><span className="pa-avatar">{kind === 'team' ? <Users size={18} /> : <Bot size={18} />}</span><h2 id={headingId}>{agent ? '编辑助理' : '创建助理'}</h2>{agent && <span className="pa-version">v{agent.version}</span>}</div><button type="button" aria-label="关闭助理设置" disabled={locked} onClick={onClose}><X size={18} /></button></header>
@@ -173,7 +174,12 @@ export function PersonalAgentEditor({ api, agent, agents, busy, onClose, onSaved
       <div className="pa-editor-body">
         {error && <div className="pa-form-error" role="alert">{error}</div>}
         <fieldset disabled={locked || agent?.status === 'archived'} className="pa-fields">
-          <div className="pa-field-row"><label>名称<input aria-label="名称" autoFocus required maxLength={80} value={name} onChange={event => setName(event.target.value)} /></label><label>类型<select aria-label="类型" value={kind} disabled={Boolean(agent)} onChange={event => setKind(event.target.value as PersonalAgent['kind'])}><option value="specialist">专员</option><option value="team">团队</option></select></label></div>
+          <div className="pa-field-row"><label>名称<input aria-label="名称" autoFocus required maxLength={80} value={name} onChange={event => setName(event.target.value)} /></label><label>类型<select aria-label="类型" value={kind} disabled={Boolean(agent)} onChange={event => {
+            const selected = event.target.value as PersonalAgent['kind']
+            setKind(selected)
+            setSelectedTools(value => value.filter(name => !tools.find(tool => tool.name === name)?.kinds
+              || tools.find(tool => tool.name === name)?.kinds?.includes(selected)))
+          }}><option value="specialist">专员</option><option value="team">团队</option></select></label></div>
           <label>简介<input aria-label="简介" maxLength={500} value={description} onChange={event => setDescription(event.target.value)} /></label>
           <label>职责与工作方式<textarea aria-label="职责与工作方式" required rows={5} maxLength={12000} value={instructions} onChange={event => setInstructions(event.target.value)} /></label>
           <label>模型能力<select aria-label="模型能力" value={tier} onChange={event => setTier(event.target.value as PersonalAgent['model_tier'])}>{Object.entries(tierLabels).map(([value, text]) => <option key={value} value={value}>{text}</option>)}</select></label>

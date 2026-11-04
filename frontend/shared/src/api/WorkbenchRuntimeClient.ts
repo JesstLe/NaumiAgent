@@ -82,7 +82,7 @@ export type PersonalAgentInput = Pick<PersonalAgent,
 export type PersonalAgentUpdate = Partial<Omit<PersonalAgentInput, 'kind'> & Pick<PersonalAgent, 'status'>> & {
   expected_version: number
 }
-export interface PersonalTool { name: string; description: string; read_only?: boolean }
+export interface PersonalTool { name: string; description: string; read_only?: boolean; kinds?: PersonalAgent['kind'][] }
 
 export interface PersonalPeerGrant {
   agent_id: string
@@ -207,6 +207,46 @@ export interface PersonalCollaboration {
   peer_sessions?: PersonalPeerSession[]
 }
 
+export type PersonalTeamTurnStatus = 'queued' | 'planning' | 'working' | 'summarizing'
+  | 'completed' | 'cancelled' | 'error' | 'unknown' | 'blocked' | 'delivery_pending'
+export interface PersonalTeamTurnInput {
+  source_session_id: string
+  team_id: string
+  team_version: number
+  request_id: string
+  content: string
+  context?: string
+  source_ids?: string[]
+  member_grants?: PersonalPeerGrant[]
+}
+export interface PersonalTeamRoster {
+  teams: { agent_id: string; agent_version: number; member_ids: string[] }[]
+  agents: { agent_id: string; agent_version: number; tool_names: string[] }[]
+}
+export interface PersonalTeamTurn {
+  id: string
+  request_id: string
+  team_id: string
+  team_version: number
+  team_name: string
+  source_session_id: string
+  team_session_id: string
+  source_user_message_id: string
+  result_message_id: string
+  content: string
+  context: string
+  created_at: string
+  updated_at: string
+  cancel_requested: boolean
+  status: PersonalTeamTurnStatus
+  response: string
+  error: string
+  result_sha256: string
+  usage: { total_tokens: number; total_cost_usd: number; job_count: number }
+  roster: PersonalTeamRoster
+  phases: { phase: 'planning' | 'members' | 'summary'; collaboration_id: string; collaboration: PersonalCollaboration }[]
+}
+
 function preferenceNamespace(): string {
   try {
     return new URLSearchParams(location.search).get('naumiWindow')?.trim() || ''
@@ -318,6 +358,13 @@ export async function consumeEvents(
   }
 }
 
+export class WorkbenchRequestError extends Error {
+  constructor(message: string, readonly status: number, readonly code = '') {
+    super(message)
+    this.name = 'WorkbenchRequestError'
+  }
+}
+
 export class WorkbenchRuntimeClient extends WorkbenchApiClient {
   constructor(
     private base: string,
@@ -338,13 +385,14 @@ export class WorkbenchRuntimeClient extends WorkbenchApiClient {
     })
     if (!response.ok) {
       if (response.status === 401)
-        throw new Error('连接令牌无效，请在设置中更新')
-      if (response.status === 429) throw new Error('请求较多，请稍后重试')
+        throw new WorkbenchRequestError('连接令牌无效，请在设置中更新', 401)
+      if (response.status === 429) throw new WorkbenchRequestError('请求较多，请稍后重试', 429)
       const detail = await response.json().catch(() => ({}))
-      throw new Error(
+      throw new WorkbenchRequestError(
         typeof detail.detail === 'string'
           ? detail.detail
-          : `请求失败（${response.status}），请重试`,
+          : `请求失败（${response.status}），请重试`, response.status,
+        typeof detail.code === 'string' ? detail.code : '',
       )
     }
     return response
@@ -406,6 +454,18 @@ export class WorkbenchRuntimeClient extends WorkbenchApiClient {
   }
   async createPersonalMessage(body: PersonalMessageInput): Promise<PersonalCollaboration> {
     return (await this.fetch('/personal/messages', { method: 'POST', body: JSON.stringify(body) })).json()
+  }
+  async personalTeamTurns(teamSessionId: string): Promise<{ turns: PersonalTeamTurn[] }> {
+    return (await this.fetch(`/personal/team-turns?team_session_id=${encodeURIComponent(teamSessionId)}`)).json()
+  }
+  async personalTeamTurn(id: string): Promise<PersonalTeamTurn> {
+    return (await this.fetch(`/personal/team-turns/${encodeURIComponent(id)}`)).json()
+  }
+  async createPersonalTeamTurn(body: PersonalTeamTurnInput): Promise<PersonalTeamTurn> {
+    return (await this.fetch('/personal/team-turns', { method: 'POST', body: JSON.stringify(body) })).json()
+  }
+  async cancelPersonalTeamTurn(id: string): Promise<PersonalTeamTurn> {
+    return (await this.fetch(`/personal/team-turns/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: '{}' })).json()
   }
   async outputAsset(path: string, signal?: AbortSignal): Promise<Blob> {
     if (!/^\/api\/v1\/output-assets\/[a-f0-9]{64}\.(svg|png|jpg|webp|gif|pdf|csv|json|txt|md)$/.test(path)) throw new Error('文件地址无效')

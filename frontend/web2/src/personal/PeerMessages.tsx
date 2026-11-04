@@ -99,9 +99,10 @@ export function usePeerTools(api: Pick<PersonalMessagesApi, 'personalTools'>) {
   return { tools, loading, error, retry: () => setRevision(value => value + 1) }
 }
 
-export function PeerScopeEditor({ agents, tools, value, onChange, disabled = false }: {
+export function PeerScopeEditor({ agents, tools, value, onChange, disabled = false, legend = '互询范围', selectionVerb = '询问' }: {
   agents: PersonalAgent[]; tools: PersonalTool[]; value: PersonalPeerGrant[]
   onChange: (grants: PersonalPeerGrant[]) => void; disabled?: boolean
+  legend?: string; selectionVerb?: '询问' | '分配'
 }) {
   const available = agents.filter(agent => agent.kind === 'specialist' && agent.status === 'active')
   const candidates = [...available, ...agents.filter(agent => value.some(grant => grant.agent_id === agent.id)
@@ -110,14 +111,14 @@ export function PeerScopeEditor({ agents, tools, value, onChange, disabled = fal
     ? [...value, { agent_id: agent.id, agent_version: agent.version, tool_names: defaultPeerTools(agent, tools) }]
     : value.filter(grant => grant.agent_id !== agent.id))
   return <fieldset className="pm-scope" disabled={disabled}>
-    <legend>互询范围</legend>
+    <legend>{legend}</legend>
     {!candidates.length && <span className="pm-empty">尚无可选择的专员</span>}
     {candidates.map(agent => {
       const grant = value.find(candidate => candidate.agent_id === agent.id)
       const selectedTools = grant?.tool_names || []
       const stale = grant && grant.agent_version !== agent.version
       return <div className={`pm-grant${grant ? ' selected' : ''}`} key={agent.id}>
-        <label className="pm-grant-role"><input type="checkbox" aria-label={`允许向${agent.name}询问`}
+        <label className="pm-grant-role"><input type="checkbox" aria-label={selectionVerb === '分配' ? `允许分配给${agent.name}` : `允许向${agent.name}询问`}
           checked={Boolean(grant)} disabled={!grant && (agent.status !== 'active' || value.length >= 128)}
           onChange={event => setGrant(agent, event.target.checked)} /><strong>{agent.name}</strong>
           <code>v{grant?.agent_version || agent.version}</code>{agent.status !== 'active' && <span>已停用</span>}</label>

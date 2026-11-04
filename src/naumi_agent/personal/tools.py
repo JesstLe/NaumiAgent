@@ -39,6 +39,19 @@ _FIELDS = {
     "messages": {"collaboration_id"},
     "message": {"message_id"},
     "message_ack": {"message_id", "expected_response_sha256"},
+    "team_send": {
+        "source_session_id",
+        "team_id",
+        "team_version",
+        "request_id",
+        "content",
+        "context",
+        "source_ids",
+        "member_grants",
+    },
+    "team_turns": {"team_session_id"},
+    "team_turn": {"turn_id"},
+    "cancel_team_turn": {"turn_id"},
 }
 _REQUIRED = {
     "tools": set(),
@@ -64,6 +77,10 @@ _REQUIRED = {
     "messages": {"collaboration_id"},
     "message": {"message_id"},
     "message_ack": {"message_id", "expected_response_sha256"},
+    "team_send": {"team_id", "team_version", "request_id", "content"},
+    "team_turns": set(),
+    "team_turn": {"turn_id"},
+    "cancel_team_turn": {"turn_id"},
 }
 
 
@@ -88,7 +105,10 @@ class PersonalAgentsTool(Tool):
             "peer_agents 显式指定互询对象版本与工具范围，默认没有授权；省略工具范围只准只读与互询。"
             "message_send 以已有专员发送真实消息；messages/message查询双方对话，"
             "message_ack确认回答。"
-            "团队对话入口仍未接通，协作请明确选择成员步骤。"
+            "team_send向已有团队发送持久委托，team_turns/team_turn查询真实阶段与汇总；"
+            "cancel_team_turn请求停止。团队规划、成员与汇总分别有真实Job/Run；"
+            "member_grants省略只授予成员只读范围，写入必须明确授权。"
+            "团队须显式配置personal_team才能分工；空工具团队只对话。"
         )
 
     @property
@@ -101,7 +121,7 @@ class PersonalAgentsTool(Tool):
 
     @property
     def parameters_schema(self) -> dict[str, Any]:
-        return {
+        schema = {
             "type": "object",
             "additionalProperties": False,
             "properties": {
@@ -149,6 +169,16 @@ class PersonalAgentsTool(Tool):
                 "sender_agent_version": {"type": "integer", "minimum": 1},
                 "recipient_agent_version": {"type": "integer", "minimum": 1},
                 "message_id": {"type": "string", "pattern": "^pm_[0-9a-f]{32}$"},
+                "turn_id": {"type": "string", "pattern": "^pt_[0-9a-f]{32}$"},
+                "team_id": {"type": "string", "pattern": "^pa_[0-9a-f]{32}$"},
+                "team_version": {"type": "integer", "minimum": 1, "maximum": 2_147_483_647},
+                "team_session_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                "source_ids": {
+                    "type": "array",
+                    "maxItems": 32,
+                    "uniqueItems": True,
+                    "items": {"type": "string", "minLength": 1, "maxLength": 128},
+                },
                 "expected_response_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
                 "peer_agents": {
                     "type": "array",
@@ -194,6 +224,8 @@ class PersonalAgentsTool(Tool):
             },
             "required": ["operation"],
         }
+        schema["properties"]["member_grants"] = schema["properties"]["peer_agents"].copy()
+        return schema
 
     async def execute(self, **kwargs: Any) -> str:
         try:
@@ -203,7 +235,21 @@ class PersonalAgentsTool(Tool):
             operation = fields.pop("operation")
             if set(fields) - _FIELDS[operation] or not _REQUIRED[operation] <= set(fields):
                 raise PersonalAgentError("invalid_input", "当前操作缺少必填字段或包含无关字段")
-            if operation in {"message_send", "messages", "message", "message_ack"}:
+            if operation in {"team_send", "team_turns", "team_turn", "cancel_team_turn"}:
+                service = self.service.engine.personal_teams
+                if operation == "team_send":
+                    session = await self.service.engine.get_or_create_session()
+                    source_id = fields.pop("source_session_id", session.id)
+                    if source_id != session.id:
+                        raise PersonalAgentError("session_conflict", "请从原始对话发送团队委托")
+                    result = await service.start_turn(source_session_id=source_id, **fields)
+                elif operation == "team_turns":
+                    result = {"turns": await service.list(**fields)}
+                elif operation == "team_turn":
+                    result = await service.get(fields["turn_id"])
+                else:
+                    result = await service.cancel(fields["turn_id"])
+            elif operation in {"message_send", "messages", "message", "message_ack"}:
                 service = self.service.engine.personal_collaborations.messages
                 if operation == "message_send":
                     session = await self.service.engine.get_or_create_session()

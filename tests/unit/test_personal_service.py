@@ -186,7 +186,7 @@ async def test_empty_tool_scope_and_crud_history_use_same_store(setup_service):
     assert profile(service) == archived
 
 
-async def test_paused_archived_and_team_are_not_executable(setup_service):
+async def test_paused_archived_rejected_but_team_opens_without_becoming_a_leaf(setup_service):
     service, _ = setup_service
     agent = profile(service)
     paused = service.update(agent.id, 1, status="paused")
@@ -196,8 +196,12 @@ async def test_paused_archived_and_team_are_not_executable(setup_service):
     with error("agent_inactive"):
         await service.open_session(agent.id)
     team = profile(service, "team", kind="team")
-    with error("team_execution_pending"):
-        await service.open_session(team.id)
+    opened = await service.open_session(team.id)
+    saved = await service.engine.session_store.load(opened["session_id"])
+    assert saved.personal_agent_id == saved.personal_team_id == team.id
+    assert saved.personal_execution_id == ""
+    with error("team_turn_required"):
+        service._executable(team.id)
 
 
 async def test_open_reuses_active_session_and_survives_service_restart(setup_service):

@@ -67,6 +67,25 @@ async def _assert_writable_session(engine, session_id: str) -> None:
             raise HTTPException(409, exc.message) from exc
 
 
+async def _assert_no_active_team_turns(engine, session_id: str) -> None:
+    service = getattr(engine, "personal_teams", None)
+    if service is None:
+        return
+    for turn in await service.list(team_session_id=session_id):
+        running = any(
+            p["collaboration"]["status"] in {"admitted", "claimed", "running", "waiting"}
+            for p in turn["phases"]
+        )
+        if running or turn["status"] in {
+            "queued",
+            "planning",
+            "working",
+            "summarizing",
+            "delivery_pending",
+        }:
+            raise HTTPException(409, "团队任务仍在执行，请先停止任务再归档或删除对话")
+
+
 # --- Sessions ---
 
 
@@ -147,6 +166,7 @@ async def pin_session(
 async def archive_session(session_id: str, request: Request, auth: str = AuthDep):
     engine = request.app.state.engine
     await _assert_writable_session(engine, session_id)
+    await _assert_no_active_team_turns(engine, session_id)
     lock = _engine_lock(request)
     if lock.locked() and getattr(getattr(engine, "_session", None), "id", None) == session_id:
         raise HTTPException(status_code=409, detail="当前会话正在执行，完成或停止后才能归档")
@@ -200,6 +220,7 @@ async def get_session(session_id: str, request: Request, auth: str = AuthDep):
 async def delete_session(session_id: str, request: Request, auth: str = AuthDep):
     engine = request.app.state.engine
     await _assert_writable_session(engine, session_id)
+    await _assert_no_active_team_turns(engine, session_id)
     result = await engine.delete_session_detailed(session_id)
     if result.outcome is ReconciliationCoordinatorOutcome.NOT_FOUND:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -255,7 +276,25 @@ async def send_message(
                     "binding_conflict", "专员身份与会话归属不一致，请恢复后继续"
                 )
             if profile is not None:
-                personal._executable(profile.id)
+                personal.require_active_profile(profile.id)
+                if profile.kind == "team":
+                    if body.edit_message_id or body.linked_issue_id or body.workbench_issue:
+                        raise PersonalAgentError(
+                            "team_turn_required", "团队委托保留原始记录，请发送新消息"
+                        )
+                    if not body.request_id or body.expected_team_version is None:
+                        raise PersonalAgentError(
+                            "team_turn_required", "请使用带请求编号与团队版本的团队入口"
+                        )
+                    result = await engine.personal_teams.start_turn(
+                        source_session_id=session_id,
+                        team_id=profile.id,
+                        team_version=body.expected_team_version,
+                        request_id=body.request_id,
+                        content=body.content,
+                        source_ids=body.source_ids,
+                    )
+                    return JSONResponse(status_code=202, content=result)
         except PersonalAgentError as exc:
             raise HTTPException(409, exc.message) from exc
     if is_pi and body.edit_message_id:

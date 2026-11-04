@@ -22,7 +22,10 @@ from pathlib import Path
 from typing import Any
 
 from naumi_agent.personal.models import PersonalAgentError
+from naumi_agent.personal.peer_models import agent_id as normalized_agent_id
 from naumi_agent.personal.peer_models import dispatch, grants
+from naumi_agent.personal.peer_models import tool_names as normalized_tool_names
+from naumi_agent.personal.peer_models import version as normalized_version
 
 _SCHEMA_VERSION = 1
 _COLLABORATION_ID = re.compile(r"^pc_[0-9a-f]{32}$")
@@ -131,7 +134,7 @@ def _steps(value: Any) -> list[dict[str, Any]]:
         if (
             not isinstance(raw, dict)
             or not _STEP_FIELDS <= set(raw)
-            or set(raw) - _STEP_FIELDS - {"message"}
+            or set(raw) - _STEP_FIELDS - {"message", "tool_names"}
         ):
             raise _invalid("协作步骤缺少必填字段或包含不支持的字段")
         step_id = _identifier(raw["id"], _STEP_ID, "步骤编号", 64)
@@ -160,6 +163,8 @@ def _steps(value: Any) -> list[dict[str, Any]]:
         )
         if "message" in raw:
             steps[-1]["message"] = dispatch(raw["message"])
+        if "tool_names" in raw:
+            steps[-1]["tool_names"] = normalized_tool_names(raw["tool_names"])
     for step in steps:
         if set(step["depends_on"]) - ids:
             raise _invalid("前置步骤不存在，请检查步骤编号")
@@ -173,6 +178,45 @@ def _steps(value: Any) -> list[dict[str, Any]]:
         for key in ready:
             del pending[key]
     return steps
+
+
+def _team_execution(value: Any) -> dict | None:
+    if value is None:
+        return None
+    fields = {
+        "turn_id",
+        "phase",
+        "team_id",
+        "team_version",
+        "max_budget_usd",
+        "max_input_tokens",
+        "max_output_tokens",
+        "max_turns",
+    }
+    if not isinstance(value, dict) or set(value) != fields:
+        raise _invalid("团队阶段凭据字段不正确")
+    if (
+        not isinstance(value["turn_id"], str)
+        or not re.fullmatch(r"pt_[0-9a-f]{32}", value["turn_id"])
+        or value["phase"] not in {"planning", "members", "summary"}
+    ):
+        raise _invalid("团队阶段身份不正确")
+    result = dict(value)
+    result["team_id"] = normalized_agent_id(value["team_id"])
+    result["team_version"] = normalized_version(value["team_version"])
+    result["max_turns"] = _integer(value["max_turns"], "团队阶段执行轮次", 1, 1000)
+    for key in ("max_input_tokens", "max_output_tokens"):
+        if result[key] is not None:
+            result[key] = _integer(result[key], "团队阶段 token 预算", 0, 2**63 - 1)
+    cost = result["max_budget_usd"]
+    if cost is not None and (
+        isinstance(cost, bool)
+        or not isinstance(cost, (int, float))
+        or not math.isfinite(cost)
+        or not 0 <= cost <= 1e9
+    ):
+        raise _invalid("团队阶段费用预算不正确")
+    return result
 
 
 def _event_data(value: Any) -> str:
@@ -353,6 +397,7 @@ class CollaborationStore:
         context: str = "",
         title: str = "",
         peer_agents: list[dict] | None = None,
+        team_execution: dict | None = None,
     ) -> dict[str, Any]:
         workspace_key = _text(workspace_key, "工作区标识", 2048)
         source_session_id = _text(source_session_id, "来源会话编号", 128)
@@ -361,6 +406,9 @@ class CollaborationStore:
             source_agent_id = _identifier(source_agent_id, _AGENT_ID, "来源助理编号", 35)
         request_id = _identifier(request_id, _REQUEST_ID, "请求编号", 128)
         normalized_steps = _steps(steps)
+        owner = _team_execution(team_execution)
+        if owner is None and any("tool_names" in step for step in normalized_steps):
+            raise _invalid("单步工具范围需要可信团队执行凭据")
         payload = {
             "workspace_key": workspace_key,
             "source_session_id": source_session_id,
@@ -375,6 +423,8 @@ class CollaborationStore:
             for item in normalized_grants:
                 item.setdefault("tool_names", [])
             payload["peer_agents"] = normalized_grants
+        if owner is not None:
+            payload["team_execution"] = owner
         payload_sha256 = _sha256(_canonical(payload))
         with self._connection(write=True) as conn:
             existing = conn.execute(

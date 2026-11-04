@@ -97,6 +97,8 @@ import {
 import { ProjectCreationDialog, type ProjectCreationInput } from './ProjectCreationDialog'
 import { PersonalAgents } from './personal/PersonalAgents'
 import { usePersonalAgents } from './personal/usePersonalAgents'
+import { useTeamTurns } from './personal/useTeamTurns'
+import { TeamComposerControls, TeamConversation, TeamTurnCard } from './personal/TeamConversation'
 
 type Panel =
   | 'home'
@@ -279,7 +281,26 @@ export function Web2() {
     api: w.api, sessionId: w.sessionId, busy: w.busy,
     connected: Boolean(w.daemon), onSelect: w.select,
   })
-  const completion = useCommandCompletion(w.commands, w.draft, w.setDraft)
+  const teamProfile = personal.current?.kind === 'team' && !personal.readOnly ? personal.current : null
+  const teamWorkspace = useRef(w)
+  teamWorkspace.current = w
+  const teamTurns = useTeamTurns({ api: w.api, namespace: w.base, team: teamProfile,
+    sessionId: w.sessionId, catalog: personal.agents, connected: Boolean(w.daemon),
+    linkedTurnIds: w.messages.flatMap(message => typeof message.metadata?.team_turn_id === 'string' ? [message.metadata.team_turn_id] : []),
+    onConversationRefresh: w.refreshConversation,
+    onAccepted: (body, namespace) => {
+      const active = teamWorkspace.current
+      if (active.base !== namespace) return
+      if (active.sessionId !== body.source_session_id) {
+        if (readPreference(`draft:${body.source_session_id}`).trim() === body.content)
+          savePreference(`draft:${body.source_session_id}`, '')
+        return
+      }
+      if (active.draft.trim() === body.content) active.setDraft('')
+      if (JSON.stringify(active.selectedSources) === JSON.stringify(body.source_ids || [])) active.setSelectedSources([])
+    },
+  })
+  const completion = useCommandCompletion(teamProfile ? [] : w.commands, w.draft, w.setDraft)
   const [sidebar, setSidebar] = useState(
     () => readPreference('sidebar', String(window.innerWidth > 580)) === 'true',
   )
@@ -361,12 +382,18 @@ export function Web2() {
   )
   const personalLocked = Boolean(personal.opening) || personal.currentPending || Boolean(personal.currentError)
     || Boolean(personal.current && personal.current.status !== 'active') || personal.readOnly
-  const composerLocked = w.busy || w.uploading || w.loading || w.connecting || personalLocked
+  const composerLocked = w.busy || w.uploading || w.loading || w.connecting || personalLocked || teamTurns.posting
+    || Boolean(teamProfile && !teamTurns.canSubmit)
+  const submitConversation = async () => {
+    if (composerLocked) return
+    if (teamProfile) await teamTurns.submit(w.draft, w.selectedSources)
+    else await w.send()
+  }
   useEffect(() => {
     setEditingMessage(null)
     setSavingEdit(false)
   }, [w.sessionId])
-  const uploadLocked = w.busy || w.uploading || !w.daemon || personal.readOnly
+  const uploadLocked = w.busy || w.uploading || !w.daemon || personal.readOnly || teamTurns.posting || Boolean(teamProfile && teamTurns.pending)
   const currentWriteLocked = (id: string) =>
     w.mutating || (w.busy && w.runningSessionId === id) || (personal.readOnly && w.sessionId === id)
   const branch = w.diff?.branch || w.snapshot?.worktrees[0]?.branch
@@ -991,7 +1018,7 @@ export function Web2() {
                     el.scrollHeight - el.scrollTop - el.clientHeight < 80
               }}
             >
-              {!messages.length && !w.loading && !currentSessionBusy && !w.runs.length && !w.liveEvents.length ? (
+              {!messages.length && !w.loading && !currentSessionBusy && !w.runs.length && !w.liveEvents.length && !teamTurns.turns.length ? (
                 <div className="w2-welcome">
                   <Logo className="w2-welcome-logo" />
                   <h1>
@@ -1059,7 +1086,7 @@ export function Web2() {
                               timestamp={message.timestamp}
                               text={message.content}
                               onCopyError={() => w.setError('复制失败，请选中文字复制')}
-                              retryDisabled={!retryUser || composerLocked}
+                              retryDisabled={!retryUser || composerLocked || Boolean(teamProfile)}
                               onRetry={() => {
                                 if (!retryUser) return
                                 void w.regenerate(retryUser.content, retryUser.id, message.id)
@@ -1070,7 +1097,7 @@ export function Web2() {
                               ? null
                               : <div className="w2-message-actions">
                                   <CopyButton text={message.content} />
-                                  {w.engine === 'naumi' && (
+                                  {w.engine === 'naumi' && !teamProfile && (
                                     <IconButton
                                       label="编辑消息"
                                       disabled={composerLocked}
@@ -1083,6 +1110,8 @@ export function Web2() {
                       {message.role === 'user' && (run || live) && (
                         <ThinkingState run={run} live={live} objective={message.content} />
                       )}
+                      {teamProfile && message.role === 'user' && teamTurns.turns.filter(turn => turn.source_user_message_id === message.id).map(turn =>
+                        <TeamTurnCard key={turn.id} turn={turn} state={teamTurns} api={w.api} agents={personal.agents} busy={w.busy} onOpenSession={w.select} />)}
                     </Fragment>
                   })}
                   {(detachedLiveRun || (
@@ -1094,10 +1123,13 @@ export function Web2() {
                       live={currentSessionBusy || (!w.runs[0] && w.liveEvents.length > 0)}
                     />
                   )}
+                  {teamProfile && <TeamConversation state={teamTurns} api={w.api} agents={personal.agents}
+                    visibleMessageIds={messages.map(message => message.id)} busy={w.busy} onOpenSession={w.select} />}
                 </div>
               )}
             </div>
             <div className="w2-composer-wrap">
+              {teamProfile && <TeamComposerControls key={`${w.base}:${w.sessionId}:${teamProfile.id}`} team={teamProfile} state={teamTurns} disabled={w.busy || w.uploading || personalLocked} />}
               {personal.readOnly && <div className="pa-current-record" role="status"><span>协作执行记录</span>{personal.current && <button type="button" disabled={w.busy || personal.current.status !== 'active'} onClick={() => void personal.select(personal.current)}>打开日常对话</button>}</div>}
               {personal.currentError && <div className="pa-current-error" role="alert"><span>{personal.currentError}</span><button onClick={() => void personal.refresh()}>重新确认助理</button></div>}
               {w.error && (
@@ -1205,9 +1237,10 @@ export function Web2() {
                   aria-label="消息"
                   aria-controls={completion.items.length ? 'w2-command-list' : undefined}
                   aria-activedescendant={completion.items.length ? `w2-command-${completion.index}` : undefined}
-                  placeholder="描述任务，或输入 / 使用命令"
-                  value={w.draft}
-                  disabled={w.loading || w.connecting || personal.readOnly}
+                  placeholder={teamProfile ? '发送消息' : '描述任务，或输入 / 使用命令'}
+                  value={teamProfile && teamTurns.pending ? teamTurns.pending.content : w.draft}
+                  maxLength={teamProfile ? 16000 : undefined}
+                  disabled={w.loading || w.connecting || personal.readOnly || teamTurns.posting || Boolean(teamProfile && teamTurns.pending)}
                   onChange={(event) => w.setDraft(event.target.value)}
                   onKeyDown={(event) => {
                     if (completion.onKeyDown(event)) return
@@ -1219,7 +1252,7 @@ export function Web2() {
                       event.keyCode !== 229
                     ) {
                       event.preventDefault()
-                      if (!composerLocked) void w.send()
+                      if (!composerLocked) void submitConversation()
                     }
                   }}
                 />
@@ -1240,6 +1273,7 @@ export function Web2() {
                           {source.title}
                           <IconButton
                             label={`移除附件 ${source.title}`}
+                            disabled={Boolean(teamProfile && teamTurns.pending) || teamTurns.posting}
                             onClick={() =>
                               w.setSelectedSources(
                                 w.selectedSources.filter(
@@ -1276,8 +1310,8 @@ export function Web2() {
                     <ShieldCheck size={14} />
                     <select
                       aria-label="执行模式"
-                      value={w.mode}
-                      disabled={w.uploading}
+                      value={teamProfile ? 'default' : w.mode}
+                      disabled={w.uploading || Boolean(teamProfile)}
                       onChange={(event) =>
                         w.setMode(event.target.value as typeof w.mode)
                       }
@@ -1317,7 +1351,7 @@ export function Web2() {
                       !currentSessionBusy &&
                       (!w.draft.trim() || !w.daemon || composerLocked)
                     }
-                    onClick={() => void (currentSessionBusy ? w.stop() : w.send())}
+                    onClick={() => void (currentSessionBusy ? w.stop() : submitConversation())}
                   >
                     {currentSessionBusy ? (
                       <Square size={13} fill="currentColor" />

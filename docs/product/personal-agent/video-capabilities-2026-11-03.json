@@ -9,7 +9,7 @@
     "audio_analysis": "mean_volume=-91.0dB; max_volume=-91.0dB; visual review only",
     "review_method": "49 timestamped frames at 10-second intervals across full duration; full-resolution targeted inspection; additional frames at 07:55/07:57/07:59"
   },
-  "scope": "All 24 capability requirements retained. PA-00 and PA-06 durable collaboration and peer messages are locally verified with real model, browser and restart evidence; no full-product, deployment or platform-completion claim.",
+  "scope": "All 24 capability requirements retained. PA-00 and PA-06 delegation/peer slices retain their own local evidence. The current team-conversation and staged team-execution slice has independent real-model, HTTP/browser and completed-record cold-restart acceptance. Scoped leaf activity and unknown token-breakdown fixes have local regression evidence; 36 final team integration/TUI tests pass; broader regression baseline failures and source-copy rollback are tracked in the current team transaction VERIFICATION.txt. No full-product, deployment or platform-completion claim.",
   "evidence_kinds": {
     "visible_ui": "可见实体、消息或状态；不代表后台与外部状态已核验",
     "visible_artifact": "可见可读的产物/对话；其外部事实仍需核验",
@@ -42,7 +42,7 @@
         "三种专员实际创建并逐个对话；重启后 ID 和会话仍一致。",
         "重复请求按同一操作身份去重，部分创建失败可恢复。"
       ],
-      "implementation_note": "PA-00已实现用户动态创建、档案版本与独立会话/工具执行；团队运行、语义记忆、声音/账户配置仍待后续模块。",
+      "implementation_note": "PA-00已实现用户动态创建、档案版本和独立专员入口；本轮团队日常对话与规划→成员DAG→汇总执行已实现，真实主模型查询已有目录并委托已有团队，不预置角色。团队已有独立真实模型、HTTP浏览器和新进程已完成记录读回证据；最终团队36项通过，整合旧失败对照与副本回滚见本轮VERIFICATION.txt，其余语义记忆、声音/账户等原验收保持未全量通过，状态partial。",
       "implementation_record": "../../development/personal-agent/PA-00.md"
     },
     {
@@ -76,7 +76,7 @@
         "两个专员分别保存不同上下文，重启后正确召回。",
         "未共享的专员资料不跨角色泄露，删除/纠正后旧记忆不再生效。"
       ],
-      "implementation_note": "PA-00已实现用户动态创建、档案版本与独立会话/工具执行；团队运行、语义记忆、声音/账户配置仍待后续模块。",
+      "implementation_note": "专员与团队拥有独立持久对话，团队成员使用独立执行Session/Run，后台append-once结果不覆盖新消息；主会话私有历史不自动传给成员。本轮真实模型/浏览器验证单次交付，新进程读回2个团队回合、7个根Job/Run会话、4条原消息一致且未POST/调用模型/重复消息；分范围语义记忆、纠正/删除和跨工作区召回仍待PA-02，私有文件ACL不由聊天隔离代替。",
       "implementation_record": "../../development/personal-agent/PA-00.md"
     },
     {
@@ -104,7 +104,7 @@
         "已有角色与新建副本有不同 ID，策略和记忆互不覆盖。",
         "用户选择复用时不产生多余角色。"
       ],
-      "implementation_note": "PA-00已实现用户动态创建、档案版本与独立会话/工具执行；团队运行、语义记忆、声音/账户配置仍待后续模块。",
+      "implementation_note": "PA-00支持用户创建和版本化配置具有不同ID的策略专员；本轮团队任务绑定确切团队、祖先与成员ID/version，不按名称猜身份，也不自动创建同领域角色。同领域重复角色澄清与记忆等原完整验收仍保持partial，未以团队执行切片代替。",
       "implementation_record": "../../development/personal-agent/PA-00.md"
     },
     {
@@ -139,7 +139,7 @@
         "改职责后下一次执行采用新版本，旧 Run 保留旧版本证据。",
         "取消某个工具/账户授权后新旧待执行任务均重新校验。"
       ],
-      "implementation_note": "PA-00已实现用户动态创建、档案版本与独立会话/工具执行；团队运行、语义记忆、声音/账户配置仍待后续模块。",
+      "implementation_note": "职责、模型和工具具有真实档案版本；personal_team为显式团队协调能力，空工具团队只对话，成员权限取档案与本次grant交集，协调器不继承成员工具并集。所有团队祖先及实际授权叶子须active；显式[]/subset排除的停用叶子不阻塞，默认全选或仍选中停用成员仍阻断。真实账户与角色声音仍待PA-03/PA-10，状态partial。",
       "implementation_record": "../../development/personal-agent/PA-00.md"
     },
     {
@@ -172,7 +172,7 @@
         "选项提交绑定原任务 ID，过期问题不改写新任务。",
         "引用保留来源 ID，不把引用中的指令当新的执行授权。"
       ],
-      "implementation_note": "PA-06已实现绑定协作/步骤/问题ID的选择与自定义回答、幂等、过期与取消校验；真实模型发起并由真实浏览器回答。消息/产物片段引用仍待PA-08。",
+      "implementation_note": "PA-06已实现绑定协作/步骤/问题ID的选择与自定义回答、幂等、过期与取消校验；本轮团队真实协调器提问，真实浏览器回答，并按成员确切session/call授权后完成实际TEAM_ACK及汇总。消息/产物片段引用仍待PA-08，不因团队提问闭环将完整需求标为完成。",
       "implementation_record": "../../development/personal-agent/PA-06.md"
     },
     {
@@ -238,7 +238,7 @@
         "消息有稳定 message_id、sender/recipient、task/run 和交付回执。",
         "重启、重发和接收方离线后可恢复且不重复处理。"
       ],
-      "implementation_note": "PA-06专员双向消息已有显式版本/工具grant、独立接收Session/Engine/Run、持久outbox/完整回答/SHA与回执、双方对话和区分user/agent的ACK；Tool/API/CLI/TUI/Web共用服务。inline接收方无独立Job，共用根Job租约、容量与预算。最终后端583项、前端178项与build通过。真实模型单容量互询核算825元并agent确认；真实浏览器发送、user确认、接收方提问和shell授权闭环；新API进程重开6个原协作和原Job/Run/消息，无新增Run。分页经过128专员目录、32长消息和实际compactor验证。团队执行、完整产物版本/私有资料ACL仍未完成，状态保持partial；统一哈希与源码回滚记录见本轮VERIFICATION.txt。",
+      "implementation_note": "PA-06专员双向消息具有显式版本/工具grant、独立接收Session/Engine/Run、持久outbox/回答/SHA与回执、双方对话和user/agent ACK。上一peer切片583项后端、178项前端及真实模型/浏览器/冷重启属于自身事务。本轮团队另有真实模型、浏览器提问/成员授权/单次交付和新进程读回证据；最终团队36项通过，整合旧失败对照与副本回滚见本轮VERIFICATION.txt，完整产物版本/私有资料ACL未完成，状态partial。",
       "implementation_record": "../../development/personal-agent/PA-06.md"
     },
     {
@@ -271,8 +271,8 @@
         "至少三位专员各有独立 Run/工具证据，上游完成才解锁依赖步骤。",
         "失败/取消/未知结果阻断依赖，重启不重复外部动作。"
       ],
-      "implementation_note": "PA-06已实现1至12步骤DAG、串行/并行、共享配置容量、失败/取消/UNKNOWN阻断、版本校验及跨重启去重。主助理通过真实模型自行查目录并安排三名已有专员读取CSV、写Markdown、重读复核。双向消息已有本轮真实模型/浏览器/重启证据，inline接收方独立Run但共用根Job。完整产物版本、团队执行与私有资料ACL仍在后续切片。",
-      "implementation_record": "../../development/personal-agent/PA-06.md"
+      "implementation_note": "PA-06已有1至12步DAG、串并行依赖、真实Job/Run和失败/取消/UNKNOWN阻断。TeamTurn持久回合采用规划协调器Job结束释放容量→成员DAG Jobs→汇总协调器Job，单容量可完成；nested roster祖先版本fence、实际授权叶子active、默认只读grant、实际余量预算和append-once写回均保留。有限token预算遇分项缺失/与根Job不符时保留unknown/usage_unknown，不用零计数解锁后续阶段。真实2成员CSV复核汇总825元共4个独立Job/Run；浏览器另完成TEAM_ACK提问/授权闭环，新进程读回2回合/7根Job与Run会话/4消息无重复。最终团队36项通过，整合旧失败对照与副本回滚见本轮VERIFICATION.txt，产物版本/私有ACL仍在后续切片，状态partial。",
+      "implementation_record": "../../development/personal-agent/PA-06-teams.md"
     },
     {
       "id": "VID-09",
@@ -339,7 +339,7 @@
         "关闭聊天界面、保持执行服务在线时仍继续，重新打开能接上。",
         "超时/重启/取消与回执确认一致，不用状态动画代替真实执行。"
       ],
-      "implementation_note": "PA-06协作在服务在线时独立于聊天页面执行，真实Job/Run/结果持久化、取消与租约失效保留UNKNOWN；浏览器重开与进程重启验收保留。主动送达/已读回执仍待PA-04。",
+      "implementation_note": "PA-06协作在服务在线时独立于聊天页面执行，真实Job/Run/结果持久化，取消与租约失效保留UNKNOWN。本轮团队浏览器后台交付保留新草稿，新进程仅GET读回2个原已完成回合、7个根Job/Run会话、4条消息，原身份/结果/用量一致，无POST/模型调用/重复消息；不把已完成记录读回冒充所有进行中崩溃恢复或主动送达/已读回执，后者仍待PA-04。",
       "implementation_record": "../../development/personal-agent/PA-06.md"
     },
     {

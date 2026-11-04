@@ -201,7 +201,12 @@ async def test_conflicting_create_team_and_missing_ids(api):
         await client.post("/personal/agents", json=payload(request_id="team", kind="team"))
     ).json()
     opening = await client.post(f"/personal/agents/{team['id']}/session")
-    assert opening.status_code == 409 and opening.json()["code"] == "team_execution_pending"
+    assert opening.status_code == 200 and opening.json()["agent_id"] == team["id"]
+    identity = await client.get(
+        "/personal/current", params={"session_id": opening.json()["session_id"]}
+    )
+    assert identity.json()["agent"]["kind"] == "team"
+    assert identity.json().get("read_only", False) is False
     assert (await client.get("/personal/agents/pa_" + "0" * 32)).status_code == 404
     assert (await client.get("/personal/agents/bad-id")).status_code == 422
     assert (await client.get("/personal/current")).status_code == 422
