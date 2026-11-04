@@ -45,6 +45,6 @@
 
 ## 2026-11-05 Root 最终集成
 
-本文件的全部 runtime cases 已包含在实际通过的 Root 集成组中。全相关后端为 **1902 passed / 1 failed / 2 skipped**，唯一失败为未修改的 PA-01 ItemStore 首次并发 WAL 建库，已在 HEAD 隔离原源码复现。后续 provider-schema、只读 legacy、真实 Engine 发送/压缩/来源持久 pin 等最后集成为 **433 passed / exit 0**，包含本文件全部 cases；两组不叠加计数。
+本文件的全部 runtime cases 已包含在实际通过的 Root 集成组中。全相关后端为 **1902 passed / 1 failed / 2 skipped**，唯一失败为未修改的 PA-01 ItemStore 首次并发 WAL 建库，已在 HEAD 隔离原源码复现。后续 provider-schema、只读 legacy、真实 Engine 发送/压缩/来源持久 pin 等最后集成为 **434 passed / exit 0**，包含本文件全部 cases；两组不叠加计数。
 
-命令、完整输出及退出状态分别在 transaction 的 `root-module-final-record.json` 与 `root-memory-last-integration-record.json`。实际 ONNX、真实 provider、GUI 与冷重启由 Root 独立验收；汇总见 [PA-02 实施记录](pa02-personal-memory.md)，不以受控 port 代替真实组件证据。初次未运行阶段的 manifest 与记录保留，最终源码包另存为新快照，不覆盖早先冻结证据。
+命令、完整输出及退出状态分别在 transaction 的 `root-module-final-record.json` 与 `root-memory-boundary-final-record.json`。实际 ONNX、真实 provider、GUI 与冷重启由 Root 独立验收；汇总见 [PA-02 实施记录](pa02-personal-memory.md)，不以受控 port 代替真实组件证据。初次未运行阶段的 manifest 与记录保留，最终源码包另存为新快照，不覆盖早先冻结证据。

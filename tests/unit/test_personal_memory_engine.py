@@ -179,11 +179,48 @@ async def test_final_send_consumes_metadata_before_removing_provider_extras(memo
     assert "STALE_METADATA_ONLY_MEMORY_BODY" not in canonical(current)
     assert "metadata" not in current[-1]
     engine.config.memory.long_term_enabled = False
+    runtime.begin_turn(engine)
     disabled = await engine._prepare_messages_for_model(raw)
     assert "STALE_METADATA_ONLY_MEMORY_BODY" not in canonical(disabled)
     assert "MEMORY_ONLY_LILAC_520" not in canonical(disabled)
     assert all("metadata" not in value for value in disabled)
     assert raw[0]["content"] == "STALE_METADATA_ONLY_MEMORY_BODY"
+
+
+async def test_revocation_during_send_preparation_stops_before_transport(
+    memory_engine, monkeypatch
+):
+    engine = memory_engine
+    note = await save(engine)
+    runtime.begin_turn(engine)
+    original_record = engine.personal_memory_runtime._record_selection
+    calls = []
+
+    async def record_then_revoke():
+        await original_record()
+        await engine.personal_memory.dispatch(
+            "delete",
+            {
+                "request_id": "revoke-during-model-preparation",
+                "memory_id": note["memory_id"],
+                "expected_revision": note["revision"],
+            },
+            trusted_channel="manual_cli",
+        )
+
+    async def transport(**kwargs):
+        calls.append(kwargs)
+        return ModelResponse(content="obsolete context", model="controlled")
+
+    monkeypatch.setattr(engine.personal_memory_runtime, "_record_selection", record_then_revoke)
+    monkeypatch.setattr(engine.router, "call", transport)
+    with pytest.raises(PersonalAgentError, match="纠正、删除或撤权"):
+        await engine._call_model_with_recovery(
+            messages=[{"role": "user", "content": "继续"}],
+            tier=ModelTier.FAST,
+            tools=None,
+        )
+    assert calls == []
 
 
 @pytest.mark.parametrize("phase", ["extract", "compact"])

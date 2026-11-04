@@ -6493,6 +6493,7 @@ class AgentEngine:
             messages, update_engine_context=update_engine_context, preserve_metadata=True,
         )
         prepared = await self.personal_memory_runtime.prepare_messages(sanitized)
+        await personal_runtime.authorize_execution(self)
         # Provenance metadata is consumed before removing non-provider fields.
         return [{key: value for key, value in message.items() if key != "metadata"}
                 for message in prepared]

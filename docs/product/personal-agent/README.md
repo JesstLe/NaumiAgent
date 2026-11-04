@@ -211,7 +211,7 @@ Agent不会未经明确共享就读取另一Agent的私有资料；用户能直�
 当前统一相关后端组为 1902 passed / 1 failed / 2 skipped，唯一失败是未修改的 PA-01 ItemStore
 首次并发建库 WAL 竞态，已在 HEAD 隔离原源码复现。完整前端为 30 files / 311 tests passed；
 真实浏览器已完成创建、纠正、导出、删除和原 ID 草稿清理。最终 schema/只读 legacy/Engine
-集成 433 项通过；实际 provider 形成 6 个成功 Run、7 个完整调用，另保留原 schema 拒绝 Run，
+集成 434 项通过；实际 provider 形成 6 个成功 Run、7 个完整调用，另保留原 schema 拒绝 Run，
 没有重放原失败请求。真实服务器冷重启后业务与原执行状态不变，仅正常 resume 更新原 UI
 会话访问时间；新增 paid Run 为 0。源码回滚及分层证据见
 [PA-02 实施记录](../../development/pa02-personal-memory.md)，不以本机通过代表全产品完成。

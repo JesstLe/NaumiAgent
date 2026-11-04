@@ -128,7 +128,7 @@ witness 和旧 vector 路径也受保护。
 |---|---|
 | 原记忆模块基线 | 80 passed / exit 0 |
 | 全相关后端 | 1902 passed / 1 failed / 2 skipped；唯一失败为未修改的 PA-01 ItemStore WAL 首次并发建库，HEAD 隔离源码同测试复现 |
-| 最后 schema / 只读 legacy / Engine 集成 | 433 passed / exit 0；不与上一组叠加计数 |
+| 最后 schema / 只读 legacy / Engine 集成 | 434 passed / exit 0；不与上一组叠加计数 |
 | 完整前端 | 30 files / 311 tests passed；生产构建通过 |
 | 实际浏览器 | 创建、纠正、修订、JSON 导出、删除、丢响应后的原 ID 草稿清理；本地不保存正文；1440 / 390 均重新打开检查 |
 | 实际 provider | A main、B main、Echo 未分享/分享/撤销，共 5 个成功 Run；独立修复验证模型自主调用 propose，共 6 个成功 Run / 7 个完整 provider 调用 |
@@ -144,3 +144,9 @@ witness 和旧 vector 路径也受保护。
 源码四产物、完整命令/输出/退出状态、51 路径副本回滚和后改零写守卫以同目录
 `VERIFICATION.txt` 为最终证据。源码回滚不自动降级用户记忆数据库。
 本机验收不代表完整产品、发布安装或多设备平台验收；24 项要求仍全部保留。
+
+### 最后发送窗口自审
+
+实际发送准备包含异步的引用解析与 ref-only 证据写入。新增受控竞态测试在解析后、transport 前删除原记忆，在初始提交 `2e07a7e0` 上真实复现 `1 failed`：旧上下文仍进入受控模型端口。现在三个发送入口共用的准备接口在解析与证据写入完成后，再执行一次 `authorize_execution`，最后才移除 metadata 并进入实际 ModelPort。修复后的完整影响组为 **434 passed in 85.33s / exit 0**，包括来源、生命周期、compaction、委派、兼容入口与该竞态；测试中的 transport 调用数为 0。未重放任何已付费 Run。
+
+初始本机模块提交与此窄修复分别保留，不改写历史；最终四产物对当前文件重新冻结。早先 `snapshot-v1`、`snapshot-v2` 源码包保留供比对。
