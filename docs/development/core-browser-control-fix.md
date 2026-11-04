@@ -41,3 +41,9 @@ E:\Workspace\NaumiAgent\.venv\Scripts\python.exe -m pytest tests/unit/test_task_
 - 本模块没有新增终止活跃模型请求的机制；abort沿用现有协作取消协议，本次保证状态和人工控制不会覆盖终止结果。
 
 证据：`E:\Workspace\NaumiAgent-fix-core-evidence-20261104\browser-baseline.txt`、`browser-modified.txt`、`browser-final.txt`。
+
+## 复审补充
+
+- 启动失败进入清理也注册 finalizing 标记，拒绝在心跳完成等待期间覆盖失败结果；对应模块 103 passed。
+- 独立复审复现了 `runtime.stop()` 期间取消导致槽位/runtime/control 滞留。最终清理抽为独立 task，经 `finish_cleanup()` shield；重复取消等待资源与状态收口后传播。槽位、控制映射、等待 future 和定时器由 finally 释放，持久化异常也不占住内存槽位。
+- 修复后模块 104 passed in 3.73s；新增重复取消回归验证 stop 完成、终态落地、全部映射清空及 active_slots=0。证据 `browser-finalization.json`、`review/repro_finalization_cancel.txt`（后者为修复前复现）。

@@ -331,3 +331,35 @@ async def test_startup_failure_also_fences_abort_during_finalization(tmp_path):
     assert run["status"] == "failed"
     assert runner.active_slots == 0
     assert not runner._run_controls
+
+
+@pytest.mark.asyncio
+async def test_repeated_cancellation_waits_for_browser_finalization(tmp_path):
+    runtime = Runtime()
+    gate, stopping = asyncio.Event(), asyncio.Event()
+
+    async def stop():
+        stopping.set()
+        await gate.wait()
+        runtime.stop_count += 1
+        return {}
+
+    runtime.stop = stop
+    runner, run, task = execution_runner(tmp_path, runtime, runtime, concurrency=1)
+    await wait_for(lambda: run["status"] == "manual_control")
+    await runner.resume_run(run["id"])
+    await stopping.wait()
+    for _ in range(2):
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+    gate.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert runtime.stop_count == 1
+    assert run["status"] == "completed"
+    assert run["finishedAt"]
+    assert runner.active_slots == 0
+    assert not runner._run_runtimes
+    assert not runner._run_controls
+    assert not runner._control_locks

@@ -19,6 +19,7 @@ from naumi_agent.runtime.browser_heartbeat import (
     BrowserExecutionHeartbeatLifecycle,
     BrowserExecutionHeartbeatSnapshot,
 )
+from naumi_agent.runtime.owned_process import finish_cleanup
 from naumi_agent.tools.browser.orchestrator.run_template_store import (
     RunTemplateStore,
 )
@@ -1290,6 +1291,10 @@ class TaskRunner:
             outcome = {"status": "failed", "summary": str(exc),
                        "error": {"message": str(exc), "stack": None}, "pendingInput": None}
         finally:
+            await finish_cleanup(self._finalize_run(run, outcome, run_runtime))
+
+    async def _finalize_run(self, run, outcome, run_runtime) -> None:
+        try:
             async with self._control_lock(run["id"]):
                 finished = {**run, **outcome}
                 control = self._get_run_control(run["id"])
@@ -1330,9 +1335,18 @@ class TaskRunner:
                 self._store.persist(self.runs)
                 self._emit_update("run_updated", run)
                 self._emit_update("run_finished", run)
-                self._active_slots = max(0, self._active_slots - 1)
-                self._release_attached_slot(run["id"])
+        finally:
+            timeout_handle = self._reply_timeouts.pop(run["id"], None)
+            if timeout_handle:
+                timeout_handle.cancel()
+            future = self._pending_replies.pop(run["id"], None)
+            if future is not None and not future.done():
+                future.set_result({"abort": True, "reason": "浏览器任务已结束。"})
+            self._run_controls.pop(run["id"], None)
+            self._run_runtimes.pop(run["id"], None)
             self._control_locks.pop(run["id"], None)
+            self._active_slots = max(0, self._active_slots - 1)
+            self._release_attached_slot(run["id"])
             await self.process_queue()
 
     # ── Templates ──
