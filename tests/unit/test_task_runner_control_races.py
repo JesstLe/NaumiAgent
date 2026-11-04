@@ -300,3 +300,34 @@ async def test_two_owned_runtimes_receive_independent_manual_controls(tmp_path):
     assert shared.enter_count == shared.exit_count == shared.stop_count == 0
     assert runner.active_slots == 0
     assert not runner._run_runtimes
+
+
+@pytest.mark.asyncio
+async def test_startup_failure_also_fences_abort_during_finalization(tmp_path):
+    gate, finishing = asyncio.Event(), asyncio.Event()
+
+    def fail_runtime(_run_id):
+        raise RuntimeError("synthetic startup failure")
+
+    runner = make_runner(tmp_path, Runtime(), max_concurrent_runs=2,
+                         runtime_factory=fail_runtime)
+    run = run_record("queued")
+    runner.runs = [run]
+    runner._active_slots = 1
+
+    async def finish_heartbeat(_run):
+        finishing.set()
+        await gate.wait()
+
+    runner._finish_run_heartbeat = finish_heartbeat
+    task = asyncio.create_task(runner._execute_run(run))
+    await asyncio.wait_for(finishing.wait(), 2)
+    try:
+        with pytest.raises(ValueError, match="正在清理"):
+            runner.abort_run(run["id"])
+    finally:
+        gate.set()
+        await task
+    assert run["status"] == "failed"
+    assert runner.active_slots == 0
+    assert not runner._run_controls

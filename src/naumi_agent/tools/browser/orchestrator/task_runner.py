@@ -1292,7 +1292,7 @@ class TaskRunner:
         finally:
             async with self._control_lock(run["id"]):
                 finished = {**run, **outcome}
-                control = self._run_controls.get(run["id"], {})
+                control = self._get_run_control(run["id"])
                 if control.get("aborted"):
                     finished.update(
                         status="aborted", summary=control.get("reason") or "任务已终止。",
