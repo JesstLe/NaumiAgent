@@ -64,7 +64,10 @@ def test_construction_is_lazy_and_empty_list_does_not_seed_roles(tmp_path: Path)
         tables = {
             row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
-        assert tables == {"collaborations", "collaboration_events", "collaboration_sessions"}
+        assert tables == {
+            "collaborations", "collaboration_events", "collaboration_sessions",
+            "collaboration_permission_payloads",
+        }
         columns = {row[1] for row in db.execute("PRAGMA table_info(collaborations)")}
         assert not {"state", "status", "response", "result", "job_id"} & columns
 

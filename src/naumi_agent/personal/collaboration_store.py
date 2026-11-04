@@ -8,6 +8,7 @@ observations. No observation here can make an Agent job completed or replayable.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import math
 import re
@@ -21,7 +22,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from naumi_agent.config.credentials import resolve_runtime_payload_key
+from naumi_agent.daemons.permission_decisions import permission_arguments_sha256
 from naumi_agent.personal.models import PersonalAgentError
+from naumi_agent.safety.payload_envelope import (
+    PayloadEnvelope,
+    RuntimePayloadKey,
+    open_runtime_payload,
+    seal_runtime_payload,
+)
 
 _SCHEMA_VERSION = 1
 _COLLABORATION_ID = re.compile(r"^pc_[0-9a-f]{32}$")
@@ -33,6 +42,8 @@ _EVENT_KIND = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$")
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 _STEP_FIELDS = frozenset({"id", "agent_id", "agent_version", "task", "depends_on"})
 _MAX_EVENT_BYTES = 64 * 1024
+_MAX_PERMISSION_PAYLOAD_BYTES = 512 * 1024
+_PERMISSION_REF = "permission_payload_ref"
 _TABLES = (
     """CREATE TABLE IF NOT EXISTS collaborations (
         id TEXT PRIMARY KEY,
@@ -69,6 +80,18 @@ _TABLES = (
     )""",
     "CREATE INDEX IF NOT EXISTS collaborations_scope "
     "ON collaborations(workspace_key, source_session_id, created_at DESC, id)",
+    # Additive schema-1 extension: older readers can still open plans and journals.
+    """CREATE TABLE IF NOT EXISTS collaboration_permission_payloads (
+        collaboration_id TEXT NOT NULL REFERENCES collaborations(id),
+        event_key TEXT NOT NULL,
+        step_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        call_id TEXT NOT NULL,
+        payload_sha256 TEXT NOT NULL,
+        payload_bytes INTEGER NOT NULL CHECK(payload_bytes > 0),
+        envelope_json TEXT NOT NULL,
+        PRIMARY KEY(collaboration_id, event_key)
+    )""",
 )
 
 
@@ -168,7 +191,7 @@ def _steps(value: Any) -> list[dict[str, Any]]:
     return steps
 
 
-def _event_data(value: Any) -> str:
+def _event_data(value: Any, *, maximum_bytes: int = _MAX_EVENT_BYTES) -> str:
     if not isinstance(value, dict):
         raise _invalid("协作事件内容必须是 JSON 对象")
 
@@ -194,13 +217,70 @@ def _event_data(value: Any) -> str:
     validate(value)
     try:
         encoded = _canonical(value)
-        if len(encoded.encode("utf-8")) > _MAX_EVENT_BYTES:
-            raise _invalid("协作事件内容最多允许 64 KB")
+        if len(encoded.encode("utf-8")) > maximum_bytes:
+            raise _invalid(f"协作事件内容最多允许 {maximum_bytes // 1024} KB")
     except (ValueError, TypeError, UnicodeError, RecursionError) as exc:
         if isinstance(exc, PersonalAgentError):
             raise
         raise _invalid("协作事件内容不是有效的 JSON 资料") from exc
     return encoded
+
+
+def _permission_data(value: Any) -> str:
+    """Keep the existing arguments limit distinct from envelope metadata overhead."""
+    if not isinstance(value, dict) or not isinstance(value.get("arguments"), dict):
+        raise _invalid("权限确认资料必须包含完整工具参数")
+    try:
+        permission_arguments_sha256(value["arguments"])
+    except (TypeError, ValueError, UnicodeError, RecursionError) as exc:
+        raise _invalid("权限确认参数无效或超过 256 KB") from exc
+    for field, label, limit in (
+        ("session_id", "权限确认会话编号", 128),
+        ("call_id", "权限确认调用编号", 128),
+        ("tool_name", "权限确认工具名称", 256),
+    ):
+        _text(value.get(field), label, limit, strip=False)
+    if _PERMISSION_REF in value:
+        raise _invalid("权限确认资料含保留字段")
+    return _event_data(value, maximum_bytes=_MAX_PERMISSION_PAYLOAD_BYTES)
+
+
+def _permission_aad(
+    plan: dict[str, Any],
+    key: str,
+    step_id: str,
+    session_id: str,
+    call_id: str,
+    digest: str,
+) -> bytes:
+    return _canonical(
+        {
+            "domain": "naumi-personal-permission-payload-v1",
+            "workspace_key": plan["workspace_key"],
+            "collaboration_id": plan["id"],
+            "event_key": key,
+            "step_id": step_id,
+            "session_id": session_id,
+            "call_id": call_id,
+            "payload_sha256": digest,
+        }
+    ).encode("utf-8")
+
+
+def _permission_key() -> RuntimePayloadKey:
+    # Resolve only when sealing/opening overflow data; never during store startup.
+    try:
+        return RuntimePayloadKey.from_bytes(resolve_runtime_payload_key())
+    except Exception as exc:
+        raise PersonalAgentError(
+            "storage_error", "权限确认资料密钥暂不可用，请恢复凭据后重试"
+        ) from exc
+
+
+def _permission_step(plan: dict[str, Any], step_id: str, payload: dict[str, Any]) -> None:
+    step = next((item for item in plan["steps"] if item["id"] == step_id), None)
+    if step is None or payload["session_id"] != step["session_id"]:
+        raise PersonalAgentError("binding_conflict", "权限确认与协作执行会话不一致")
 
 
 def _plan(row: sqlite3.Row) -> dict[str, Any]:
@@ -501,6 +581,22 @@ class CollaborationStore:
         if step_id:
             step_id = _identifier(step_id, _STEP_ID, "步骤编号", 64)
         data_json = _event_data({} if data is None else data)
+        with self._connection(write=True) as conn:
+            plan = _plan(self._required(conn, collaboration_id, workspace_key))
+            return self._append_record(conn, plan, key, kind, step_id, data_json)
+
+    @staticmethod
+    def _append_record(
+        conn: sqlite3.Connection,
+        plan: dict[str, Any],
+        key: str,
+        kind: str,
+        step_id: str,
+        data_json: str,
+    ) -> dict[str, Any]:
+        collaboration_id = plan["id"]
+        if step_id and step_id not in {step["id"] for step in plan["steps"]}:
+            raise _invalid("交接记录引用的步骤不存在")
         payload_sha256 = _sha256(
             _canonical(
                 {
@@ -510,34 +606,212 @@ class CollaborationStore:
                 }
             )
         )
+        existing = conn.execute(
+            "SELECT * FROM collaboration_events WHERE collaboration_id=? AND event_key=?",
+            (collaboration_id, key),
+        ).fetchone()
+        if existing is not None:
+            if existing["payload_sha256"] != payload_sha256:
+                raise PersonalAgentError(
+                    "idempotency_conflict", "该交接记录编号已用于不同内容，请保留原记录"
+                )
+            return _event(existing)
+        sequence = conn.execute(
+            "SELECT COALESCE(MAX(sequence),0)+1 FROM collaboration_events WHERE collaboration_id=?",
+            (collaboration_id,),
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO collaboration_events VALUES (?,?,?,?,?,?,?,?)",
+            (collaboration_id, sequence, key, kind, step_id, data_json, payload_sha256, _now()),
+        )
+        row = conn.execute(
+            "SELECT * FROM collaboration_events WHERE collaboration_id=? AND sequence=?",
+            (collaboration_id, sequence),
+        ).fetchone()
+        return _event(row)
+
+    def append_permission_request(
+        self,
+        collaboration_id: str,
+        workspace_key: str,
+        *,
+        key: str,
+        step_id: str,
+        data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Atomically journal a request, encrypting overflow without truncating approval."""
+        collaboration_id, workspace_key = self._scope(collaboration_id, workspace_key)
+        key = _identifier(key, _EVENT_KEY, "交接记录编号", 256)
+        step_id = _identifier(step_id, _STEP_ID, "步骤编号", 64)
+        encoded = _permission_data(data)
+        detached = json.loads(encoded)
+        plaintext = encoded.encode("utf-8")
+        digest = _sha256(encoded)
         with self._connection(write=True) as conn:
             plan = _plan(self._required(conn, collaboration_id, workspace_key))
-            if step_id and step_id not in {step["id"] for step in plan["steps"]}:
-                raise _invalid("交接记录引用的步骤不存在")
+            _permission_step(plan, step_id, detached)
             existing = conn.execute(
                 "SELECT * FROM collaboration_events WHERE collaboration_id=? AND event_key=?",
                 (collaboration_id, key),
             ).fetchone()
             if existing is not None:
-                if existing["payload_sha256"] != payload_sha256:
-                    raise PersonalAgentError(
-                        "idempotency_conflict", "该交接记录编号已用于不同内容，请保留原记录"
-                    )
+                if existing["kind"] != "permission_requested" or existing["step_id"] != step_id:
+                    raise PersonalAgentError("idempotency_conflict", "权限记录编号已用于其他内容")
+                previous = self._permission_record_payload(conn, plan, existing)
+                if _canonical(previous) != encoded:
+                    raise PersonalAgentError("idempotency_conflict", "权限记录编号已用于不同参数")
                 return _event(existing)
-            sequence = conn.execute(
-                "SELECT COALESCE(MAX(sequence),0)+1 FROM collaboration_events "
-                "WHERE collaboration_id=?",
-                (collaboration_id,),
-            ).fetchone()[0]
-            conn.execute(
-                "INSERT INTO collaboration_events VALUES (?,?,?,?,?,?,?,?)",
-                (collaboration_id, sequence, key, kind, step_id, data_json, payload_sha256, _now()),
+            journal = encoded
+            if len(plaintext) > _MAX_EVENT_BYTES:
+                aad = _permission_aad(
+                    plan,
+                    key,
+                    step_id,
+                    detached["session_id"],
+                    detached["call_id"],
+                    digest,
+                )
+                try:
+                    envelope = seal_runtime_payload(plaintext, aad=aad, key=_permission_key())
+                except PersonalAgentError:
+                    raise
+                except Exception as exc:
+                    raise PersonalAgentError("storage_error", "权限确认资料加密未完成") from exc
+                conn.execute(
+                    "INSERT INTO collaboration_permission_payloads "
+                    "(collaboration_id,event_key,step_id,session_id,call_id,payload_sha256,"
+                    "payload_bytes,envelope_json) VALUES (?,?,?,?,?,?,?,?)",
+                    (
+                        collaboration_id,
+                        key,
+                        step_id,
+                        detached["session_id"],
+                        detached["call_id"],
+                        digest,
+                        len(plaintext),
+                        _canonical(envelope.to_dict()),
+                    ),
+                )
+                # Older schema-1 UIs require session/call IDs to show approve buttons.
+                # Omit them here: only a reader that authenticates the payload can approve.
+                journal = _event_data(
+                    {
+                        _PERMISSION_REF: {
+                            "schema_version": 1,
+                            "sha256": digest,
+                            "bytes": len(plaintext),
+                        }
+                    }
+                )
+            return self._append_record(
+                conn,
+                plan,
+                key,
+                "permission_requested",
+                step_id,
+                journal,
             )
-            row = conn.execute(
-                "SELECT * FROM collaboration_events WHERE collaboration_id=? AND sequence=?",
-                (collaboration_id, sequence),
+
+    @staticmethod
+    def _permission_record_payload(
+        conn: sqlite3.Connection,
+        plan: dict[str, Any],
+        row: sqlite3.Row,
+    ) -> dict[str, Any]:
+        """Authenticate the persisted event and its scope-bound overflow before display."""
+        try:
+            event = _event(row)
+            if event["kind"] != "permission_requested":
+                raise ValueError("not a permission event")
+            event_digest = _sha256(
+                _canonical(
+                    {
+                        "kind": event["kind"],
+                        "step_id": event["step_id"],
+                        "data": event["data"],
+                    }
+                )
+            )
+            if not hmac.compare_digest(event_digest, row["payload_sha256"]):
+                raise ValueError("journal digest mismatch")
+            payload = event["data"]
+            stored = conn.execute(
+                "SELECT * FROM collaboration_permission_payloads "
+                "WHERE collaboration_id=? AND event_key=?",
+                (plan["id"], event["key"]),
             ).fetchone()
-            return _event(row)
+            if _PERMISSION_REF in payload:
+                reference = payload[_PERMISSION_REF]
+                if (
+                    set(payload) != {_PERMISSION_REF}
+                    or not isinstance(reference, dict)
+                    or set(reference) != {"schema_version", "sha256", "bytes"}
+                    or type(reference["schema_version"]) is not int
+                    or reference["schema_version"] != 1
+                    or type(reference["bytes"]) is not int
+                    or not _MAX_EVENT_BYTES < reference["bytes"] <= _MAX_PERMISSION_PAYLOAD_BYTES
+                    or not isinstance(reference["sha256"], str)
+                    or re.fullmatch(r"[0-9a-f]{64}", reference["sha256"]) is None
+                    or stored is None
+                    or stored["step_id"] != event["step_id"]
+                    or stored["payload_bytes"] != reference["bytes"]
+                    or stored["payload_sha256"] != reference["sha256"]
+                ):
+                    raise ValueError("permission reference mismatch")
+                aad = _permission_aad(
+                    plan,
+                    event["key"],
+                    event["step_id"],
+                    stored["session_id"],
+                    stored["call_id"],
+                    reference["sha256"],
+                )
+                plaintext = open_runtime_payload(
+                    PayloadEnvelope.from_dict(json.loads(stored["envelope_json"])),
+                    aad=aad,
+                    key=_permission_key(),
+                )
+                if len(plaintext) != reference["bytes"] or not hmac.compare_digest(
+                    hashlib.sha256(plaintext).hexdigest(), reference["sha256"]
+                ):
+                    raise ValueError("permission payload digest mismatch")
+                payload = json.loads(plaintext)
+                if (
+                    payload["session_id"] != stored["session_id"]
+                    or payload["call_id"] != stored["call_id"]
+                ):
+                    raise ValueError("permission identity mismatch")
+            elif stored is not None:
+                raise ValueError("permission reference removed")
+            encoded = _permission_data(payload)
+            _permission_step(plan, event["step_id"], payload)
+            return json.loads(encoded)
+        except PersonalAgentError:
+            raise
+        except Exception as exc:
+            raise PersonalAgentError(
+                "storage_error",
+                "权限确认资料缺失或校验失败，已停止展示与批准，请恢复原始资料",
+            ) from exc
+
+    def permission_payload(
+        self,
+        collaboration_id: str,
+        workspace_key: str,
+        *,
+        key: str,
+    ) -> dict[str, Any]:
+        collaboration_id, workspace_key = self._scope(collaboration_id, workspace_key)
+        key = _identifier(key, _EVENT_KEY, "交接记录编号", 256)
+        with self._connection() as conn:
+            plan = _plan(self._required(conn, collaboration_id, workspace_key))
+            row = conn.execute(
+                "SELECT * FROM collaboration_events WHERE collaboration_id=? AND event_key=?",
+                (collaboration_id, key),
+            ).fetchone()
+            if row is None:
+                raise PersonalAgentError("not_found", "权限确认记录不存在，请刷新后重试")
+            return self._permission_record_payload(conn, plan, row)
 
     def events(
         self, collaboration_id: str, workspace_key: str, after: int = 0, limit: int = 500

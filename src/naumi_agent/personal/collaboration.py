@@ -341,7 +341,16 @@ class PersonalCollaborationService:
             status = "admitted"
         result = {**plan, "status": status, "steps": steps}
         if include_events:
-            result["events"] = events
+            result["events"] = [
+                {
+                    **event,
+                    "data": self.store.permission_payload(
+                        plan["id"], self.workspace_key, key=event["key"],
+                    ),
+                }
+                if event["kind"] == "permission_requested" else event
+                for event in events
+            ]
         return result
 
     def start(self) -> None:
@@ -734,10 +743,10 @@ class PersonalCollaborationService:
 
             async def confirm(payload: dict):
                 call_id = str(payload.get("call_id", ""))
-                self._event(
-                    plan,
-                    f"permission:{step['id']}:{call_id}",
-                    "permission_requested",
+                self.store.append_permission_request(
+                    plan["id"],
+                    self.workspace_key,
+                    key=f"permission:{step['id']}:{call_id}",
                     step_id=step["id"],
                     data=payload,
                 )
