@@ -1,16 +1,18 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
-import { ArrowDown, ChevronRight, CircleStop, ExternalLink, GitBranch, Loader2, Plus, RefreshCw, Trash2, X } from 'lucide-react'
+import { ArrowDown, ChevronRight, CircleStop, ExternalLink, GitBranch, Loader2, Mail, Plus, RefreshCw, Trash2, X } from 'lucide-react'
 import type {
   PersonalAgent, PersonalCollaboration, PersonalCollaborationEvent, PersonalCollaborationInput,
-  PersonalCollaborationReply, PersonalCollaborationStatus, PersonalCollaborationStepInput, WorkbenchRuntimeClient,
+  PersonalCollaborationReply, PersonalCollaborationStatus, PersonalCollaborationStepInput, PersonalPeerGrant, WorkbenchRuntimeClient,
 } from '@naumi/shared/api/WorkbenchRuntimeClient'
 import { personalError } from './usePersonalAgents'
 import { MessageContent } from '../rich/MessageContent'
+import { ManualMessageComposer, PeerConversations, PeerScopeEditor, usePeerTools, validatePersonalMessage } from './PeerMessages'
 import './collaboration.css'
 
 export type PersonalCollaborationsApi = Pick<WorkbenchRuntimeClient,
   'personalCollaborations' | 'createPersonalCollaboration' | 'personalCollaboration' |
-  'cancelPersonalCollaboration' | 'replyPersonalCollaboration' | 'resolvePermission'
+  'cancelPersonalCollaboration' | 'replyPersonalCollaboration' | 'resolvePermission' | 'personalTools' |
+  'personalMessages' | 'personalMessage' | 'acknowledgePersonalMessage' | 'createPersonalMessage'
 >
 
 const activeStatuses = new Set<string>(['admitted', 'claimed', 'running', 'waiting'])
@@ -27,6 +29,8 @@ const eventLabels: Record<string, string> = {
   permission_requested: '等待授权', permission_resolved: '授权已处理',
   recovery_error: '恢复失败', job_admitted: '任务入队', dispatch_prepared: '准备交接',
   recovery_unknown: '中断执行待核实',
+  peer_requested: '专员发出请求', peer_dispatch_started: '向专员派送', peer_received: '对端接收请求',
+  peer_result_available: '专员返回结果', peer_acknowledged: '确认收件',
   question_requested: '专员提问', question_answered: '用户已回答', question_expired: '问题已过期',
 }
 const stateLabel = (status: string) => statusLabels[status as PersonalCollaborationStatus] || '状态待核实'
@@ -51,7 +55,27 @@ function validateCollaboration(value: PersonalCollaboration, expectedId?: string
       || typeof event.step_id !== 'string' || typeof event.created_at !== 'string'
       || !event.data || typeof event.data !== 'object' || Array.isArray(event.data)))))
     throw new Error('协作记录返回不完整，请刷新后重试')
+  if (value.messages !== undefined && (!Array.isArray(value.messages)
+    || value.messages.some(message => validatePersonalMessage(message).collaboration_id !== value.id)))
+    throw new Error('专员消息与当前协作不一致，请重新加载')
+  if (value.peer_sessions !== undefined && (!Array.isArray(value.peer_sessions) || value.peer_sessions.some(session => !session
+    || typeof session.message_id !== 'string' || typeof session.session_id !== 'string'
+    || typeof session.agent_id !== 'string' || !Number.isInteger(session.agent_version) || session.agent_version < 1
+    || typeof session.step_id !== 'string' || !session.step_id.trim()
+    || typeof session.state !== 'string'))) throw new Error('专员执行归属返回不完整，请重新加载')
   return value
+}
+
+export function matchesCollaborationExecution(value: PersonalCollaboration, event: PersonalCollaborationEvent, running = false) {
+  const root = value.steps.find(step => step.id === event.step_id)
+  if (!root || (running && root.status !== 'running')) return false
+  if (root.session_id === event.data.session_id && !event.data.peer_message_id) return true
+  if (typeof event.data.peer_message_id !== 'string') return false
+  return Boolean(value.peer_sessions?.some(session => session.message_id === event.data.peer_message_id
+    && session.session_id === event.data.session_id
+    && session.step_id === event.step_id
+    && !value.messages?.some(message => message.id === session.message_id && message.step_id !== event.step_id)
+    && (!running || ['processing', 'dispatching'].includes(session.state))))
 }
 
 function Status({ status, stopping = false }: { status: string; stopping?: boolean }) {
@@ -83,6 +107,8 @@ export function PersonalCollaborations({ api, agents, sourceSessionId, busy, onC
   const [detailLoading, setDetailLoading] = useState(false)
   const [composing, setComposing] = useState(false)
   const [composerKey, setComposerKey] = useState(0)
+  const [messageComposerKey, setMessageComposerKey] = useState(0)
+  const [composeMode, setComposeMode] = useState<'workflow' | 'message'>('workflow')
   const [revision, setRevision] = useState(0)
   const [submitting, setSubmitting] = useState(false)
   const [cancelConfirm, setCancelConfirm] = useState(false)
@@ -152,6 +178,14 @@ export function PersonalCollaborations({ api, agents, sourceSessionId, busy, onC
   const selected = detail?.id === selectedId ? detail : null
   const locked = submitting || cancelling || opening
   const refresh = () => setRevision(value => value + 1)
+  const acceptCreated = (input: PersonalCollaboration, origin: 'workflow' | 'message') => {
+    const value = validateCollaboration(input)
+    setItems(items => [value, ...items.filter(item => item.id !== value.id)])
+    setComposing(false)
+    if (origin === 'workflow') setComposerKey(value => value + 1)
+    else setMessageComposerKey(value => value + 1)
+    setSelectedId(value.id); setDetail(value); refresh()
+  }
   const select = (id: string) => { if (!locked) { setComposing(false); setSelectedId(id) } }
 
   const cancel = async () => {
@@ -191,13 +225,12 @@ export function PersonalCollaborations({ api, agents, sourceSessionId, busy, onC
   const permissions = (selected && activeStatuses.has(selected.status) && !selected.cancel_requested ? selected.events || [] : []).filter(event => event.kind === 'permission_requested'
     && typeof event.data.call_id === 'string' && typeof event.data.session_id === 'string'
     && !resolved.has(`${event.step_id}:${event.data.call_id}`)
-    && selected?.steps.some(step => step.id === event.step_id && step.session_id === event.data.session_id))
+    && selected && matchesCollaborationExecution(selected, event))
   const answered = new Set((selected?.events || []).filter(event => ['question_answered', 'question_expired'].includes(event.kind))
     .map(event => String(event.data.request_id || '')))
   const questions = (selected && activeStatuses.has(selected.status) && !selected.cancel_requested ? selected.events || [] : [])
     .filter(event => event.kind === 'question_requested' && typeof event.data.request_id === 'string'
-      && !answered.has(event.data.request_id) && selected?.steps.some(step => step.id === event.step_id
-        && step.status === 'running' && step.session_id === event.data.session_id))
+      && !answered.has(event.data.request_id) && selected && matchesCollaborationExecution(selected, event, true))
   const reply = async (event: PersonalCollaborationEvent, body: PersonalCollaborationReply) => {
     if (!selected || typeof event.data.request_id !== 'string') return
     const requestId = event.data.request_id, key = `${selected.id}:${requestId}`
@@ -223,7 +256,8 @@ export function PersonalCollaborations({ api, agents, sourceSessionId, busy, onC
     </header>
     <div className="pc-workbench">
       <aside className="pc-sidebar" aria-label="协作任务列表">
-        <button type="button" className={`pc-new${composing ? ' selected' : ''}`} disabled={locked} onClick={() => setComposing(true)}><Plus size={16} />发起协作</button>
+        <button type="button" className={`pc-new${composing && composeMode === 'workflow' ? ' selected' : ''}`} disabled={locked} onClick={() => { setComposeMode('workflow'); setComposing(true) }}><Plus size={16} />发起协作</button>
+        <button type="button" className={`pc-new${composing && composeMode === 'message' ? ' selected' : ''}`} disabled={locked} onClick={() => { setComposeMode('message'); setComposing(true) }}><Mail size={16} />专员消息</button>
         {listError && <div className="pc-error" role="alert">{listError}<button type="button" onClick={refresh}>重试加载列表</button></div>}
         {loading && !items.length && <div className="pc-empty" role="status">正在加载协作…</div>}
         {!loading && !listError && !items.length && <div className="pc-empty">尚无协作任务</div>}
@@ -234,11 +268,10 @@ export function PersonalCollaborations({ api, agents, sourceSessionId, busy, onC
         </button>)}</div>
       </aside>
       <main className="pc-content">
-        <div hidden={!composing}><CollaborationComposer key={composerKey} api={api} agents={agents} sourceSessionId={sourceSessionId}
-          onBusy={setSubmitting} onCreated={value => {
-            setItems(items => [value, ...items.filter(item => item.id !== value.id)])
-            setComposing(false); setComposerKey(value => value + 1); setSelectedId(value.id); setDetail(value); refresh()
-          }} /></div>
+        <div hidden={!composing || composeMode !== 'workflow'}><CollaborationComposer key={composerKey} api={api} agents={agents} sourceSessionId={sourceSessionId}
+          onBusy={setSubmitting} onCreated={value => acceptCreated(value, 'workflow')} /></div>
+        <div hidden={!composing || composeMode !== 'message'}><ManualMessageComposer key={messageComposerKey} api={api} agents={agents} sourceSessionId={sourceSessionId}
+          onBusy={setSubmitting} onCreated={value => acceptCreated(value, 'message')} /></div>
         {!composing && <>
           {detailError && <div className="pc-error" role="alert">{detailError}<button type="button" onClick={refresh}>重试加载任务</button></div>}
           {actionError && <div className="pc-error" role="alert">{actionError}</div>}
@@ -252,7 +285,7 @@ export function PersonalCollaborations({ api, agents, sourceSessionId, busy, onC
               const options = Array.isArray(event.data.options) ? event.data.options.filter((option): option is { value: string; label: string; description?: string } => Boolean(option) && typeof option === 'object' && typeof option.value === 'string' && typeof option.label === 'string') : []
               const expired = typeof event.data.expires_at === 'string' && new Date(event.data.expires_at).valueOf() <= Date.now()
               return <div className="pc-question" key={event.key}>
-                <header><strong>{typeof event.data.header === 'string' && event.data.header || '专员提问'}</strong><span>{selected.steps.find(step => step.id === event.step_id)?.agent_name || agents.find(agent => agent.id === selected.steps.find(step => step.id === event.step_id)?.agent_id)?.name || '专员'}</span></header>
+                <header><strong>{typeof event.data.header === 'string' && event.data.header || '专员提问'}</strong><span>{typeof event.data.actor_name === 'string' && event.data.actor_name || selected.steps.find(step => step.id === event.step_id)?.agent_name || agents.find(agent => agent.id === selected.steps.find(step => step.id === event.step_id)?.agent_id)?.name || '专员'}</span></header>
                 <p>{typeof event.data.question === 'string' ? event.data.question : '问题内容暂不可用，请刷新记录'}</p>
                 {questionSent[key] ? <span role="status">回答已提交</span> : expired ? <span role="status">问题已过期</span> : <>
                   {!!options.length && <div className="pc-question-options">{options.map(option => <button type="button" key={option.value} disabled={questionBusy[key]} onClick={() => void reply(event, { kind: 'option', value: option.value })}>
@@ -269,7 +302,7 @@ export function PersonalCollaborations({ api, agents, sourceSessionId, busy, onC
             })}</section>}
             {!!permissions.length && <section className="pc-permissions" aria-label="协作待授权操作">{permissions.map(event => {
               const key = `${String(event.data.session_id)}:${String(event.data.call_id)}`
-              return <div className="pc-permission" key={event.key}><header><strong>{selected.steps.find(step => step.id === event.step_id)?.agent_name || agents.find(agent => agent.id === selected.steps.find(step => step.id === event.step_id)?.agent_id)?.name || '专员'} · 等待授权</strong><code>{String(event.data.tool_name || '工具操作')}</code></header>
+              return <div className="pc-permission" key={event.key}><header><strong>{typeof event.data.actor_name === 'string' && event.data.actor_name || selected.steps.find(step => step.id === event.step_id)?.agent_name || agents.find(agent => agent.id === selected.steps.find(step => step.id === event.step_id)?.agent_id)?.name || '专员'} · 等待授权</strong><code>{String(event.data.tool_name || '工具操作')}</code></header>
                 {typeof event.data.reason === 'string' && <p>{event.data.reason}</p>}
                 {event.data.arguments !== undefined && <pre>{typeof event.data.arguments === 'string' ? event.data.arguments : JSON.stringify(event.data.arguments, null, 2)}</pre>}
                 {permissionSent[key] ? <span role="status">授权决定已提交</span> : <div><button type="button" disabled={permissionBusy[key]} onClick={() => void resolve(event, 'deny')}>拒绝</button><button type="button" className="pc-primary" disabled={permissionBusy[key]} onClick={() => void resolve(event, 'allow')}>{permissionBusy[key] ? '正在提交…' : '允许本次操作'}</button></div>}
@@ -287,9 +320,10 @@ export function PersonalCollaborations({ api, agents, sourceSessionId, busy, onC
               <footer><code>{step.job_id}</code>{step.run_id && <code title="执行记录">{step.run_id}</code>}
                 {onOpenSession && step.session_id && <button type="button" disabled={busy || locked || ['waiting', 'admitted', 'claimed'].includes(step.status)} onClick={() => void openSession(step.session_id)}><ExternalLink size={13} />查看执行记录</button>}</footer>
             </li>)}</ol>
+            <PeerConversations api={api} collaboration={selected} busy={busy || locked} onOpenSession={onOpenSession ? openSession : undefined} />
             <details className="pc-transcript" open><summary>交接与执行记录 <span>{selected.events?.length || 0}</span></summary>
               {selected.events?.length ? <ol>{selected.events.map(event => <li key={event.sequence}><span className="pc-event-dot" /><div><header><strong>{eventLabel(event.kind)}</strong><time>{timestamp(event.created_at)}</time></header>
-                {event.step_id && <span className="pc-event-agent">{selected.steps.find(step => step.id === event.step_id)?.agent_name || agents.find(agent => agent.id === selected.steps.find(step => step.id === event.step_id)?.agent_id)?.name || event.step_id}</span>}
+                {event.step_id && <span className="pc-event-agent">{typeof event.data.actor_name === 'string' && event.data.actor_name || selected.steps.find(step => step.id === event.step_id)?.agent_name || agents.find(agent => agent.id === selected.steps.find(step => step.id === event.step_id)?.agent_id)?.name || event.step_id}</span>}
                 <EventData event={event} />
               </div></li>)}</ol> : <div className="pc-empty">尚无执行记录</div>}
             </details>
@@ -312,7 +346,7 @@ function EventData({ event }: { event: PersonalCollaborationEvent }) {
 }
 
 export function CollaborationComposer({ api, agents, sourceSessionId, onBusy, onCreated }: {
-  api: Pick<PersonalCollaborationsApi, 'createPersonalCollaboration'>
+  api: Pick<PersonalCollaborationsApi, 'createPersonalCollaboration' | 'personalTools'>
   agents: PersonalAgent[]
   sourceSessionId: string | null
   onBusy: (value: boolean) => void
@@ -322,29 +356,35 @@ export function CollaborationComposer({ api, agents, sourceSessionId, onBusy, on
   const [context, setContext] = useState('')
   const [mode, setMode] = useState<'sequential' | 'parallel'>('sequential')
   const [rows, setRows] = useState<PersonalCollaborationStepInput[]>(() => [newStep()])
+  const [peerAgents, setPeerAgents] = useState<PersonalPeerGrant[]>([])
+  const permissions = usePeerTools(api)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const requestId = useRef('')
   const requestSource = useRef<string | null>(null)
+  const submitted = useRef<PersonalCollaborationInput | null>(null)
   const inFlight = useRef(false)
   const alive = useRef(true)
   useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
   const available = agents.filter(agent => agent.kind === 'specialist' && agent.status === 'active')
   const canSubmit = rows.length > 0 && rows.every(row => row.agent_id && row.agent_version > 0 && row.task.trim()
     && available.some(agent => agent.id === row.agent_id))
+    && peerAgents.every(grant => available.some(agent => agent.id === grant.agent_id && agent.version === grant.agent_version))
+    && (!peerAgents.length || (!permissions.loading && !permissions.error))
   const update = (id: string, fields: Partial<PersonalCollaborationStepInput>) => setRows(values => values.map(row => row.id === id ? { ...row, ...fields } : row))
   const submit = async (event: FormEvent) => {
     event.preventDefault()
-    if (inFlight.current || !canSubmit) return
+    if (inFlight.current || (!submitted.current && !canSubmit)) return
     if (!sourceSessionId && !requestSource.current) { setError('请先打开一个已有对话，再发起协作'); return }
     if (!requestId.current) { requestId.current = crypto.randomUUID(); requestSource.current = sourceSessionId }
     inFlight.current = true; setSaving(true); onBusy(true); setError('')
-    const body: PersonalCollaborationInput = {
+    const body: PersonalCollaborationInput = submitted.current || {
       source_session_id: requestSource.current!, request_id: requestId.current,
-      title: title.trim(), context: context.trim(), steps: rows.map((row, index) => ({
+      title: title.trim(), context: context.trim(), ...(peerAgents.length ? { peer_agents: peerAgents } : {}), steps: rows.map((row, index) => ({
         ...row, task: row.task.trim(), depends_on: mode === 'sequential' && index > 0 ? [rows[index - 1].id] : [],
       })),
     }
+    submitted.current = body
     try {
       const result = validateCollaboration(await api.createPersonalCollaboration(body))
       if (result.request_id !== body.request_id || result.source_session_id !== body.source_session_id)
@@ -356,7 +396,7 @@ export function CollaborationComposer({ api, agents, sourceSessionId, onBusy, on
   return <form className="pc-composer" onSubmit={submit}>
     <header><h3>发起协作</h3><span>{rows.length} 个步骤</span></header>
     {error && <div className="pc-error" role="alert">{error}</div>}
-    <fieldset disabled={saving} className="pc-compose-fields">
+    <fieldset disabled={saving || Boolean(submitted.current)} className="pc-compose-fields">
       <label>任务名称<input aria-label="协作任务名称" maxLength={120} value={title} onChange={event => setTitle(event.target.value)} /></label>
       <fieldset className="pc-mode"><legend>执行方式</legend>
         <label><input type="radio" name="collaboration-mode" checked={mode === 'sequential'} onChange={() => setMode('sequential')} /><ArrowDown size={14} />依次接力</label>
@@ -377,9 +417,11 @@ export function CollaborationComposer({ api, agents, sourceSessionId, onBusy, on
       </li>)}</ol>
       {!available.length && <div className="pc-empty">尚无可协作的专员</div>}
       <button type="button" className="pc-add-step" disabled={rows.length >= 12} onClick={() => setRows(values => [...values, newStep()])}><Plus size={14} />添加步骤</button>
+      {permissions.error && <div className="pc-error" role="alert">{permissions.error}<button type="button" onClick={permissions.retry}>重试加载互询权限</button></div>}
+      <PeerScopeEditor agents={agents} tools={permissions.tools} value={peerAgents} onChange={setPeerAgents} disabled={saving || permissions.loading || Boolean(permissions.error)} />
       <label>共享上下文<textarea aria-label="协作共享上下文" maxLength={32000} rows={4} value={context} onChange={event => setContext(event.target.value)} /></label>
     </fieldset>
-    <footer><button type="submit" className="pc-primary" disabled={saving || !canSubmit}>{saving ? <Loader2 size={15} className="pa-spin" /> : <ChevronRight size={15} />}{saving ? '正在提交…' : '开始协作'}</button></footer>
+    <footer><button type="submit" className="pc-primary" disabled={saving || (!submitted.current && !canSubmit)}>{saving ? <Loader2 size={15} className="pa-spin" /> : <ChevronRight size={15} />}{saving ? '正在提交…' : '开始协作'}</button></footer>
   </form>
 }
 

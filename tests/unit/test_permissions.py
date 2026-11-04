@@ -978,7 +978,16 @@ class TestPermissionChecker:
         outside_dir = tmp_path / "outside"
         allowed_dir.mkdir()
         outside_dir.mkdir()
-        (allowed_dir / "escape").symlink_to(outside_dir, target_is_directory=True)
+        try:
+            (allowed_dir / "escape").symlink_to(outside_dir, target_is_directory=True)
+        except OSError as exc:
+            if os.name != "nt" or getattr(exc, "winerror", None) != 1314:
+                raise
+            # Directory junctions exercise the same resolved-path escape without
+            # requiring the Windows symbolic-link privilege.
+            import _winapi
+
+            _winapi.CreateJunction(str(outside_dir), str(allowed_dir / "escape"))
         checker = PermissionChecker(
             PermissionMode.MODERATE,
             allowed_dirs=[str(allowed_dir)],

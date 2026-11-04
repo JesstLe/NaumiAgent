@@ -67,6 +67,7 @@ class Session:
     summary: str = ""
     engine: str = "naumi"
     personal_agent_id: str = ""
+    personal_execution_id: str = ""
 
     def add_message(self, role: str, content: str, **metadata: Any) -> None:
         msg: dict[str, Any] = {
@@ -97,6 +98,7 @@ class Session:
             "summary": self.summary,
             "engine": self.engine,
             "personal_agent_id": self.personal_agent_id,
+            "personal_execution_id": self.personal_execution_id,
         }
 
     @classmethod
@@ -125,6 +127,7 @@ class Session:
             summary=row.get("summary", ""),
             engine=row.get("engine") or "naumi",
             personal_agent_id=row.get("personal_agent_id") or "",
+            personal_execution_id=row.get("personal_execution_id") or "",
         )
 
 
@@ -146,7 +149,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     git_branch TEXT NOT NULL DEFAULT '',
     summary TEXT NOT NULL DEFAULT '',
     engine TEXT NOT NULL DEFAULT 'naumi',
-    personal_agent_id TEXT NOT NULL DEFAULT ''
+    personal_agent_id TEXT NOT NULL DEFAULT '',
+    personal_execution_id TEXT NOT NULL DEFAULT ''
 )
 """
 
@@ -155,9 +159,9 @@ INSERT INTO sessions
     (
         id, title, model, messages, created_at, updated_at, status, total_tokens,
         total_cost_usd, workspace_root, git_branch, summary, engine,
-        last_accessed_at, archived_at, pinned_at, personal_agent_id
+        last_accessed_at, archived_at, pinned_at, personal_agent_id, personal_execution_id
     )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
     title = excluded.title,
     model = excluded.model,
@@ -183,8 +187,11 @@ ON CONFLICT(id) DO UPDATE SET
     pinned_at = excluded.pinned_at,
     personal_agent_id = CASE
         WHEN sessions.personal_agent_id <> '' THEN sessions.personal_agent_id
-        ELSE excluded.personal_agent_id END
-RETURNING personal_agent_id
+        ELSE excluded.personal_agent_id END,
+    personal_execution_id = CASE
+        WHEN sessions.personal_execution_id <> '' THEN sessions.personal_execution_id
+        ELSE excluded.personal_execution_id END
+RETURNING personal_agent_id, personal_execution_id
 """
 
 _GET = "SELECT * FROM sessions WHERE id = ?"
@@ -203,6 +210,7 @@ _EXTRA_COLUMNS = {
     "archived_at": "TEXT",
     "pinned_at": "TEXT",
     "personal_agent_id": "TEXT NOT NULL DEFAULT ''",
+    "personal_execution_id": "TEXT NOT NULL DEFAULT ''",
 }
 
 _PAYLOAD_BYTES_SQL = """
@@ -218,6 +226,7 @@ length(CAST(id AS BLOB)) + length(CAST(title AS BLOB))
 + length(CAST(COALESCE(git_branch, '') AS BLOB))
 + length(CAST(COALESCE(summary, '') AS BLOB))
 + length(CAST(COALESCE(personal_agent_id, '') AS BLOB))
++ length(CAST(COALESCE(personal_execution_id, '') AS BLOB))
 """
 
 _EFFECTIVE_ACCESS_SQL = """
@@ -252,6 +261,7 @@ class SessionStore:
                     await self._ensure_schema(db)
                     await db.commit()
                 except BaseException:
+                    await db.rollback()
                     await db.close()
                     raise
                 self._db = db
@@ -282,6 +292,7 @@ class SessionStore:
         git_branch: str | None = None,
         engine: str | None = None,
         personal_agent_id: str = "",
+        personal_execution_id: str = "",
     ) -> Session:
         session = Session(
             title=title or "新会话",
@@ -290,6 +301,7 @@ class SessionStore:
             git_branch=str(git_branch or "").strip(),
             engine=engine or "naumi",
             personal_agent_id=personal_agent_id,
+            personal_execution_id=personal_execution_id,
         )
         if system_prompt:
             session.add_message("system", system_prompt)
@@ -305,6 +317,13 @@ class SessionStore:
             or any(ord(character) < 33 or ord(character) == 127 for character in marker)
         ):
             raise ValueError("个人助理身份标记必须是无空白的字符串，最多 128 字符。")
+        marker = session.personal_execution_id
+        if (
+            not isinstance(marker, str)
+            or len(marker) > 128
+            or any(ord(character) < 33 or ord(character) == 127 for character in marker)
+        ):
+            raise ValueError("会话执行身份标记必须是无空白的字符串，最多 128 字符。")
         db = await self._get_db()
         if session.status == "active":
             timestamp = datetime.now()
@@ -332,6 +351,7 @@ class SessionStore:
                 row["archived_at"],
                 row["pinned_at"],
                 row["personal_agent_id"],
+                row["personal_execution_id"],
             ),
         )
         # Ownership is sticky in SQL even when a stale caller saves an unmarked object.
@@ -340,6 +360,29 @@ class SessionStore:
         await db.commit()
         if saved is not None:
             session.personal_agent_id = saved["personal_agent_id"]
+            session.personal_execution_id = saved["personal_execution_id"]
+
+    async def bind_personal_execution(
+        self, session_id: str, expected_agent_id: str, execution_id: str
+    ) -> None:
+        """Mark legacy execution history without racing or rewriting its messages."""
+        if (
+            not isinstance(execution_id, str)
+            or not execution_id
+            or len(execution_id) > 128
+            or any(ord(character) < 33 or ord(character) == 127 for character in execution_id)
+        ):
+            raise ValueError("会话执行编号不正确。")
+        db = await self._get_db()
+        cursor = await db.execute(
+            "UPDATE sessions SET personal_execution_id=? WHERE id=? AND personal_agent_id=? "
+            "AND personal_execution_id IN ('',?) RETURNING personal_execution_id",
+            (execution_id, session_id, expected_agent_id, execution_id),
+        )
+        result = await cursor.fetchone()
+        await db.commit()
+        if result is None:
+            raise ValueError("会话归属或执行编号不一致，未修改历史内容。")
 
     @_serialized
     async def load(self, session_id: str) -> Session | None:
@@ -536,6 +579,7 @@ class SessionStore:
             summary=source.summary,
             personal_agent_id=source.personal_agent_id,
             engine=source.engine,
+            personal_execution_id=source.personal_execution_id,
         )
         await self.save(duplicate)
         return duplicate

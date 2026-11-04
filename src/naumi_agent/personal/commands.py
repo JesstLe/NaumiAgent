@@ -8,6 +8,8 @@ import shlex
 import uuid
 from typing import Any
 
+from naumi_agent.personal import peer_models
+from naumi_agent.personal.models import PersonalAgentError
 from naumi_agent.tools.base import ToolCall
 
 _FIELDS = frozenset(
@@ -39,7 +41,11 @@ _HELP = """个人助理命令：
 /assistants collaborations — 查看协作记录
 /assistants collaboration <ID> — 查看交接与结果
 /assistants cancel-collaboration <ID> — 请求停止协作
-/assistants reply-json <协作ID> <问题ID> '<JSON对象>' — 回答协作中的问题"""
+/assistants reply-json <协作ID> <问题ID> '<JSON对象>' — 回答协作中的问题
+/assistants message-json '<JSON对象>' — 指定已有专员发送消息
+/assistants messages <协作ID> — 查看双方消息记录
+/assistants message <消息ID> — 查看完整问题、回答与回执
+/assistants message-ack <消息ID> <回答SHA256> — 确认已收到原回答"""
 
 
 def _identifier(value: str) -> str:
@@ -83,6 +89,63 @@ def parse_assistants_command(argument: str) -> dict[str, Any]:
     if not parts:
         return {"operation": "list"}
     action, *args = parts
+    if action == "message-json" and len(args) == 1:
+        try:
+            fields = json.loads(args[0])
+        except (ValueError, RecursionError) as exc:
+            raise ValueError("消息 JSON 格式有误，请检查引号。") from exc
+        required = {
+            "sender_agent_id",
+            "sender_agent_version",
+            "recipient_agent_id",
+            "recipient_agent_version",
+            "content",
+        }
+        optional = {"source_session_id", "request_id", "context", "peer_agents"}
+        if (
+            not isinstance(fields, dict)
+            or not required <= fields.keys()
+            or fields.keys() - (required | optional)
+        ):
+            raise ValueError("消息需要发送与接收专员的 ID、版本和 content（内容）。")
+        fields = {"request_id": uuid.uuid4().hex, **fields}
+        try:
+            peer_models.agent_id(fields["sender_agent_id"])
+            peer_models.version(fields["sender_agent_version"])
+            peer_models.dispatch(
+                {
+                    key: fields.get(key, "")
+                    for key in (
+                        "recipient_agent_id",
+                        "recipient_agent_version",
+                        "request_id",
+                        "content",
+                        "context",
+                    )
+                }
+            )
+            if "peer_agents" in fields:
+                peer_models.grants(fields["peer_agents"])
+        except PersonalAgentError as exc:
+            raise ValueError(exc.message) from exc
+        if "source_session_id" in fields:
+            source = fields["source_session_id"]
+            if not isinstance(source, str) or not _IDENTIFIER.fullmatch(source):
+                raise ValueError("来源会话 ID 格式不正确，请从原始对话发送。")
+        return {"operation": "message_send", **fields}
+    if action == "messages" and len(args) == 1:
+        if not re.fullmatch(r"pc_[0-9a-f]{32}", args[0]):
+            raise ValueError("协作 ID 格式无效，请从协作记录复制。")
+        return {"operation": "messages", "collaboration_id": args[0]}
+    if action in {"message", "message-ack"} and len(args) == (2 if action == "message-ack" else 1):
+        if not re.fullmatch(r"pm_[0-9a-f]{32}", args[0]):
+            raise ValueError("消息 ID 格式无效，请从双方消息记录复制。")
+        result = {"operation": action.replace("-", "_"), "message_id": args[0]}
+        if action == "message-ack":
+            if not re.fullmatch(r"[0-9a-f]{64}", args[1]):
+                raise ValueError("回答摘要格式不正确，请复制原回答的 SHA256。")
+            result["expected_response_sha256"] = args[1]
+        return result
     if action == "collaborations" and not args:
         return {"operation": "collaborations"}
     if action == "reply-json" and len(args) == 3:
@@ -111,10 +174,13 @@ def parse_assistants_command(argument: str) -> dict[str, Any]:
             raise ValueError("协作 JSON 格式有误，请检查引号。") from exc
         if (
             not isinstance(fields, dict)
-            or set(fields) - {"source_session_id", "request_id", "title", "context", "steps"}
+            or set(fields)
+            - {"source_session_id", "request_id", "title", "context", "steps", "peer_agents"}
             or "steps" not in fields
         ):
-            raise ValueError("协作需要 steps，可指定 title、context、request_id 和来源对话。")
+            raise ValueError(
+                "协作需要 steps，可指定 title、context、request_id、来源对话和 peer_agents。"
+            )
         return {"operation": "collaborate", "request_id": uuid.uuid4().hex, **fields}
     if action == "list" and (not args or args == ["all"]):
         return {"operation": "list", "include_archived": bool(args)}
@@ -167,6 +233,29 @@ def _profile_summary(agent: dict[str, Any]) -> str:
 
 
 def _format_result(operation: str, payload: Any) -> str:
+    if operation == "messages" and isinstance(payload, dict):
+        messages = payload.get("messages", [])
+        if not messages:
+            return "暂无专员消息。"
+        return "双方消息\n" + "\n".join(_message_summary(message) for message in messages)
+    if operation in {"message", "message_ack"} and isinstance(payload, dict):
+        lines = [_message_summary(payload)]
+        for key, label in (
+            ("content", "问题"),
+            ("context", "共享资料"),
+            ("response", "回答"),
+            ("error", "执行结果"),
+        ):
+            if payload.get(key):
+                lines.append(label + "：\n" + _message_text(payload[key]))
+        if payload.get("response_sha256"):
+            lines.append("回答 SHA256：" + _display(payload["response_sha256"]))
+        if payload.get("acknowledged_at"):
+            actor = {"user": "用户", "agent": "发送专员"}.get(
+                payload.get("acknowledged_by"), "原确认方"
+            )
+            lines.append(f"{actor}已确认收到：{_display(payload['acknowledged_at'])}")
+        return "\n".join(lines)
     if operation == "collaboration_reply":
         return "回答已记录：" + _display(payload.get("request_id"))
     if operation == "collaborations" and isinstance(payload, dict):
@@ -178,7 +267,7 @@ def _format_result(operation: str, payload: Any) -> str:
             f"{_collaboration_status(p.get('status'))}"
             for p in values
         )
-    if operation in {"collaborate", "collaboration", "cancel_collaboration"}:
+    if operation in {"collaborate", "collaboration", "cancel_collaboration", "message_send"}:
         lines = [
             f"协作：{_display(payload.get('id'))} · {_collaboration_status(payload.get('status'))}"
         ]
@@ -227,6 +316,26 @@ def _format_result(operation: str, payload: Any) -> str:
         lines.append(f"职责：{_display(agent.get('instructions'))}")
         return "\n".join(lines)
     return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def _message_text(value: Any) -> str:
+    # Preserve complete multiline answers without permitting terminal escape sequences.
+    return re.sub(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]", "", str(value or "").replace("\r\n", "\n"))
+
+
+def _message_summary(message: dict[str, Any]) -> str:
+    status = {
+        "queued": "等待派送",
+        "dispatching": "开始派送",
+        "processing": "对方处理中",
+        "responded": "已回答",
+        "acknowledged": "已确认收到",
+    }.get(str(message.get("state"))) or _collaboration_status(message.get("state"))
+    return (
+        f"{_display(message.get('id'))} · "
+        f"{_display(message.get('sender_name') or message.get('sender_agent_id'))} → "
+        f"{_display(message.get('recipient_name') or message.get('recipient_agent_id'))} · {status}"
+    )
 
 
 def _collaboration_status(value: Any) -> str:

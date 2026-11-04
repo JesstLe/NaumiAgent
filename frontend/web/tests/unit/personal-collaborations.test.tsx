@@ -25,6 +25,11 @@ const questionId = `ask-${'c'.repeat(32)}`
 const question = (changes: Partial<PersonalCollaborationEvent> = {}): PersonalCollaborationEvent => ({ sequence: 3, key: 'question_1', kind: 'question_requested', step_id: 'step1', data: { request_id: questionId, session_id: 'execution_1', header: '报告格式', question: '这次预算报告使用哪种格式？', options: [{ value: 'markdown', label: 'Markdown', description: '保留可编辑内容' }, { value: 'text', label: '纯文本', description: '适合直接复制' }], allow_custom: true, custom_label: '指定其他格式', expires_at: '2099-11-04T01:00:35Z' }, created_at: '2026-11-04T01:00:35Z', ...changes })
 function apiMock(items: PersonalCollaboration[] = [collaboration()]) {
   return {
+    personalTools: vi.fn().mockResolvedValue({ tools: [{ name: 'file_read', description: '读取文件', read_only: true }] }),
+    personalMessages: vi.fn().mockResolvedValue({ messages: [] }),
+    personalMessage: vi.fn().mockRejectedValue(new Error('消息不存在')),
+    acknowledgePersonalMessage: vi.fn().mockRejectedValue(new Error('消息不存在')),
+    createPersonalMessage: vi.fn().mockImplementation(async body => collaboration({ request_id: body.request_id, source_session_id: body.source_session_id })),
     personalCollaborations: vi.fn().mockResolvedValue({ collaborations: items }),
     personalCollaboration: vi.fn().mockImplementation(async (id: string) => items.find(item => item.id === id) || collaboration({ id })),
     createPersonalCollaboration: vi.fn().mockImplementation(async (body: PersonalCollaborationInput) => collaboration({ request_id: body.request_id, source_session_id: body.source_session_id })),
@@ -95,10 +100,11 @@ describe('collaboration composer', () => {
     fireEvent.click(screen.getByRole('button', { name: '开始协作' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('连接中断')
     expect(screen.getByLabelText('步骤 1 任务')).toHaveValue('步骤 1 的明确任务')
-    fireEvent.change(screen.getByLabelText('协作任务名称'), { target: { value: '修改后的标题' } })
+    expect(screen.getByLabelText('协作任务名称')).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: '开始协作' }))
     await waitFor(() => expect(api.createPersonalCollaboration).toHaveBeenCalledTimes(2))
     expect(api.createPersonalCollaboration.mock.calls[0][0].request_id).toBe(api.createPersonalCollaboration.mock.calls[1][0].request_id)
+    expect(api.createPersonalCollaboration.mock.calls[0][0]).toEqual(api.createPersonalCollaboration.mock.calls[1][0])
   })
 
   it('prevents duplicate submission while the first admission is pending', async () => {
@@ -162,7 +168,7 @@ describe('collaboration workbench', () => {
     renderDialog(api, { onOpenSession: open, onClose: close })
     expect(await screen.findByLabelText('步骤 1 的结果')).toHaveTextContent('825 元')
     expect(screen.getByLabelText('步骤 2 的结果')).toHaveTextContent('1200 - 375 = 825')
-    expect(screen.getByText('v3')).toBeVisible()
+    expect(within(screen.getByRole('list', { name: '协作执行步骤' })).getByText('v3')).toBeVisible()
     fireEvent.click(screen.getByText('共享上下文', { selector: 'summary' }))
     expect(screen.getByText('只共享这段指定材料。')).toBeVisible()
     fireEvent.click(screen.getByText('查看原始记录'))

@@ -82,7 +82,72 @@ export type PersonalAgentInput = Pick<PersonalAgent,
 export type PersonalAgentUpdate = Partial<Omit<PersonalAgentInput, 'kind'> & Pick<PersonalAgent, 'status'>> & {
   expected_version: number
 }
-export interface PersonalTool { name: string; description: string }
+export interface PersonalTool { name: string; description: string; read_only?: boolean }
+
+export interface PersonalPeerGrant {
+  agent_id: string
+  agent_version: number
+  tool_names?: string[]
+}
+export type PersonalMessageState = 'queued' | 'dispatching' | 'processing' | 'responded'
+  | 'acknowledged' | 'blocked' | 'unknown' | 'cancelled' | 'error' | 'timeout' | 'max_turns'
+export interface PersonalMessageReceipt {
+  sequence: number
+  kind: string
+  data: Record<string, unknown>
+  created_at: string
+  receipt_sha256: string
+}
+export interface PersonalAgentMessage {
+  id: string
+  collaboration_id: string
+  step_id: string
+  source_session_id: string
+  source_run_id: string
+  sender_agent_id: string
+  sender_version: number
+  sender_name: string
+  recipient_agent_id: string
+  recipient_version: number
+  recipient_name: string
+  receiver_session_id: string
+  receiver_run_id: string
+  root_job_id: string
+  content: string
+  context: string
+  response: string
+  error: string
+  outcome: string
+  state: PersonalMessageState
+  created_at: string
+  acknowledged_at: string
+  acknowledged_by?: string
+  response_sha256: string
+  result_sha256: string
+  receipts?: PersonalMessageReceipt[]
+  content_truncated?: boolean
+  context_truncated?: boolean
+  response_truncated?: boolean
+}
+export interface PersonalMessageInput {
+  source_session_id: string
+  request_id: string
+  sender_agent_id: string
+  sender_agent_version: number
+  recipient_agent_id: string
+  recipient_agent_version: number
+  content: string
+  context?: string
+  peer_agents?: PersonalPeerGrant[]
+}
+export interface PersonalPeerSession {
+  message_id: string
+  session_id: string
+  agent_id: string
+  agent_version: number
+  step_id: string
+  state: PersonalMessageState
+}
 
 export type PersonalCollaborationStatus =
   | 'admitted' | 'claimed' | 'running' | 'completed' | 'error' | 'timeout'
@@ -100,6 +165,7 @@ export interface PersonalCollaborationInput {
   title?: string
   context?: string
   steps: PersonalCollaborationStepInput[]
+  peer_agents?: PersonalPeerGrant[]
 }
 export interface PersonalCollaborationReply {
   kind: 'option' | 'custom'
@@ -126,6 +192,7 @@ export interface PersonalCollaborationEvent {
 export interface PersonalCollaboration {
   id: string
   request_id: string
+  message_request_id?: string
   source_session_id: string
   source_agent_id: string
   title: string
@@ -135,6 +202,9 @@ export interface PersonalCollaboration {
   status: PersonalCollaborationStatus
   steps: PersonalCollaborationStep[]
   events?: PersonalCollaborationEvent[]
+  peer_agents?: PersonalPeerGrant[]
+  messages?: PersonalAgentMessage[]
+  peer_sessions?: PersonalPeerSession[]
 }
 
 function preferenceNamespace(): string {
@@ -322,6 +392,20 @@ export class WorkbenchRuntimeClient extends WorkbenchApiClient {
     return (await this.fetch(`/personal/collaborations/${encodeURIComponent(id)}/questions/${encodeURIComponent(requestId)}/reply`, {
       method: 'POST', body: JSON.stringify(body),
     })).json()
+  }
+  async personalMessages(collaborationId: string): Promise<{ messages: PersonalAgentMessage[] }> {
+    return (await this.fetch(`/personal/collaborations/${encodeURIComponent(collaborationId)}/messages`)).json()
+  }
+  async personalMessage(id: string): Promise<PersonalAgentMessage> {
+    return (await this.fetch(`/personal/messages/${encodeURIComponent(id)}`)).json()
+  }
+  async acknowledgePersonalMessage(id: string, body: { expected_response_sha256: string }): Promise<PersonalAgentMessage> {
+    return (await this.fetch(`/personal/messages/${encodeURIComponent(id)}/ack`, {
+      method: 'POST', body: JSON.stringify(body),
+    })).json()
+  }
+  async createPersonalMessage(body: PersonalMessageInput): Promise<PersonalCollaboration> {
+    return (await this.fetch('/personal/messages', { method: 'POST', body: JSON.stringify(body) })).json()
   }
   async outputAsset(path: string, signal?: AbortSignal): Promise<Blob> {
     if (!/^\/api\/v1\/output-assets\/[a-f0-9]{64}\.(svg|png|jpg|webp|gif|pdf|csv|json|txt|md)$/.test(path)) throw new Error('文件地址无效')

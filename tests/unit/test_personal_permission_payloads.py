@@ -290,3 +290,109 @@ def test_cross_instance_concurrent_idempotency_keeps_one_payload(store):
     with sqlite3.connect(store.db_path) as db:
         assert db.execute(f"SELECT COUNT(*) FROM {TABLE}").fetchone()[0] == 1
         assert db.execute("SELECT COUNT(*) FROM collaboration_events").fetchone()[0] == 1
+
+
+def peer_request(store, plan, **changes):
+    from naumi_agent.personal.message_store import PersonalMessageStore
+
+    messages = PersonalMessageStore(store.base_dir.parent / "messages")
+    message = messages.create(
+        **{
+            "workspace_key": plan["workspace_key"],
+            "collaboration_id": plan["id"],
+            "step_id": "write",
+            "source_session_id": plan["steps"][0]["session_id"],
+            "sender_agent_id": plan["steps"][0]["agent_id"],
+            "sender_version": 1,
+            "recipient_agent_id": "pa_" + "b" * 32,
+            "recipient_version": 1,
+            "request_id": "permission-peer",
+            "content": "写入用户已确认内容",
+            "context": "",
+            "tool_names": ["file_write"],
+            **changes,
+        }
+    )
+    data = {
+        **payload(plan, "x" * 70000),
+        "session_id": message["receiver_session_id"],
+        "peer_message_id": message["id"],
+        "actor_id": message["recipient_agent_id"],
+        "actor_name": "接收专员",
+    }
+    return messages, message, data
+
+
+def test_peer_permission_binds_to_immutable_receiver_message(store):
+    plan = create(store)
+    _messages, message, data = peer_request(store, plan)
+    assert data["session_id"] != plan["steps"][0]["session_id"]
+    event = append(store, plan, data)
+    restored = CollaborationStore(store.base_dir).permission_payload(
+        plan["id"],
+        plan["workspace_key"],
+        key=event["key"],
+    )
+    assert restored == data
+    assert restored["peer_message_id"] == message["id"]
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("session_id", "forged-session"),
+        ("actor_id", "pa_" + "c" * 32),
+        ("peer_message_id", "pm_" + "0" * 32),
+    ],
+)
+def test_peer_permission_rejects_forged_declared_identity(store, field, value):
+    plan = create(store)
+    _messages, _message, data = peer_request(store, plan)
+    data[field] = value
+    with pytest.raises(PersonalAgentError) as exc:
+        append(store, plan, data)
+    assert exc.value.code == "binding_conflict"
+    assert store.events(plan["id"], plan["workspace_key"]) == []
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"workspace_key": "other-workspace"},
+        {"collaboration_id": "pc_" + "0" * 32},
+        {"step_id": "other-step"},
+    ],
+)
+def test_peer_permission_rejects_valid_message_from_another_scope(store, changes):
+    plan = create(store)
+    _messages, _message, data = peer_request(store, plan, **changes)
+    with pytest.raises(PersonalAgentError) as exc:
+        append(store, plan, data)
+    assert exc.value.code == "binding_conflict"
+    assert store.events(plan["id"], plan["workspace_key"]) == []
+
+
+def test_peer_permission_read_rechecks_immutable_message_integrity(store):
+    plan = create(store)
+    messages, message, data = peer_request(store, plan)
+    event = append(store, plan, data)
+    with sqlite3.connect(messages.db_path) as db:
+        db.execute(
+            "UPDATE peer_messages SET receiver_session_id='tampered' WHERE id=?", (message["id"],)
+        )
+    with pytest.raises(PersonalAgentError) as exc:
+        store.permission_payload(plan["id"], plan["workspace_key"], key=event["key"])
+    assert exc.value.code == "binding_conflict"
+
+
+def test_forged_peer_permission_does_not_create_missing_message_database(store):
+    plan = create(store)
+    data = {
+        **payload(plan, "x" * 70000),
+        "session_id": "unregistered-peer-session",
+        "peer_message_id": "pm_" + "0" * 32,
+        "actor_id": "pa_" + "b" * 32,
+    }
+    with pytest.raises(PersonalAgentError):
+        append(store, plan, data)
+    assert not (store.base_dir.parent / "messages" / "personal_messages.db").exists()

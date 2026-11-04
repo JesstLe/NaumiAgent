@@ -1396,7 +1396,8 @@ class TestSessionLoading:
                 await release.wait()
                 return None
 
-            engine.session_store.resume = failed_load  # type: ignore[method-assign]
+            # A missing candidate exits before resume(); gate the actual preflight read.
+            engine.session_store.load = failed_load  # type: ignore[method-assign]
             confirmations: list[dict[str, object]] = []
 
             async def confirm(payload: dict[str, object]) -> str:
@@ -1405,7 +1406,7 @@ class TestSessionLoading:
 
             engine.set_permission_confirmer(confirm)
             load_task = asyncio.create_task(engine.load_session("missing-session"))
-            await entered.wait()
+            await asyncio.wait_for(entered.wait(), timeout=5)
 
             release.set()
             assert await load_task is False
@@ -3280,6 +3281,9 @@ class TestSubagentVisualization:
         self,
         engine: AgentEngine,
     ) -> None:
+        # These visualization tests control blueprint.execute, not the independent
+        # worker transport (covered by dedicated bound-worker tests).
+        engine.subagent_manager._agent_worker_process_factory = None
         session = await engine.get_or_create_session()
         engine.task_store.set_session(session.id)
         task = await engine.task_store.create_task(subject="让 coder 检查实现")
@@ -3342,6 +3346,9 @@ class TestSubagentVisualization:
         self,
         engine: AgentEngine,
     ) -> None:
+        # These visualization tests control blueprint.execute, not the independent
+        # worker transport (covered by dedicated bound-worker tests).
+        engine.subagent_manager._agent_worker_process_factory = None
         session = await engine.get_or_create_session()
         engine.task_store.set_session(session.id)
         task = await engine.task_store.create_task(subject="让 coder 处理失败用例")
@@ -3388,6 +3395,9 @@ class TestSubagentVisualization:
         self,
         engine: AgentEngine,
     ) -> None:
+        # These visualization tests control blueprint.execute, not the independent
+        # worker transport (covered by dedicated bound-worker tests).
+        engine.subagent_manager._agent_worker_process_factory = None
         session = await engine.get_or_create_session()
         engine.task_store.set_session(session.id)
         task = await engine.task_store.create_task(subject="让 coder 处理异常")
@@ -4850,14 +4860,17 @@ class TestStreamingStartupLatency:
         engine: AgentEngine,
     ) -> None:
         first = engine._get_openai_tools_cached()
+        cached_templates = engine._openai_tools_cache
         second = engine._get_openai_tools_cached()
 
-        assert first is second
+        # Authorization projects a fresh view; only immutable schema generation is cached.
+        assert first == second
+        assert engine._openai_tools_cache is cached_templates
 
         engine.tool_registry.register(FakeTool())
         third = engine._get_openai_tools_cached()
 
-        assert third is not first
+        assert engine._openai_tools_cache is not cached_templates
         assert third is not None
         assert any(tool["function"]["name"] == "fake_tool" for tool in third)
 

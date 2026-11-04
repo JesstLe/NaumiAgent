@@ -25,6 +25,7 @@ from typing import Any
 from naumi_agent.config.credentials import resolve_runtime_payload_key
 from naumi_agent.daemons.permission_decisions import permission_arguments_sha256
 from naumi_agent.personal.models import PersonalAgentError
+from naumi_agent.personal.peer_models import dispatch, grants
 from naumi_agent.safety.payload_envelope import (
     PayloadEnvelope,
     RuntimePayloadKey,
@@ -150,7 +151,11 @@ def _steps(value: Any) -> list[dict[str, Any]]:
     steps: list[dict[str, Any]] = []
     ids: set[str] = set()
     for raw in value:
-        if not isinstance(raw, dict) or set(raw) != _STEP_FIELDS:
+        if (
+            not isinstance(raw, dict)
+            or not _STEP_FIELDS <= set(raw)
+            or set(raw) - _STEP_FIELDS - {"message"}
+        ):
             raise _invalid("协作步骤缺少必填字段或包含不支持的字段")
         step_id = _identifier(raw["id"], _STEP_ID, "步骤编号", 64)
         if step_id in ids:
@@ -176,6 +181,8 @@ def _steps(value: Any) -> list[dict[str, Any]]:
                 "depends_on": sorted(normalized),
             }
         )
+        if "message" in raw:
+            steps[-1]["message"] = dispatch(raw["message"])
     for step in steps:
         if set(step["depends_on"]) - ids:
             raise _invalid("前置步骤不存在，请检查步骤编号")
@@ -277,10 +284,41 @@ def _permission_key() -> RuntimePayloadKey:
         ) from exc
 
 
-def _permission_step(plan: dict[str, Any], step_id: str, payload: dict[str, Any]) -> None:
+def _permission_step(
+    plan: dict[str, Any],
+    step_id: str,
+    payload: dict[str, Any],
+    base_dir: Path,
+) -> None:
     step = next((item for item in plan["steps"] if item["id"] == step_id), None)
-    if step is None or payload["session_id"] != step["session_id"]:
+    if step is None:
         raise PersonalAgentError("binding_conflict", "权限确认与协作执行会话不一致")
+    peer_message_id = payload.get("peer_message_id")
+    if not peer_message_id:
+        if payload["session_id"] != step["session_id"] or (
+            payload.get("actor_id") and payload["actor_id"] != step["agent_id"]
+        ):
+            raise PersonalAgentError("binding_conflict", "权限确认与协作执行会话不一致")
+        return
+    # Receiver sessions belong to immutable peer messages, not the root step.
+    # get() is read-only and never creates a missing peer database.
+    from naumi_agent.personal.message_store import PersonalMessageStore
+
+    try:
+        message = PersonalMessageStore(base_dir.parent / "messages").get(
+            peer_message_id,
+            plan["workspace_key"],
+        )
+    except PersonalAgentError as exc:
+        raise PersonalAgentError("binding_conflict", "权限确认的专员消息不存在或校验失败") from exc
+    if (
+        message["workspace_key"] != plan["workspace_key"]
+        or message["collaboration_id"] != plan["id"]
+        or message["step_id"] != step_id
+        or message["receiver_session_id"] != payload["session_id"]
+        or message["recipient_agent_id"] != payload.get("actor_id")
+    ):
+        raise PersonalAgentError("binding_conflict", "权限确认与已登记的专员消息不一致")
 
 
 def _plan(row: sqlite3.Row) -> dict[str, Any]:
@@ -425,6 +463,7 @@ class CollaborationStore:
         steps: list[dict[str, Any]],
         context: str = "",
         title: str = "",
+        peer_agents: list[dict] | None = None,
     ) -> dict[str, Any]:
         workspace_key = _text(workspace_key, "工作区标识", 2048)
         source_session_id = _text(source_session_id, "来源会话编号", 128)
@@ -442,6 +481,11 @@ class CollaborationStore:
             "context": _text(context, "共享上下文", 32000, required=False, strip=False),
             "steps": normalized_steps,
         }
+        normalized_grants = grants(peer_agents)
+        if normalized_grants:
+            for item in normalized_grants:
+                item.setdefault("tool_names", [])
+            payload["peer_agents"] = normalized_grants
         payload_sha256 = _sha256(_canonical(payload))
         with self._connection(write=True) as conn:
             existing = conn.execute(
@@ -649,7 +693,7 @@ class CollaborationStore:
         digest = _sha256(encoded)
         with self._connection(write=True) as conn:
             plan = _plan(self._required(conn, collaboration_id, workspace_key))
-            _permission_step(plan, step_id, detached)
+            _permission_step(plan, step_id, detached, self.base_dir)
             existing = conn.execute(
                 "SELECT * FROM collaboration_events WHERE collaboration_id=? AND event_key=?",
                 (collaboration_id, key),
@@ -712,8 +756,8 @@ class CollaborationStore:
                 journal,
             )
 
-    @staticmethod
     def _permission_record_payload(
+        self,
         conn: sqlite3.Connection,
         plan: dict[str, Any],
         row: sqlite3.Row,
@@ -784,7 +828,7 @@ class CollaborationStore:
             elif stored is not None:
                 raise ValueError("permission reference removed")
             encoded = _permission_data(payload)
-            _permission_step(plan, event["step_id"], payload)
+            _permission_step(plan, event["step_id"], payload, self.base_dir)
             return json.loads(encoded)
         except PersonalAgentError:
             raise

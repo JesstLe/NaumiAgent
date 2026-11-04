@@ -4381,6 +4381,9 @@ class AgentEngine:
         self._tool_registry.register(ExtensionDiscoveryTool(self))
         self._tool_registry.register(RequestUserInputTool(self))
         self._tool_registry.register(PersonalAgentsTool(self.personal_agents))
+        from naumi_agent.personal.messages import PersonalMessageTool
+
+        self._tool_registry.register(PersonalMessageTool(self))
         self._tool_registry.register(OutputPublishTool(self))
         self._tool_registry.register(OutputAssetRetentionPreviewTool(self))
         self._tool_registry.register(OutputAssetRetentionRunTool(self))
