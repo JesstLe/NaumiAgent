@@ -46,7 +46,7 @@ export function usePersonalAgents({ api, sessionId, busy, connected, onSelect }:
     setLoading(true)
     try {
       const result = await api.personalAgents(true)
-      if (!Array.isArray(result.agents)) throw new Error('助理目录返回不完整，请重试')
+      if (!Array.isArray(result.agents)) throw new Error('Agent 目录返回不完整，请重试')
       if (alive.current && sequence === listSequence.current) {
         setAgents(result.agents)
         setError('')
@@ -66,7 +66,7 @@ export function usePersonalAgents({ api, sessionId, busy, connected, onSelect }:
     }
     try {
       const result = await api.currentPersonalAgent(sessionId)
-      if (!Object.prototype.hasOwnProperty.call(result, 'agent')) throw new Error('未能确认当前助理，请重试')
+      if (!Object.prototype.hasOwnProperty.call(result, 'agent')) throw new Error('未能确认当前 Agent，请重试')
       if (alive.current && sequence === currentSequence.current)
         setCurrentState({ api, sessionId, agent: result.agent, error: '',
           readOnly: result.read_only === true, collaborationId: result.collaboration_id || '' })
@@ -105,7 +105,7 @@ export function usePersonalAgents({ api, sessionId, busy, connected, onSelect }:
       const binding = agent ? await api.openPersonalSession(agent.id) : null
       if (!alive.current || sequence !== actionSequence.current || busyRef.current) return
       if (binding && (!binding.session_id || binding.agent_id !== agent?.id))
-        throw new Error('会话与助理不匹配，请刷新后重试')
+        throw new Error('会话与 Agent 不匹配，请刷新后重试')
       await onSelect(binding?.session_id ?? null)
     } catch (cause) {
       if (alive.current && sequence === actionSequence.current) setError(personalError(cause))

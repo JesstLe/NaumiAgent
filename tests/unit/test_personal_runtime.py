@@ -52,7 +52,7 @@ async def specialist(engine, name="资料专员", tools=("file_read",)):
 async def test_no_presets_and_main_tool_registration(engine):
     assert engine.personal_agents.list() == ()
     assert "personal_agents" in engine.tool_registry.names
-    assert "初始只有主助理" in engine._build_system_prompt()
+    assert "初始只有主 Agent" in engine._build_system_prompt()
     result = await engine.execute_tool(
         ToolCall(
             id="create",

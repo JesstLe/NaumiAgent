@@ -27,13 +27,13 @@ def text(value: Any, label: str, maximum: int, *, required: bool = True) -> str:
 
 def agent_id(value: Any) -> str:
     if not isinstance(value, str) or not _AGENT.fullmatch(value):
-        raise PersonalAgentError("invalid_input", "专员编号格式不正确")
+        raise PersonalAgentError("invalid_input", "Agent 编号格式不正确")
     return value
 
 
 def version(value: Any) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 2_147_483_647:
-        raise PersonalAgentError("invalid_input", "专员版本必须是正整数")
+        raise PersonalAgentError("invalid_input", "Agent 版本必须是正整数")
     return value
 
 
@@ -51,7 +51,7 @@ def grants(value: Any) -> list[dict]:
     if value is None:
         return []
     if not isinstance(value, list) or len(value) > 128:
-        raise PersonalAgentError("invalid_input", "互询范围必须是最多 128 位专员的列表")
+        raise PersonalAgentError("invalid_input", "互询范围必须是最多 128 位 Agent 的列表")
     result, seen = [], set()
     for raw in value:
         if (
@@ -59,10 +59,10 @@ def grants(value: Any) -> list[dict]:
             or set(raw) - {"agent_id", "agent_version", "tool_names"}
             or not {"agent_id", "agent_version"} <= set(raw)
         ):
-            raise PersonalAgentError("invalid_input", "互询范围缺少专员编号或版本")
+            raise PersonalAgentError("invalid_input", "互询范围缺少 Agent 编号或版本")
         identity = agent_id(raw["agent_id"])
         if identity in seen:
-            raise PersonalAgentError("invalid_input", "互询范围包含重复专员")
+            raise PersonalAgentError("invalid_input", "互询范围包含重复 Agent")
         seen.add(identity)
         item = {"agent_id": identity, "agent_version": version(raw["agent_version"])}
         if "tool_names" in raw:

@@ -159,7 +159,7 @@ async def test_every_manual_mutation_uses_authorized_engine_tool():
 async def test_empty_catalog_is_not_populated_by_listing():
     engine = _engine({"agents": []})
     text = await run_assistants_command(engine, "")
-    assert "尚未创建专员" in text
+    assert "尚未创建Agent" in text
     assert json.loads(engine.execute_tool.await_args.args[0].arguments) == {"operation": "list"}
 
 

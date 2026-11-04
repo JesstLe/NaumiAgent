@@ -36,7 +36,7 @@ _SUPPORTED = frozenset(
 /chaos /scale /state /vibe /eval /page /heal /dspy /graph /mcts /route
 /speculate /jit /pointer /cooe /sleep /entropy /ooda /probe /hook /vision
 /spar /world /fusion /consensus /pid /zkp /genesis /macro /cosmos /watchdog
-/supervisor /autopsy /feedback /evolution /assistants
+/supervisor /autopsy /feedback /evolution /assistants /library
 """.split()
 )
 
@@ -81,7 +81,7 @@ def validate_command(value: str) -> str:
             except ValueError as exc:
                 raise HTTPException(422, str(exc)) from exc
             if parsed["operation"] == "open":
-                raise HTTPException(422, "请从“我的助理”侧栏打开专员会话。")
+                raise HTTPException(422, "请从“我的 Agent”侧栏打开 Agent 会话。")
     return canonical + normalized[len(token) :]
 
 
@@ -191,7 +191,10 @@ async def _command_stream(request, session_id, command, mode, *, edit_message_id
                 engine.set_runtime_mode(mode)
                 try:
                     adapter = _CommandEngine(engine, on_tool)
-                    output = await execute_slash_command(adapter, command)
+                    from naumi_agent.personal.runtime import run_context
+
+                    with run_context(engine, session_id, run.id, None):
+                        output = await execute_slash_command(adapter, command)
                 finally:
                     engine.set_runtime_mode(previous_mode)
                 output = Text.from_ansi(output).plain.strip() or "命令执行完成"

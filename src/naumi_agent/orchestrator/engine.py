@@ -4257,6 +4257,9 @@ class AgentEngine:
         from naumi_agent.personal.teams import PersonalTeamService
 
         self.personal_teams = PersonalTeamService(self)
+        from naumi_agent.personal.artifacts import PersonalArtifactService
+
+        self.personal_artifacts = PersonalArtifactService(self)
         self._personal_turn_snapshot = None
         self.goal_store = resources.goal_store
         self.pursuit_store = resources.pursuit_store
@@ -4390,6 +4393,9 @@ class AgentEngine:
         from naumi_agent.personal.teams import PersonalTeamTool
 
         self._tool_registry.register(PersonalTeamTool(self))
+        from naumi_agent.personal.artifact_tools import PersonalArtifactsTool
+
+        self._tool_registry.register(PersonalArtifactsTool(self))
         self._tool_registry.register(OutputPublishTool(self))
         self._tool_registry.register(OutputAssetRetentionPreviewTool(self))
         self._tool_registry.register(OutputAssetRetentionRunTool(self))
@@ -5267,31 +5273,30 @@ class AgentEngine:
         """获取当前会话，不存在则创建."""
         if self._session is not None:
             return self._session
-        default_prompt = self._build_system_prompt()
-        self._session = await self.create_session(
-            title=title,
-            model=self._model_port.resolve_model(ModelTier.CAPABLE),
-            system_prompt=next(
-                (m["content"] for m in self._messages if m.get("role") == "system"),
-                default_prompt,
-            ),
-        )
-        self._advance_session_authorization_generation()
-        return self._session
+        async with self._session_transition_lock:
+            if self._session is None:
+                default_prompt = self._build_system_prompt()
+                self._session = await self.create_session(
+                    title=title,
+                    model=self._model_port.resolve_model(ModelTier.CAPABLE),
+                    system_prompt=next(
+                        (m["content"] for m in self._messages if m.get("role") == "system"),
+                        default_prompt,
+                    ),
+                )
+                self._advance_session_authorization_generation()
+            return self._session
 
     async def load_session(self, session_id: str) -> bool:
         """加载已有会话，恢复上下文.
 
         清理不完整的工具调用序列，避免 LLM API 拒绝续接。
         """
-        initial_session_id = self._session.id if self._session is not None else ""
-        transition_epoch = (
-            self._begin_active_session_transition(initial_session_id)
-            if initial_session_id and initial_session_id != session_id
-            else None
-        )
+        personal_runtime.assert_idle_transition(self)
+        transition_epoch = None
         try:
             async with self._session_transition_lock:
+                personal_runtime.assert_idle_transition(self)
                 previous_session_id = self._session.id if self._session is not None else ""
                 if previous_session_id and previous_session_id != session_id:
                     if transition_epoch is None:
@@ -6146,6 +6151,8 @@ class AgentEngine:
 
     async def _save_session(self) -> None:
         """将完整历史写入持久化存储（不丢失压缩前的消息）."""
+        if getattr(self, "_personal_active_turn", None) is not None:
+            personal_runtime.require_current_agent(self)
         session = await self.get_or_create_session()
         session.messages = list(self._full_history) if self._full_history else list(self._messages)
         session.total_tokens = self._usage.total_input_tokens + self._usage.total_output_tokens
@@ -6244,7 +6251,9 @@ class AgentEngine:
 
     async def _auto_extract_memories(self, task: str, result: AgentResult) -> None:
         """Store high-confidence facts/preferences/decisions from a completed turn."""
-        if personal_runtime.current_agent(self) is not None:
+        if personal_runtime.current_agent(self) is not None or getattr(
+            self, "_personal_artifact_refs", []
+        ):
             return
         if not self._config.memory.long_term_enabled:
             return
@@ -6277,6 +6286,12 @@ class AgentEngine:
 
     def _append_message(self, msg: dict[str, Any]) -> None:
         """Append to both _messages and _full_history."""
+        if getattr(self, "_personal_active_turn", None) is not None:
+            personal_runtime.require_current_agent(self)
+        if msg.get("role") == "assistant" and msg.get("content") and not msg.get("tool_calls"):
+            refs = getattr(self, "_personal_artifact_outputs", [])
+            if refs:
+                msg = {**msg, "metadata": {**msg.get("metadata", {}), "artifact_refs": list(refs)}}
         sanitized_messages, visual_replacements = self._compactor.sanitize_visual_payloads(
             [msg]
         )
@@ -6503,7 +6518,10 @@ class AgentEngine:
             )
         if update_engine_context and sanitized != self._messages:
             self._messages = sanitized
-        return sanitized
+        return [
+            {key: value for key, value in message.items() if key != "metadata"}
+            for message in sanitized
+        ]
 
     async def _build_compaction_runtime_snapshot(self) -> tuple[str, list[str], list[str]]:
         """Build deterministic state that must survive history compaction."""
@@ -7464,7 +7482,46 @@ class AgentEngine:
             usage=self._usage,
         )
 
+    @personal_runtime.bound_turn
     async def run(self, task: str, turn_context: str = "") -> AgentResult:
+        """Record non-streamed execution through the same authoritative Run store."""
+        session = await self.get_or_create_session()
+        profile = personal_runtime.current_agent(self)
+        if profile is not None and profile.kind == "team" and not session.personal_execution_id:
+            return await self.personal_teams.dispatch_from_engine(task, turn_context)
+        usage_before = RunUsageTotals.capture(self._usage)
+        recorder = await ChatRunRecorder.start(
+            store=self.chat_run_store, workspace_root=self.workspace_root,
+            session_id=session.id, task=task,
+            release_binding=await self._verified_terminal_run_release_binding(),
+        )
+        publisher = RuntimeEventPublisher(
+            CompositeEventSink((ChatRunRecorderEventSink(recorder), self._event_sink)),
+            session_id=session.id, run_id=recorder.run_id,
+        )
+        try:
+            with personal_runtime.run_context(self, session.id, recorder.run_id, publisher):
+                result = await self._run_core(task, turn_context=turn_context)
+        except asyncio.CancelledError as exc:
+            await self._finish_streaming_run(
+                recorder=recorder, publisher=publisher, status="cancelled",
+                summary="运行已由用户取消。", usage_before=usage_before, original_error=exc,
+            )
+            raise
+        except Exception as exc:
+            await self._finish_streaming_run(
+                recorder=recorder, publisher=publisher, status="failed",
+                summary=self._format_error(exc), usage_before=usage_before, original_error=exc,
+            )
+            raise
+        result.receipt = await self._finish_streaming_run(
+            recorder=recorder, publisher=publisher, status=result.status,
+            summary=result.response or result.error or "本轮运行已结束。",
+            usage_before=usage_before,
+        )
+        return result
+
+    async def _run_core(self, task: str, turn_context: str = "") -> AgentResult:
         """执行任务 — 自适应规划 + ReAct 主循环."""
         session = await self.get_or_create_session()
         profile = personal_runtime.current_agent(self)
@@ -7492,7 +7549,7 @@ class AgentEngine:
             self._append_message({"role": "system", "content": turn_context})
         await self._begin_harness_completion_run(
             task,
-            run_id=f"agent:{uuid.uuid4().hex}",
+            run_id=personal_runtime.current_run_id(self, session.id) or f"agent:{uuid.uuid4().hex}",
         )
         await self._inject_relevant_memories(task)
         tools = self._get_openai_tools_cached()
@@ -7551,6 +7608,7 @@ class AgentEngine:
 
         return result
 
+    @personal_runtime.bound_turn
     async def run_streaming(
         self,
         task: str,
@@ -7597,15 +7655,16 @@ class AgentEngine:
             observed_at=recorder.record.started_at,
         )
         try:
-            try:
-                result = await self._run_streaming_core(
-                    task,
-                    publisher,
-                    turn_context=turn_context,
-                    harness_run_id=recorder.run_id,
-                )
-            finally:
-                self._active_feedback_turn = previous_feedback_turn
+            with personal_runtime.run_context(self, session.id, recorder.run_id, publisher):
+                try:
+                    result = await self._run_streaming_core(
+                        task,
+                        publisher,
+                        turn_context=turn_context,
+                        harness_run_id=recorder.run_id,
+                    )
+                finally:
+                    self._active_feedback_turn = previous_feedback_turn
         except asyncio.CancelledError as exc:
             await self._finish_streaming_run(
                 recorder=recorder,
@@ -9178,11 +9237,15 @@ class AgentEngine:
         """执行单个工具调用（含权限检查）."""
         if events is not None and on_event is not None:
             raise TypeError("不能同时传入 events 和旧 on_event 回调")
+        if events is None and on_event is None:
+            events = personal_runtime.current_run_events(self)
         if events is None:
             events = self._coerce_engine_events(on_event)
         await personal_runtime.authorize_execution(self)
-        denial = (None if agent_name == "cli" and tc.name == "personal_agents"
-                  else personal_runtime.tool_denial(self, tc.name))
+        denial = (
+            None if agent_name == "cli" and tc.name in {"personal_agents", "personal_artifacts"}
+            else personal_runtime.tool_denial(self, tc.name)
+        )
         if denial:
             return ToolResult(call_id=tc.id, status="error", content=denial)
         tool = self._tool_registry.get(tc.name)
@@ -9490,15 +9553,19 @@ class AgentEngine:
                 )
 
         await personal_runtime.authorize_execution(self)
-        denial = (None if agent_name == "cli" and tc.name == "personal_agents"
-                  else personal_runtime.tool_denial(self, tc.name))
+        denial = (
+            None if agent_name == "cli" and tc.name in {"personal_agents", "personal_artifacts"}
+            else personal_runtime.tool_denial(self, tc.name)
+        )
         if denial:
             return ToolResult(call_id=tc.id, status="error", content=denial)
 
         try:
             with bind_permission_receipt(execution_authorization_receipt):
+                from naumi_agent.personal.artifact_boundary import guarded_tool
+
                 outcome = await self._tool_execution_port.invoke(
-                    tool,
+                    guarded_tool(self, tool, tc.id),
                     args,
                     event_callback=(
                         events.legacy_callback() if events is not None else None

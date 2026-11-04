@@ -2983,6 +2983,11 @@ async def _handle_command(engine: Any, cmd: str) -> None:
 
             output = await run_assistants_command(engine, arg)
             console.print(output, markup=False, highlight=False, soft_wrap=True)
+        case "/library":
+            from naumi_agent.personal.artifact_commands import run_library_command
+
+            output = await run_library_command(engine, arg)
+            console.print(output, markup=False, highlight=False, soft_wrap=True)
         case "/agents":
             await _run_agents(engine, arg)
         case "/runtime":
@@ -3266,7 +3271,8 @@ def _print_help() -> None:
         ("/schedule <子命令>", "调度提醒 — create/list/cancel/pause/resume"),
         ("/todo <子命令>", "todo 清单 — list/add/start/done/pending/delete/clear"),
         ("/team <子命令>", "团队协议 — status/handoff/blocker/decision/request/result"),
-        ("/assistants [子命令]", "个人助理 — 创建、配置、打开、暂停与归档"),
+        ("/assistants [子命令]", "Agent — 创建、配置、打开、暂停与归档"),
+        ("/library [子命令]", "资料库 — 版本、正文、导入、修订、分享与撤销"),
         (
             "/agents result ack <投递ID> <SHA256>",
             "Agent Control — 确认一条持久结果已读",

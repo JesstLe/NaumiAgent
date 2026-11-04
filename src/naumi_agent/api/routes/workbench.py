@@ -9,8 +9,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from pydantic import BaseModel, Field
+from starlette.requests import HTTPConnection
 
 from naumi_agent import __version__
 from naumi_agent.api.deps import AuthDep, is_connection_api_key_valid
@@ -28,7 +37,45 @@ from naumi_agent.workbench.proposal_governance import (
     ProposalGovernanceConflictError,
 )
 
-router = APIRouter(tags=["workbench"])
+
+async def _workbench_write_lease(connection: HTTPConnection):
+    """Serialize whole stateful actions, never an event socket's lifetime."""
+    if (
+        connection.scope["type"] != "http"
+        or connection.scope["method"] in {
+            "GET", "HEAD", "OPTIONS",
+        }
+        # Approval replies must remain available while execution awaits a decision.
+        or getattr(connection.scope.get("endpoint"), "__name__", "") == "resolve_approval"
+    ):
+        yield
+        return
+    from naumi_agent.api.routes.messages import _engine_lock
+
+    async with _engine_lock(connection):
+        yield
+
+
+async def _read_workbench_session(engine, session_id: str) -> bool:
+    """Validate persisted read scope without changing the executing Agent."""
+    session = await engine.session_store.load(session_id)
+    if session is None:
+        return False
+    recorded = str(getattr(session, "workspace_root", "") or "")
+    current = str(getattr(engine, "workspace_root", "") or "")
+    if recorded and current:
+        try:
+            matches = os.path.normcase(str(Path(recorded).resolve())) == os.path.normcase(
+                str(Path(current).resolve())
+            )
+        except (OSError, ValueError) as exc:
+            raise RuntimeError("会话工作区暂时未能核验") from exc
+        if not matches:
+            return False
+    return True
+
+
+router = APIRouter(tags=["workbench"], dependencies=[Depends(_workbench_write_lease)])
 LOCAL_DAEMON_BIND_HOST = "127.0.0.1"
 WORKBENCH_API_BASE_PATH = "/api/v1"
 WORKBENCH_BASE_PATH = f"{WORKBENCH_API_BASE_PATH}/workbench"
@@ -479,10 +526,12 @@ def _task_to_summary(task: Any | None) -> dict[str, Any] | None:
     return data
 
 
-async def _task_summaries_by_id(engine) -> dict[str, dict[str, Any] | None]:
+async def _task_summaries_by_id(engine, session_id: str) -> dict[str, dict[str, Any] | None]:
     task_store = getattr(engine, "task_store", None)
     if task_store is None:
         return {}
+    if hasattr(task_store, "scoped"):
+        task_store = task_store.scoped(session_id)
     tasks = await task_store.list_tasks()
     return {task.id: _task_to_summary(task) for task in tasks}
 
@@ -530,7 +579,7 @@ async def _build_workbench_snapshot(engine, session_id: str) -> dict[str, Any]:
     records = await manager.status()
     if not isinstance(records, list):
         records = [records]
-    tasks_by_id = await _task_summaries_by_id(engine)
+    tasks_by_id = await _task_summaries_by_id(engine, session_id)
     worktrees = [_worktree_to_dict(record, tasks_by_id) for record in records]
     return {
         **snapshot,
@@ -765,7 +814,7 @@ async def get_workbench_bootstrap(
     for session_dict in session_dicts:
         candidate_session_id = session_dict["id"]
         try:
-            session_loaded = await engine.load_session(candidate_session_id)
+            session_loaded = await _read_workbench_session(engine, candidate_session_id)
         except RuntimeError:
             logger.exception(
                 "Workbench bootstrap could not load session %s",
@@ -805,7 +854,7 @@ async def get_workbench_snapshot(session_id: str, request: Request, auth: str = 
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        session_loaded = await engine.load_session(session_id)
+        session_loaded = await _read_workbench_session(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not session_loaded:
@@ -843,7 +892,7 @@ async def get_workbench_events(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        session_loaded = await engine.load_session(session_id)
+        session_loaded = await _read_workbench_session(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not session_loaded:
@@ -893,7 +942,7 @@ async def get_workbench_event(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        session_loaded = await engine.load_session(session_id)
+        session_loaded = await _read_workbench_session(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not session_loaded:
@@ -928,7 +977,7 @@ async def websocket_workbench_events(websocket: WebSocket, session_id: str):
         await websocket.close()
         return
     try:
-        session_loaded = await engine.load_session(session_id)
+        session_loaded = await _read_workbench_session(engine, session_id)
     except RuntimeError as exc:
         await websocket.send_json({"type": "error", "message": str(exc)})
         await websocket.close()
@@ -1093,7 +1142,7 @@ async def get_validation_runs(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        session_loaded = await engine.load_session(session_id)
+        session_loaded = await _read_workbench_session(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not session_loaded:
@@ -1130,7 +1179,7 @@ async def get_validation_run(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        session_loaded = await engine.load_session(session_id)
+        session_loaded = await _read_workbench_session(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not session_loaded:
@@ -1167,7 +1216,7 @@ async def get_context_snapshots(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        session_loaded = await engine.load_session(session_id)
+        session_loaded = await _read_workbench_session(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not session_loaded:
@@ -1204,7 +1253,7 @@ async def get_context_snapshot(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        session_loaded = await engine.load_session(session_id)
+        session_loaded = await _read_workbench_session(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not session_loaded:
@@ -1295,7 +1344,7 @@ async def get_failures(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        session_loaded = await engine.load_session(session_id)
+        session_loaded = await _read_workbench_session(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not session_loaded:
@@ -1328,7 +1377,7 @@ async def get_failure(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        session_loaded = await engine.load_session(session_id)
+        session_loaded = await _read_workbench_session(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not session_loaded:
@@ -1363,7 +1412,7 @@ async def get_missions(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        session_loaded = await engine.load_session(session_id)
+        session_loaded = await _read_workbench_session(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not session_loaded:
@@ -1396,7 +1445,7 @@ async def get_mission(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        session_loaded = await engine.load_session(session_id)
+        session_loaded = await _read_workbench_session(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not session_loaded:
@@ -1640,7 +1689,7 @@ async def get_intent_locks(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        session_loaded = await engine.load_session(session_id)
+        session_loaded = await _read_workbench_session(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not session_loaded:
@@ -1678,7 +1727,7 @@ async def get_intent_lock(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        session_loaded = await engine.load_session(session_id)
+        session_loaded = await _read_workbench_session(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not session_loaded:
@@ -1753,7 +1802,7 @@ async def get_decisions(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        session_loaded = await engine.load_session(session_id)
+        session_loaded = await _read_workbench_session(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not session_loaded:
@@ -1791,7 +1840,7 @@ async def get_decision(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        session_loaded = await engine.load_session(session_id)
+        session_loaded = await _read_workbench_session(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not session_loaded:
@@ -1844,7 +1893,7 @@ async def claim_workbench_issue(
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     try:
-        tasks_by_id = await _task_summaries_by_id(engine)
+        tasks_by_id = await _task_summaries_by_id(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     lease_payload = _lease_to_dict(lease, tasks_by_id)
@@ -1880,7 +1929,7 @@ async def list_workbench_bids(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        session_loaded = await engine.load_session(session_id)
+        session_loaded = await _read_workbench_session(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not session_loaded:
@@ -2354,7 +2403,7 @@ async def release_workbench_lease(
     if lease is None:
         raise HTTPException(status_code=404, detail="租约不存在")
     try:
-        tasks_by_id = await _task_summaries_by_id(engine)
+        tasks_by_id = await _task_summaries_by_id(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     lease_payload = _lease_to_dict(lease, tasks_by_id)
@@ -2396,7 +2445,7 @@ async def expire_workbench_leases(
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     try:
-        tasks_by_id = await _task_summaries_by_id(engine)
+        tasks_by_id = await _task_summaries_by_id(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     response = {"expired": [_lease_to_dict(lease, tasks_by_id) for lease in expired]}
@@ -2433,7 +2482,7 @@ async def get_issues(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        session_loaded = await engine.load_session(session_id)
+        session_loaded = await _read_workbench_session(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not session_loaded:
@@ -2474,7 +2523,7 @@ async def get_issue(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        session_loaded = await engine.load_session(session_id)
+        session_loaded = await _read_workbench_session(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not session_loaded:
@@ -2509,7 +2558,7 @@ async def get_agent_profiles(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        session_loaded = await engine.load_session(session_id)
+        session_loaded = await _read_workbench_session(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not session_loaded:
@@ -2544,7 +2593,7 @@ async def get_agent_profile(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        session_loaded = await engine.load_session(session_id)
+        session_loaded = await _read_workbench_session(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not session_loaded:
@@ -2674,7 +2723,7 @@ async def get_worktrees(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        session_loaded = await engine.load_session(session_id)
+        session_loaded = await _read_workbench_session(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not session_loaded:
@@ -2688,7 +2737,7 @@ async def get_worktrees(
     if not isinstance(records, list):
         records = [records]
     try:
-        tasks_by_id = await _task_summaries_by_id(engine)
+        tasks_by_id = await _task_summaries_by_id(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     worktrees = [_worktree_to_dict(record, tasks_by_id) for record in records]
@@ -2753,7 +2802,7 @@ async def keep_worktree(
             payload={"reason": reason},
         )
     try:
-        tasks_by_id = await _task_summaries_by_id(engine)
+        tasks_by_id = await _task_summaries_by_id(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     worktree = _worktree_to_dict(record, tasks_by_id)
@@ -2784,7 +2833,7 @@ async def get_worktree(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        session_loaded = await engine.load_session(session_id)
+        session_loaded = await _read_workbench_session(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not session_loaded:
@@ -2803,7 +2852,7 @@ async def get_worktree(
     if isinstance(record, list):
         raise HTTPException(status_code=404, detail="worktree 不存在")
     try:
-        tasks_by_id = await _task_summaries_by_id(engine)
+        tasks_by_id = await _task_summaries_by_id(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return _worktree_to_dict(record, tasks_by_id)
@@ -2896,7 +2945,7 @@ async def get_leases(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        session_loaded = await engine.load_session(session_id)
+        session_loaded = await _read_workbench_session(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not session_loaded:
@@ -2933,7 +2982,7 @@ async def get_lease(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        session_loaded = await engine.load_session(session_id)
+        session_loaded = await _read_workbench_session(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not session_loaded:
@@ -2970,7 +3019,7 @@ async def get_approvals(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        session_loaded = await engine.load_session(session_id)
+        session_loaded = await _read_workbench_session(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not session_loaded:
@@ -3011,7 +3060,7 @@ async def get_approval(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        session_loaded = await engine.load_session(session_id)
+        session_loaded = await _read_workbench_session(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not session_loaded:
@@ -3044,7 +3093,7 @@ async def get_review_evidence(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        session_loaded = await engine.load_session(session_id)
+        session_loaded = await _read_workbench_session(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not session_loaded:
@@ -3079,7 +3128,7 @@ async def resolve_approval(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        session_loaded = await engine.load_session(session_id)
+        session_loaded = await _read_workbench_session(engine, session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not session_loaded:

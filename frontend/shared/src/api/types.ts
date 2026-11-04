@@ -446,11 +446,12 @@ export interface MessageResponse {
 
 export interface ChatSource {
   id: string
-  kind: 'file' | 'screenshot'
+  kind: 'file' | 'screenshot' | 'artifact'
   title: string
   path: string
   run_id: string
   created_at: string
+  metadata?: Record<string, unknown>
 }
 
 export interface ChatSourceCreate {

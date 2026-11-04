@@ -381,7 +381,7 @@ class SessionStore:
             or len(marker) > 128
             or any(ord(character) < 33 or ord(character) == 127 for character in marker)
         ):
-            raise ValueError("个人助理身份标记必须是无空白的字符串，最多 128 字符。")
+            raise ValueError("Agent 身份标记必须是无空白的字符串，最多 128 字符。")
         marker = session.personal_execution_id
         if (
             not isinstance(marker, str)
@@ -403,7 +403,7 @@ class SessionStore:
                 )
             )
         ):
-            raise ValueError("团队会话身份必须匹配助理身份，且不能是执行会话或其他引擎。")
+            raise ValueError("团队会话身份必须匹配 Agent 身份，且不能是执行会话或其他引擎。")
         db = await self._get_db()
         if session.status == "active":
             timestamp = datetime.now()
@@ -503,7 +503,7 @@ class SessionStore:
             not isinstance(expected_agent_id, str)
             or re.fullmatch(r"pa_[a-f0-9]{32}", expected_agent_id) is None
         ):
-            raise ValueError("团队助理编号格式不正确。")
+            raise ValueError("团队 Agent 编号格式不正确。")
         db = await self._get_db()
         cursor = await db.execute(
             "UPDATE sessions SET personal_team_id=? WHERE id=? AND personal_agent_id=? "
@@ -535,7 +535,7 @@ class SessionStore:
             not isinstance(expected_agent_id, str)
             or re.fullmatch(r"pa_[a-f0-9]{32}", expected_agent_id) is None
         ):
-            raise ValueError("团队助理编号格式不正确。")
+            raise ValueError("团队 Agent 编号格式不正确。")
         if not isinstance(messages, list) or not 1 <= len(messages) <= 128:
             raise ValueError("每次交付需要 1 至 128 条团队消息。")
         identities = []
@@ -549,7 +549,7 @@ class SessionStore:
                 or not message["content"].strip()
                 or not isinstance(message["metadata"], dict)
             ):
-                raise ValueError("团队消息需要编号、用户或助理角色、正文与资料字段。")
+                raise ValueError("团队消息需要编号、用户或 Agent 角色、正文与资料字段。")
             identities.append(_delivery_id(message["id"]))
         if len(set(identities)) != len(identities):
             raise ValueError("团队消息编号重复。")

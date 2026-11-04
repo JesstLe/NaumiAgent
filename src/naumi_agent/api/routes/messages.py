@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from dataclasses import asdict
 from datetime import datetime
@@ -56,7 +57,7 @@ router = APIRouter(tags=["sessions", "messages"])
 async def _assert_writable_session(engine, session_id: str) -> None:
     session = await engine.session_store.load(session_id)
     if getattr(session, "personal_execution_id", ""):
-        raise HTTPException(409, "这是协作执行记录，请在专员日常对话中继续交流")
+        raise HTTPException(409, "这是协作执行记录，请在 Agent 日常对话中继续交流")
     collaboration = getattr(engine, "personal_collaborations", None)
     if collaboration is not None:
         from naumi_agent.personal.models import PersonalAgentError
@@ -121,7 +122,7 @@ async def update_session(
         personal is not None and personal.current(session_id) is not None
     ):
         if body.model is not None or body.system_prompt is not None:
-            raise HTTPException(409, "该会话属于专员，请在助理设置中修改职责和模型")
+            raise HTTPException(409, "该会话属于 Agent，请在 Agent 设置中修改职责和模型")
     if body.model is not None:
         session.model = body.model
     if body.title is not None:
@@ -183,7 +184,7 @@ async def duplicate_session(session_id: str, request: Request, auth: str = AuthD
     if getattr(original, "personal_agent_id", "") or (
         personal is not None and personal.current(session_id) is not None
     ):
-        raise HTTPException(409, "专员会话不复制到主助理；请创建新专员并明确共享所需资料")
+        raise HTTPException(409, "Agent 会话不复制到主 Agent；请创建新 Agent 并明确共享所需资料")
     session = await engine.session_store.duplicate(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -273,7 +274,7 @@ async def send_message(
                 profile is None or profile.id != session.personal_agent_id
             ):
                 raise PersonalAgentError(
-                    "binding_conflict", "专员身份与会话归属不一致，请恢复后继续"
+                    "binding_conflict", "Agent 身份与会话归属不一致，请恢复后继续"
                 )
             if profile is not None:
                 personal.require_active_profile(profile.id)
@@ -544,34 +545,28 @@ async def upload_chat_source(
     if file.filename is None:
         raise HTTPException(status_code=400, detail="Missing filename")
 
-    workspace_root = Path(engine.workspace_root).expanduser().resolve()
-    upload_dir = workspace_root / ".naumi" / "uploads" / session_id
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    target_path = upload_dir / Path(file.filename).name
+    import hashlib
 
-    try:
-        content = await file.read()
-        target_path.write_bytes(content)
-    except OSError as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to save file: {exc}") from exc
+    from naumi_agent.tools.output_publish import MAX_ASSET_BYTES
 
-    try:
-        relative_path = str(target_path.resolve().relative_to(workspace_root))
-    except ValueError as exc:
-        raise HTTPException(status_code=500, detail="Upload path is outside workspace") from exc
-
-    source = await _chat_run_store(request).add_source(
-        session_id=session_id,
-        kind="file",
-        title=target_path.name,
-        path=relative_path,
+    content = await file.read(MAX_ASSET_BYTES + 1)
+    await file.close()
+    service = engine.personal_artifacts
+    actor = await service.session_actor(session_id, write=True)
+    filename = Path(file.filename).name
+    key = hashlib.sha256((session_id + ":" + filename).encode() + content).hexdigest()
+    item = await service.publish(
+        actor_id=actor, request_id="upload-" + key, title=filename, filename=filename,
+        kind="material", content=content, session_id=session_id,
     )
+    source = await service.attach_source(session_id, actor, item)
     return ChatSourceReferenceResponse(
         id=source.id,
         kind=source.kind,
         title=source.title,
         path=source.path,
         created_at=source.created_at,
+        metadata=source.metadata,
     )
 
 
@@ -600,18 +595,32 @@ async def add_chat_source(
         raise HTTPException(status_code=400, detail="来源必须位于当前工作区内") from exc
     if not resolved.is_file():
         raise HTTPException(status_code=400, detail="来源文件不存在或不是普通文件")
-    source = await _chat_run_store(request).add_source(
-        session_id=session_id,
-        kind=body.kind,
-        title=body.title.strip() or resolved.name,
-        path=relative_path,
+    import hashlib
+
+    from naumi_agent.personal.artifact_boundary import checked_public_path
+    from naumi_agent.tools.output_publish import MAX_ASSET_BYTES
+
+    resolved = checked_public_path(engine, relative_path)
+    with resolved.open("rb") as stream:
+        content = stream.read(MAX_ASSET_BYTES + 1)
+    service = engine.personal_artifacts
+    actor = await service.session_actor(session_id, write=True)
+    title = body.title.strip() or resolved.name
+    key = hashlib.sha256(
+        (session_id + ":" + title + ":" + relative_path).encode() + content
+    ).hexdigest()
+    item = await service.publish(
+        actor_id=actor, request_id="source-" + key, title=title, filename=resolved.name,
+        kind="material", content=content, session_id=session_id,
     )
+    source = await service.attach_source(session_id, actor, item)
     return ChatSourceReferenceResponse(
         id=source.id,
         kind=source.kind,
         title=source.title,
         path=source.path,
         created_at=source.created_at,
+        metadata=source.metadata,
     )
 
 
@@ -955,6 +964,17 @@ async def _build_turn_context(
         source = by_id.get(source_id)
         if source is None:
             raise HTTPException(status_code=400, detail="来源不存在或不属于当前会话")
+        if source.kind == "artifact":
+            content = await engine.personal_artifacts.source_text(
+                session_id=session_id, source=source
+            )
+            sections.extend([
+                f"### {source.title}", "确切资料版本："
+                + json.dumps(source.metadata["artifact_ref"], ensure_ascii=False),
+                "```text", content, "```",
+            ])
+            sources.append(source)
+            continue
         path = (workspace_root / source.path).resolve()
         try:
             path.relative_to(workspace_root)

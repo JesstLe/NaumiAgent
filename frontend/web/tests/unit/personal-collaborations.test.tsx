@@ -42,7 +42,7 @@ function renderDialog(api: PersonalCollaborationsApi, options: { onClose?: () =>
   return render(<PersonalCollaborations api={api} agents={agents} sourceSessionId="source" busy={options.busy || false} onClose={options.onClose || vi.fn()} onOpenSession={options.onOpenSession} />)
 }
 function fillStep(index: number, agentIndex = 0, task = `步骤 ${index} 的明确任务`) {
-  fireEvent.change(screen.getByLabelText(`步骤 ${index} 专员`), { target: { value: agents[agentIndex].id } })
+  fireEvent.change(screen.getByLabelText(`步骤 ${index} Agent`), { target: { value: agents[agentIndex].id } })
   fireEvent.change(screen.getByLabelText(`步骤 ${index} 任务`), { target: { value: task } })
 }
 function deferred<T>() {

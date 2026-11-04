@@ -132,9 +132,9 @@ class PersonalTeamService:
         marker = source.personal_agent_id
         owner = self.personal.current(source_session_id)
         if marker and (owner is None or owner.id != marker):
-            raise PersonalAgentError("binding_conflict", "来源对话的助理归属不一致")
+            raise PersonalAgentError("binding_conflict", "来源对话的 Agent 归属不一致")
         if owner is not None and (owner.kind != "team" or owner.id != client["team_id"]):
-            raise PersonalAgentError("team_scope_denied", "请从主助理或当前团队对话发起任务")
+            raise PersonalAgentError("team_scope_denied", "请从主 Agent 或当前团队对话发起任务")
         existing = self.store.find_request(
             self.workspace_key, source_session_id, client["request_id"]
         )
@@ -165,6 +165,9 @@ class PersonalTeamService:
         roster = capture_roster(self.personal, team, self.engine.tool_registry, grants)
         source_context = await self._sources(source_session_id, client["source_ids"])
         session = await self.personal.open_session(team.id)
+        await self.engine.personal_artifacts.propagate(
+            source_session_id, session["session_id"], team.id
+        )
         policy = {
             "permission_mode": self.engine.config.safety.permission_mode,
             "max_budget_usd": self.engine.config.safety.max_budget_usd,
@@ -202,6 +205,14 @@ class PersonalTeamService:
             source = sources.get(identity)
             if source is None:
                 raise PersonalAgentError("team_scope_denied", "附件来源不属于本次对话")
+            if source.kind == "artifact":
+                body = await self.engine.personal_artifacts.source_text(
+                    session_id=session_id, source=source
+                )
+                sections.append({"source_id": identity, "title": source.title,
+                                 "artifact_ref": source.metadata["artifact_ref"], "content": body,
+                                 "sha256": hashlib.sha256(body.encode("utf-8")).hexdigest()})
+                continue
             path = (root / source.path).resolve()
             if not path.is_relative_to(root) or not path.is_file():
                 raise PersonalAgentError("not_found", "附件已移动或不在当前工作区")

@@ -172,6 +172,7 @@ class ChatSourceReferenceResponse(BaseModel):
     path: str
     run_id: str = ""
     created_at: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ChatSourceCreate(BaseModel):

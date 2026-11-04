@@ -181,7 +181,7 @@ async def test_shared_terminal_router_supports_message_details_and_full_answers(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("actor", "expected"), [("user", "用户已确认收到"), ("agent", "发送专员已确认收到")]
+    ("actor", "expected"), [("user", "用户已确认收到"), ("agent", "发送Agent已确认收到")]
 )
 async def test_ack_formats_actual_first_confirmation_actor(actor, expected):
     engine = _engine(
@@ -208,7 +208,7 @@ async def test_ack_formats_actual_first_confirmation_actor(actor, expected):
 @pytest.mark.asyncio
 async def test_message_listing_empty_or_summary_is_readable():
     engine = _engine({"messages": []})
-    assert await run_assistants_command(engine, "messages " + COLLABORATION) == "暂无专员消息。"
+    assert await run_assistants_command(engine, "messages " + COLLABORATION) == "暂无Agent消息。"
     engine.execute_tool.return_value = ToolResult(
         "call",
         "success",

@@ -98,7 +98,7 @@ def _invalid(message: str) -> PersonalAgentError:
 
 
 def _corrupt() -> PersonalAgentError:
-    return _error("storage_error", "专员消息与回执校验不一致，请恢复资料库后继续")
+    return _error("storage_error", "Agent 消息与回执校验不一致，请恢复资料库后继续")
 
 
 def _text(value: Any, field: str, limit: int, *, empty: bool = False, strip: bool = True) -> str:
@@ -273,12 +273,12 @@ class PersonalMessageStore:
                     finally:
                         conn.close()
             except (OSError, sqlite3.Error) as exc:
-                raise _error("storage_error", "专员消息资料库暂不可用，请检查目录后重试") from exc
+                raise _error("storage_error", "Agent 消息资料库暂不可用，请检查目录后重试") from exc
 
     @staticmethod
     def _check_version(conn: sqlite3.Connection) -> None:
         if conn.execute("PRAGMA user_version").fetchone()[0] > _SCHEMA_VERSION:
-            raise _error("unsupported_schema", "专员消息资料库来自较新版本，请先更新应用")
+            raise _error("unsupported_schema", "Agent 消息资料库来自较新版本，请先更新应用")
 
     @contextmanager
     def _connection(self, *, write: bool = False) -> Iterator[sqlite3.Connection]:
@@ -294,7 +294,7 @@ class PersonalMessageStore:
         except (sqlite3.Error, OSError) as exc:
             if conn is not None:
                 conn.rollback()
-            raise _error("storage_error", "专员消息资料库暂不可用，请稍后重试") from exc
+            raise _error("storage_error", "Agent 消息资料库暂不可用，请稍后重试") from exc
         except BaseException:
             if conn is not None:
                 conn.rollback()
@@ -317,7 +317,7 @@ class PersonalMessageStore:
             (message_id, workspace_key),
         ).fetchone()
         if row is None:
-            raise _error("not_found", "该专员消息不存在，请刷新记录")
+            raise _error("not_found", "该 Agent 消息不存在，请刷新记录")
         return row
 
     def _append(
@@ -588,16 +588,16 @@ class PersonalMessageStore:
         if parent_message_id:
             parent_message_id = _identifier(parent_message_id, _MESSAGE_ID, "上级消息编号", 35)
         if not isinstance(origin, str) or origin not in {"agent", "manual"}:
-            raise _invalid("消息来源必须是专员或用户手动操作")
+            raise _invalid("消息来源必须是 Agent 或用户手动操作")
         payload = {
             "workspace_key": _text(workspace_key, "工作区标识", 2048),
             "collaboration_id": _identifier(collaboration_id, _COLLABORATION_ID, "协作编号", 35),
             "step_id": _identifier(step_id, _STEP_ID, "步骤编号", 64),
             "source_session_id": _text(source_session_id, "发送会话编号", 128),
-            "sender_agent_id": _identifier(sender_agent_id, _AGENT_ID, "发送专员编号", 35),
-            "sender_version": _integer(sender_version, "发送专员版本"),
-            "recipient_agent_id": _identifier(recipient_agent_id, _AGENT_ID, "接收专员编号", 35),
-            "recipient_version": _integer(recipient_version, "接收专员版本"),
+            "sender_agent_id": _identifier(sender_agent_id, _AGENT_ID, "发送 Agent 编号", 35),
+            "sender_version": _integer(sender_version, "发送 Agent 版本"),
+            "recipient_agent_id": _identifier(recipient_agent_id, _AGENT_ID, "接收 Agent 编号", 35),
+            "recipient_version": _integer(recipient_version, "接收 Agent 版本"),
             "request_id": _identifier(request_id, _REQUEST_ID, "请求编号"),
             "content": _text(content, "消息内容", 16000, strip=False),
             "context": _text(context, "共享上下文", 32000, empty=True, strip=False),
@@ -616,7 +616,7 @@ class PersonalMessageStore:
                 message = self._read(conn, existing)[0]
                 if message["payload_sha256"] != payload_sha:
                     raise _error(
-                        "idempotency_conflict", "该请求编号已用于其他专员消息，请保留原请求"
+                        "idempotency_conflict", "该请求编号已用于其他 Agent 消息，请保留原请求"
                     )
                 return message
             depth = 0
@@ -634,10 +634,12 @@ class PersonalMessageStore:
                         or ancestor["recipient_version"] != payload["sender_version"]
                         or ancestor["receiver_session_id"] != payload["source_session_id"]
                     ):
-                        raise _error("binding_conflict", "发送专员、版本或会话与上级接收方不一致")
+                        raise _error("binding_conflict", "发送 Agent、版本或会话与上级接收方不一致")
                     depth = ancestor["depth"] + 1
                     if depth > _MAX_DEPTH:
-                        raise _error("peer_depth", "专员互询层级已达到上限，请由主助理整理后继续")
+                        raise _error(
+                            "peer_depth", "Agent 互询层级已达到上限，请由主 Agent 整理后继续"
+                        )
                 if all(
                     ancestor[key] == payload[key]
                     for key in (
@@ -654,7 +656,7 @@ class PersonalMessageStore:
                 (payload["workspace_key"], payload["collaboration_id"], payload["step_id"]),
             ).fetchone()[0]
             if count >= _MAX_MESSAGES:
-                raise _error("peer_limit", "本步骤的专员消息已达到上限，请先整理现有结果")
+                raise _error("peer_limit", "本步骤的 Agent 消息已达到上限，请先整理现有结果")
             identity = uuid.uuid4().hex
             request = {
                 **payload,
@@ -700,7 +702,7 @@ class PersonalMessageStore:
     def get(self, message_id: str, workspace_key: str) -> dict:
         message_id, workspace_key = self._scope(message_id, workspace_key)
         if not self._db_path.exists():
-            raise _error("not_found", "该专员消息不存在，请刷新记录")
+            raise _error("not_found", "该 Agent 消息不存在，请刷新记录")
         with self._connection() as conn:
             return self._required(conn, message_id, workspace_key)
 
@@ -716,7 +718,7 @@ class PersonalMessageStore:
         workspace_key = _text(workspace_key, "工作区标识", 2048)
         collaboration_id = _identifier(collaboration_id, _COLLABORATION_ID, "协作编号", 35)
         if agent_id is not None:
-            agent_id = _identifier(agent_id, _AGENT_ID, "专员编号", 35)
+            agent_id = _identifier(agent_id, _AGENT_ID, "Agent 编号", 35)
         limit = _integer(limit, "消息数量", 1, 500)
         offset = _integer(offset, "消息起点", 0, 9_223_372_036_854_775_807)
         if not self._db_path.exists():
@@ -745,7 +747,7 @@ class PersonalMessageStore:
     def events(self, message_id: str, workspace_key: str) -> list[dict]:
         message_id, workspace_key = self._scope(message_id, workspace_key)
         if not self._db_path.exists():
-            raise _error("not_found", "该专员消息不存在，请刷新记录")
+            raise _error("not_found", "该 Agent 消息不存在，请刷新记录")
         with self._connection() as conn:
             return self._read(conn, self._raw(conn, message_id, workspace_key))[1]
 
@@ -798,7 +800,7 @@ class PersonalMessageStore:
     @staticmethod
     def _require_token(message: dict, dispatch_token: str) -> None:
         if not message["dispatch_token"] or message["dispatch_token"] != dispatch_token:
-            raise _error("binding_conflict", "专员消息派送凭据已失效，请核对原始执行")
+            raise _error("binding_conflict", "Agent 消息派送凭据已失效，请核对原始执行")
 
     def mark_received(
         self, message_id: str, workspace_key: str, *, dispatch_token: str, receiver_run_id: str
@@ -838,9 +840,9 @@ class PersonalMessageStore:
             receiver_run_id = _identifier(receiver_run_id, _IDENTIFIER, "接收执行记录编号")
         if not isinstance(outcome, str) or outcome not in _OUTCOMES:
             raise _invalid("消息结果类型不正确")
-        response = _text(response, "专员回答", _MAX_RESPONSE_BYTES, empty=True, strip=False)
+        response = _text(response, "Agent 回答", _MAX_RESPONSE_BYTES, empty=True, strip=False)
         if len(response.encode("utf-8")) > _MAX_RESPONSE_BYTES:
-            raise _invalid("专员回答最多允许 2 MB，请改用明确的产物引用")
+            raise _invalid("Agent 回答最多允许 2 MB，请改用明确的产物引用")
         error = _text(error, "消息错误说明", 16000, empty=True, strip=False)
         usage = _json_object({} if usage is None else usage, "用量记录", 16384)
         run_receipt = _json_object({} if run_receipt is None else run_receipt, "执行回执", 65536)
@@ -897,7 +899,7 @@ class PersonalMessageStore:
         actor_kind: str = "agent",
     ) -> dict:
         message_id, workspace_key = self._scope(message_id, workspace_key)
-        sender_agent_id = _identifier(sender_agent_id, _AGENT_ID, "发送专员编号", 35)
+        sender_agent_id = _identifier(sender_agent_id, _AGENT_ID, "发送 Agent 编号", 35)
         expected_response_sha256 = _identifier(
             expected_response_sha256,
             _SHA256,
@@ -905,11 +907,11 @@ class PersonalMessageStore:
             64,
         )
         if not isinstance(actor_kind, str) or actor_kind not in {"agent", "user"}:
-            raise _invalid("回答确认者必须是专员或用户")
+            raise _invalid("回答确认者必须是 Agent 或用户")
         with self._connection(write=True) as conn:
             message = self._required(conn, message_id, workspace_key)
             if message["sender_agent_id"] != sender_agent_id:
-                raise _error("message_scope_denied", "只有原发送专员可以确认这条回答")
+                raise _error("message_scope_denied", "只有原发送 Agent 可以确认这条回答")
             if message["outcome"] != "completed":
                 raise _error("message_not_ready", "该消息尚无已完成的回答，请查看真实执行状态")
             if message["response_sha256"] != expected_response_sha256:

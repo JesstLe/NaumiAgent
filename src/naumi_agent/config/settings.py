@@ -982,7 +982,7 @@ class PersonalConfig(BaseSettings):
     @classmethod
     def validate_data_dir(cls, value: str) -> str:
         if not value.strip() or "\x00" in value:
-            raise ValueError("个人助理目录不能为空")
+            raise ValueError("Agent 目录不能为空")
         return str(Path(value).expanduser().resolve())
 
 

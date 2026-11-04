@@ -117,12 +117,15 @@ class _FakeSessionStore:
     def __init__(self, exists: bool) -> None:
         self.exists = exists
         self.load_error: Exception | None = None
+        self.load_error_after = 0
+        self.load_calls: list[str] = []
         self.list_sessions_error: Exception | None = None
         self.create_session_error: Exception | None = None
         self.created_sessions: list[dict[str, str | None]] = []
 
     async def load(self, session_id: str):
-        if self.load_error is not None:
+        self.load_calls.append(session_id)
+        if self.load_error is not None and len(self.load_calls) > self.load_error_after:
             raise self.load_error
         if not self.exists:
             return None
@@ -2006,13 +2009,25 @@ class _FakeSessionStoreWithCount:
 
 
 class _FakeSessionStoreWithLatest:
-    def __init__(self, sessions: list[SimpleNamespace]) -> None:
+    def __init__(
+        self,
+        sessions: list[SimpleNamespace],
+        *,
+        missing_session_ids: set[str] | None = None,
+        load_errors: dict[str, Exception] | None = None,
+    ) -> None:
         self.sessions = sessions
+        self.missing_session_ids = missing_session_ids or set()
+        self.load_errors = load_errors or {}
         self.loaded: list[str] = []
         self.list_requests: list[dict[str, int | str]] = []
 
     async def load(self, session_id: str):
         self.loaded.append(session_id)
+        if session_id in self.load_errors:
+            raise self.load_errors[session_id]
+        if session_id in self.missing_session_ids:
+            return None
         for session in self.sessions:
             if session.id == session_id:
                 return session
@@ -2064,17 +2079,20 @@ async def test_workbench_snapshot_endpoint_reports_unavailable_session_store() -
 
 
 @pytest.mark.asyncio
-async def test_workbench_snapshot_endpoint_reports_runtime_session_load_failure() -> None:
+async def test_workbench_snapshot_endpoint_reports_session_scope_read_failure() -> None:
     engine = _FakeEngine(
-        exists=True, load_session_error=RuntimeError("运行态会话暂不可用")
+        exists=True
     )
+    engine.session_store.load_error = RuntimeError("会话作用域读取暂不可用")
+    engine.session_store.load_error_after = 1
 
     with pytest.raises(HTTPException) as exc:
         await get_workbench_snapshot("sess-1", _fake_request(engine), auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
+    assert engine.session_store.load_calls == ["sess-1", "sess-1"]
     assert exc.value.status_code == 503
-    assert exc.value.detail == "运行态会话暂不可用"
+    assert exc.value.detail == "会话作用域读取暂不可用"
 
 
 @pytest.mark.asyncio
@@ -2083,7 +2101,7 @@ async def test_workbench_snapshot_endpoint_returns_service_snapshot() -> None:
 
     response = await get_workbench_snapshot("sess-1", _fake_request(engine), auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert response["session_id"] == "sess-1"
     assert "missions" in response
     assert "leases" in response
@@ -2171,7 +2189,7 @@ async def test_workbench_snapshot_endpoint_reports_unavailable_snapshot_service(
     with pytest.raises(HTTPException) as exc:
         await get_workbench_snapshot("sess-1", _fake_request(engine), auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert exc.value.status_code == 503
     assert exc.value.detail == "snapshot backend unavailable"
 
@@ -2186,7 +2204,7 @@ async def test_workbench_snapshot_endpoint_reports_invalid_snapshot_request() ->
     with pytest.raises(HTTPException) as exc:
         await get_workbench_snapshot("sess-1", _fake_request(engine), auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert exc.value.status_code == 400
     assert exc.value.detail == "snapshot session state is invalid"
 
@@ -2216,18 +2234,21 @@ async def test_get_events_endpoint_reports_unavailable_session_store() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_events_endpoint_reports_runtime_session_load_failure() -> None:
+async def test_get_events_endpoint_reports_session_scope_read_failure() -> None:
     engine = _FakeEngine(
-        exists=True, load_session_error=RuntimeError("运行态会话暂不可用")
+        exists=True
     )
+    engine.session_store.load_error = RuntimeError("会话作用域读取暂不可用")
+    engine.session_store.load_error_after = 1
 
     with pytest.raises(HTTPException) as exc:
         await get_workbench_events("sess-1", _fake_request(engine), limit=10, auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
+    assert engine.session_store.load_calls == ["sess-1", "sess-1"]
     assert engine.workbench_service.listed_events == []
     assert exc.value.status_code == 503
-    assert exc.value.detail == "运行态会话暂不可用"
+    assert exc.value.detail == "会话作用域读取暂不可用"
 
 
 @pytest.mark.asyncio
@@ -2238,7 +2259,7 @@ async def test_get_events_endpoint_returns_events_and_limit() -> None:
         "sess-1", _fake_request(engine), limit=25, auth="test"
     )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_events == [
         {
             "session_id": "sess-1",
@@ -2321,7 +2342,7 @@ async def test_get_events_endpoint_reports_unavailable_event_service() -> None:
     with pytest.raises(HTTPException) as exc:
         await get_workbench_events("sess-1", _fake_request(engine), limit=10, auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert exc.value.status_code == 503
     assert exc.value.detail == "event store unavailable"
 
@@ -2336,7 +2357,7 @@ async def test_get_events_endpoint_reports_invalid_event_request() -> None:
     with pytest.raises(HTTPException) as exc:
         await get_workbench_events("sess-1", _fake_request(engine), limit=10, auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert exc.value.status_code == 400
     assert exc.value.detail == "event filter is invalid"
 
@@ -2356,7 +2377,7 @@ async def test_get_events_endpoint_forwards_filters_and_returns_them() -> None:
         auth="test",
     )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_events == [
         {
             "session_id": "sess-1",
@@ -2442,7 +2463,7 @@ def test_get_event_route_returns_single_event() -> None:
     response = client.get("/workbench/sessions/sess-1/events/event-2")
 
     assert response.status_code == 200
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_events == [
         {"session_id": "sess-1", "event_id": "event-2"}
     ]
@@ -2490,10 +2511,12 @@ async def test_get_event_endpoint_reports_unavailable_session_store() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_event_endpoint_reports_runtime_session_load_failure() -> None:
+async def test_get_event_endpoint_reports_session_scope_read_failure() -> None:
     engine = _FakeEngine(
-        exists=True, load_session_error=RuntimeError("运行态会话暂不可用")
+        exists=True
     )
+    engine.session_store.load_error = RuntimeError("会话作用域读取暂不可用")
+    engine.session_store.load_error_after = 1
 
     with pytest.raises(HTTPException) as exc:
         await get_workbench_event(
@@ -2503,10 +2526,11 @@ async def test_get_event_endpoint_reports_runtime_session_load_failure() -> None
             auth="test",
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
+    assert engine.session_store.load_calls == ["sess-1", "sess-1"]
     assert engine.workbench_service.requested_events == []
     assert exc.value.status_code == 503
-    assert exc.value.detail == "运行态会话暂不可用"
+    assert exc.value.detail == "会话作用域读取暂不可用"
 
 
 @pytest.mark.asyncio
@@ -2524,7 +2548,7 @@ async def test_get_event_endpoint_reports_unavailable_event_service() -> None:
             auth="test",
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_events == [
         {"session_id": "sess-1", "event_id": "event-2"}
     ]
@@ -2545,7 +2569,7 @@ async def test_get_event_endpoint_reports_invalid_event_request() -> None:
             auth="test",
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_events == [
         {"session_id": "sess-1", "event_id": "event-2"}
     ]
@@ -2594,7 +2618,7 @@ def test_workbench_event_stream_refreshes_audit_events() -> None:
         event_message = websocket.receive_json()
         complete_message = websocket.receive_json()
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_events == [
         {
             "session_id": "sess-1",
@@ -2668,7 +2692,7 @@ async def test_workbench_event_stream_sends_initial_audit_events_on_connect() ->
     await websocket_workbench_events(websocket, "sess-1")
 
     assert websocket.accepted is True
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_events == [
         {
             "session_id": "sess-1",
@@ -2715,7 +2739,7 @@ async def test_workbench_event_stream_can_send_initial_snapshot_on_connect() -> 
     await websocket_workbench_events(websocket, "sess-1")
 
     assert websocket.accepted is True
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert websocket.sent_json[0] == {"type": "connected", "session_id": "sess-1"}
     assert websocket.sent_json[1] == {
         "type": "workbench/snapshot",
@@ -2778,21 +2802,23 @@ async def test_workbench_event_stream_reports_unavailable_session_store() -> Non
 
 
 @pytest.mark.asyncio
-async def test_workbench_event_stream_reports_unavailable_runtime_session() -> None:
+async def test_workbench_event_stream_reports_unavailable_session_scope_read() -> None:
     engine = _FakeEngine(
         exists=True,
-        load_session_error=RuntimeError("运行态会话暂不可用"),
     )
+    engine.session_store.load_error = RuntimeError("会话作用域读取暂不可用")
+    engine.session_store.load_error_after = 1
     websocket = _RecordingWorkbenchWebSocket(engine)
 
     await websocket_workbench_events(websocket, "sess-1")
 
     assert websocket.accepted is True
     assert websocket.closed is True
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
+    assert engine.session_store.load_calls == ["sess-1", "sess-1"]
     assert engine.workbench_service.listed_events == []
     assert websocket.sent_json == [
-        {"type": "error", "message": "运行态会话暂不可用"},
+        {"type": "error", "message": "会话作用域读取暂不可用"},
     ]
 
 
@@ -2810,7 +2836,7 @@ async def test_workbench_event_stream_accepts_valid_api_key_when_configured() ->
 
     assert websocket.accepted is True
     assert websocket.closed is False
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert websocket.sent_json[0] == {"type": "connected", "session_id": "sess-1"}
     assert websocket.sent_json[-1] == {"type": "refresh_complete", "count": 1}
 
@@ -2845,20 +2871,23 @@ async def test_get_validation_runs_endpoint_reports_unavailable_session_store() 
 
 
 @pytest.mark.asyncio
-async def test_get_validation_runs_endpoint_reports_runtime_session_load_failure() -> None:
+async def test_get_validation_runs_endpoint_reports_session_scope_read_failure() -> None:
     engine = _FakeEngine(
-        exists=True, load_session_error=RuntimeError("运行态会话暂不可用")
+        exists=True
     )
+    engine.session_store.load_error = RuntimeError("会话作用域读取暂不可用")
+    engine.session_store.load_error_after = 1
 
     with pytest.raises(HTTPException) as exc:
         await get_validation_runs(
             "sess-1", _fake_request(engine), task_id=None, limit=10, auth="test"
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
+    assert engine.session_store.load_calls == ["sess-1", "sess-1"]
     assert engine.workbench_service.listed_validation_runs == []
     assert exc.value.status_code == 503
-    assert exc.value.detail == "运行态会话暂不可用"
+    assert exc.value.detail == "会话作用域读取暂不可用"
 
 
 @pytest.mark.asyncio
@@ -2874,7 +2903,7 @@ async def test_get_validation_runs_endpoint_returns_runs_and_params() -> None:
         auth="test",
     )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_validation_runs == [
         {
             "session_id": "sess-1",
@@ -2935,7 +2964,7 @@ async def test_get_validation_runs_endpoint_reports_unavailable_validation_servi
             auth="test",
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert exc.value.status_code == 503
     assert exc.value.detail == "validation store unavailable"
 
@@ -2957,7 +2986,7 @@ async def test_get_validation_runs_endpoint_reports_invalid_validation_request()
             auth="test",
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert exc.value.status_code == 400
     assert exc.value.detail == "validation filter is invalid"
 
@@ -2977,7 +3006,7 @@ async def test_get_validation_run_endpoint_returns_single_run() -> None:
     )
 
     assert response.status_code == 200
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_validation_runs == [
         {"session_id": "sess-1", "run_id": "run-2"}
     ]
@@ -3042,18 +3071,21 @@ async def test_get_validation_run_endpoint_reports_unavailable_session_store() -
 
 
 @pytest.mark.asyncio
-async def test_get_validation_run_endpoint_reports_runtime_session_load_failure() -> None:
+async def test_get_validation_run_endpoint_reports_session_scope_read_failure() -> None:
     engine = _FakeEngine(
-        exists=True, load_session_error=RuntimeError("运行态会话暂不可用")
+        exists=True
     )
+    engine.session_store.load_error = RuntimeError("会话作用域读取暂不可用")
+    engine.session_store.load_error_after = 1
 
     with pytest.raises(HTTPException) as exc:
         await get_validation_run("sess-1", "run-2", _fake_request(engine), auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
+    assert engine.session_store.load_calls == ["sess-1", "sess-1"]
     assert engine.workbench_service.requested_validation_runs == []
     assert exc.value.status_code == 503
-    assert exc.value.detail == "运行态会话暂不可用"
+    assert exc.value.detail == "会话作用域读取暂不可用"
 
 
 @pytest.mark.asyncio
@@ -3066,7 +3098,7 @@ async def test_get_validation_run_endpoint_reports_unavailable_validation_servic
     with pytest.raises(HTTPException) as exc:
         await get_validation_run("sess-1", "run-2", _fake_request(engine), auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_validation_runs == [
         {"session_id": "sess-1", "run_id": "run-2"}
     ]
@@ -3084,7 +3116,7 @@ async def test_get_validation_run_endpoint_reports_invalid_validation_request() 
     with pytest.raises(HTTPException) as exc:
         await get_validation_run("sess-1", "run-2", _fake_request(engine), auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_validation_runs == [
         {"session_id": "sess-1", "run_id": "run-2"}
     ]
@@ -3132,10 +3164,12 @@ async def test_get_context_snapshots_endpoint_reports_unavailable_session_store(
 
 
 @pytest.mark.asyncio
-async def test_get_context_snapshots_endpoint_reports_runtime_session_load_failure() -> None:
+async def test_get_context_snapshots_endpoint_reports_session_scope_read_failure() -> None:
     engine = _FakeEngine(
-        exists=True, load_session_error=RuntimeError("运行态会话暂不可用")
+        exists=True
     )
+    engine.session_store.load_error = RuntimeError("会话作用域读取暂不可用")
+    engine.session_store.load_error_after = 1
 
     with pytest.raises(HTTPException) as exc:
         await get_context_snapshots(
@@ -3147,10 +3181,11 @@ async def test_get_context_snapshots_endpoint_reports_runtime_session_load_failu
             auth="test",
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
+    assert engine.session_store.load_calls == ["sess-1", "sess-1"]
     assert engine.workbench_service.listed_context_snapshots == []
     assert exc.value.status_code == 503
-    assert exc.value.detail == "运行态会话暂不可用"
+    assert exc.value.detail == "会话作用域读取暂不可用"
 
 
 @pytest.mark.asyncio
@@ -3167,7 +3202,7 @@ async def test_get_context_snapshots_endpoint_returns_snapshots_and_params() -> 
         auth="test",
     )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_context_snapshots == [
         {
             "session_id": "sess-1",
@@ -3226,7 +3261,7 @@ async def test_get_context_snapshots_endpoint_reports_unavailable_context_servic
             auth="test",
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert exc.value.status_code == 503
     assert exc.value.detail == "context snapshot store unavailable"
 
@@ -3248,7 +3283,7 @@ async def test_get_context_snapshots_endpoint_reports_invalid_context_request() 
             auth="test",
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert exc.value.status_code == 400
     assert exc.value.detail == "context snapshot filter is invalid"
 
@@ -3268,7 +3303,7 @@ async def test_get_context_snapshot_endpoint_returns_single_snapshot() -> None:
     )
 
     assert response.status_code == 200
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_context_snapshots == [
         {"session_id": "sess-1", "snapshot_id": "snap-2"}
     ]
@@ -3331,20 +3366,23 @@ async def test_get_context_snapshot_endpoint_reports_unavailable_session_store()
 
 
 @pytest.mark.asyncio
-async def test_get_context_snapshot_endpoint_reports_runtime_session_load_failure() -> None:
+async def test_get_context_snapshot_endpoint_reports_session_scope_read_failure() -> None:
     engine = _FakeEngine(
-        exists=True, load_session_error=RuntimeError("运行态会话暂不可用")
+        exists=True
     )
+    engine.session_store.load_error = RuntimeError("会话作用域读取暂不可用")
+    engine.session_store.load_error_after = 1
 
     with pytest.raises(HTTPException) as exc:
         await get_context_snapshot(
             "sess-1", "snap-2", _fake_request(engine), auth="test"
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
+    assert engine.session_store.load_calls == ["sess-1", "sess-1"]
     assert engine.workbench_service.requested_context_snapshots == []
     assert exc.value.status_code == 503
-    assert exc.value.detail == "运行态会话暂不可用"
+    assert exc.value.detail == "会话作用域读取暂不可用"
 
 
 @pytest.mark.asyncio
@@ -3359,7 +3397,7 @@ async def test_get_context_snapshot_endpoint_reports_unavailable_context_service
             "sess-1", "snap-2", _fake_request(engine), auth="test"
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_context_snapshots == [
         {"session_id": "sess-1", "snapshot_id": "snap-2"}
     ]
@@ -3379,7 +3417,7 @@ async def test_get_context_snapshot_endpoint_reports_invalid_context_request() -
             "sess-1", "snap-2", _fake_request(engine), auth="test"
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_context_snapshots == [
         {"session_id": "sess-1", "snapshot_id": "snap-2"}
     ]
@@ -3809,20 +3847,23 @@ async def test_get_missions_endpoint_reports_unavailable_session_store() -> None
 
 
 @pytest.mark.asyncio
-async def test_get_missions_endpoint_reports_runtime_session_load_failure() -> None:
+async def test_get_missions_endpoint_reports_session_scope_read_failure() -> None:
     engine = _FakeEngine(
-        exists=True, load_session_error=RuntimeError("运行态会话暂不可用")
+        exists=True
     )
+    engine.session_store.load_error = RuntimeError("会话作用域读取暂不可用")
+    engine.session_store.load_error_after = 1
 
     with pytest.raises(HTTPException) as exc:
         await get_missions(
             "sess-1", _fake_request(engine), status=None, limit=10, auth="test"
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
+    assert engine.session_store.load_calls == ["sess-1", "sess-1"]
     assert engine.workbench_service.listed_missions == []
     assert exc.value.status_code == 503
-    assert exc.value.detail == "运行态会话暂不可用"
+    assert exc.value.detail == "会话作用域读取暂不可用"
 
 
 @pytest.mark.asyncio
@@ -3833,7 +3874,7 @@ async def test_get_missions_endpoint_returns_missions_and_params() -> None:
         "sess-1", _fake_request(engine), status="active", limit=25, auth="test"
     )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_missions == [
         {"session_id": "sess-1", "status": "active", "limit": 25}
     ]
@@ -3862,7 +3903,7 @@ async def test_get_missions_endpoint_without_status_filter() -> None:
         "sess-1", _fake_request(engine), status=None, limit=50, auth="test"
     )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_missions == [
         {"session_id": "sess-1", "status": None, "limit": 50}
     ]
@@ -3883,7 +3924,7 @@ async def test_get_missions_endpoint_reports_invalid_filter() -> None:
             "sess-1", _fake_request(engine), status="bad-status", limit=25, auth="test"
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_missions == [
         {"session_id": "sess-1", "status": "bad-status", "limit": 25}
     ]
@@ -3903,7 +3944,7 @@ async def test_get_missions_endpoint_reports_unavailable_mission_service() -> No
             "sess-1", _fake_request(engine), status=None, limit=25, auth="test"
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_missions == [
         {"session_id": "sess-1", "status": None, "limit": 25}
     ]
@@ -3966,18 +4007,21 @@ async def test_get_mission_endpoint_reports_unavailable_session_store() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_mission_endpoint_reports_runtime_session_load_failure() -> None:
+async def test_get_mission_endpoint_reports_session_scope_read_failure() -> None:
     engine = _FakeEngine(
-        exists=True, load_session_error=RuntimeError("运行态会话暂不可用")
+        exists=True
     )
+    engine.session_store.load_error = RuntimeError("会话作用域读取暂不可用")
+    engine.session_store.load_error_after = 1
 
     with pytest.raises(HTTPException) as exc:
         await get_mission("sess-1", "mission-2", _fake_request(engine), auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
+    assert engine.session_store.load_calls == ["sess-1", "sess-1"]
     assert engine.workbench_service.requested_missions == []
     assert exc.value.status_code == 503
-    assert exc.value.detail == "运行态会话暂不可用"
+    assert exc.value.detail == "会话作用域读取暂不可用"
 
 
 @pytest.mark.asyncio
@@ -3990,7 +4034,7 @@ async def test_get_mission_endpoint_reports_invalid_mission_request() -> None:
     with pytest.raises(HTTPException) as exc:
         await get_mission("sess-1", "mission-2", _fake_request(engine), auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_missions == [
         {"session_id": "sess-1", "mission_id": "mission-2"}
     ]
@@ -4008,7 +4052,7 @@ async def test_get_mission_endpoint_reports_unavailable_mission_service() -> Non
     with pytest.raises(HTTPException) as exc:
         await get_mission("sess-1", "mission-2", _fake_request(engine), auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_missions == [
         {"session_id": "sess-1", "mission_id": "mission-2"}
     ]
@@ -4342,7 +4386,7 @@ async def test_list_workbench_bids_endpoint_delegates_to_service() -> None:
         auth="test",
     )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_bids == [
         {
             "session_id": "sess-1",
@@ -4715,21 +4759,23 @@ async def test_get_approvals_endpoint_reports_unavailable_session_store() -> Non
 
 
 @pytest.mark.asyncio
-async def test_get_approvals_endpoint_reports_runtime_session_load_failure() -> None:
+async def test_get_approvals_endpoint_reports_session_scope_read_failure() -> None:
     engine = _FakeEngine(
         exists=True,
-        load_session_error=RuntimeError("运行态会话暂不可用"),
     )
+    engine.session_store.load_error = RuntimeError("会话作用域读取暂不可用")
+    engine.session_store.load_error_after = 1
 
     with pytest.raises(HTTPException) as exc:
         await get_approvals(
             "sess-1", _fake_request(engine), state=None, limit=10, auth="test"
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
+    assert engine.session_store.load_calls == ["sess-1", "sess-1"]
     assert engine.workbench_service.listed_approvals == []
     assert exc.value.status_code == 503
-    assert exc.value.detail == "运行态会话暂不可用"
+    assert exc.value.detail == "会话作用域读取暂不可用"
 
 
 @pytest.mark.asyncio
@@ -4746,7 +4792,7 @@ async def test_get_approvals_endpoint_returns_approvals_and_params() -> None:
         auth="test",
     )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_approvals == [
         {
             "session_id": "sess-1",
@@ -4807,7 +4853,7 @@ async def test_get_approvals_endpoint_without_state_filter() -> None:
         auth="test",
     )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_approvals == [
         {
             "session_id": "sess-1",
@@ -4840,7 +4886,7 @@ async def test_get_approvals_endpoint_reports_unavailable_approval_service() -> 
             auth="test",
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert exc.value.status_code == 503
     assert exc.value.detail == "approval store unavailable"
 
@@ -4861,7 +4907,7 @@ async def test_get_approvals_endpoint_reports_invalid_approval_request() -> None
             auth="test",
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert exc.value.status_code == 400
     assert exc.value.detail == "approval filter is invalid"
 
@@ -4876,7 +4922,7 @@ def test_get_approval_route_returns_single_approval() -> None:
     response = client.get("/workbench/sessions/sess-1/approvals/approval-2")
 
     assert response.status_code == 200
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_approvals == [
         {"session_id": "sess-1", "approval_id": "approval-2"}
     ]
@@ -4940,19 +4986,21 @@ async def test_get_approval_endpoint_reports_unavailable_session_store() -> None
 
 
 @pytest.mark.asyncio
-async def test_get_approval_endpoint_reports_runtime_session_load_failure() -> None:
+async def test_get_approval_endpoint_reports_session_scope_read_failure() -> None:
     engine = _FakeEngine(
         exists=True,
-        load_session_error=RuntimeError("运行态会话暂不可用"),
     )
+    engine.session_store.load_error = RuntimeError("会话作用域读取暂不可用")
+    engine.session_store.load_error_after = 1
 
     with pytest.raises(HTTPException) as exc:
         await get_approval("sess-1", "approval-2", _fake_request(engine), auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
+    assert engine.session_store.load_calls == ["sess-1", "sess-1"]
     assert engine.workbench_service.requested_approvals == []
     assert exc.value.status_code == 503
-    assert exc.value.detail == "运行态会话暂不可用"
+    assert exc.value.detail == "会话作用域读取暂不可用"
 
 
 @pytest.mark.asyncio
@@ -4965,7 +5013,7 @@ async def test_get_approval_endpoint_reports_unavailable_approval_service() -> N
     with pytest.raises(HTTPException) as exc:
         await get_approval("sess-1", "approval-2", _fake_request(engine), auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_approvals == [
         {"session_id": "sess-1", "approval_id": "approval-2"}
     ]
@@ -4983,7 +5031,7 @@ async def test_get_approval_endpoint_reports_invalid_approval_request() -> None:
     with pytest.raises(HTTPException) as exc:
         await get_approval("sess-1", "approval-2", _fake_request(engine), auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_approvals == [
         {"session_id": "sess-1", "approval_id": "approval-2"}
     ]
@@ -4999,7 +5047,7 @@ async def test_get_review_evidence_returns_real_evidence_for_approval() -> None:
         "sess-1", "approval-1", _fake_request(engine), auth="test"
     )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_evidence == [
         {"session_id": "sess-1", "approval_id": "approval-1"}
     ]
@@ -5073,10 +5121,12 @@ async def test_get_failures_endpoint_reports_unavailable_session_store() -> None
 
 
 @pytest.mark.asyncio
-async def test_get_failures_endpoint_reports_runtime_session_load_failure() -> None:
+async def test_get_failures_endpoint_reports_session_scope_read_failure() -> None:
     engine = _FakeEngine(
-        exists=True, load_session_error=RuntimeError("运行态会话暂不可用")
+        exists=True
     )
+    engine.session_store.load_error = RuntimeError("会话作用域读取暂不可用")
+    engine.session_store.load_error_after = 1
 
     with pytest.raises(HTTPException) as exc:
         await get_failures(
@@ -5088,10 +5138,11 @@ async def test_get_failures_endpoint_reports_runtime_session_load_failure() -> N
             auth="test",
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
+    assert engine.session_store.load_calls == ["sess-1", "sess-1"]
     assert engine.workbench_service.listed_failures == []
     assert exc.value.status_code == 503
-    assert exc.value.detail == "运行态会话暂不可用"
+    assert exc.value.detail == "会话作用域读取暂不可用"
 
 
 @pytest.mark.asyncio
@@ -5108,7 +5159,7 @@ async def test_get_failures_endpoint_returns_failures_and_params() -> None:
         auth="test",
     )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_failures == [
         {
             "session_id": "sess-1",
@@ -5165,7 +5216,7 @@ async def test_get_failures_endpoint_without_filters() -> None:
         auth="test",
     )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_failures == [
         {
             "session_id": "sess-1",
@@ -5199,7 +5250,7 @@ async def test_get_failures_endpoint_reports_invalid_failure_request() -> None:
             auth="test",
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_failures == []
     assert exc.value.status_code == 400
     assert exc.value.detail == "failure filter is invalid"
@@ -5222,7 +5273,7 @@ async def test_get_failures_endpoint_reports_unavailable_failure_service() -> No
             auth="test",
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_failures == []
     assert exc.value.status_code == 503
     assert exc.value.detail == "failure store unavailable"
@@ -5243,7 +5294,7 @@ async def test_get_failure_endpoint_returns_single_failure() -> None:
     )
 
     assert response.status_code == 200
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_failures == [
         {"session_id": "sess-1", "failure_id": "failure-2"}
     ]
@@ -5306,18 +5357,21 @@ async def test_get_failure_endpoint_reports_unavailable_session_store() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_failure_endpoint_reports_runtime_session_load_failure() -> None:
+async def test_get_failure_endpoint_reports_session_scope_read_failure() -> None:
     engine = _FakeEngine(
-        exists=True, load_session_error=RuntimeError("运行态会话暂不可用")
+        exists=True
     )
+    engine.session_store.load_error = RuntimeError("会话作用域读取暂不可用")
+    engine.session_store.load_error_after = 1
 
     with pytest.raises(HTTPException) as exc:
         await get_failure("sess-1", "failure-2", _fake_request(engine), auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
+    assert engine.session_store.load_calls == ["sess-1", "sess-1"]
     assert engine.workbench_service.requested_failures == []
     assert exc.value.status_code == 503
-    assert exc.value.detail == "运行态会话暂不可用"
+    assert exc.value.detail == "会话作用域读取暂不可用"
 
 
 @pytest.mark.asyncio
@@ -5328,7 +5382,7 @@ async def test_get_failure_endpoint_reports_invalid_failure_request() -> None:
     with pytest.raises(HTTPException) as exc:
         await get_failure("sess-1", "failure-2", _fake_request(engine), auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_failures == [
         {"session_id": "sess-1", "failure_id": "failure-2"}
     ]
@@ -5346,7 +5400,7 @@ async def test_get_failure_endpoint_reports_unavailable_failure_service() -> Non
     with pytest.raises(HTTPException) as exc:
         await get_failure("sess-1", "failure-2", _fake_request(engine), auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_failures == [
         {"session_id": "sess-1", "failure_id": "failure-2"}
     ]
@@ -5382,20 +5436,22 @@ async def test_resolve_approval_endpoint_reports_unavailable_session_store() -> 
 
 
 @pytest.mark.asyncio
-async def test_resolve_approval_endpoint_reports_runtime_session_load_failure() -> None:
+async def test_resolve_approval_endpoint_reports_session_scope_read_failure() -> None:
     engine = _FakeEngine(
         exists=True,
-        load_session_error=RuntimeError("运行态会话暂不可用"),
     )
+    engine.session_store.load_error = RuntimeError("会话作用域读取暂不可用")
+    engine.session_store.load_error_after = 1
     body = ApprovalResolve(actor="Human", state=ApprovalState.APPROVED)
 
     with pytest.raises(HTTPException) as exc:
         await resolve_approval("sess-1", "approval-1", body, _fake_request(engine), auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
+    assert engine.session_store.load_calls == ["sess-1", "sess-1"]
     assert engine.workbench_service.resolved_approvals == []
     assert exc.value.status_code == 503
-    assert exc.value.detail == "运行态会话暂不可用"
+    assert exc.value.detail == "会话作用域读取暂不可用"
 
 
 @pytest.mark.asyncio
@@ -5423,7 +5479,7 @@ async def test_resolve_approval_endpoint_returns_resolved_approval() -> None:
         "sess-1", "approval-1", body, _fake_request(engine), auth="test"
     )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.resolved_approvals == [
         {
             "session_id": "sess-1",
@@ -5467,7 +5523,7 @@ async def test_resolve_approval_endpoint_can_return_fresh_snapshot() -> None:
         auth="test",
     )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert response["approval"]["id"] == "approval-1"
     assert response["approval"]["state"] == "approved"
     assert response["snapshot"]["version"] == 1
@@ -5522,7 +5578,7 @@ async def test_resolve_approval_endpoint_returns_404_when_missing() -> None:
             "sess-1", "approval-missing", body, _fake_request(engine), auth="test"
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert exc.value.status_code == 404
     assert exc.value.detail == "审批请求不存在"
 
@@ -5538,7 +5594,7 @@ async def test_resolve_approval_endpoint_maps_value_error_to_400() -> None:
     with pytest.raises(HTTPException) as exc:
         await resolve_approval("sess-1", "approval-1", body, _fake_request(engine), auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert exc.value.status_code == 400
     assert exc.value.detail == "审批结果只能是 approved 或 rejected"
 
@@ -5554,7 +5610,7 @@ async def test_resolve_approval_endpoint_reports_unavailable_approval_service() 
     with pytest.raises(HTTPException) as exc:
         await resolve_approval("sess-1", "approval-1", body, _fake_request(engine), auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.resolved_approvals == [
         {
             "session_id": "sess-1",
@@ -6223,12 +6279,12 @@ async def test_workbench_bootstrap_returns_latest_session_and_snapshot() -> None
     assert response.daemon_status.host == "127.0.0.1"
     assert response.capabilities.protocol_version == 1
     assert engine.session_store.loaded == ["sess-latest"]
-    assert engine.loaded == ["sess-latest"]
+    assert engine.loaded == []
 
 
 @pytest.mark.asyncio
-async def test_workbench_bootstrap_does_not_select_unloadable_latest_session() -> None:
-    engine = _FakeEngine(exists=True, load_session_result=False)
+async def test_workbench_bootstrap_does_not_select_missing_latest_session() -> None:
+    engine = _FakeEngine(exists=True)
     latest_session = SimpleNamespace(
         id="sess-broken",
         title="损坏会话",
@@ -6240,7 +6296,9 @@ async def test_workbench_bootstrap_does_not_select_unloadable_latest_session() -
         total_cost_usd=0.0,
         status="active",
     )
-    engine.session_store = _FakeSessionStoreWithLatest([latest_session])
+    engine.session_store = _FakeSessionStoreWithLatest(
+        [latest_session], missing_session_ids={"sess-broken"}
+    )
     request = _fake_status_request(engine)
 
     response = await get_workbench_bootstrap(request, auth="test")
@@ -6249,14 +6307,13 @@ async def test_workbench_bootstrap_does_not_select_unloadable_latest_session() -
     assert response.selected_session_id is None
     assert response.snapshot is None
     assert response.daemon_status.status == "running"
-    assert engine.loaded == ["sess-broken"]
+    assert engine.loaded == []
 
 
 @pytest.mark.asyncio
-async def test_workbench_bootstrap_keeps_daemon_ready_when_session_load_raises() -> None:
+async def test_workbench_bootstrap_keeps_daemon_ready_when_session_read_raises() -> None:
     engine = _FakeEngine(
         exists=True,
-        load_session_error=RuntimeError("运行态会话暂不可用"),
     )
     latest_session = SimpleNamespace(
         id="sess-runtime-fails",
@@ -6269,7 +6326,10 @@ async def test_workbench_bootstrap_keeps_daemon_ready_when_session_load_raises()
         total_cost_usd=0.0,
         status="active",
     )
-    engine.session_store = _FakeSessionStoreWithLatest([latest_session])
+    engine.session_store = _FakeSessionStoreWithLatest(
+        [latest_session],
+        load_errors={"sess-runtime-fails": RuntimeError("会话作用域读取暂不可用")},
+    )
     request = _fake_status_request(engine)
 
     response = await get_workbench_bootstrap(request, auth="test")
@@ -6279,7 +6339,7 @@ async def test_workbench_bootstrap_keeps_daemon_ready_when_session_load_raises()
     assert response.snapshot is None
     assert response.daemon_status.status == "running"
     assert response.capabilities.protocol_version == 1
-    assert engine.loaded == ["sess-runtime-fails"]
+    assert engine.loaded == []
 
 
 @pytest.mark.asyncio
@@ -6300,14 +6360,8 @@ async def test_workbench_bootstrap_degrades_when_session_registry_is_unavailable
 
 
 @pytest.mark.asyncio
-async def test_workbench_bootstrap_selects_next_loadable_session() -> None:
-    engine = _FakeEngine(
-        exists=True,
-        load_session_results={
-            "sess-broken": False,
-            "sess-ready": True,
-        },
-    )
+async def test_workbench_bootstrap_selects_next_existing_session() -> None:
+    engine = _FakeEngine(exists=True)
     broken_session = SimpleNamespace(
         id="sess-broken",
         title="损坏会话",
@@ -6330,7 +6384,9 @@ async def test_workbench_bootstrap_selects_next_loadable_session() -> None:
         total_cost_usd=0.006,
         status="active",
     )
-    engine.session_store = _FakeSessionStoreWithLatest([broken_session, ready_session])
+    engine.session_store = _FakeSessionStoreWithLatest(
+        [broken_session, ready_session], missing_session_ids={"sess-broken"}
+    )
     request = _fake_status_request(engine)
 
     response = await get_workbench_bootstrap(request, page_size=2, auth="test")
@@ -6342,7 +6398,7 @@ async def test_workbench_bootstrap_selects_next_loadable_session() -> None:
     assert response.selected_session_id == "sess-ready"
     assert response.snapshot is not None
     assert response.snapshot["session_id"] == "sess-ready"
-    assert engine.loaded == ["sess-broken", "sess-ready"]
+    assert engine.loaded == []
 
 
 @pytest.mark.asyncio
@@ -6371,7 +6427,7 @@ async def test_workbench_bootstrap_keeps_daemon_ready_when_snapshot_fails() -> N
     assert response.selected_session_id is None
     assert response.snapshot is None
     assert response.daemon_status.status == "running"
-    assert engine.loaded == ["sess-snapshot-fails"]
+    assert engine.loaded == []
 
 
 @pytest.mark.asyncio
@@ -7258,10 +7314,12 @@ async def test_get_issues_endpoint_reports_unavailable_session_store() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_issues_endpoint_reports_runtime_session_load_failure() -> None:
+async def test_get_issues_endpoint_reports_session_scope_read_failure() -> None:
     engine = _FakeEngine(
-        exists=True, load_session_error=RuntimeError("运行态会话暂不可用")
+        exists=True
     )
+    engine.session_store.load_error = RuntimeError("会话作用域读取暂不可用")
+    engine.session_store.load_error_after = 1
 
     with pytest.raises(HTTPException) as exc:
         await get_issues(
@@ -7273,10 +7331,11 @@ async def test_get_issues_endpoint_reports_runtime_session_load_failure() -> Non
             auth="test",
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
+    assert engine.session_store.load_calls == ["sess-1", "sess-1"]
     assert engine.workbench_service.listed_issues == []
     assert exc.value.status_code == 503
-    assert exc.value.detail == "运行态会话暂不可用"
+    assert exc.value.detail == "会话作用域读取暂不可用"
 
 
 @pytest.mark.asyncio
@@ -7293,7 +7352,7 @@ async def test_get_issues_endpoint_returns_issues_and_params() -> None:
         auth="test",
     )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_issues == [
         {
             "session_id": "sess-1",
@@ -7355,7 +7414,7 @@ async def test_get_issues_endpoint_without_filters() -> None:
         auth="test",
     )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_issues == [
         {
             "session_id": "sess-1",
@@ -7389,7 +7448,7 @@ async def test_get_issues_endpoint_reports_invalid_issue_filter() -> None:
             auth="test",
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_issues == [
         {
             "session_id": "sess-1",
@@ -7420,7 +7479,7 @@ async def test_get_issues_endpoint_reports_unavailable_issue_service() -> None:
             auth="test",
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_issues == [
         {
             "session_id": "sess-1",
@@ -7464,20 +7523,23 @@ async def test_get_agent_profiles_endpoint_reports_unavailable_session_store() -
 
 
 @pytest.mark.asyncio
-async def test_get_agent_profiles_endpoint_reports_runtime_session_load_failure() -> None:
+async def test_get_agent_profiles_endpoint_reports_session_scope_read_failure() -> None:
     engine = _FakeEngine(
-        exists=True, load_session_error=RuntimeError("运行态会话暂不可用")
+        exists=True
     )
+    engine.session_store.load_error = RuntimeError("会话作用域读取暂不可用")
+    engine.session_store.load_error_after = 1
 
     with pytest.raises(HTTPException) as exc:
         await get_agent_profiles(
             "sess-1", _fake_request(engine), status=None, limit=10, auth="test"
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
+    assert engine.session_store.load_calls == ["sess-1", "sess-1"]
     assert engine.workbench_service.listed_agent_profiles == []
     assert exc.value.status_code == 503
-    assert exc.value.detail == "运行态会话暂不可用"
+    assert exc.value.detail == "会话作用域读取暂不可用"
 
 
 @pytest.mark.asyncio
@@ -7488,7 +7550,7 @@ async def test_get_agent_profiles_endpoint_returns_profiles_and_params() -> None
         "sess-1", _fake_request(engine), status="busy", limit=25, auth="test"
     )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_agent_profiles == [
         {"session_id": "sess-1", "status": "busy", "limit": 25}
     ]
@@ -7524,7 +7586,7 @@ async def test_get_agent_profiles_endpoint_reports_invalid_profile_request() -> 
             "sess-1", _fake_request(engine), status="invalid", limit=10, auth="test"
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_agent_profiles == []
     assert exc.value.status_code == 400
     assert exc.value.detail == "agent status filter is invalid"
@@ -7542,7 +7604,7 @@ async def test_get_agent_profiles_endpoint_reports_unavailable_profile_service()
             "sess-1", _fake_request(engine), status=None, limit=10, auth="test"
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_agent_profiles == []
     assert exc.value.status_code == 503
     assert exc.value.detail == "agent profile store unavailable"
@@ -7771,7 +7833,7 @@ def test_get_agent_profile_route_returns_single_profile() -> None:
     response = client.get("/workbench/sessions/sess-1/agents/agent-2")
 
     assert response.status_code == 200
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_agent_profiles == [
         {"session_id": "sess-1", "agent_id": "agent-2"}
     ]
@@ -7822,20 +7884,23 @@ async def test_get_agent_profile_endpoint_reports_unavailable_session_store() ->
 
 
 @pytest.mark.asyncio
-async def test_get_agent_profile_endpoint_reports_runtime_session_load_failure() -> None:
+async def test_get_agent_profile_endpoint_reports_session_scope_read_failure() -> None:
     engine = _FakeEngine(
-        exists=True, load_session_error=RuntimeError("运行态会话暂不可用")
+        exists=True
     )
+    engine.session_store.load_error = RuntimeError("会话作用域读取暂不可用")
+    engine.session_store.load_error_after = 1
 
     with pytest.raises(HTTPException) as exc:
         await get_agent_profile(
             "sess-1", "agent-2", _fake_request(engine), auth="test"
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
+    assert engine.session_store.load_calls == ["sess-1", "sess-1"]
     assert engine.workbench_service.requested_agent_profiles == []
     assert exc.value.status_code == 503
-    assert exc.value.detail == "运行态会话暂不可用"
+    assert exc.value.detail == "会话作用域读取暂不可用"
 
 
 @pytest.mark.asyncio
@@ -7850,7 +7915,7 @@ async def test_get_agent_profile_endpoint_reports_invalid_profile_request() -> N
             "sess-1", "agent-2", _fake_request(engine), auth="test"
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_agent_profiles == [
         {"session_id": "sess-1", "agent_id": "agent-2"}
     ]
@@ -7870,7 +7935,7 @@ async def test_get_agent_profile_endpoint_reports_unavailable_profile_service() 
             "sess-1", "agent-2", _fake_request(engine), auth="test"
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_agent_profiles == [
         {"session_id": "sess-1", "agent_id": "agent-2"}
     ]
@@ -8017,18 +8082,21 @@ async def test_get_issue_endpoint_reports_unavailable_session_store() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_issue_endpoint_reports_runtime_session_load_failure() -> None:
+async def test_get_issue_endpoint_reports_session_scope_read_failure() -> None:
     engine = _FakeEngine(
-        exists=True, load_session_error=RuntimeError("运行态会话暂不可用")
+        exists=True
     )
+    engine.session_store.load_error = RuntimeError("会话作用域读取暂不可用")
+    engine.session_store.load_error_after = 1
 
     with pytest.raises(HTTPException) as exc:
         await get_issue("sess-1", "task-2", _fake_request(engine), auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
+    assert engine.session_store.load_calls == ["sess-1", "sess-1"]
     assert engine.workbench_service.requested_issues == []
     assert exc.value.status_code == 503
-    assert exc.value.detail == "运行态会话暂不可用"
+    assert exc.value.detail == "会话作用域读取暂不可用"
 
 
 @pytest.mark.asyncio
@@ -8039,7 +8107,7 @@ async def test_get_issue_endpoint_reports_invalid_issue_request() -> None:
     with pytest.raises(HTTPException) as exc:
         await get_issue("sess-1", "task-2", _fake_request(engine), auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_issues == [
         {"session_id": "sess-1", "task_id": "task-2"}
     ]
@@ -8057,7 +8125,7 @@ async def test_get_issue_endpoint_reports_unavailable_issue_service() -> None:
     with pytest.raises(HTTPException) as exc:
         await get_issue("sess-1", "task-2", _fake_request(engine), auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_issues == [
         {"session_id": "sess-1", "task_id": "task-2"}
     ]
@@ -8107,10 +8175,12 @@ async def test_get_leases_endpoint_reports_unavailable_session_store() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_leases_endpoint_reports_runtime_session_load_failure() -> None:
+async def test_get_leases_endpoint_reports_session_scope_read_failure() -> None:
     engine = _FakeEngine(
-        exists=True, load_session_error=RuntimeError("运行态会话暂不可用")
+        exists=True
     )
+    engine.session_store.load_error = RuntimeError("会话作用域读取暂不可用")
+    engine.session_store.load_error_after = 1
 
     with pytest.raises(HTTPException) as exc:
         await get_leases(
@@ -8123,10 +8193,11 @@ async def test_get_leases_endpoint_reports_runtime_session_load_failure() -> Non
             auth="test",
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
+    assert engine.session_store.load_calls == ["sess-1", "sess-1"]
     assert engine.workbench_service.listed_leases == []
     assert exc.value.status_code == 503
-    assert exc.value.detail == "运行态会话暂不可用"
+    assert exc.value.detail == "会话作用域读取暂不可用"
 
 
 @pytest.mark.asyncio
@@ -8143,7 +8214,7 @@ async def test_get_leases_endpoint_returns_leases_and_params() -> None:
         auth="test",
     )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_leases == [
         {
             "session_id": "sess-1",
@@ -8201,7 +8272,7 @@ async def test_get_leases_endpoint_without_filters() -> None:
         auth="test",
     )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_leases == [
         {
             "session_id": "sess-1",
@@ -8236,7 +8307,7 @@ async def test_get_leases_endpoint_reports_invalid_lease_request() -> None:
             auth="test",
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_leases == []
     assert exc.value.status_code == 400
     assert exc.value.detail == "lease filter is invalid"
@@ -8260,7 +8331,7 @@ async def test_get_leases_endpoint_reports_unavailable_lease_service() -> None:
             auth="test",
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_leases == []
     assert exc.value.status_code == 503
     assert exc.value.detail == "lease store unavailable"
@@ -8276,7 +8347,7 @@ def test_get_lease_route_returns_single_lease() -> None:
     response = client.get("/workbench/sessions/sess-1/leases/lease-2")
 
     assert response.status_code == 200
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_leases == [
         {"session_id": "sess-1", "lease_id": "lease-2"}
     ]
@@ -8337,18 +8408,21 @@ async def test_get_lease_endpoint_reports_unavailable_session_store() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_lease_endpoint_reports_runtime_session_load_failure() -> None:
+async def test_get_lease_endpoint_reports_session_scope_read_failure() -> None:
     engine = _FakeEngine(
-        exists=True, load_session_error=RuntimeError("运行态会话暂不可用")
+        exists=True
     )
+    engine.session_store.load_error = RuntimeError("会话作用域读取暂不可用")
+    engine.session_store.load_error_after = 1
 
     with pytest.raises(HTTPException) as exc:
         await get_lease("sess-1", "lease-2", _fake_request(engine), auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
+    assert engine.session_store.load_calls == ["sess-1", "sess-1"]
     assert engine.workbench_service.requested_leases == []
     assert exc.value.status_code == 503
-    assert exc.value.detail == "运行态会话暂不可用"
+    assert exc.value.detail == "会话作用域读取暂不可用"
 
 
 @pytest.mark.asyncio
@@ -8359,7 +8433,7 @@ async def test_get_lease_endpoint_reports_invalid_lease_request() -> None:
     with pytest.raises(HTTPException) as exc:
         await get_lease("sess-1", "lease-2", _fake_request(engine), auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_leases == [
         {"session_id": "sess-1", "lease_id": "lease-2"}
     ]
@@ -8377,7 +8451,7 @@ async def test_get_lease_endpoint_reports_unavailable_lease_service() -> None:
     with pytest.raises(HTTPException) as exc:
         await get_lease("sess-1", "lease-2", _fake_request(engine), auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_leases == [
         {"session_id": "sess-1", "lease_id": "lease-2"}
     ]
@@ -8426,13 +8500,14 @@ async def test_get_worktrees_endpoint_reports_unavailable_session_store() -> Non
 
 
 @pytest.mark.asyncio
-async def test_get_worktrees_endpoint_reports_runtime_session_load_failure() -> None:
+async def test_get_worktrees_endpoint_reports_session_scope_read_failure() -> None:
     worktree_manager = FakeWorktreeManager()
     engine = _FakeEngine(
         exists=True,
         worktree_manager=worktree_manager,
-        load_session_error=RuntimeError("运行态会话暂不可用"),
     )
+    engine.session_store.load_error = RuntimeError("会话作用域读取暂不可用")
+    engine.session_store.load_error_after = 1
 
     with pytest.raises(HTTPException) as exc:
         await get_worktrees(
@@ -8444,10 +8519,11 @@ async def test_get_worktrees_endpoint_reports_runtime_session_load_failure() -> 
             auth="test",
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
+    assert engine.session_store.load_calls == ["sess-1", "sess-1"]
     assert worktree_manager.status_calls == []
     assert exc.value.status_code == 503
-    assert exc.value.detail == "运行态会话暂不可用"
+    assert exc.value.detail == "会话作用域读取暂不可用"
 
 
 @pytest.mark.asyncio
@@ -8487,13 +8563,14 @@ async def test_get_worktree_endpoint_reports_unavailable_session_store() -> None
 
 
 @pytest.mark.asyncio
-async def test_get_worktree_endpoint_reports_runtime_session_load_failure() -> None:
+async def test_get_worktree_endpoint_reports_session_scope_read_failure() -> None:
     worktree_manager = FakeWorktreeManager()
     engine = _FakeEngine(
         exists=True,
         worktree_manager=worktree_manager,
-        load_session_error=RuntimeError("运行态会话暂不可用"),
     )
+    engine.session_store.load_error = RuntimeError("会话作用域读取暂不可用")
+    engine.session_store.load_error_after = 1
 
     with pytest.raises(HTTPException) as exc:
         await get_worktree(
@@ -8503,10 +8580,11 @@ async def test_get_worktree_endpoint_reports_runtime_session_load_failure() -> N
             auth="test",
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
+    assert engine.session_store.load_calls == ["sess-1", "sess-1"]
     assert worktree_manager.status_calls == []
     assert exc.value.status_code == 503
-    assert exc.value.detail == "运行态会话暂不可用"
+    assert exc.value.detail == "会话作用域读取暂不可用"
 
 
 @pytest.mark.asyncio
@@ -8614,7 +8692,7 @@ async def test_get_worktrees_endpoint_filters_and_returns_json_ready_records() -
         auth="test",
     )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert worktree_manager.status_calls == [""]
     assert response.model_dump() == {
         "worktrees": [
@@ -8693,7 +8771,7 @@ def test_get_worktrees_route_accepts_filters() -> None:
     )
 
     assert response.status_code == 200
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert response.json() == {
         "worktrees": [
             {
@@ -8761,7 +8839,7 @@ def test_get_worktree_route_returns_single_worktree() -> None:
     response = client.get("/workbench/sessions/sess-1/worktrees/wt-api")
 
     assert response.status_code == 200
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert worktree_manager.status_calls == ["wt-api"]
     assert response.json() == {
         "name": "wt-api",
@@ -9202,19 +9280,21 @@ async def test_get_intent_locks_endpoint_reports_unavailable_session_store() -> 
 
 
 @pytest.mark.asyncio
-async def test_get_intent_locks_endpoint_reports_runtime_session_load_failure() -> None:
+async def test_get_intent_locks_endpoint_reports_session_scope_read_failure() -> None:
     engine = _FakeEngine(
         exists=True,
-        load_session_error=RuntimeError("运行态会话暂不可用"),
     )
+    engine.session_store.load_error = RuntimeError("会话作用域读取暂不可用")
+    engine.session_store.load_error_after = 1
 
     with pytest.raises(HTTPException) as exc:
         await get_intent_locks("sess-1", "mission-2", _fake_request(engine), auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
+    assert engine.session_store.load_calls == ["sess-1", "sess-1"]
     assert engine.workbench_service.listed_intent_locks == []
     assert exc.value.status_code == 503
-    assert exc.value.detail == "运行态会话暂不可用"
+    assert exc.value.detail == "会话作用域读取暂不可用"
 
 
 @pytest.mark.asyncio
@@ -9229,7 +9309,7 @@ async def test_get_intent_locks_endpoint_returns_locks_and_mission_id() -> None:
         auth="test",
     )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_intent_locks == [
         {"session_id": "sess-1", "mission_id": "mission-2", "active": True}
     ]
@@ -9262,7 +9342,7 @@ async def test_get_intent_locks_endpoint_maps_value_error_to_400() -> None:
     with pytest.raises(HTTPException) as exc:
         await get_intent_locks("sess-1", "mission-2", _fake_request(engine), auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_intent_locks == []
     assert exc.value.status_code == 400
     assert exc.value.detail == "意图锁查询参数无效"
@@ -9278,7 +9358,7 @@ async def test_get_intent_locks_endpoint_maps_runtime_error_to_503() -> None:
     with pytest.raises(HTTPException) as exc:
         await get_intent_locks("sess-1", "mission-2", _fake_request(engine), auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_intent_locks == []
     assert exc.value.status_code == 503
     assert exc.value.detail == "意图锁存储暂不可用"
@@ -9322,11 +9402,12 @@ async def test_get_intent_lock_endpoint_reports_unavailable_session_store() -> N
 
 
 @pytest.mark.asyncio
-async def test_get_intent_lock_endpoint_reports_runtime_session_load_failure() -> None:
+async def test_get_intent_lock_endpoint_reports_session_scope_read_failure() -> None:
     engine = _FakeEngine(
         exists=True,
-        load_session_error=RuntimeError("运行态会话暂不可用"),
     )
+    engine.session_store.load_error = RuntimeError("会话作用域读取暂不可用")
+    engine.session_store.load_error_after = 1
 
     with pytest.raises(HTTPException) as exc:
         await get_intent_lock(
@@ -9337,10 +9418,11 @@ async def test_get_intent_lock_endpoint_reports_runtime_session_load_failure() -
             auth="test",
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
+    assert engine.session_store.load_calls == ["sess-1", "sess-1"]
     assert engine.workbench_service.requested_intent_locks == []
     assert exc.value.status_code == 503
-    assert exc.value.detail == "运行态会话暂不可用"
+    assert exc.value.detail == "会话作用域读取暂不可用"
 
 
 @pytest.mark.asyncio
@@ -9355,7 +9437,7 @@ async def test_get_intent_lock_endpoint_returns_lock_detail() -> None:
         auth="test",
     )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_intent_locks == [
         {
             "session_id": "sess-1",
@@ -9416,7 +9498,7 @@ async def test_get_intent_lock_endpoint_maps_value_error_to_400() -> None:
             auth="test",
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_intent_locks == [
         {
             "session_id": "sess-1",
@@ -9444,7 +9526,7 @@ async def test_get_intent_lock_endpoint_maps_runtime_error_to_503() -> None:
             auth="test",
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_intent_locks == [
         {
             "session_id": "sess-1",
@@ -9482,19 +9564,21 @@ async def test_get_decisions_endpoint_reports_unavailable_session_store() -> Non
 
 
 @pytest.mark.asyncio
-async def test_get_decisions_endpoint_reports_runtime_session_load_failure() -> None:
+async def test_get_decisions_endpoint_reports_session_scope_read_failure() -> None:
     engine = _FakeEngine(
         exists=True,
-        load_session_error=RuntimeError("运行态会话暂不可用"),
     )
+    engine.session_store.load_error = RuntimeError("会话作用域读取暂不可用")
+    engine.session_store.load_error_after = 1
 
     with pytest.raises(HTTPException) as exc:
         await get_decisions("sess-1", "mission-2", _fake_request(engine), auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
+    assert engine.session_store.load_calls == ["sess-1", "sess-1"]
     assert engine.workbench_service.listed_decisions == []
     assert exc.value.status_code == 503
-    assert exc.value.detail == "运行态会话暂不可用"
+    assert exc.value.detail == "会话作用域读取暂不可用"
 
 
 @pytest.mark.asyncio
@@ -9509,7 +9593,7 @@ async def test_get_decisions_endpoint_returns_decisions_and_mission_id() -> None
         auth="test",
     )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_decisions == [
         {
             "session_id": "sess-1",
@@ -9545,7 +9629,7 @@ async def test_get_decisions_endpoint_maps_value_error_to_400() -> None:
     with pytest.raises(HTTPException) as exc:
         await get_decisions("sess-1", "mission-2", _fake_request(engine), auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_decisions == []
     assert exc.value.status_code == 400
     assert exc.value.detail == "决策查询参数无效"
@@ -9561,7 +9645,7 @@ async def test_get_decisions_endpoint_maps_runtime_error_to_503() -> None:
     with pytest.raises(HTTPException) as exc:
         await get_decisions("sess-1", "mission-2", _fake_request(engine), auth="test")
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.listed_decisions == []
     assert exc.value.status_code == 503
     assert exc.value.detail == "决策日志暂不可用"
@@ -9588,11 +9672,12 @@ async def test_get_decision_endpoint_reports_unavailable_session_store() -> None
 
 
 @pytest.mark.asyncio
-async def test_get_decision_endpoint_reports_runtime_session_load_failure() -> None:
+async def test_get_decision_endpoint_reports_session_scope_read_failure() -> None:
     engine = _FakeEngine(
         exists=True,
-        load_session_error=RuntimeError("运行态会话暂不可用"),
     )
+    engine.session_store.load_error = RuntimeError("会话作用域读取暂不可用")
+    engine.session_store.load_error_after = 1
 
     with pytest.raises(HTTPException) as exc:
         await get_decision(
@@ -9603,10 +9688,11 @@ async def test_get_decision_endpoint_reports_runtime_session_load_failure() -> N
             auth="test",
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
+    assert engine.session_store.load_calls == ["sess-1", "sess-1"]
     assert engine.workbench_service.requested_decisions == []
     assert exc.value.status_code == 503
-    assert exc.value.detail == "运行态会话暂不可用"
+    assert exc.value.detail == "会话作用域读取暂不可用"
 
 
 @pytest.mark.asyncio
@@ -9623,7 +9709,7 @@ async def test_get_decision_endpoint_maps_value_error_to_400() -> None:
             auth="test",
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_decisions == [
         {
             "session_id": "sess-1",
@@ -9649,7 +9735,7 @@ async def test_get_decision_endpoint_maps_runtime_error_to_503() -> None:
             auth="test",
         )
 
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_decisions == [
         {
             "session_id": "sess-1",
@@ -9701,7 +9787,7 @@ def test_get_intent_lock_route_returns_single_lock() -> None:
     )
 
     assert response.status_code == 200
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_intent_locks == [
         {
             "session_id": "sess-1",
@@ -9783,7 +9869,7 @@ def test_get_decision_route_returns_single_decision() -> None:
     )
 
     assert response.status_code == 200
-    assert engine.loaded == ["sess-1"]
+    assert engine.loaded == []
     assert engine.workbench_service.requested_decisions == [
         {
             "session_id": "sess-1",

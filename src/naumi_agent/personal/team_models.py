@@ -140,10 +140,12 @@ def capture_roster(
             raise PersonalAgentError("member_cycle", "团队成员形成循环，请调整成员关系")
         if profile.kind == "specialist":
             if profile.member_ids:
-                raise PersonalAgentError("binding_conflict", "专员资料包含不支持的嵌套成员")
+                raise PersonalAgentError("binding_conflict", "Agent 资料包含不支持的嵌套成员")
             leaves[profile.id] = profile
             if len(leaves) > _MAX_AGENTS:
-                raise PersonalAgentError("team_limit", "团队展开后超过 128 位专员，请调整成员范围")
+                raise PersonalAgentError(
+                    "team_limit", "团队展开后超过 128 位 Agent，请调整成员范围"
+                )
             return
         if profile.status != "active":
             raise PersonalAgentError("agent_inactive", "嵌套团队已停用，请刷新目录后继续")
@@ -173,7 +175,7 @@ def capture_roster(
     for grant in selected_grants:
         profile = leaves.get(grant["agent_id"])
         if profile is None:
-            raise PersonalAgentError("team_scope_denied", "授权对象不是本团队中的具体专员")
+            raise PersonalAgentError("team_scope_denied", "授权对象不是本团队中的具体 Agent")
         if profile.status != "active":
             raise PersonalAgentError("agent_inactive", "本次授权成员已停用，请调整成员范围后继续")
         if profile.version != grant["agent_version"]:
@@ -211,7 +213,7 @@ def _validated_roster(value: Any) -> tuple[dict[str, dict], dict[str, dict]]:
     if not isinstance(value["teams"], list) or not 1 <= len(value["teams"]) <= _MAX_TEAMS:
         raise _invalid("团队快照需要包含 1 至 128 个团队")
     if not isinstance(value["agents"], list) or len(value["agents"]) > _MAX_AGENTS:
-        raise _invalid("团队快照最多包含 128 位专员")
+        raise _invalid("团队快照最多包含 128 位 Agent")
     teams, agents = {}, {}
     for raw in value["teams"]:
         if not isinstance(raw, dict) or set(raw) != {"agent_id", "agent_version", "member_ids"}:
@@ -232,7 +234,7 @@ def _validated_roster(value: Any) -> tuple[dict[str, dict], dict[str, dict]]:
             raise _invalid("团队快照包含重复或冲突的成员身份")
         tools = tool_names(raw["tool_names"])
         if "personal_team" in tools:
-            raise PersonalAgentError("team_scope_denied", "具体专员不获得团队协调权限")
+            raise PersonalAgentError("team_scope_denied", "具体 Agent 不获得团队协调权限")
         agents[identity] = {
             "agent_id": identity,
             "agent_version": version(raw["agent_version"]),
@@ -292,7 +294,7 @@ def validate_current(personal: Any, roster: Any) -> None:
     for entry in agents.values():
         current = _profile(personal, entry["agent_id"])
         if current.kind != "specialist" or current.member_ids:
-            raise PersonalAgentError("binding_conflict", "成员快照不属于具体专员")
+            raise PersonalAgentError("binding_conflict", "成员快照不属于具体 Agent")
         if current.version != entry["agent_version"]:
             raise PersonalAgentError("version_conflict", "成员配置已更新，已停止旧版本执行")
         if not set(entry["tool_names"]) <= set(current.tool_names):
@@ -314,7 +316,7 @@ def normalize_plan(value: Any, roster: Any) -> list[dict]:
     for step in result:
         entry = agents.get(step["agent_id"])
         if entry is None:
-            raise PersonalAgentError("team_scope_denied", "计划只能分配给本次已授权的团队专员")
+            raise PersonalAgentError("team_scope_denied", "计划只能分配给本次已授权的团队 Agent")
         if entry["agent_version"] != step["agent_version"]:
             raise PersonalAgentError("version_conflict", "计划成员版本与本次授权不一致")
     return result

@@ -110,7 +110,7 @@ class OpenSessionRequest(BaseModel):
 def _service(request: Request):
     service = getattr(request.app.state.engine, "personal_agents", None)
     if service is None:
-        raise PersonalAgentError("configuration_error", "个人助理服务尚未启动，请重启应用")
+        raise PersonalAgentError("configuration_error", "Agent 服务尚未启动，请重启应用")
     return service
 
 
@@ -137,7 +137,7 @@ async def current_agent(
     session = await service.engine.session_store.load(session_id)
     marker = getattr(session, "personal_agent_id", "")
     if marker and (agent is None or marker != agent.id):
-        raise PersonalAgentError("binding_conflict", "专员身份资料暂不可用，请恢复后继续")
+        raise PersonalAgentError("binding_conflict", "Agent 身份资料暂不可用，请恢复后继续")
     collaboration = getattr(service.engine, "personal_collaborations", None)
     plan = collaboration.execution_plan(session_id) if collaboration is not None else None
     result = {"agent": agent.to_dict() if agent is not None else None}

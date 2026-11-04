@@ -45,6 +45,7 @@ dependencies = [
     "regex>=2024.11.6",
     "wcwidth>=0.7.0",
     "pillow>=11.3",
+    "pypdf>=6,<8",
 ]
 
 [project.optional-dependencies]

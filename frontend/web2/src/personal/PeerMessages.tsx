@@ -49,7 +49,7 @@ export function validatePersonalMessage(value: PersonalAgentMessage, expectedId?
       || typeof receipt.created_at !== 'string' || typeof receipt.receipt_sha256 !== 'string'
       || !/^[a-f0-9]{64}$/.test(receipt.receipt_sha256)
       || !receipt.data || typeof receipt.data !== 'object' || Array.isArray(receipt.data)))))
-    throw new Error(full ? '完整消息返回不完整，请重新加载对话' : '专员消息返回不完整，请刷新后重试')
+    throw new Error(full ? '完整消息返回不完整，请重新加载对话' : 'Agent 消息返回不完整，请刷新后重试')
   return value
 }
 
@@ -112,7 +112,7 @@ export function PeerScopeEditor({ agents, tools, value, onChange, disabled = fal
     : value.filter(grant => grant.agent_id !== agent.id))
   return <fieldset className="pm-scope" disabled={disabled}>
     <legend>{legend}</legend>
-    {!candidates.length && <span className="pm-empty">尚无可选择的专员</span>}
+    {!candidates.length && <span className="pm-empty">尚无可选择的 Agent</span>}
     {candidates.map(agent => {
       const grant = value.find(candidate => candidate.agent_id === agent.id)
       const selectedTools = grant?.tool_names || []
@@ -140,7 +140,7 @@ export function PeerScopeEditor({ agents, tools, value, onChange, disabled = fal
       </div>
     })}
     {value.filter(grant => !candidates.some(agent => agent.id === grant.agent_id)).map(grant => <div key={grant.agent_id} className="pm-stale" role="alert">
-      <span>专员资料暂不可用 · {grant.agent_id}</span><button type="button" onClick={() => onChange(value.filter(candidate => candidate.agent_id !== grant.agent_id))}>移除授权</button>
+      <span>Agent 资料暂不可用 · {grant.agent_id}</span><button type="button" onClick={() => onChange(value.filter(candidate => candidate.agent_id !== grant.agent_id))}>移除授权</button>
     </div>)}
   </fieldset>
 }
@@ -185,7 +185,7 @@ export function ManualMessageComposer({ api, agents, sourceSessionId, onBusy, on
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (inFlight.current || (!submitted.current && !canSend) || !sender || !recipient) return
-    if (!sourceSessionId && !requestSource.current) { setError('请先打开一个已有对话，再发送专员消息'); return }
+    if (!sourceSessionId && !requestSource.current) { setError('请先打开一个已有对话，再发送Agent 消息'); return }
     if (!requestId.current) { requestId.current = crypto.randomUUID(); requestSource.current = sourceSessionId }
     inFlight.current = true; setSaving(true); setError(''); onBusy(true)
     const body: PersonalMessageInput = submitted.current || {
@@ -205,9 +205,9 @@ export function ManualMessageComposer({ api, agents, sourceSessionId, onBusy, on
     finally { inFlight.current = false; if (alive.current) setSaving(false); onBusy(false) }
   }
   return <form className="pm-composer pc-composer" onSubmit={submit}>
-    <header><h3>发送专员消息</h3><Mail size={18} /></header>
+    <header><h3>发送Agent 消息</h3><Mail size={18} /></header>
     {error && <div className="pc-error" role="alert">{error}</div>}
-    {stale && <div className="pc-error" role="alert">专员配置已更新，请重新选择发送方、接收方或更新授权版本</div>}
+    {stale && <div className="pc-error" role="alert">Agent 配置已更新，请重新选择发送方、接收方或更新授权版本</div>}
     {permissions.error && <div className="pc-error" role="alert">{permissions.error}<button type="button" onClick={permissions.retry}>重试加载工具</button></div>}
     <fieldset disabled={saving || permissions.loading || Boolean(submitted.current)} className="pc-compose-fields">
       <div className="pm-actors"><label>发送方<select aria-label="消息发送方" value={sender?.id || ''} required onChange={event => {
@@ -216,8 +216,8 @@ export function ManualMessageComposer({ api, agents, sourceSessionId, onBusy, on
       }}><option value="">选择发送方</option>{senders.map(agent => <option key={agent.id} value={agent.id}>{agent.name} · v{agent.version}</option>)}</select></label>
         <ArrowRight size={17} /><label>接收方<select aria-label="消息接收方" value={recipient?.id || ''} required onChange={event => selectRecipient(event.target.value)}>
           <option value="">选择接收方</option>{available.filter(agent => agent.id !== sender?.id).map(agent => <option key={agent.id} value={agent.id}>{agent.name} · v{agent.version}</option>)}</select></label></div>
-      {!senders.length && <div className="pc-error" role="status">请先给发送方配置“专员互询”工具</div>}
-      <label>消息<textarea aria-label="专员消息内容" rows={5} required maxLength={16000} value={content} onChange={event => setContent(event.target.value)} /></label>
+      {!senders.length && <div className="pc-error" role="status">请先给发送方配置“Agent 互询”工具</div>}
+      <label>消息<textarea aria-label="Agent 消息内容" rows={5} required maxLength={16000} value={content} onChange={event => setContent(event.target.value)} /></label>
       <label>共享上下文<textarea aria-label="消息共享上下文" rows={3} maxLength={32000} value={context} onChange={event => setContext(event.target.value)} /></label>
       {sender && <label className="pm-return-scope"><input type="checkbox" aria-label="允许对端继续询问发送方" checked={grants.some(grant => grant.agent_id === sender.id)}
         onChange={event => {
@@ -258,7 +258,7 @@ export function PeerConversations({ api, collaboration, busy = false, onOpenSess
       setLoading(true)
       try {
         const result = await api.personalMessages(collaboration.id)
-        if (!Array.isArray(result.messages)) throw new Error('专员消息列表返回不完整，请重试')
+        if (!Array.isArray(result.messages)) throw new Error('Agent 消息列表返回不完整，请重试')
         const values = result.messages.map(value => validatePersonalMessage(value))
         if (values.some(value => value.collaboration_id !== collaboration.id)) throw new Error('消息与当前协作不一致，请重新加载')
         if (stopped) return
@@ -315,17 +315,17 @@ export function PeerConversations({ api, collaboration, busy = false, onOpenSess
     catch (cause) { if (alive.current) setActionError(personalError(cause)) }
     finally { if (alive.current) setOpening(false) }
   }
-  return <section className="pm-conversations" aria-label="专员双方对话">
-    <header><h4><Mail size={15} />专员消息 <span>{messages.length}</span></h4><button type="button" className="pc-icon" aria-label="刷新专员消息" disabled={acking || opening || loading} onClick={() => setRevision(value => value + 1)}><RefreshCw size={13} className={loading ? 'pa-spin' : ''} /></button></header>
+  return <section className="pm-conversations" aria-label="Agent 双方对话">
+    <header><h4><Mail size={15} />Agent 消息 <span>{messages.length}</span></h4><button type="button" className="pc-icon" aria-label="刷新Agent 消息" disabled={acking || opening || loading} onClick={() => setRevision(value => value + 1)}><RefreshCw size={13} className={loading ? 'pa-spin' : ''} /></button></header>
     {listError && <div className="pc-error" role="alert">{listError}<button type="button" onClick={() => setRevision(value => value + 1)}>重试加载消息</button></div>}
-    {!messages.length && !listError && <div className="pm-empty" role="status">{loading ? '正在加载专员消息…' : '尚无专员消息'}</div>}
+    {!messages.length && !listError && <div className="pm-empty" role="status">{loading ? '正在加载Agent 消息…' : '尚无Agent 消息'}</div>}
     <div className="pm-message-list">{messages.map(message => <button type="button" key={message.id} className={`pm-summary${message.id === selectedId ? ' selected' : ''}`}
       aria-label={`查看${message.sender_name}与${message.recipient_name}的对话`} aria-expanded={message.id === selectedId} disabled={acking || opening}
       onClick={() => { setActionError(''); setSelectedId(value => value === message.id ? '' : message.id) }}>
       <header><strong>{message.sender_name}<ArrowRight size={12} />{message.recipient_name}</strong><span className={`pm-state pm-state-${message.state}`}>{messageLabels[message.state]}</span></header>
       <p>{message.content.slice(0, 220)}{(message.content.length > 220 || message.content_truncated) && '…'}</p><time>{stamp(message.created_at)}</time>
     </button>)}</div>
-    {selectedId && <div className="pm-thread" aria-label="专员完整对话">
+    {selectedId && <div className="pm-thread" aria-label="Agent 完整对话">
       {detailError && <div className="pc-error" role="alert">{detailError}<button type="button" onClick={() => setRevision(value => value + 1)}>重试加载对话</button></div>}
       {actionError && <div className="pc-error" role="alert">{actionError}</div>}
       {detailLoading && !selected && <div className="pm-empty" role="status">正在打开双方对话…</div>}

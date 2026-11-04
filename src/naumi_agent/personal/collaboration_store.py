@@ -141,8 +141,8 @@ def _steps(value: Any) -> list[dict[str, Any]]:
         if step_id in ids:
             raise _invalid("协作步骤编号重复")
         ids.add(step_id)
-        agent_id = _identifier(raw["agent_id"], _AGENT_ID, "助理编号", 35)
-        version = _integer(raw["agent_version"], "助理版本", 1, 2_147_483_647)
+        agent_id = _identifier(raw["agent_id"], _AGENT_ID, "Agent 编号", 35)
+        version = _integer(raw["agent_version"], "Agent 版本", 1, 2_147_483_647)
         task = _text(raw["task"], "步骤任务", 16000, strip=False)
         dependencies = raw["depends_on"]
         if not isinstance(dependencies, list) or len(dependencies) > 11:
@@ -401,9 +401,9 @@ class CollaborationStore:
     ) -> dict[str, Any]:
         workspace_key = _text(workspace_key, "工作区标识", 2048)
         source_session_id = _text(source_session_id, "来源会话编号", 128)
-        source_agent_id = _text(source_agent_id, "来源助理编号", 35, required=False)
+        source_agent_id = _text(source_agent_id, "来源 Agent 编号", 35, required=False)
         if source_agent_id:
-            source_agent_id = _identifier(source_agent_id, _AGENT_ID, "来源助理编号", 35)
+            source_agent_id = _identifier(source_agent_id, _AGENT_ID, "来源 Agent 编号", 35)
         request_id = _identifier(request_id, _REQUEST_ID, "请求编号", 128)
         normalized_steps = _steps(steps)
         owner = _team_execution(team_execution)

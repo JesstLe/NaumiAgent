@@ -95,15 +95,15 @@ class PersonalAgentsTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "按用户明确要求管理长期存在的个人专员或团队。初始没有预置专员。"
+            "按用户明确要求管理长期存在的个人Agent或团队。初始没有预置Agent。"
             "可查看、创建、修改、查看历史和打开独立会话。创建须提供稳定 request_id；"
             "修改须提供当前 expected_version。工具列表为空代表无工具权限。"
-            "collaborate 将明确任务委派给已有专员，steps 绑定专员ID与版本；"
+            "collaborate 将明确任务委派给已有Agent，steps 绑定AgentID与版本；"
             "depends_on 指定前置步骤，只共享显式 context 和前置结果。"
             "collaborations/collaboration 查看真实进度和交接；cancel_collaboration 请求停止。"
             "collaboration_reply 仅转交用户针对原 question_id 的真实回答，不替用户作决定。"
             "peer_agents 显式指定互询对象版本与工具范围，默认没有授权；省略工具范围只准只读与互询。"
-            "message_send 以已有专员发送真实消息；messages/message查询双方对话，"
+            "message_send 以已有Agent发送真实消息；messages/message查询双方对话，"
             "message_ack确认回答。"
             "team_send向已有团队发送持久委托，team_turns/team_turn查询真实阶段与汇总；"
             "cancel_team_turn请求停止。团队规划、成员与汇总分别有真实Job/Run；"
@@ -115,7 +115,7 @@ class PersonalAgentsTool(Tool):
     def metadata(self) -> ToolMetadata:
         return ToolMetadata(
             requires_confirmation=True,
-            user_facing_name="管理个人助理",
+            user_facing_name="管理 Agent",
             search_hint="personal agents persistent specialist team create update session",
         )
 
@@ -230,7 +230,7 @@ class PersonalAgentsTool(Tool):
     async def execute(self, **kwargs: Any) -> str:
         try:
             if not Draft202012Validator(self.parameters_schema).is_valid(kwargs):
-                raise PersonalAgentError("invalid_input", "助理操作参数类型、长度或字段不正确")
+                raise PersonalAgentError("invalid_input", "Agent 操作参数类型、长度或字段不正确")
             fields = dict(kwargs)
             operation = fields.pop("operation")
             if set(fields) - _FIELDS[operation] or not _REQUIRED[operation] <= set(fields):
@@ -255,7 +255,7 @@ class PersonalAgentsTool(Tool):
                     session = await self.service.engine.get_or_create_session()
                     source_id = fields.pop("source_session_id", session.id)
                     if source_id != session.id:
-                        raise PersonalAgentError("session_conflict", "请从原始对话发送专员消息")
+                        raise PersonalAgentError("session_conflict", "请从原始对话发送Agent消息")
                     result = await service.start_manual(source_session_id=source_id, **fields)
                 elif operation == "messages":
                     result = {"messages": await service.list(fields["collaboration_id"])}

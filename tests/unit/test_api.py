@@ -3,6 +3,7 @@
 import asyncio
 import json
 from io import BytesIO
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -32,9 +33,30 @@ from naumi_agent.api.schemas import HealthResponse, MessageCreate, SessionCreate
 from naumi_agent.config.settings import AppConfig, MemoryConfig
 from naumi_agent.harness.coordinator import ReconciliationCoordinatorOutcome
 from naumi_agent.orchestrator.engine import AgentEngine
+from naumi_agent.personal.models import PersonalAgentError
 from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.runs.store import ChatRunRecord, ChatRunStepRecord
+from naumi_agent.runtime.composition import create_agent_engine
 from naumi_agent.runtime.ports.events import EventSink, RuntimeEvent, RuntimeEventType
+
+
+@pytest.fixture
+async def artifact_api_engine(tmp_path, runtime_payload_key):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    config = AppConfig(
+        workspace_root=str(workspace),
+        personal={"data_dir": str(tmp_path / "personal")},
+        memory={"session_db_path": str(tmp_path / "state/sessions.db"),
+                "vector_db_path": str(tmp_path / "vectors"), "long_term_enabled": False},
+        safety={"permission_mode": "bypass", "allowed_dirs": [str(workspace)]},
+    )
+    engine = create_agent_engine(config)
+    await engine.get_or_create_session()
+    try:
+        yield engine
+    finally:
+        await engine.shutdown()
 
 
 def _api_runtime_event(
@@ -1049,50 +1071,68 @@ class TestMessageRoutes:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("content", [b"", "验收标记：共享工作区".encode()])
-    async def test_upload_source_returns_real_persisted_reference(self, tmp_path, content):
-        workspace = tmp_path / "workspace"
-        workspace.mkdir()
-        engine = _FakeEngine()
-        engine.workspace_root = workspace
-        store = ChatRunStore(tmp_path / "chat-runs.db")
+    async def test_upload_source_returns_real_persisted_reference(
+        self, artifact_api_engine, content
+    ):
+        engine = artifact_api_engine
+        session_id = engine._session.id
+        store = engine.chat_run_store
+        if not content:
+            with pytest.raises(PersonalAgentError, match="不能为空"):
+                await upload_chat_source(
+                    session_id, _fake_request(engine, store),
+                    file=UploadFile(filename="note.txt", file=BytesIO(content)), auth="test",
+                )
+            assert await store.list_sources(session_id) == []
+            assert not engine.personal_artifacts.store.db_path.exists()
+            return
         response = await upload_chat_source(
-            "sess_1",
+            session_id,
             _fake_request(engine, store),
             file=UploadFile(filename="note.txt", file=BytesIO(content)),
             auth="test",
         )
         assert response.title == "note.txt"
         assert response.run_id == ""
-        assert (workspace / response.path).read_bytes() == content
-        persisted = await store.list_sources("sess_1")
+        assert response.kind == "artifact" and response.path.startswith("artifact://art_")
+        ref = response.metadata["artifact_ref"]
+        _, actual = await engine.personal_artifacts.read(
+            actor_id="main", artifact_id=ref["artifact_id"], version=ref["version"]
+        )
+        assert actual == content
+        persisted = await store.list_sources(session_id)
         assert len(persisted) == 1
         assert persisted[0].id == response.id
 
     @pytest.mark.asyncio
     async def test_add_chat_source_accepts_only_existing_workspace_file(
-        self, tmp_path
+        self, tmp_path, artifact_api_engine
     ) -> None:
-        workspace = tmp_path / "workspace"
-        workspace.mkdir()
+        engine = artifact_api_engine
+        workspace = Path(engine.workspace_root)
         source = workspace / "spec.md"
         source.write_text("spec", encoding="utf-8")
-        engine = _FakeEngine()
-        engine.workspace_root = workspace
-        request = _fake_request(engine, ChatRunStore(tmp_path / "chat-runs.db"))
+        request = _fake_request(engine, engine.chat_run_store)
+        session_id = engine._session.id
 
         response = await add_chat_source(
-            "sess_1",
+            session_id,
             SimpleNamespace(path=str(source), kind="file", title="Product spec"),
             request,
             auth="test",
         )
 
-        assert response.path == "spec.md"
+        assert response.kind == "artifact" and response.path.startswith("artifact://art_")
+        ref = response.metadata["artifact_ref"]
+        _, data = await engine.personal_artifacts.read(
+            actor_id="main", artifact_id=ref["artifact_id"], version=ref["version"]
+        )
+        assert data == b"spec"
         assert response.title == "Product spec"
 
         with pytest.raises(Exception) as exc:
             await add_chat_source(
-                "sess_1",
+                session_id,
                 SimpleNamespace(
                     path=str(tmp_path / "outside.md"),
                     kind="file",

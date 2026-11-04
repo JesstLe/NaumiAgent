@@ -19,7 +19,7 @@ const agents: PersonalAgent[] = [
   { id: `pa_${'a'.repeat(32)}`, name: '工作统筹员', description: '', instructions: '明确共享资料后协作。', model_tier: 'fast', tool_names: ['personal_message', 'file_read', 'file_write', 'unknown_tool'], kind: 'specialist', member_ids: [], status: 'active', version: 3, created_at: '2026-11-04T01:00:00Z', updated_at: '2026-11-04T01:00:00Z' },
   { id: `pa_${'b'.repeat(32)}`, name: '预算核算员', description: '', instructions: '读取指定预算。', model_tier: 'fast', tool_names: ['file_read', 'file_write'], kind: 'specialist', member_ids: [], status: 'active', version: 2, created_at: '2026-11-04T01:00:00Z', updated_at: '2026-11-04T01:00:00Z' },
 ]
-const tools = [{ name: 'personal_message', description: '专员互询', read_only: false },
+const tools = [{ name: 'personal_message', description: 'Agent 互询', read_only: false },
   { name: 'file_read', description: '读取文件', read_only: true }, { name: 'file_write', description: '写入文件', read_only: false }]
 const collaboration = (updates: Partial<PersonalCollaboration> = {}): PersonalCollaboration => ({
   id: `pc_${'c'.repeat(32)}`, request_id: 'peer-request', source_session_id: 'main-source', source_agent_id: '',
@@ -59,7 +59,7 @@ async function fillManual() {
   await waitFor(() => expect(screen.getByLabelText('消息发送方')).toBeEnabled())
   fireEvent.change(screen.getByLabelText('消息发送方'), { target: { value: agents[0].id } })
   fireEvent.change(screen.getByLabelText('消息接收方'), { target: { value: agents[1].id } })
-  fireEvent.change(screen.getByLabelText('专员消息内容'), { target: { value: '请真实读取 budget.csv 并核算剩余预算。' } })
+  fireEvent.change(screen.getByLabelText('Agent 消息内容'), { target: { value: '请真实读取 budget.csv 并核算剩余预算。' } })
   fireEvent.change(screen.getByLabelText('消息共享上下文'), { target: { value: '仅本次指定资料。' } })
 }
 
@@ -95,7 +95,7 @@ describe('explicit peer scopes', () => {
   it('adds selected scopes to real collaboration submissions without copying unrelated context', async () => {
     const api = { personalTools: vi.fn().mockResolvedValue({ tools }), createPersonalCollaboration: vi.fn().mockImplementation(async body => collaboration({ request_id: body.request_id, source_session_id: body.source_session_id })) }
     render(<CollaborationComposer api={api} agents={agents} sourceSessionId="main-source" onBusy={vi.fn()} onCreated={vi.fn()} />)
-    fireEvent.change(screen.getByLabelText('步骤 1 专员'), { target: { value: agents[0].id } })
+    fireEvent.change(screen.getByLabelText('步骤 1 Agent'), { target: { value: agents[0].id } })
     fireEvent.change(screen.getByLabelText('步骤 1 任务'), { target: { value: '向核算员询问预算。' } })
     await waitFor(() => expect(screen.getByRole('checkbox', { name: '允许向预算核算员询问' })).toBeEnabled())
     fireEvent.click(screen.getByRole('checkbox', { name: '允许向预算核算员询问' }))
@@ -148,8 +148,8 @@ describe('manual persistent specialist messages', () => {
     expect(api.createPersonalMessage).toHaveBeenCalledOnce()
     await act(async () => { pending.resolve(manualCollaboration(api.createPersonalMessage.mock.calls[0][0], { message_request_id: 'wrong-message-request' })); await pending.promise })
     expect(await screen.findByRole('alert')).toHaveTextContent('与本次请求不一致')
-    expect(screen.getByLabelText('专员消息内容')).toHaveValue('请真实读取 budget.csv 并核算剩余预算。')
-    expect(screen.getByLabelText('专员消息内容')).toBeDisabled()
+    expect(screen.getByLabelText('Agent 消息内容')).toHaveValue('请真实读取 budget.csv 并核算剩余预算。')
+    expect(screen.getByLabelText('Agent 消息内容')).toBeDisabled()
     expect(screen.getByLabelText('消息发送方')).toBeDisabled()
     expect(screen.getByRole('checkbox', { name: '允许向预算核算员询问' })).toBeDisabled()
     view.rerender(<ManualMessageComposer api={api} agents={agents} sourceSessionId="newly-selected-source" onBusy={vi.fn()} onCreated={vi.fn()} />)
@@ -170,7 +170,7 @@ describe('manual persistent specialist messages', () => {
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('返回的消息任务与本次请求不一致')
     expect(created).not.toHaveBeenCalled()
-    expect(screen.getByLabelText('专员消息内容')).toBeDisabled()
+    expect(screen.getByLabelText('Agent 消息内容')).toBeDisabled()
   })
 
   it('retries the exact pinned request after an asynchronous transport failure and accepts its verified alias', async () => {
@@ -197,7 +197,7 @@ describe('manual persistent specialist messages', () => {
     expect(api.createPersonalMessage).not.toHaveBeenCalled()
     view.unmount()
     render(<ManualMessageComposer api={api} agents={[agents[1]]} sourceSessionId="main-source" onBusy={vi.fn()} onCreated={vi.fn()} />)
-    expect(screen.getByText('请先给发送方配置“专员互询”工具')).toBeVisible()
+    expect(screen.getByText('请先给发送方配置“Agent 互询”工具')).toBeVisible()
     expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
   })
 
@@ -206,9 +206,9 @@ describe('manual persistent specialist messages', () => {
     const view = render(<ManualMessageComposer api={api} agents={agents} sourceSessionId="main-source" onBusy={vi.fn()} onCreated={vi.fn()} />)
     await fillManual()
     view.rerender(<ManualMessageComposer api={api} agents={[{ ...agents[0], version: 4 }, agents[1]]} sourceSessionId="main-source" onBusy={vi.fn()} onCreated={vi.fn()} />)
-    expect(await screen.findByRole('alert')).toHaveTextContent('专员配置已更新')
+    expect(await screen.findByRole('alert')).toHaveTextContent('Agent 配置已更新')
     expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
-    expect(screen.getByLabelText('专员消息内容')).toHaveValue('请真实读取 budget.csv 并核算剩余预算。')
+    expect(screen.getByLabelText('Agent 消息内容')).toHaveValue('请真实读取 budget.csv 并核算剩余预算。')
   })
 })
 
@@ -221,7 +221,7 @@ describe('persistent two-sided conversations and receipts', () => {
     expect(api.personalMessage).not.toHaveBeenCalled()
     expect(api.acknowledgePersonalMessage).not.toHaveBeenCalled()
     fireEvent.click(row)
-    const thread = await screen.findByLabelText('专员完整对话')
+    const thread = await screen.findByLabelText('Agent 完整对话')
     await waitFor(() => expect(within(thread).getByText('825 元').tagName).toBe('STRONG'))
     expect(within(thread).getByText('v3')).toBeVisible()
     expect(within(thread).getByText('v2')).toBeVisible()
@@ -241,7 +241,7 @@ describe('persistent two-sided conversations and receipts', () => {
     expect(screen.getByText('用户确认收件')).toBeVisible()
     await waitFor(() => expect(api.personalMessage).toHaveBeenCalledTimes(2))
     expect(screen.getByText('用户确认收件')).toBeVisible()
-    fireEvent.click(screen.getByRole('button', { name: '刷新专员消息' }))
+    fireEvent.click(screen.getByRole('button', { name: '刷新Agent 消息' }))
     await waitFor(() => expect(api.personalMessages).toHaveBeenCalledTimes(2))
     expect(screen.queryByRole('button', { name: '确认收到' })).not.toBeInTheDocument()
   })
@@ -252,18 +252,18 @@ describe('persistent two-sided conversations and receipts', () => {
     fireEvent.click(await screen.findByRole('button', { name: '查看工作统筹员与预算核算员的对话' }))
     await screen.findByRole('button', { name: '确认收到' })
     api.personalMessage.mockResolvedValue(message({ response: '被替换的回应', response_sha256: '1'.repeat(64) }))
-    fireEvent.click(screen.getByRole('button', { name: '刷新专员消息' }))
+    fireEvent.click(screen.getByRole('button', { name: '刷新Agent 消息' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('消息身份或结果摘要发生冲突')
     expect(screen.getByLabelText('接收方原始回应')).toHaveTextContent('825 元')
     expect(screen.getByLabelText('接收方原始回应')).not.toHaveTextContent('被替换的回应')
   })
 
   it('rejects empty message identities and malformed result digests', () => {
-    expect(() => validatePersonalMessage(message({ id: '' }))).toThrow('专员消息返回不完整')
-    expect(() => validatePersonalMessage(message({ receiver_session_id: ' ' }))).toThrow('专员消息返回不完整')
-    expect(() => validatePersonalMessage(message({ response_sha256: 'malformed' }))).toThrow('专员消息返回不完整')
-    expect(() => validatePersonalMessage(message({ state: 'acknowledged', acknowledged_at: '' }))).toThrow('专员消息返回不完整')
-    expect(() => validatePersonalMessage(message({ receipts: [message().receipts![1]] }))).toThrow('专员消息返回不完整')
+    expect(() => validatePersonalMessage(message({ id: '' }))).toThrow('Agent 消息返回不完整')
+    expect(() => validatePersonalMessage(message({ receiver_session_id: ' ' }))).toThrow('Agent 消息返回不完整')
+    expect(() => validatePersonalMessage(message({ response_sha256: 'malformed' }))).toThrow('Agent 消息返回不完整')
+    expect(() => validatePersonalMessage(message({ state: 'acknowledged', acknowledged_at: '' }))).toThrow('Agent 消息返回不完整')
+    expect(() => validatePersonalMessage(message({ receipts: [message().receipts![1]] }))).toThrow('Agent 消息返回不完整')
     expect(validatePersonalMessage(message({ state: 'max_turns', outcome: 'max_turns' })).state).toBe('max_turns')
   })
 
@@ -356,14 +356,14 @@ describe('composer continuity', () => {
     render(<PersonalCollaborations api={api} agents={agents} sourceSessionId="main-source" busy={false} onClose={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: '发起协作' }))
     fireEvent.change(screen.getByLabelText('协作任务名称'), { target: { value: '保留的协作草稿' } })
-    fireEvent.click(screen.getByRole('button', { name: '专员消息' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Agent 消息' }))
     await fillManual()
     fireEvent.click(screen.getByRole('button', { name: '发起协作' }))
     expect(screen.getByLabelText('协作任务名称')).toHaveValue('保留的协作草稿')
     expect(screen.getByLabelText('协作任务名称')).toBeVisible()
-    fireEvent.click(screen.getByRole('button', { name: '专员消息' }))
-    expect(screen.getByLabelText('专员消息内容')).toHaveValue('请真实读取 budget.csv 并核算剩余预算。')
-    expect(screen.getByLabelText('专员消息内容')).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'Agent 消息' }))
+    expect(screen.getByLabelText('Agent 消息内容')).toHaveValue('请真实读取 budget.csv 并核算剩余预算。')
+    expect(screen.getByLabelText('Agent 消息内容')).toBeVisible()
     expect(api.createPersonalMessage).not.toHaveBeenCalled()
   })
 })

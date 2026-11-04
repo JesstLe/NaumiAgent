@@ -18,6 +18,7 @@ from naumi_agent.personal.store import PersonalAgentStore
 logger = logging.getLogger(__name__)
 
 _TOOL_LABELS = {
+    "personal_artifacts": "读取、创建、修订与分享当前 Agent 的资料和产物",
     "glob": "按文件名查找文件",
     "grep": "搜索文件内容",
     "read": "读取文件",
@@ -57,7 +58,7 @@ _TOOL_LABELS = {
     "browser_chrome_launcher_info": "查看浏览器启动信息",
     "browser_start": "启动浏览器",
     "browser_stop": "关闭浏览器",
-    "personal_message": "向协作范围内的专员询问并接收结果",
+    "personal_message": "向协作范围内的Agent询问并接收结果",
     "personal_team": "协调当前团队成员并提交真实分工计划",
 }
 
@@ -65,6 +66,7 @@ _TOOL_LABELS = {
 # catalog, global-memory, delegation, or code-generation/registration authority.
 ASSIGNABLE_TOOL_NAMES = frozenset(
     {
+        "personal_artifacts",
         "glob",
         "grep",
         "file_read",
@@ -126,7 +128,7 @@ class PersonalAgentService:
         self.store = store
         config = getattr(engine, "config", None) or getattr(engine, "_config", None)
         if config is None or not getattr(config.memory, "session_db_path", ""):
-            raise PersonalAgentError("configuration_error", "助理服务缺少会话资料库配置")
+            raise PersonalAgentError("configuration_error", "Agent 服务缺少会话资料库配置")
         self.workspace_root = str(Path(engine.workspace_root).expanduser().resolve())
         database_path = _absolute_key(config.memory.session_db_path)
         self.session_db_key = hashlib.sha256(database_path.encode("utf-8")).hexdigest()
@@ -164,7 +166,7 @@ class PersonalAgentService:
             raise PersonalAgentError("invalid_input", "工具列表包含无效名称或重复项目")
         allowed = {tool["name"] for tool in self.assignable_tools()}
         if any(name not in allowed for name in names):
-            raise PersonalAgentError("tool_not_assignable", "包含未注册或暂不支持分配给专员的工具")
+            raise PersonalAgentError("tool_not_assignable", "包含未注册或暂不支持分配给Agent的工具")
         return tuple(sorted(names))
 
     def list(self, *, include_archived: bool = False) -> tuple[PersonalAgent, ...]:
@@ -173,7 +175,7 @@ class PersonalAgentService:
     def get(self, agent_id: str) -> PersonalAgent:
         agent = self.store.get(agent_id)
         if agent is None:
-            raise PersonalAgentError("not_found", "该助理不存在，请刷新列表")
+            raise PersonalAgentError("not_found", "该 Agent 不存在，请刷新列表")
         return agent
 
     def create(self, **fields: Any) -> PersonalAgent:
@@ -188,7 +190,7 @@ class PersonalAgentService:
             "member_ids",
         }
         if set(fields) - allowed or not {"name", "instructions", "request_id"} <= set(fields):
-            raise PersonalAgentError("invalid_input", "助理资料缺少必填字段或包含不支持的字段")
+            raise PersonalAgentError("invalid_input", "Agent 资料缺少必填字段或包含不支持的字段")
         fields["tool_names"] = self.validate_tools(fields.get("tool_names", ()))
         if "personal_team" in fields["tool_names"] and fields.get("kind", "specialist") != "team":
             raise PersonalAgentError("tool_not_assignable", "团队协调工具只能分配给团队")
@@ -212,7 +214,7 @@ class PersonalAgentService:
     def require_active_profile(self, agent_id: str) -> PersonalAgent:
         agent = self.get(agent_id)
         if agent.status != "active":
-            raise PersonalAgentError("agent_inactive", "助理已停用或归档，请启用后继续")
+            raise PersonalAgentError("agent_inactive", "Agent 已停用或归档，请启用后继续")
         self.validate_tools(agent.tool_names)
         return agent
 
@@ -220,7 +222,7 @@ class PersonalAgentService:
         agent = self.require_active_profile(agent_id)
         if agent.kind == "team":
             raise PersonalAgentError(
-                "team_turn_required", "请通过团队对话发起任务，不将团队当作单个专员执行"
+                "team_turn_required", "请通过团队对话发起任务，不将团队当作单个Agent执行"
             )
         return agent
 
@@ -230,7 +232,7 @@ class PersonalAgentService:
             or not session.workspace_root
             or (_absolute_key(session.workspace_root) != _absolute_key(self.workspace_root))
         ):
-            raise PersonalAgentError("session_scope_mismatch", "助理会话属于其他工作区或执行引擎")
+            raise PersonalAgentError("session_scope_mismatch", "Agent 会话属于其他工作区或执行引擎")
         return session.status == "active" and session.archived_at is None
 
     async def _discard_unbound(self, session: Session) -> None:
@@ -247,7 +249,7 @@ class PersonalAgentService:
         except Exception as exc:
             logger.warning("Personal-agent session admission failed: %s", type(exc).__name__)
             raise PersonalAgentError(
-                "storage_error", "助理会话暂时未能打开，请检查服务状态后重试"
+                "storage_error", "Agent 会话暂时未能打开，请检查服务状态后重试"
             ) from exc
 
     async def _open_session(self, agent_id: str) -> dict[str, Any]:
@@ -258,14 +260,14 @@ class PersonalAgentService:
                 if binding is not None:
                     if binding.session_db_key != self.session_db_key:
                         raise PersonalAgentError(
-                            "session_scope_mismatch", "助理会话资料库标识不一致"
+                            "session_scope_mismatch", "Agent 会话资料库标识不一致"
                         )
                     existing = await self.engine.session_store.load(binding.session_id)
                     if existing is not None and self._session_valid(existing):
                         marker = getattr(existing, "personal_agent_id", "")
                         if marker and marker != agent_id:
                             raise PersonalAgentError(
-                                "session_scope_mismatch", "会话已属于其他专员，已停止打开"
+                                "session_scope_mismatch", "会话已属于其他Agent，已停止打开"
                             )
                         if not marker:
                             existing.personal_agent_id = agent_id
@@ -284,11 +286,11 @@ class PersonalAgentService:
                     model = self.engine.router.resolve_model(ModelTier(profile.model_tier))
                 except Exception as exc:
                     raise PersonalAgentError(
-                        "model_unavailable", "该助理的模型尚未配置，请先选择模型"
+                        "model_unavailable", "该 Agent 的模型尚未配置，请先选择模型"
                     ) from exc
                 if not isinstance(model, str) or not model.strip():
                     raise PersonalAgentError(
-                        "model_unavailable", "该助理的模型尚未配置，请先选择模型"
+                        "model_unavailable", "该 Agent 的模型尚未配置，请先选择模型"
                     )
                 session = Session(
                     title=profile.name,
@@ -320,4 +322,4 @@ class PersonalAgentService:
                     continue
                 current = self.require_active_profile(agent_id)
                 return {"agent_id": agent_id, "session_id": session.id, "version": current.version}
-            raise PersonalAgentError("binding_conflict", "助理会话正在恢复，请稍后重新打开")
+            raise PersonalAgentError("binding_conflict", "Agent 会话正在恢复，请稍后重新打开")

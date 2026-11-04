@@ -43,8 +43,8 @@ describe('personal agent directory', () => {
     const api = apiMock()
     render(<Directory api={api} />)
     await waitFor(() => expect(screen.queryByText('正在加载…')).not.toBeInTheDocument())
-    expect(screen.getByRole('button', { name: '主助理' })).toBeVisible()
-    expect(screen.getByRole('button', { name: '创建助理' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '主 Agent' })).toBeVisible()
+    expect(screen.getByRole('button', { name: '创建 Agent' })).toBeEnabled()
     expect(screen.queryByText(/运营|投资|研究专员/)).not.toBeInTheDocument()
     expect(api.createPersonalAgent).not.toHaveBeenCalled()
   })
@@ -56,9 +56,9 @@ describe('personal agent directory', () => {
     await waitFor(() => expect(select).toHaveBeenCalledWith('session-travel'))
     expect(api.openPersonalSession).toHaveBeenCalledWith('pa_travel')
     rerender(<Directory api={api} onSelect={select} busy />)
-    expect(screen.getByRole('button', { name: '主助理' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '主 Agent' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '与旅行搭档对话' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '创建助理' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '创建 Agent' })).toBeDisabled()
   })
 
   it('shows real list errors with retry rather than silently pretending the directory is empty', async () => {
@@ -128,7 +128,7 @@ describe('personal agent directory', () => {
     fireEvent.click(button); fireEvent.click(button)
     expect(api.openPersonalSession).toHaveBeenCalledTimes(1)
     await act(async () => { pending.resolve({ session_id: 'wrong', agent_id: 'other-agent', version: 1 }) })
-    expect(await screen.findByRole('alert')).toHaveTextContent('会话与助理不匹配')
+    expect(await screen.findByRole('alert')).toHaveTextContent('会话与 Agent 不匹配')
     expect(select).not.toHaveBeenCalled()
   })
 
@@ -144,6 +144,20 @@ describe('personal agent directory', () => {
 })
 
 describe('personal agent editor', () => {
+  it.each(['Lambda-7', 'Mira 🌙', '山海'])('preserves arbitrary Agent name %s without adding an occupational suffix', async name => {
+    const api = apiMock(), saved = vi.fn().mockResolvedValue(undefined)
+    render(<PersonalAgentEditor api={api} agent={null} agents={[]} busy={false} onClose={vi.fn()} onSaved={saved} />)
+    expect(screen.getByRole('option', { name: 'Agent', exact: true })).toHaveValue('specialist')
+    expect(screen.queryByRole('option', { name: '专员', exact: true })).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: name } })
+    fireEvent.change(screen.getByLabelText('职责与工作方式'), { target: { value: '按我的明确目标处理不同类型的事情。' } })
+    await waitFor(() => expect(screen.getByRole('button', { name: '创建', exact: true })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: '创建', exact: true }))
+    await waitFor(() => expect(saved).toHaveBeenCalled())
+    expect(api.createPersonalAgent).toHaveBeenCalledWith(expect.objectContaining({ name, kind: 'specialist' }))
+    expect(screen.getByLabelText('名称')).toHaveValue(name)
+  })
+
   it('creates an arbitrary user-defined role with an explicit tool allowlist', async () => {
     const api = apiMock(), saved = vi.fn().mockResolvedValue(undefined)
     render(<PersonalAgentEditor api={api} agent={null} agents={[]} busy={false} onClose={vi.fn()} onSaved={saved} />)
@@ -176,12 +190,12 @@ describe('personal agent editor', () => {
 
   it('sends the selected version and preserves edits when concurrent modification conflicts', async () => {
     const api = apiMock(), saved = vi.fn()
-    api.updatePersonalAgent.mockRejectedValue(new Error('助理已被更新，请重新打开后修改'))
+    api.updatePersonalAgent.mockRejectedValue(new Error('Agent 已被更新，请重新打开后修改'))
     render(<PersonalAgentEditor api={api} agent={agent()} agents={[agent()]} busy={false} onClose={vi.fn()} onSaved={saved} />)
     fireEvent.change(screen.getByLabelText('名称'), { target: { value: '家庭旅行' } })
     await waitFor(() => expect(screen.getByRole('button', { name: '保存修改' })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: '保存修改' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('助理已被更新')
+    expect(await screen.findByRole('alert')).toHaveTextContent('Agent 已被更新')
     expect(screen.getByLabelText('名称')).toHaveValue('家庭旅行')
     expect(api.updatePersonalAgent).toHaveBeenCalledWith('pa_travel', expect.objectContaining({ expected_version: 3, name: '家庭旅行' }))
     expect(api.updatePersonalAgent.mock.calls[0][1]).not.toHaveProperty('kind')
@@ -193,9 +207,9 @@ describe('personal agent editor', () => {
     const api = apiMock()
     render(<PersonalAgentEditor api={api} agent={agent()} agents={[agent()]} busy={false} onClose={vi.fn()} onSaved={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: '版本记录' }))
-    expect(await screen.findByRole('list', { name: '助理版本记录' })).toHaveTextContent('v2')
+    expect(await screen.findByRole('list', { name: 'Agent 版本记录' })).toHaveTextContent('v2')
     expect(api.personalAgentHistory).toHaveBeenCalledWith('pa_travel')
-    fireEvent.click(screen.getByRole('button', { name: '归档助理' }))
+    fireEvent.click(screen.getByRole('button', { name: '归档 Agent' }))
     expect(api.updatePersonalAgent).not.toHaveBeenCalled()
     const confirmation = screen.getByRole('group', { name: '确认状态变更' })
     fireEvent.click(within(confirmation).getByRole('button', { name: '确认归档' }))

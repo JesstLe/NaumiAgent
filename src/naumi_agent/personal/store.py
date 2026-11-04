@@ -88,9 +88,9 @@ def _text(value: Any, field: str, limit: int, *, required: bool = True) -> str:
 
 
 def _agent_id(value: Any) -> str:
-    result = _text(value, "助理编号", 64)
+    result = _text(value, "Agent 编号", 64)
     if not _AGENT_ID.fullmatch(result):
-        raise PersonalAgentError("invalid_input", "助理编号格式不正确")
+        raise PersonalAgentError("invalid_input", "Agent 编号格式不正确")
     return result
 
 
@@ -175,14 +175,14 @@ class PersonalAgentStore:
                         version = conn.execute("PRAGMA user_version").fetchone()[0]
                         if version > _SCHEMA_VERSION:
                             raise PersonalAgentError(
-                                "unsupported_schema", "助理资料库来自较新版本，请先更新应用"
+                                "unsupported_schema", "Agent 资料库来自较新版本，请先更新应用"
                             )
                         conn.execute("PRAGMA journal_mode=WAL")
                         conn.execute("BEGIN IMMEDIATE")
                         # Recheck under the migration lock before writing a schema version.
                         if conn.execute("PRAGMA user_version").fetchone()[0] > _SCHEMA_VERSION:
                             raise PersonalAgentError(
-                                "unsupported_schema", "助理资料库来自较新版本，请先更新应用"
+                                "unsupported_schema", "Agent 资料库来自较新版本，请先更新应用"
                             )
                         for statement in _TABLES:
                             conn.execute(statement)
@@ -204,7 +204,7 @@ class PersonalAgentStore:
                         conn.close()
             except (OSError, sqlite3.Error) as exc:
                 raise PersonalAgentError(
-                    "storage_error", "助理资料库暂时不可用，请检查目录或稍后重试"
+                    "storage_error", "Agent 资料库暂时不可用，请检查目录或稍后重试"
                 ) from exc
 
     @contextmanager
@@ -219,7 +219,7 @@ class PersonalAgentStore:
         except sqlite3.Error as exc:
             if conn is not None:
                 conn.rollback()
-            raise PersonalAgentError("storage_error", "助理资料保存未完成，请稍后重试") from exc
+            raise PersonalAgentError("storage_error", "Agent 资料保存未完成，请稍后重试") from exc
         except BaseException:
             if conn is not None:
                 conn.rollback()
@@ -237,7 +237,7 @@ class PersonalAgentStore:
     def _required(conn: sqlite3.Connection, agent_id: str) -> PersonalAgent:
         agent = PersonalAgentStore._get(conn, agent_id)
         if agent is None:
-            raise PersonalAgentError("not_found", "该助理不存在，请刷新列表")
+            raise PersonalAgentError("not_found", "该 Agent 不存在，请刷新列表")
         return agent
 
     def list(self, *, include_archived: bool = False) -> tuple[PersonalAgent, ...]:
@@ -259,7 +259,9 @@ class PersonalAgentStore:
     @staticmethod
     def _validate_members(conn: sqlite3.Connection, agent: PersonalAgent) -> None:
         if agent.kind == "specialist" and agent.member_ids:
-            raise PersonalAgentError("invalid_members", "专员不包含团队成员，请创建团队后添加成员")
+            raise PersonalAgentError(
+                "invalid_members", "Agent 不包含团队成员，请创建团队后添加成员"
+            )
         pending = list(agent.member_ids)
         visited: set[str] = set()
         while pending:
@@ -316,12 +318,12 @@ class PersonalAgentStore:
         if not _REQUEST_ID.fullmatch(request_id):
             raise PersonalAgentError("invalid_input", "请求编号格式不正确")
         payload = {
-            "name": _text(name, "助理名称", 80),
-            "description": _text(description, "助理简介", 500, required=False),
-            "instructions": _text(instructions, "助理职责", 12_000),
+            "name": _text(name, "Agent 名称", 80),
+            "description": _text(description, "Agent 简介", 500, required=False),
+            "instructions": _text(instructions, "Agent 职责", 12_000),
             "model_tier": _choice(model_tier, {"fast", "capable", "reasoning"}, "模型等级"),
             "tool_names": _names(tool_names),
-            "kind": _choice(kind, {"specialist", "team"}, "助理类型"),
+            "kind": _choice(kind, {"specialist", "team"}, "Agent 类型"),
             "member_ids": _names(member_ids, members=True),
         }
         fingerprint = hashlib.sha256(
@@ -360,29 +362,29 @@ class PersonalAgentStore:
     def update(self, agent_id: str, expected_version: int, **fields: Any) -> PersonalAgent:
         agent_id = _agent_id(agent_id)
         if type(expected_version) is not int or expected_version < 1:
-            raise PersonalAgentError("invalid_input", "请提供有效的助理资料版本")
+            raise PersonalAgentError("invalid_input", "请提供有效的 Agent 资料版本")
         if not fields or set(fields) - _UPDATE_FIELDS:
             raise PersonalAgentError("invalid_input", "没有可更新的字段或包含不支持的字段")
         normalized: dict[str, Any] = {}
         for key, value in fields.items():
             if key in {"name", "description", "instructions"}:
                 labels = {
-                    "name": ("助理名称", 80),
-                    "description": ("助理简介", 500),
-                    "instructions": ("助理职责", 12_000),
+                    "name": ("Agent 名称", 80),
+                    "description": ("Agent 简介", 500),
+                    "instructions": ("Agent 职责", 12_000),
                 }
                 label, limit = labels[key]
                 normalized[key] = _text(value, label, limit, required=key != "description")
             elif key in {"tool_names", "member_ids"}:
                 normalized[key] = _names(value, members=key == "member_ids")
             elif key == "status":
-                normalized[key] = _choice(value, {"active", "paused", "archived"}, "助理状态")
+                normalized[key] = _choice(value, {"active", "paused", "archived"}, "Agent 状态")
             else:
                 normalized[key] = _choice(value, {"fast", "capable", "reasoning"}, "模型等级")
         with self._connection(write=True) as conn:
             current = self._required(conn, agent_id)
             if current.version != expected_version:
-                raise PersonalAgentError("version_conflict", "助理资料已更新，请刷新后再修改")
+                raise PersonalAgentError("version_conflict", "Agent 资料已更新，请刷新后再修改")
             candidate = replace(current, **normalized)
             self._validate_members(conn, candidate)
             if candidate == current:
@@ -429,7 +431,7 @@ class PersonalAgentStore:
         with self._connection(write=True) as conn:
             agent = self._required(conn, agent_id)
             if agent.status != "active":
-                raise PersonalAgentError("agent_inactive", "助理已停用或归档，请启用后继续")
+                raise PersonalAgentError("agent_inactive", "Agent 已停用或归档，请启用后继续")
             row = conn.execute(
                 "SELECT * FROM personal_agent_bindings WHERE agent_id=? AND workspace_key=?",
                 (agent_id, workspace_key),
@@ -440,14 +442,14 @@ class PersonalAgentStore:
             if expected_session_id is not None and (
                 current is None or current.session_id != expected_session_id
             ):
-                raise PersonalAgentError("binding_conflict", "助理会话已切换，请刷新后继续")
+                raise PersonalAgentError("binding_conflict", "Agent 会话已切换，请刷新后继续")
             occupied = conn.execute(
                 "SELECT agent_id FROM personal_agent_sessions WHERE workspace_key=? "
                 "AND session_db_key=? AND session_id=? AND agent_id != ?",
                 (workspace_key, session_db_key, session_id, agent_id),
             ).fetchone()
             if occupied is not None:
-                raise PersonalAgentError("session_conflict", "该会话已属于另一位助理")
+                raise PersonalAgentError("session_conflict", "该会话已属于另一位 Agent")
             if current and (current.session_id, current.session_db_key) == (
                 session_id,
                 session_db_key,
@@ -521,14 +523,14 @@ class PersonalAgentStore:
             if profile.status != "active" or (
                 profile.kind != "specialist" and not (allow_team is True and profile.kind == "team")
             ):
-                raise PersonalAgentError("agent_inactive", "请先启用专员，再发起协作")
+                raise PersonalAgentError("agent_inactive", "请先启用 Agent，再发起协作")
             existing = conn.execute(
                 "SELECT agent_id FROM personal_agent_sessions WHERE workspace_key=? "
                 "AND session_db_key=? AND session_id=?",
                 (workspace_key, session_db_key, session_id),
             ).fetchone()
             if existing is not None and existing["agent_id"] != agent_id:
-                raise PersonalAgentError("session_conflict", "执行会话已属于另一位助理")
+                raise PersonalAgentError("session_conflict", "执行会话已属于另一位 Agent")
             conn.execute(
                 "INSERT OR IGNORE INTO personal_agent_sessions VALUES (?,?,?,?,?)",
                 (workspace_key, session_db_key, session_id, agent_id, _now()),

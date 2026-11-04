@@ -9,7 +9,7 @@
     "audio_analysis": "mean_volume=-91.0dB; max_volume=-91.0dB; visual review only",
     "review_method": "49 timestamped frames at 10-second intervals across full duration; full-resolution targeted inspection; additional frames at 07:55/07:57/07:59"
   },
-  "scope": "All 24 capability requirements retained. PA-00 and PA-06 delegation/peer slices retain their own local evidence. The current team-conversation and staged team-execution slice has independent real-model, HTTP/browser and completed-record cold-restart acceptance. Scoped leaf activity and unknown token-breakdown fixes have local regression evidence; 36 final team integration/TUI tests pass; broader regression baseline failures and source-copy rollback are tracked in the current team transaction VERIFICATION.txt. No full-product, deployment or platform-completion claim.",
+  "scope": "All 24 capability requirements retained. PA-00 and PA-06 delegation/peer slices retain their own local evidence. The current team-conversation and staged team-execution slice has independent real-model, HTTP/browser and completed-record cold-restart acceptance. Scoped leaf activity and unknown token-breakdown fixes have local regression evidence; 36 final team integration/TUI tests pass; broader regression baseline failures and source-copy rollback are tracked in the current team transaction VERIFICATION.txt. No full-product, deployment or platform-completion claim. PA-08 adds immutable private artifacts, exact-version sharing/revocation, real Page/Library and actual Docker calculation. Generic user-named Agents keep stable identities. Its real provider and browser evidence is recorded separately from deterministic concurrency barriers and baseline regression failures; full-product completion remains unclaimed.",
   "evidence_kinds": {
     "visible_ui": "可见实体、消息或状态；不代表后台与外部状态已核验",
     "visible_artifact": "可见可读的产物/对话；其外部事实仍需核验",
@@ -305,8 +305,8 @@
         "下游结果引用上游 artifact_id/version 与源证据。",
         "上游更新、权限撤销和约束变化可解释地影响后续步骤。"
       ],
-      "implementation_note": "PA-06已实现显式共享上下文与绑定agent_id/version、Job及result_sha256的上游结果交接，不自动共享私有聊天；artifact_id/version与撤销分享仍待PA-08。",
-      "implementation_record": "../../development/personal-agent/PA-06.md"
+      "implementation_note": "PA-06交接现接入PA-08 exact artifact_id/version/sha256/grant引用；读取、传播、后续模型/工具与发布重核撤销，衍生版本保留上游来源。真实山海Agent独立读取已分享CSV和Mira产物v1并用隔离Python复核825，产物记录原source grants及真实Run。真实并发验收发现旧Workbench读取会切换执行身份，原失败Run保留，修复由Event barrier HTTP/WS测试独立验证，不将失败重标成功。",
+      "implementation_record": "../../development/personal-agent/PA-08.md"
     },
     {
       "id": "VID-10",
@@ -529,7 +529,7 @@
     {
       "id": "VID-17",
       "title": "富文档/Page、目录与结构化表格",
-      "status": "planned",
+      "status": "partial",
       "in_scope": true,
       "verified_in_naumi": false,
       "owners": [
@@ -555,12 +555,14 @@
       "acceptance": [
         "退出会话后按产物ID重开；筛选改变实际数据行。",
         "空数据、长文本、窄屏和大表格均可用，数据不由静态示例替代。"
-      ]
+      ],
+      "implementation_note": "已实现独立Page与Library，目录、真实筛选/排序/CSV导出、文档及二进制修订、版本和窄屏布局。真实UI上传CSV并创建来源绑定Page；真实provider实际计算生成Page，原聊天卡可打开，内容SHA由HTTP核对；1440/768/390已检查。跨平台完整兼容仍待后续。",
+      "implementation_record": "../../development/personal-agent/PA-08.md"
     },
     {
       "id": "VID-18",
       "title": "引用卡、事实/估算/未知与研究判断",
-      "status": "planned",
+      "status": "partial",
       "in_scope": true,
       "verified_in_naumi": false,
       "owners": [
@@ -587,12 +589,14 @@
       "acceptance": [
         "事实字段有证据引用，估算有方法或前提，未知字段保持未知。",
         "来源失效/反证到达时能够修订结果并保留版本。"
-      ]
+      ],
+      "implementation_note": "Page支持fact/estimate/unknown及不可变确切来源卡，修订保留lineage；上游撤销阻断旧引用的后续访问/衍生。真实预算Page保留支付状态未知。此为产物证据底座，不等于PA-07研究检索、反证与推荐质量已实现。",
+      "implementation_record": "../../development/personal-agent/PA-08.md"
     },
     {
       "id": "VID-19",
       "title": "聊天产物卡、资料库、复用与分享",
-      "status": "planned",
+      "status": "partial",
       "in_scope": true,
       "verified_in_naumi": false,
       "owners": [
@@ -619,7 +623,9 @@
       "acceptance": [
         "上传资料→检索引用→生成产物→重开/导出形成闭环。",
         "跨角色权限和分享撤销有效，旧链接不越权。"
-      ]
+      ],
+      "implementation_note": "已接通真实上传/查询引用→隔离计算生成产物→聊天卡→独立资料库重开/下载，支持exact版本分享、撤销及新grant不复活旧ref。真实v1/v2、SVG二进制及跨Agent复核已分层记录；私有blob不进入公开output-assets。PA-02语义记忆和适用设备兼容仍待验收。",
+      "implementation_record": "../../development/personal-agent/PA-08.md"
     },
     {
       "id": "VID-20",

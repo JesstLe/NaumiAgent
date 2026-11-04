@@ -25,6 +25,7 @@ import {
   HelpCircle,
   Loader2,
   Lightbulb,
+  Library,
   MoreHorizontal,
   Maximize2,
   Minimize2,
@@ -99,6 +100,9 @@ import { PersonalAgents } from './personal/PersonalAgents'
 import { usePersonalAgents } from './personal/usePersonalAgents'
 import { useTeamTurns } from './personal/useTeamTurns'
 import { TeamComposerControls, TeamConversation, TeamTurnCard } from './personal/TeamConversation'
+import { LibraryWorkspace, MessageArtifactCards, clearArtifactLocation, messageArtifactRefs, writeArtifactLocation } from './personal/library/ArtifactLibrary'
+import type { ArtifactSelection } from './personal/library/ArtifactPage'
+import { requestArtifactNavigation } from './personal/library/navigation'
 
 type Panel =
   | 'home'
@@ -277,10 +281,27 @@ function PluginPanel() {
 export function Web2() {
   const w = useWorkspace()
   const platform = usePlatform()
+  const [libraryOpen, setLibraryOpen] = useState(() => new URLSearchParams(location.search).get('library') === '1' || new URLSearchParams(location.search).has('artifact'))
+  const closeLibrary = () => {
+    setLibraryOpen(false)
+    if (new URLSearchParams(location.search).has('library') || new URLSearchParams(location.search).has('artifact')) clearArtifactLocation()
+  }
+  useEffect(() => {
+    const update = () => setLibraryOpen(new URLSearchParams(location.search).get('library') === '1' || new URLSearchParams(location.search).has('artifact'))
+    window.addEventListener('popstate', update)
+    return () => window.removeEventListener('popstate', update)
+  }, [])
   const personal = usePersonalAgents({
     api: w.api, sessionId: w.sessionId, busy: w.busy,
-    connected: Boolean(w.daemon), onSelect: w.select,
+    connected: Boolean(w.daemon), onSelect: id => new Promise((resolve, reject) => requestArtifactNavigation(() => { closeLibrary(); void w.select(id).then(resolve, reject) }, () => resolve(undefined))),
   })
+  const openLibrary = (selection?: ArtifactSelection) => {
+    requestArtifactNavigation(() => {
+      writeArtifactLocation(personal.current?.id || 'main', selection || null)
+      setLibraryOpen(true)
+      if (window.innerWidth < 580) setSidebar(false)
+    })
+  }
   const teamProfile = personal.current?.kind === 'team' && !personal.readOnly ? personal.current : null
   const teamWorkspace = useRef(w)
   teamWorkspace.current = w
@@ -479,8 +500,7 @@ export function Web2() {
     </div>
   )
   const openPanel = (next: Panel) => {
-    setPanel(next)
-    setRight(true)
+    requestArtifactNavigation(() => { closeLibrary(); setPanel(next); setRight(true) })
   }
   const daemonConfigFor = async (path: string) => {
     if (!platform.getDaemonLaunchConfig)
@@ -501,7 +521,8 @@ export function Web2() {
     const config = preparedConfig ?? await daemonConfigFor(path)
     await platform.openWorkspaceWindow(config, { session_id: sessionId || null, view: 'web2' })
   }
-  const newChat = () => {
+  const newChat = () => requestArtifactNavigation(() => {
+    closeLibrary()
     if (w.busy && workspaceRoot) {
       setWorkspaceOpening(true)
       setWorkspaceTarget(workspaceRoot)
@@ -515,7 +536,7 @@ export function Web2() {
     }
     void w.select(null)
     textarea.current?.focus()
-  }
+  })
   const loadGitState = async () => {
     try { setGitState(await w.api.gitBranches()) }
     catch (error) { w.setError(errorText(error)) }
@@ -825,13 +846,14 @@ export function Web2() {
           </button>
           <button
             onClick={() => openPanel('tools')}
-            className={panel === 'tools' ? 'selected' : ''}
+            className={!libraryOpen && panel === 'tools' ? 'selected' : ''}
           >
             <Workflow />
             工具与扩展
           </button>
-          <button onClick={() => openPanel('schedules')} className={panel === 'schedules' ? 'selected' : ''}><Clock3 />定时任务</button>
-          <button onClick={() => openPanel('plugins')} className={panel === 'plugins' ? 'selected' : ''}><Plug />插件</button>
+          <button onClick={() => openLibrary()} className={libraryOpen ? 'selected' : ''}><Library />资料库</button>
+          <button onClick={() => openPanel('schedules')} className={!libraryOpen && panel === 'schedules' ? 'selected' : ''}><Clock3 />定时任务</button>
+          <button onClick={() => openPanel('plugins')} className={!libraryOpen && panel === 'plugins' ? 'selected' : ''}><Plug />插件</button>
         </nav>
         <PersonalAgents api={w.api} state={personal} busy={w.busy} connected={Boolean(w.daemon)}
           collaboration={{ api: w.api, sessionId: w.sessionId, onOpenSession: w.select }} />
@@ -970,12 +992,17 @@ export function Web2() {
         }}
       />
 
-      <main className={`w2-main ${terminal ? 'has-terminal' : ''}`}>
+      <main className={`w2-main ${terminal ? 'has-terminal' : ''} ${libraryOpen ? 'is-library' : ''}`}>
+        {libraryOpen && <LibraryWorkspace key={`${w.base}:${workspaceRoot || ''}`} api={w.api} namespace={`${w.base}:${workspaceRoot || ''}`}
+          initialActorId={personal.current?.id || 'main'} currentActorId={personal.current?.id || 'main'}
+          sessionId={!personal.readOnly && !personal.currentPending && !personal.currentError ? w.sessionId || undefined : undefined}
+          agents={personal.agents} connected={Boolean(w.daemon)} onClose={closeLibrary}
+          onConversationRefresh={() => { if (w.sessionId) void w.refreshConversation(w.sessionId) }} />}
         <div className="w2-workspace">
           <section className="w2-chat" aria-label="对话">
             <div className="w2-chat-heading">
               <span className="pa-current-heading">
-                <span>{personal.current?.name || current?.title || '主助理'}</span>
+                <span>{personal.current?.name || current?.title || '主 Agent'}</span>
                 {personal.current && personal.current.status !== 'active' && <small className="pa-current-status">{personal.current.status === 'paused' ? '已暂停' : '已归档'}</small>}
               </span>
               <div className="w2-summary-anchor" ref={summaryRef}>
@@ -1080,6 +1107,8 @@ export function Web2() {
                             </form>
                           : <MessageContent content={message.content} plain={message.role === 'user'} />}
                         {message.role === 'assistant' && <AiSources sources={sources} />}
+                        {!personal.currentPending && !personal.currentError && <MessageArtifactCards key={`${w.sessionId}:${personal.current?.id || 'main'}:${message.id}`} metadata={message.metadata}
+                          api={w.api} actorId={personal.current?.id || 'main'} onOpen={openLibrary} />}
                         {showAssistantActions
                           ? <MessageActionBar
                               messageId={message.id}
@@ -1131,7 +1160,7 @@ export function Web2() {
             <div className="w2-composer-wrap">
               {teamProfile && <TeamComposerControls key={`${w.base}:${w.sessionId}:${teamProfile.id}`} team={teamProfile} state={teamTurns} disabled={w.busy || w.uploading || personalLocked} />}
               {personal.readOnly && <div className="pa-current-record" role="status"><span>协作执行记录</span>{personal.current && <button type="button" disabled={w.busy || personal.current.status !== 'active'} onClick={() => void personal.select(personal.current)}>打开日常对话</button>}</div>}
-              {personal.currentError && <div className="pa-current-error" role="alert"><span>{personal.currentError}</span><button onClick={() => void personal.refresh()}>重新确认助理</button></div>}
+              {personal.currentError && <div className="pa-current-error" role="alert"><span>{personal.currentError}</span><button onClick={() => void personal.refresh()}>重新确认 Agent</button></div>}
               {w.error && (
                 <div className="w2-error" role="alert">
                   <span>{w.error}</span>
@@ -1475,6 +1504,12 @@ export function Web2() {
                         <span>
                           {source.title}
                           <small>{source.path}</small>
+                          {source.kind === 'artifact' && <button type="button" onClick={event => {
+                            event.preventDefault(); event.stopPropagation()
+                            const value = messageArtifactRefs({ artifact_refs: [source.metadata?.artifact_ref] })
+                            if (value.error) w.setError(value.error)
+                            else if (value.refs[0]) openLibrary(value.refs[0])
+                          }}>打开资料版本</button>}
                         </span>
                         <input
                           type="checkbox"

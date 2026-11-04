@@ -29,9 +29,9 @@ const eventLabels: Record<string, string> = {
   permission_requested: '等待授权', permission_resolved: '授权已处理',
   recovery_error: '恢复失败', job_admitted: '任务入队', dispatch_prepared: '准备交接',
   recovery_unknown: '中断执行待核实',
-  peer_requested: '专员发出请求', peer_dispatch_started: '向专员派送', peer_received: '对端接收请求',
-  peer_result_available: '专员返回结果', peer_acknowledged: '确认收件',
-  question_requested: '专员提问', question_answered: '用户已回答', question_expired: '问题已过期',
+  peer_requested: 'Agent 发出请求', peer_dispatch_started: '向 Agent 派送', peer_received: '对端接收请求',
+  peer_result_available: 'Agent 返回结果', peer_acknowledged: '确认收件',
+  question_requested: 'Agent 提问', question_answered: '用户已回答', question_expired: '问题已过期',
 }
 const stateLabel = (status: string) => statusLabels[status as PersonalCollaborationStatus] || '状态待核实'
 const eventLabel = (kind: string) => eventLabels[kind] || '执行记录'
@@ -57,12 +57,12 @@ export function validateCollaboration(value: PersonalCollaboration, expectedId?:
     throw new Error('协作记录返回不完整，请刷新后重试')
   if (value.messages !== undefined && (!Array.isArray(value.messages)
     || value.messages.some(message => validatePersonalMessage(message).collaboration_id !== value.id)))
-    throw new Error('专员消息与当前协作不一致，请重新加载')
+    throw new Error('Agent 消息与当前协作不一致，请重新加载')
   if (value.peer_sessions !== undefined && (!Array.isArray(value.peer_sessions) || value.peer_sessions.some(session => !session
     || typeof session.message_id !== 'string' || typeof session.session_id !== 'string'
     || typeof session.agent_id !== 'string' || !Number.isInteger(session.agent_version) || session.agent_version < 1
     || typeof session.step_id !== 'string' || !session.step_id.trim()
-    || typeof session.state !== 'string'))) throw new Error('专员执行归属返回不完整，请重新加载')
+    || typeof session.state !== 'string'))) throw new Error('Agent 执行归属返回不完整，请重新加载')
   return value
 }
 
@@ -277,7 +277,7 @@ export function PersonalCollaborations({ api, agents, sourceSessionId, busy, onC
       <aside className="pc-sidebar" aria-label="协作任务列表">
         {scopedCollaborations === undefined && <>
           <button type="button" className={`pc-new${composing && composeMode === 'workflow' ? ' selected' : ''}`} disabled={locked} onClick={() => { setComposeMode('workflow'); setComposing(true) }}><Plus size={16} />发起协作</button>
-          <button type="button" className={`pc-new${composing && composeMode === 'message' ? ' selected' : ''}`} disabled={locked} onClick={() => { setComposeMode('message'); setComposing(true) }}><Mail size={16} />专员消息</button>
+          <button type="button" className={`pc-new${composing && composeMode === 'message' ? ' selected' : ''}`} disabled={locked} onClick={() => { setComposeMode('message'); setComposing(true) }}><Mail size={16} />Agent 消息</button>
         </>}
         {listError && <div className="pc-error" role="alert">{listError}<button type="button" onClick={refresh}>重试加载列表</button></div>}
         {loading && !items.length && <div className="pc-empty" role="status">正在加载协作…</div>}
@@ -306,7 +306,7 @@ export function PersonalCollaborations({ api, agents, sourceSessionId, busy, onC
               const options = Array.isArray(event.data.options) ? event.data.options.filter((option): option is { value: string; label: string; description?: string } => Boolean(option) && typeof option === 'object' && typeof option.value === 'string' && typeof option.label === 'string') : []
               const expired = typeof event.data.expires_at === 'string' && new Date(event.data.expires_at).valueOf() <= Date.now()
               return <div className="pc-question" key={event.key}>
-                <header><strong>{typeof event.data.header === 'string' && event.data.header || '专员提问'}</strong><span>{typeof event.data.actor_name === 'string' && event.data.actor_name || selected.steps.find(step => step.id === event.step_id)?.agent_name || agents.find(agent => agent.id === selected.steps.find(step => step.id === event.step_id)?.agent_id)?.name || '专员'}</span></header>
+                <header><strong>{typeof event.data.header === 'string' && event.data.header || 'Agent 提问'}</strong><span>{typeof event.data.actor_name === 'string' && event.data.actor_name || selected.steps.find(step => step.id === event.step_id)?.agent_name || agents.find(agent => agent.id === selected.steps.find(step => step.id === event.step_id)?.agent_id)?.name || 'Agent'}</span></header>
                 <p>{typeof event.data.question === 'string' ? event.data.question : '问题内容暂不可用，请刷新记录'}</p>
                 {questionSent[key] ? <span role="status">回答已提交</span> : expired ? <span role="status">问题已过期</span> : <>
                   {!!options.length && <div className="pc-question-options">{options.map(option => <button type="button" key={option.value} disabled={questionBusy[key]} onClick={() => void reply(event, { kind: 'option', value: option.value })}>
@@ -323,7 +323,7 @@ export function PersonalCollaborations({ api, agents, sourceSessionId, busy, onC
             })}</section>}
             {!!permissions.length && <section className="pc-permissions" aria-label="协作待授权操作">{permissions.map(event => {
               const key = `${String(event.data.session_id)}:${String(event.data.call_id)}`
-              return <div className="pc-permission" key={event.key}><header><strong>{typeof event.data.actor_name === 'string' && event.data.actor_name || selected.steps.find(step => step.id === event.step_id)?.agent_name || agents.find(agent => agent.id === selected.steps.find(step => step.id === event.step_id)?.agent_id)?.name || '专员'} · 等待授权</strong><code>{String(event.data.tool_name || '工具操作')}</code></header>
+              return <div className="pc-permission" key={event.key}><header><strong>{typeof event.data.actor_name === 'string' && event.data.actor_name || selected.steps.find(step => step.id === event.step_id)?.agent_name || agents.find(agent => agent.id === selected.steps.find(step => step.id === event.step_id)?.agent_id)?.name || 'Agent'} · 等待授权</strong><code>{String(event.data.tool_name || '工具操作')}</code></header>
                 {typeof event.data.reason === 'string' && <p>{event.data.reason}</p>}
                 {event.data.arguments !== undefined && <pre>{typeof event.data.arguments === 'string' ? event.data.arguments : JSON.stringify(event.data.arguments, null, 2)}</pre>}
                 {permissionSent[key] ? <span role="status">授权决定已提交</span> : <div><button type="button" disabled={permissionBusy[key]} onClick={() => void resolve(event, 'deny')}>拒绝</button><button type="button" className="pc-primary" disabled={permissionBusy[key]} onClick={() => void resolve(event, 'allow')}>{permissionBusy[key] ? '正在提交…' : '允许本次操作'}</button></div>}
@@ -426,17 +426,17 @@ export function CollaborationComposer({ api, agents, sourceSessionId, onBusy, on
       <ol className="pc-compose-steps">{rows.map((row, index) => <li key={row.id}>
         {index > 0 && mode === 'sequential' && <div className="pc-link"><ArrowDown size={14} /></div>}
         <div className="pc-compose-step"><header><span className="pc-step-number">{index + 1}</span>
-          <select aria-label={`步骤 ${index + 1} 专员`} required value={row.agent_id} onChange={event => {
+          <select aria-label={`步骤 ${index + 1} Agent`} required value={row.agent_id} onChange={event => {
             const profile = available.find(agent => agent.id === event.target.value)
             update(row.id, { agent_id: profile?.id || '', agent_version: profile?.version || 0 })
-          }}><option value="">选择专员</option>{available.map(agent => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
-            {row.agent_id && !available.some(agent => agent.id === row.agent_id) && <option value={row.agent_id}>所选专员已停用</option>}</select>
+          }}><option value="">选择 Agent</option>{available.map(agent => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
+            {row.agent_id && !available.some(agent => agent.id === row.agent_id) && <option value={row.agent_id}>所选 Agent 已停用</option>}</select>
           {row.agent_version > 0 && <span className="pc-version">v{row.agent_version}</span>}
           <button type="button" className="pc-icon" aria-label={`删除步骤 ${index + 1}`} disabled={rows.length === 1} onClick={() => setRows(values => values.filter(value => value.id !== row.id))}><Trash2 size={14} /></button></header>
           <label>任务<textarea aria-label={`步骤 ${index + 1} 任务`} required maxLength={16000} rows={3} value={row.task} onChange={event => update(row.id, { task: event.target.value })} /></label>
         </div>
       </li>)}</ol>
-      {!available.length && <div className="pc-empty">尚无可协作的专员</div>}
+      {!available.length && <div className="pc-empty">尚无可协作的 Agent</div>}
       <button type="button" className="pc-add-step" disabled={rows.length >= 12} onClick={() => setRows(values => [...values, newStep()])}><Plus size={14} />添加步骤</button>
       {permissions.error && <div className="pc-error" role="alert">{permissions.error}<button type="button" onClick={permissions.retry}>重试加载互询权限</button></div>}
       <PeerScopeEditor agents={agents} tools={permissions.tools} value={peerAgents} onChange={setPeerAgents} disabled={saving || permissions.loading || Boolean(permissions.error)} />

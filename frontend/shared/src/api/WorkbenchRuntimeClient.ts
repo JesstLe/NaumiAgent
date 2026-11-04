@@ -5,6 +5,15 @@ import type {
   MessageResponse,
   Session,
 } from '@naumi/shared/api/types'
+import type {
+  PersonalArtifactContent,
+  PersonalArtifactGrant,
+  PersonalArtifactInput,
+  PersonalArtifactPreview,
+  PersonalArtifactQuery,
+  PersonalArtifactRevision,
+  PersonalArtifactSnapshot,
+} from './personalArtifacts'
 
 export interface ModelConfig {
   models: { id: string; name: string; tier: string }[]
@@ -359,7 +368,9 @@ export async function consumeEvents(
 }
 
 export class WorkbenchRequestError extends Error {
-  constructor(message: string, readonly status: number, readonly code = '') {
+  constructor(message: string, readonly status: number, readonly code = '', readonly receipt?: {
+    accepted?: true; artifact_id?: string; version?: number
+  }) {
     super(message)
     this.name = 'WorkbenchRequestError'
   }
@@ -377,7 +388,7 @@ export class WorkbenchRuntimeClient extends WorkbenchApiClient {
     const response = await fetch(`${this.base.replace(/\/$/, '')}${path}`, {
       ...init,
       headers: {
-        'Content-Type': 'application/json',
+        ...(!(init.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...init.headers,
       },
@@ -392,7 +403,12 @@ export class WorkbenchRuntimeClient extends WorkbenchApiClient {
         typeof detail.detail === 'string'
           ? detail.detail
           : `请求失败（${response.status}），请重试`, response.status,
-        typeof detail.code === 'string' ? detail.code : '',
+        typeof detail.code === 'string' ? detail.code : typeof detail.error === 'string' ? detail.error : '',
+        detail.accepted === true ? {
+          accepted: true,
+          artifact_id: typeof detail.artifact_id === 'string' ? detail.artifact_id : undefined,
+          version: typeof detail.version === 'number' && Number.isInteger(detail.version) ? detail.version : undefined,
+        } : undefined,
       )
     }
     return response
@@ -466,6 +482,57 @@ export class WorkbenchRuntimeClient extends WorkbenchApiClient {
   }
   async cancelPersonalTeamTurn(id: string): Promise<PersonalTeamTurn> {
     return (await this.fetch(`/personal/team-turns/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: '{}' })).json()
+  }
+  async personalArtifacts(query: PersonalArtifactQuery, signal?: AbortSignal): Promise<{ artifacts: PersonalArtifactSnapshot[] }> {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(query)) if (value !== undefined) params.set(key, String(value))
+    return (await this.fetch(`/personal/artifacts?${params}`, { signal, cache: 'no-store' })).json()
+  }
+  async personalArtifact(id: string, actorId: string, version?: number, signal?: AbortSignal): Promise<PersonalArtifactSnapshot> {
+    const params = new URLSearchParams({ actor_id: actorId })
+    if (version !== undefined) params.set('version', String(version))
+    return (await this.fetch(`/personal/artifacts/${encodeURIComponent(id)}?${params}`, { signal, cache: 'no-store' })).json()
+  }
+  async personalArtifactVersions(id: string, actorId: string, signal?: AbortSignal): Promise<{ versions: PersonalArtifactSnapshot[] }> {
+    return (await this.fetch(`/personal/artifacts/${encodeURIComponent(id)}/versions?${new URLSearchParams({ actor_id: actorId })}`, { signal, cache: 'no-store' })).json()
+  }
+  async personalArtifactPreview(id: string, actorId: string, version: number, signal?: AbortSignal): Promise<PersonalArtifactPreview> {
+    return (await this.fetch(`/personal/artifacts/${encodeURIComponent(id)}/preview?${new URLSearchParams({ actor_id: actorId, version: String(version) })}`, { signal, cache: 'no-store' })).json()
+  }
+  async personalArtifactContent(id: string, actorId: string, version: number, signal?: AbortSignal): Promise<PersonalArtifactContent> {
+    const response = await this.fetch(`/personal/artifacts/${encodeURIComponent(id)}/content?${new URLSearchParams({ actor_id: actorId, version: String(version) })}`, { signal, cache: 'no-store' })
+    const sha256 = response.headers.get('X-Content-SHA256') || ''
+    if (!/^[a-f0-9]{64}$/.test(sha256)) throw new Error('资料缺少版本校验，请重新加载')
+    return { blob: await response.blob(), sha256 }
+  }
+  async createPersonalArtifact(body: PersonalArtifactInput): Promise<PersonalArtifactSnapshot> {
+    return (await this.fetch('/personal/artifacts', { method: 'POST', body: JSON.stringify(body) })).json()
+  }
+  async revisePersonalArtifact(id: string, body: PersonalArtifactRevision): Promise<PersonalArtifactSnapshot> {
+    return (await this.fetch(`/personal/artifacts/${encodeURIComponent(id)}/versions`, { method: 'POST', body: JSON.stringify(body) })).json()
+  }
+  async importPersonalArtifact(file: File, body: { actor_id: string; request_id: string; title?: string; kind: 'material'; session_id?: string }): Promise<PersonalArtifactSnapshot> {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(body)) if (value !== undefined) params.set(key, value)
+    const data = new FormData()
+    data.append('file', file)
+    return (await this.fetch(`/personal/artifacts/import?${params}`, { method: 'POST', body: data })).json()
+  }
+  async importPersonalArtifactVersion(id: string, file: File, body: { actor_id: string; request_id: string; expected_version: number; title?: string; kind: 'material' | 'output'; session_id?: string }): Promise<PersonalArtifactSnapshot> {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(body)) if (value !== undefined) params.set(key, String(value))
+    const data = new FormData()
+    data.append('file', file)
+    return (await this.fetch(`/personal/artifacts/${encodeURIComponent(id)}/versions/import?${params}`, { method: 'POST', body: data })).json()
+  }
+  async personalArtifactGrants(id: string, version: number, actorId: string, signal?: AbortSignal): Promise<{ grants: PersonalArtifactGrant[] }> {
+    return (await this.fetch(`/personal/artifacts/${encodeURIComponent(id)}/versions/${version}/grants?${new URLSearchParams({ actor_id: actorId })}`, { signal, cache: 'no-store' })).json()
+  }
+  async sharePersonalArtifact(id: string, version: number, body: { actor_id: string; request_id: string; recipient_id: string }): Promise<PersonalArtifactGrant> {
+    return (await this.fetch(`/personal/artifacts/${encodeURIComponent(id)}/versions/${version}/grants`, { method: 'POST', body: JSON.stringify(body) })).json()
+  }
+  async revokePersonalArtifactGrant(id: string, body: { actor_id: string; request_id: string; expected_revision: number }): Promise<PersonalArtifactGrant> {
+    return (await this.fetch(`/personal/artifact-grants/${encodeURIComponent(id)}/revoke`, { method: 'POST', body: JSON.stringify(body) })).json()
   }
   async outputAsset(path: string, signal?: AbortSignal): Promise<Blob> {
     if (!/^\/api\/v1\/output-assets\/[a-f0-9]{64}\.(svg|png|jpg|webp|gif|pdf|csv|json|txt|md)$/.test(path)) throw new Error('文件地址无效')
