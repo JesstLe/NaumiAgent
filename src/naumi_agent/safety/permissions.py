@@ -78,6 +78,32 @@ class PermissionAwareTool(Protocol):
 
 # 工具权限表
 TOOL_PERMISSIONS: dict[str, PermissionRule] = {
+    "agent_result_acknowledge": PermissionRule(
+        tool_name="agent_result_acknowledge",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+        risk_level=PermissionRiskLevel.LOW,
+        tool_family="agent_result_inbox",
+    ),
+    "output_asset_retention_run": PermissionRule(
+        tool_name="output_asset_retention_run",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=True,
+        max_calls_per_session=50,
+        risk_level=PermissionRiskLevel.HIGH,
+        tool_family="output_asset_retention",
+        allow_session_grant=False,
+    ),
     "output_publish": PermissionRule(
         tool_name="output_publish",
         allowed_modes=[
@@ -298,6 +324,71 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         max_calls_per_session=50,
         risk_level=PermissionRiskLevel.MEDIUM,
         tool_family="evolution_opportunity",
+    ),
+    "evolution_capability_specification": PermissionRule(
+        tool_name="evolution_capability_specification",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+        max_calls_per_session=50,
+        risk_level=PermissionRiskLevel.MEDIUM,
+        tool_family="evolution_capability_specification",
+    ),
+    "evolution_capability_governance": PermissionRule(
+        tool_name="evolution_capability_governance",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+        max_calls_per_session=50,
+        risk_level=PermissionRiskLevel.MEDIUM,
+        tool_family="evolution_capability_governance",
+    ),
+    "evolution_capability_artifact": PermissionRule(
+        tool_name="evolution_capability_artifact",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+        max_calls_per_session=50,
+        risk_level=PermissionRiskLevel.MEDIUM,
+        tool_family="evolution_capability_artifact",
+    ),
+    "evolution_capability_scenario_binding": PermissionRule(
+        tool_name="evolution_capability_scenario_binding",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+        max_calls_per_session=50,
+        risk_level=PermissionRiskLevel.MEDIUM,
+        tool_family="evolution_capability_scenario_binding",
+    ),
+    "evolution_capability_sandbox_request": PermissionRule(
+        tool_name="evolution_capability_sandbox_request",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+        max_calls_per_session=50,
+        risk_level=PermissionRiskLevel.MEDIUM,
+        tool_family="evolution_capability_sandbox_request",
     ),
     "evolution_capability_sandbox_execute": PermissionRule(
         tool_name="evolution_capability_sandbox_execute",
