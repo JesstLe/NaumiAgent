@@ -38,7 +38,7 @@ from naumi_agent.safety.payload_envelope import (
     seal_runtime_payload,
 )
 
-AGENT_JOB_SCHEMA_VERSION = 7
+AGENT_JOB_SCHEMA_VERSION = 8
 _PAYLOAD_MAGIC = b"NAUMI_AGENT_JOB_PAYLOAD_V1\x00"
 _TERMINAL_PAYLOAD_MAGIC = b"NAUMI_AGENT_JOB_TERMINAL_PAYLOAD_V1\x00"
 _TERMINAL_PAYLOAD_AAD = b"NAUMI_AGENT_JOB_TERMINAL_AAD_V1\x00"
@@ -82,6 +82,11 @@ class AgentJobPublicationState(StrEnum):
 
 class AgentJobDeliverySink(StrEnum):
     RESULT_INBOX = "agent_result_inbox"
+
+
+class AgentJobHumanReadChannel(StrEnum):
+    MANAGEMENT_WEB = "management_web"
+    MANUAL_CLI = "manual_cli"
 
 
 TERMINAL_AGENT_JOB_STATES = frozenset(
@@ -2584,6 +2589,51 @@ class AgentJobStore:
         except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
             raise AgentJobError("无法更新 AgentJob publication。") from exc
 
+    async def mark_execution_unknown(
+        self, job_id: str, *, owner_id: str, claim_epoch: int,
+        expected_request_sha256: str, expected_session_id_sha256: str,
+        expected_latest_receipt_sha256: str,
+    ) -> AgentJobTransitionResult:
+        """A live execution owner preserves uncertain usage/outcome without a zero result."""
+        key = self._runtime_key()
+        await self._ensure_schema()
+        async with self._connection() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            stored = await _require_stored(db, job_id, key=key)
+            if (stored.request_sha256 != expected_request_sha256
+                    or stored.request.session_id_sha256 != expected_session_id_sha256
+                    or stored.latest_receipt.receipt_sha256 != expected_latest_receipt_sha256):
+                raise AgentJobLifecycleConflictError("未知执行的原始凭据已变化。")
+            _require_live_owner(stored, owner_id=owner_id, claim_epoch=claim_epoch,
+                                now=self._now(), allowed_states=frozenset({AgentJobState.RUNNING}))
+            transition = await _append_transition(
+                db, stored=stored, target_state=AgentJobState.UNKNOWN, owner_id=owner_id,
+                claim_epoch=claim_epoch, claim_expires_at=stored.claim_expires_at,
+                result=None, reason_code="agent_job_execution_unknown",
+                occurred_at=self._now().isoformat(), key=key,
+            )
+            await db.commit()
+            return transition
+
+    async def cancel_claimed_before_start(
+        self,
+        job_id: str,
+        *,
+        owner_id: str,
+        claim_epoch: int,
+    ) -> AgentJobTransitionResult:
+        """Settle a live owner's unstarted claim without fabricating a result."""
+        return await self._owner_transition(
+            job_id,
+            owner_id=owner_id,
+            claim_epoch=claim_epoch,
+            target_state=AgentJobState.CANCELLED,
+            result=None,
+            reason_code="agent_job_cancelled_before_start",
+            allowed_states=frozenset({AgentJobState.CLAIMED}),
+        )
+
+
     async def cancel_before_claim(self, job_id: str) -> AgentJobTransitionResult:
         _require_identifier(job_id, field="job_id")
         key = self._runtime_key()
@@ -3207,6 +3257,126 @@ class AgentJobStore:
             raise AgentJobError("AgentJob clock 必须返回 aware datetime。")
         return value.astimezone(UTC)
 
+    async def acknowledge_human_result_inbox_delivery(
+        self,
+        session_id: str,
+        delivery_id: str,
+        *,
+        expected_delivery_sha256: str,
+        trusted_channel: AgentJobHumanReadChannel | str,
+    ) -> dict:
+        """Append trusted manual provenance without changing a legacy ACK receipt."""
+        try:
+            channel = AgentJobHumanReadChannel(trusted_channel)
+        except (TypeError, ValueError) as exc:
+            raise AgentJobLifecycleConflictError("请选择可信的人工确认入口。") from exc
+        legacy = await self.acknowledge_result_inbox_delivery(
+            session_id,
+            delivery_id,
+            expected_delivery_sha256=expected_delivery_sha256,
+        )
+        key = self._runtime_key()
+        async with self._connection() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            delivery = await _require_publication_delivery(db, delivery_id, key=key)
+            await _validate_delivery_binding(db, delivery, key=key)
+            ack = await _require_result_acknowledgement(
+                db,
+                legacy.acknowledgement.acknowledgement_id,
+                key=key,
+            )
+            cursor = await db.execute(
+                "SELECT * FROM agent_job_human_reads WHERE delivery_id=?",
+                (delivery_id,),
+            )
+            existing = await cursor.fetchone()
+            if existing is not None:
+                receipt = _human_read_from_row(existing, ack, key)
+                await db.commit()
+                return {"receipt": receipt, "applied": False}
+            core = {
+                "schema_version": 1,
+                "kind": "human_result_read",
+                "human_read_id": "human-read-"
+                + hashlib.sha256(
+                    (delivery_id + ":" + expected_delivery_sha256).encode()
+                ).hexdigest()[:32],
+                "delivery_id": delivery_id,
+                "publication_id": delivery.publication_id,
+                "job_id": delivery.job_id,
+                "acknowledgement_id": ack.acknowledgement_id,
+                "legacy_ack_receipt_sha256": ack.receipt.receipt_sha256,
+                "session_routing_hmac": delivery.session_routing_hmac,
+                "delivery_sha256": expected_delivery_sha256,
+                "trusted_channel": channel.value,
+                "read_at": self._now().isoformat(),
+            }
+            digest = _digest(core)
+            receipt = {
+                **core,
+                "receipt_sha256": digest,
+                "authentication_sha256": _human_read_auth(core, digest, key),
+            }
+            await db.execute(
+                "INSERT INTO agent_job_human_reads "
+                "(human_read_id,delivery_id,acknowledgement_id,receipt_sha256,receipt_json) "
+                "VALUES (?,?,?,?,?)",
+                (
+                    core["human_read_id"],
+                    delivery_id,
+                    ack.acknowledgement_id,
+                    digest,
+                    json.dumps(receipt, ensure_ascii=False, sort_keys=True),
+                ),
+            )
+            await db.commit()
+            return {"receipt": receipt, "applied": True}
+
+
+    async def get_human_result_inbox_read(
+        self,
+        session_id: str,
+        delivery_id: str,
+        *,
+        expected_delivery_sha256: str,
+    ) -> dict | None:
+        _require_identifier(delivery_id, field="delivery_id")
+        _require_sha256(expected_delivery_sha256, field="expected_delivery_sha256")
+        if not _regular_file_exists(self._db_path):
+            return None
+        await self._ensure_schema()
+        key = self._runtime_key()
+        async with self._connection() as db:
+            await db.execute("BEGIN")
+            delivery = await _require_publication_delivery(db, delivery_id, key=key)
+            await _validate_delivery_binding(db, delivery, key=key)
+            if (
+                delivery.session_routing_hmac
+                != _session_routing_hmac(
+                    session_id,
+                    key=key.key_bytes,
+                )
+                or delivery.delivery_sha256 != expected_delivery_sha256
+            ):
+                raise AgentJobLifecycleConflictError("人工已读回执不属于该执行会话或版本。")
+            cursor = await db.execute(
+                "SELECT * FROM agent_job_human_reads WHERE delivery_id=?",
+                (delivery_id,),
+            )
+            row = await cursor.fetchone()
+            if row is None:
+                await db.commit()
+                return None
+            ack = await _require_result_acknowledgement(
+                db,
+                str(row["acknowledgement_id"]),
+                key=key,
+            )
+            receipt = _human_read_from_row(row, ack, key)
+            await db.commit()
+            return receipt
+
+
     async def _ensure_schema(self) -> None:
         if self._schema_ready:
             return
@@ -3299,6 +3469,12 @@ class AgentJobStore:
                         await db.execute(
                             f"PRAGMA user_version = {AGENT_JOB_SCHEMA_VERSION}"
                         )
+                    elif version == 7:
+                        await _apply_schema_v4(db, allow_create=False)
+                        await _apply_schema_v5(db, allow_create=False)
+                        await _apply_schema_v6(db, allow_create=False)
+                        await _apply_schema_v7(db, allow_create=False)
+                        await db.execute(f"PRAGMA user_version = {AGENT_JOB_SCHEMA_VERSION}")
                     elif version != AGENT_JOB_SCHEMA_VERSION:
                         raise AgentJobError(
                             f"AgentJob schema v{version} 不受支持；"
@@ -3309,6 +3485,7 @@ class AgentJobStore:
                         await _apply_schema_v5(db, allow_create=False)
                         await _apply_schema_v6(db, allow_create=False)
                         await _apply_schema_v7(db, allow_create=False)
+                    await _apply_schema_v8(db, allow_create=version != 8)
                     await db.commit()
                 if not existed and os.name != "nt":
                     self._db_path.chmod(0o600)
@@ -5469,6 +5646,8 @@ def _validate_receipt_semantics(receipt: AgentJobLifecycleReceipt) -> None:
         ),
     }
     non_result_transitions = {
+        (AgentJobState.RUNNING, AgentJobState.UNKNOWN, "agent_job_execution_unknown"),
+        (AgentJobState.CLAIMED, AgentJobState.CANCELLED, "agent_job_cancelled_before_start"),
         (
             AgentJobState.ADMITTED,
             AgentJobState.CANCELLED,
@@ -6862,7 +7041,112 @@ _SCHEMA_V7 = (
 )
 
 
+
+
+_SCHEMA_V8 = (
+    """CREATE TABLE agent_job_human_reads (
+        human_read_id TEXT PRIMARY KEY,
+        delivery_id TEXT NOT NULL UNIQUE REFERENCES agent_job_publication_deliveries(delivery_id),
+        acknowledgement_id TEXT NOT NULL UNIQUE
+            REFERENCES agent_job_result_acknowledgements(acknowledgement_id),
+        receipt_sha256 TEXT NOT NULL UNIQUE,
+        receipt_json TEXT NOT NULL
+    )""",
+    """CREATE TRIGGER agent_job_human_reads_no_update BEFORE UPDATE ON agent_job_human_reads
+       BEGIN SELECT RAISE(ABORT, 'human read receipt is append-only'); END""",
+    """CREATE TRIGGER agent_job_human_reads_no_delete BEFORE DELETE ON agent_job_human_reads
+       BEGIN SELECT RAISE(ABORT, 'human read receipt is append-only'); END""",
+)
+
+
+
+async def _apply_schema_v8(db, *, allow_create):
+    cursor = await db.execute(
+        "SELECT sql FROM sqlite_master WHERE name='agent_job_human_reads' AND type='table'",
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        if not allow_create:
+            raise AgentJobError("AgentJob schema v8 人工已读表缺失。")
+        for statement in _SCHEMA_V8:
+            await db.execute(statement)
+    for name, expected in zip(
+        (
+            "agent_job_human_reads",
+            "agent_job_human_reads_no_update",
+            "agent_job_human_reads_no_delete",
+        ),
+        _SCHEMA_V8,
+        strict=True,
+    ):
+        cursor = await db.execute("SELECT sql FROM sqlite_master WHERE name=?", (name,))
+        stored = await cursor.fetchone()
+        if stored is None or " ".join(stored[0].split()) != " ".join(expected.split()):
+            raise AgentJobError("AgentJob schema v8 人工已读结构校验失败。")
+
+
+
+def _human_read_auth(core, digest, key):
+    raw = json.dumps(core, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()
+    return hmac.new(
+        key.key_bytes, b"NAUMI_HUMAN_READ_V1\0" + digest.encode() + raw, hashlib.sha256
+    ).hexdigest()
+
+
+
+def _human_read_from_row(row, ack, key):
+    try:
+        value = json.loads(str(row["receipt_json"]))
+        core = {
+            k: v for k, v in value.items() if k not in {"receipt_sha256", "authentication_sha256"}
+        }
+        digest = _digest(core)
+        if (
+            set(core)
+            != {
+                "schema_version",
+                "kind",
+                "human_read_id",
+                "delivery_id",
+                "publication_id",
+                "job_id",
+                "acknowledgement_id",
+                "legacy_ack_receipt_sha256",
+                "session_routing_hmac",
+                "delivery_sha256",
+                "trusted_channel",
+                "read_at",
+            }
+            or core["schema_version"] != 1
+            or core["kind"] != "human_result_read"
+            or core["human_read_id"] != row["human_read_id"]
+            or core["delivery_id"] != row["delivery_id"]
+            or core["acknowledgement_id"] != row["acknowledgement_id"]
+            or core["legacy_ack_receipt_sha256"] != ack.receipt.receipt_sha256
+            or core["delivery_id"] != ack.delivery_id
+            or core["delivery_sha256"] != ack.delivery_sha256
+            or core["session_routing_hmac"] != ack.session_routing_hmac
+            or core["job_id"] != ack.job_id
+            or core["publication_id"] != ack.publication_id
+            or digest != row["receipt_sha256"]
+            or digest != value["receipt_sha256"]
+            or not hmac.compare_digest(
+                value["authentication_sha256"], _human_read_auth(core, digest, key)
+            )
+        ):
+            raise AgentJobError("人工已读回执摘要或原始确认绑定不一致。")
+        AgentJobHumanReadChannel(core["trusted_channel"])
+        _aware_time(core["read_at"], field="read_at")
+        return value
+    except AgentJobError:
+        raise
+    except (KeyError, TypeError, ValueError) as exc:
+        raise AgentJobError("人工已读回执内容损坏。") from exc
+
+
+
 __all__ = [
+    "AgentJobHumanReadChannel",
     "AGENT_JOB_SCHEMA_VERSION",
     "AgentJobCapacityExhaustedError",
     "AgentJobCapacityPolicy",

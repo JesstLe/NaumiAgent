@@ -35,6 +35,7 @@ def current_run_events(engine):
 
 def bound_turn(function):
     """Lease one Engine execution identity without creating a second Run owner."""
+
     @wraps(function)
     async def execute(engine, *args, **kwargs):
         if getattr(engine, "_personal_active_turn", None) is not None:
@@ -75,6 +76,10 @@ async def authorize_execution(engine: Any) -> None:
 
 def use_direct_runtime(engine: Any, task: str) -> bool:
     """Do not substitute temporary planner agents for explicitly named personal roles."""
+    session = getattr(engine, "_session", None)
+    if getattr(session, "personal_execution_id", ""):
+        require_current_agent(engine)
+        return True
     if current_agent(engine) is not None or "personal_agents" in task:
         return True
     service = getattr(engine, "personal_agents", None)
@@ -149,7 +154,8 @@ def begin_turn(engine: Any) -> None:
     if artifacts is not None and artifacts.enabled:
         artifacts.require_catalog()
         engine._personal_artifact_refs = artifacts.store.session_refs(
-            workspace_key=artifacts.workspace_key, session_id=engine._session.id,
+            workspace_key=artifacts.workspace_key,
+            session_id=engine._session.id,
             actor_id=agent.id if agent is not None else "main",
         )
     if agent:
@@ -159,7 +165,8 @@ def begin_turn(engine: Any) -> None:
     # extraction away from it until explicit personal scope support is implemented.
     engine._compactor._long_term_memory = (
         engine.long_term_memory
-        if agent is None and engine.config.memory.long_term_enabled
+        if agent is None
+        and engine.config.memory.long_term_enabled
         and not engine._personal_artifact_refs
         else None
     )
@@ -231,6 +238,11 @@ def role_prompt(engine: Any) -> str:
 
 def model_tier(engine: Any, fallback: ModelTier = ModelTier.CAPABLE) -> ModelTier:
     agent = require_current_agent(engine)
+    frozen = getattr(engine, "_personal_execution_model_tier", None)
+    if frozen is not None and getattr(
+        getattr(engine, "_session", None), "personal_execution_id", ""
+    ):
+        return ModelTier(frozen)
     return ModelTier(agent.model_tier) if agent else fallback
 
 
@@ -245,16 +257,27 @@ def filter_schemas(engine: Any, schemas: list[dict[str, Any]] | None):
     else:
         names = effective_tools(engine, agent)
         selected = [schema for schema in schemas or [] if schema["function"]["name"] in names]
+    restricted = getattr(engine, "_personal_effective_tools", None)
+    if restricted is not None:
+        selected = [s for s in selected if s["function"]["name"] in restricted]
     artifacts = getattr(engine, "personal_artifacts", None)
     if artifacts is not None and artifacts.enabled:
         selected = [s for s in selected if not s["function"]["name"].startswith("browser_")]
         selected = [
-            {**s, "function": {**s["function"], "description": (
-                "在无网络隔离容器中计算。/workspace是只读公开工作区快照，"
-                "/inputs包含当前确切授权资料，产出写/outputs后由broker保存为产物。"
-                "不修改宿主工作区、不继承密钥、不自动安装依赖；隔离环境缺失时停止，"
-                "不在宿主机执行。shell使用Linux /bin/sh。"
-            )}} if s["function"]["name"] in {"bash_run", "code_execute"} else s
+            {
+                **s,
+                "function": {
+                    **s["function"],
+                    "description": (
+                        "在无网络隔离容器中计算。/workspace是只读公开工作区快照，"
+                        "/inputs包含当前确切授权资料，产出写/outputs后由broker保存为产物。"
+                        "不修改宿主工作区、不继承密钥、不自动安装依赖；隔离环境缺失时停止，"
+                        "不在宿主机执行。shell使用Linux /bin/sh。"
+                    ),
+                },
+            }
+            if s["function"]["name"] in {"bash_run", "code_execute"}
+            else s
             for s in selected
         ]
     return selected or None
@@ -263,6 +286,9 @@ def filter_schemas(engine: Any, schemas: list[dict[str, Any]] | None):
 def tool_denial(engine: Any, name: str) -> str | None:
     try:
         agent = require_current_agent(engine)
+        restricted = getattr(engine, "_personal_effective_tools", None)
+        if restricted is not None and name not in restricted:
+            return "该工具不属于本次已授权执行范围"
         if agent and name not in effective_tools(engine, agent):
             return "该工具未分配给当前 Agent，请先在 Agent 设置中明确配置"
     except PersonalAgentError as exc:

@@ -63,8 +63,11 @@ class ArtifactToolProxy:
         service = self.engine.personal_artifacts
         try:
             await service.authorize_engine()
+            item_context = getattr(self.engine, "_personal_item_context", None)
+            if item_context is not None:
+                await item_context.authorize_tool(self.name, args)
             refs = getattr(self.engine, "_personal_artifact_refs", [])
-            private = bool(refs)
+            private = bool(refs) or bool(getattr(item_context, "force_private", False))
             actor = service.engine_actor()
             # The authenticated user's Library is distinct from agent browser
             # contexts. Host CDP can otherwise reach local management endpoints.
@@ -90,11 +93,14 @@ class ArtifactToolProxy:
                 "personal_message",
                 "request_user_input",
                 "personal_agents",
+                "personal_items",
             }:
                 raise PersonalAgentError(
                     "artifact_isolation_required", "该工具尚未接入私有资料执行边界，已停止本次操作"
                 )
-            if self.name != "personal_artifacts":
+            if item_context is not None and self.name in {"file_read", "read"}:
+                return await self._read_input(actor, refs, args)
+            if self.name != "personal_artifacts" and item_context is None:
                 path_names = set(self.tool.metadata.path_argument_names) | {
                     "path",
                     "cwd",
@@ -186,19 +192,26 @@ class ArtifactToolProxy:
         # Private calculations see a read-only, bounded public snapshot, not a
         # writable host project or runtime data. Results leave only via broker.
         try:
+            item_context = getattr(self.engine, "_personal_item_context", None)
             result = await execute_private_process(
-                workspace=Path(self.engine.workspace_root),
+                workspace=Path(
+                    item_context.process_workspace
+                    if item_context is not None
+                    else self.engine.workspace_root
+                ),
                 command=command,
                 language=language,
                 inputs=inputs,
                 private=True,
+                empty_workspace=item_context is not None,
                 protected_roots=protected_roots(self.engine),
                 image="node:24-bookworm-slim" if language == "javascript" else "python:3.12-slim",
                 timeout_s=args.get("timeout", 30),
             )
         except PersonalAgentError as exc:
             await self._record_process(
-                {"error_code": exc.code, "isolation": getattr(exc, "isolation", {})}, "error",
+                {"error_code": exc.code, "isolation": getattr(exc, "isolation", {})},
+                "error",
                 run_id=run_id,
             )
             raise
@@ -208,6 +221,8 @@ class ArtifactToolProxy:
             run_id=run_id,
         )
         await service.authorize_engine()
+        if item_context is not None:
+            await item_context.authorize()
         if self.engine._session.id != session_id or service.engine_actor() != actor:
             raise PersonalAgentError("binding_conflict", "隔离计算的执行身份已变化，结果未发布")
         if result["exit_code"] != 0:
@@ -219,6 +234,8 @@ class ArtifactToolProxy:
             )
         published = []
         for item in result["files"]:
+            if item_context is not None:
+                await item_context.authorize()
             filename = Path(item["path"]).name
             snapshot = await service.publish(
                 actor_id=actor,
@@ -240,7 +257,8 @@ class ArtifactToolProxy:
             )
             url = "/web2?" + urlencode(
                 {
-                    "artifact": snapshot["artifact_id"], "version": snapshot["version"],
+                    "artifact": snapshot["artifact_id"],
+                    "version": snapshot["version"],
                     "actor": actor,
                 }
             )
@@ -258,6 +276,40 @@ class ArtifactToolProxy:
             },
             ensure_ascii=False,
         )
+
+    async def _read_input(self, actor, refs, args):
+        """Resolve exact Linux input paths through the broker, never through host tools."""
+        requested = args.get("path", args.get("file_path"))
+        service = self.engine.personal_artifacts
+        for ref in refs:
+            snapshot, content = await service.read(
+                actor_id=actor,
+                artifact_id=ref["artifact_id"],
+                version=ref["version"],
+            )
+            expected = f"/inputs/{ref['artifact_id']}-v{ref['version']}{snapshot['suffix']}"
+            if requested == expected:
+                from naumi_agent.personal.artifact_models import is_text_artifact
+
+                if not is_text_artifact(snapshot):
+                    raise PersonalAgentError("invalid_input", "该资料需要通过隔离计算读取")
+                value = content.decode("utf-8-sig")
+                offset = args.get("offset", 0)
+                limit = args.get("limit", 20000)
+                if type(offset) is not int or offset < 0 or type(limit) is not int or limit < 1:
+                    raise PersonalAgentError("invalid_input", "资料读取位置或长度无效")
+                limit = min(limit, 60000)
+                return json.dumps(
+                    {
+                        "path": expected,
+                        "ref": ref,
+                        "content": value[offset : offset + limit],
+                        "offset": offset,
+                        "next_offset": offset + limit if len(value) > offset + limit else None,
+                    },
+                    ensure_ascii=False,
+                )
+        raise PersonalAgentError("artifact_access_revoked", "该路径不是本次明确授权的输入资料")
 
     async def _record_process(self, value, status, *, run_id):
         if not run_id:
@@ -277,6 +329,8 @@ class ArtifactToolProxy:
 
 def guarded_tool(engine, tool, call_id):
     service = getattr(engine, "personal_artifacts", None)
-    if service is None or not service.enabled:
+    if service is None or not (
+        service.enabled or getattr(engine, "_personal_item_context", None) is not None
+    ):
         return tool
     return ArtifactToolProxy(engine, tool, call_id)

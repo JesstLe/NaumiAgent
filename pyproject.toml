@@ -46,6 +46,7 @@ dependencies = [
     "wcwidth>=0.7.0",
     "pillow>=11.3",
     "pypdf>=6,<8",
+    "tzdata>=2025.2",
 ]
 
 [project.optional-dependencies]

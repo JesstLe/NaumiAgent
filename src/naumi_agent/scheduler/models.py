@@ -26,6 +26,7 @@ class ScheduleTarget(StrEnum):
     """Delivery target for fired schedule events."""
 
     SESSION_MESSAGE = "session_message"
+    PERSONAL_ITEM = "personal_item"
 
 
 @dataclass
@@ -42,6 +43,8 @@ class ScheduleJob:
     created_at: str
     last_fired_at: str = ""
     fired_count: int = 0
+    scope_key: str = ""
+    binding_sha256: str = ""
 
     @property
     def is_active(self) -> bool:
@@ -58,3 +61,5 @@ class ScheduleEvent:
     prompt: str
     target: ScheduleTarget
     delivered: bool = False
+    scope_key: str = ""
+    binding_sha256: str = ""

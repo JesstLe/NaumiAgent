@@ -9,7 +9,7 @@ import logging
 import uuid
 from collections.abc import Callable
 from contextvars import Context
-from dataclasses import asdict, replace
+from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from functools import wraps
 from pathlib import Path
@@ -34,6 +34,7 @@ from naumi_agent.daemons.agent_worker_contract import (
 from naumi_agent.memory.session import Session
 from naumi_agent.model.router import ModelTier
 from naumi_agent.personal.collaboration_store import CollaborationStore
+from naumi_agent.personal.engine_execution import bounded_execution, make_execution_child
 from naumi_agent.personal.models import PersonalAgentError
 from naumi_agent.user_interaction import (
     normalize_interaction_request,
@@ -1023,8 +1024,7 @@ class PersonalCollaborationService:
                     )
                 source_sessions = [plan["source_session_id"]]
                 source_sessions.extend(
-                    item["session_id"] for item in plan["steps"]
-                    if item["id"] in step["depends_on"]
+                    item["session_id"] for item in plan["steps"] if item["id"] in step["depends_on"]
                 )
                 for source_session_id in source_sessions:
                     await child_artifacts.propagate(
@@ -1078,9 +1078,9 @@ class PersonalCollaborationService:
                         "不要读取其他 Agent 的私有会话。\n" + payload.context
                     ),
                 )
-            result = await asyncio.wait_for(
+            result = await bounded_execution(
                 operation,
-                timeout=job.request.timeout_milliseconds / 1000,
+                timeout_seconds=job.request.timeout_milliseconds / 1000,
             )
             response = result.response or ""
             status = (
@@ -1264,44 +1264,9 @@ class PersonalCollaborationService:
             )
 
     def _make_child(self, step: dict, job):
-        from naumi_agent.orchestrator.engine import AgentEngine
-        from naumi_agent.runtime.composition import build_runtime_paths
-
-        config = self.engine.config.model_copy(deep=True)
-        config.memory.long_term_enabled = False
-        config.safety.permission_mode = job.request.permission_mode
-        config.safety.max_turns = job.request.max_turns
-        config.safety.max_budget_usd = (
-            None
-            if job.request.max_cost_microusd is None
-            else job.request.max_cost_microusd / 1_000_000
+        return make_execution_child(
+            self.engine,
+            job,
+            team_execution=step.get("team_execution"),
+            peer_message_id=step.get("peer_message_id", ""),
         )
-        if step.get("team_execution"):
-            config.safety.max_input_tokens = step["team_execution"]["max_input_tokens"]
-            config.safety.max_output_tokens = step["team_execution"]["max_output_tokens"]
-        paths = build_runtime_paths(config)
-        # Bound names keep nested resources below Windows' legacy path limit;
-        # the complete immutable IDs remain in Job/message records, not filenames.
-        execution_key = hashlib.sha256(job.job_id.encode("utf-8")).hexdigest()[:32]
-        directory = paths.runtime_data_dir / "personal-executions" / execution_key
-        if step.get("peer_message_id"):
-            directory = directory / "p" / step["peer_message_id"].removeprefix("pm_")
-        changes = {
-            name: directory / getattr(paths, name).name
-            for name in paths.__dataclass_fields__
-            if name
-            not in {"workspace_root", "session_db_path", "runtime_data_dir", "chat_run_db_path"}
-        }
-        # Preserve distinct paths even for leaf names such as transport/artifacts.
-        for name in changes:
-            # Field keys may be long, and identical basename databases still need
-            # distinct namespaces. A stable compact field digest supplies both.
-            key = hashlib.sha256(name.encode("utf-8")).hexdigest()[:12]
-            changes[name] = directory / key / getattr(paths, name).name
-        child = AgentEngine(
-            config,
-            paths=replace(paths, **changes),
-            isolated_child=True,
-            execution_data_dir=directory,
-        )
-        return child

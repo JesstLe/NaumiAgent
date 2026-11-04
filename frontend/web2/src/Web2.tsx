@@ -26,6 +26,7 @@ import {
   Loader2,
   Lightbulb,
   Library,
+  ListTodo,
   MoreHorizontal,
   Maximize2,
   Minimize2,
@@ -96,6 +97,8 @@ import {
   type WorkspaceProjectCandidate,
 } from '@naumi/shared/projects/workspaceProjects'
 import { ProjectCreationDialog, type ProjectCreationInput } from './ProjectCreationDialog'
+import { PersonalItems } from './personal/items/PersonalItems'
+import type { PersonalArtifactRef } from '@naumi/shared/api/personalArtifacts'
 import { PersonalAgents } from './personal/PersonalAgents'
 import { usePersonalAgents } from './personal/usePersonalAgents'
 import { useTeamTurns } from './personal/useTeamTurns'
@@ -281,26 +284,50 @@ function PluginPanel() {
 export function Web2() {
   const w = useWorkspace()
   const platform = usePlatform()
+  const [itemsOpen, setItemsOpen] = useState(() => new URLSearchParams(location.search).get('items') === '1')
+  const closeItems = () => {
+    setItemsOpen(false)
+    const url = new URL(location.href)
+    if (url.searchParams.has('items')) { url.searchParams.delete('items'); history.pushState({}, '', url) }
+  }
   const [libraryOpen, setLibraryOpen] = useState(() => new URLSearchParams(location.search).get('library') === '1' || new URLSearchParams(location.search).has('artifact'))
   const closeLibrary = () => {
     setLibraryOpen(false)
     if (new URLSearchParams(location.search).has('library') || new URLSearchParams(location.search).has('artifact')) clearArtifactLocation()
   }
   useEffect(() => {
-    const update = () => setLibraryOpen(new URLSearchParams(location.search).get('library') === '1' || new URLSearchParams(location.search).has('artifact'))
+    const acceptedUrl = location.href
+    const update = () => {
+      const accept = () => {
+        setLibraryOpen(new URLSearchParams(location.search).get('library') === '1' || new URLSearchParams(location.search).has('artifact'))
+        setItemsOpen(new URLSearchParams(location.search).get('items') === '1')
+      }
+      if (itemsOpen) requestArtifactNavigation(accept, () => history.pushState({}, '', acceptedUrl))
+      else accept()
+    }
     window.addEventListener('popstate', update)
     return () => window.removeEventListener('popstate', update)
-  }, [])
+  }, [itemsOpen])
   const personal = usePersonalAgents({
     api: w.api, sessionId: w.sessionId, busy: w.busy,
-    connected: Boolean(w.daemon), onSelect: id => new Promise((resolve, reject) => requestArtifactNavigation(() => { closeLibrary(); void w.select(id).then(resolve, reject) }, () => resolve(undefined))),
+    connected: Boolean(w.daemon), onSelect: id => new Promise((resolve, reject) => requestArtifactNavigation(() => { closeItems(); closeLibrary(); void w.select(id).then(resolve, reject) }, () => resolve(undefined))),
   })
   const openLibrary = (selection?: ArtifactSelection) => {
     requestArtifactNavigation(() => {
+      closeItems()
       writeArtifactLocation(personal.current?.id || 'main', selection || null)
       setLibraryOpen(true)
       if (window.innerWidth < 580) setSidebar(false)
     })
+  }
+  const openItems = () => requestArtifactNavigation(() => {
+    closeLibrary()
+    const url = new URL(location.href); url.searchParams.set('items', '1'); history.pushState({}, '', url)
+    setItemsOpen(true)
+    if (window.innerWidth < 580) setSidebar(false)
+  })
+  const openItemArtifact = (actorId: string, ref: PersonalArtifactRef) => {
+    closeItems(); writeArtifactLocation(actorId, { artifact_id: ref.artifact_id, version: ref.version }); setLibraryOpen(true)
   }
   const teamProfile = personal.current?.kind === 'team' && !personal.readOnly ? personal.current : null
   const teamWorkspace = useRef(w)
@@ -500,7 +527,7 @@ export function Web2() {
     </div>
   )
   const openPanel = (next: Panel) => {
-    requestArtifactNavigation(() => { closeLibrary(); setPanel(next); setRight(true) })
+    requestArtifactNavigation(() => { closeItems(); closeLibrary(); setPanel(next); setRight(true) })
   }
   const daemonConfigFor = async (path: string) => {
     if (!platform.getDaemonLaunchConfig)
@@ -522,6 +549,7 @@ export function Web2() {
     await platform.openWorkspaceWindow(config, { session_id: sessionId || null, view: 'web2' })
   }
   const newChat = () => requestArtifactNavigation(() => {
+    closeItems()
     closeLibrary()
     if (w.busy && workspaceRoot) {
       setWorkspaceOpening(true)
@@ -846,14 +874,15 @@ export function Web2() {
           </button>
           <button
             onClick={() => openPanel('tools')}
-            className={!libraryOpen && panel === 'tools' ? 'selected' : ''}
+            className={!itemsOpen && !libraryOpen && panel === 'tools' ? 'selected' : ''}
           >
             <Workflow />
             工具与扩展
           </button>
+          <button onClick={openItems} className={itemsOpen ? 'selected' : ''}><ListTodo />事项</button>
           <button onClick={() => openLibrary()} className={libraryOpen ? 'selected' : ''}><Library />资料库</button>
-          <button onClick={() => openPanel('schedules')} className={!libraryOpen && panel === 'schedules' ? 'selected' : ''}><Clock3 />定时任务</button>
-          <button onClick={() => openPanel('plugins')} className={!libraryOpen && panel === 'plugins' ? 'selected' : ''}><Plug />插件</button>
+          <button onClick={() => openPanel('schedules')} className={!itemsOpen && !libraryOpen && panel === 'schedules' ? 'selected' : ''}><Clock3 />定时任务</button>
+          <button onClick={() => openPanel('plugins')} className={!itemsOpen && !libraryOpen && panel === 'plugins' ? 'selected' : ''}><Plug />插件</button>
         </nav>
         <PersonalAgents api={w.api} state={personal} busy={w.busy} connected={Boolean(w.daemon)}
           collaboration={{ api: w.api, sessionId: w.sessionId, onOpenSession: w.select }} />
@@ -900,7 +929,7 @@ export function Web2() {
                 className={`w2-project ${active ? 'active' : ''}`}
                 disabled={!active && (workspaceSwitching || (workspaceOpening && switching) || !platform.startDaemon)}
                 onClick={() => {
-                  if (!active) void activateWorkspace(project.path, project.name).catch((error) => w.setError(errorText(error)))
+                  if (!active) requestArtifactNavigation(() => { closeItems(); closeLibrary(); void activateWorkspace(project.path, project.name).catch((error) => w.setError(errorText(error))) })
                 }}
                 aria-current={active ? 'true' : undefined}
                 title={project.path}
@@ -920,8 +949,11 @@ export function Web2() {
                     title={session.title || '新对话'}
                     disabled={workspaceSwitching}
                     onClick={() => {
-                      if (active) void w.select(session.id)
-                      else void activateWorkspace(project.path, project.name, session.id).catch((error) => w.setError(errorText(error)))
+                      requestArtifactNavigation(() => {
+                        closeItems(); closeLibrary()
+                        if (active) void w.select(session.id)
+                        else void activateWorkspace(project.path, project.name, session.id).catch((error) => w.setError(errorText(error)))
+                      })
                     }}
                   >
                     {session.pinned && <Pin size={11} />}
@@ -992,7 +1024,8 @@ export function Web2() {
         }}
       />
 
-      <main className={`w2-main ${terminal ? 'has-terminal' : ''} ${libraryOpen ? 'is-library' : ''}`}>
+      <main className={`w2-main ${terminal ? 'has-terminal' : ''} ${libraryOpen || itemsOpen ? 'is-library' : ''}`}>
+        {itemsOpen && <PersonalItems key={`items:${w.base}:${workspaceRoot || ''}`} api={w.api} namespace={`${w.base}:${workspaceRoot || ''}`} agents={personal.agents} connected={Boolean(w.daemon)} originSessionId={w.sessionId || undefined} onClose={closeItems} onOpenArtifact={openItemArtifact} />}
         {libraryOpen && <LibraryWorkspace key={`${w.base}:${workspaceRoot || ''}`} api={w.api} namespace={`${w.base}:${workspaceRoot || ''}`}
           initialActorId={personal.current?.id || 'main'} currentActorId={personal.current?.id || 'main'}
           sessionId={!personal.readOnly && !personal.currentPending && !personal.currentError ? w.sessionId || undefined : undefined}

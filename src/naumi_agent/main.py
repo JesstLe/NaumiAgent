@@ -2983,6 +2983,16 @@ async def _handle_command(engine: Any, cmd: str) -> None:
 
             output = await run_assistants_command(engine, arg)
             console.print(output, markup=False, highlight=False, soft_wrap=True)
+        case "/items":
+            from naumi_agent.personal.item_commands import run_items_command
+
+            channel = getattr(engine, "_personal_items_manual_channel", None)
+            if channel is None:
+                channel = (
+                    "tui" if type(_active_cli).__module__.startswith("naumi_agent.tui.") else "cli"
+                )
+            output = await run_items_command(engine, arg, trusted_channel=channel)
+            console.print(output, markup=False, highlight=False, soft_wrap=True)
         case "/library":
             from naumi_agent.personal.artifact_commands import run_library_command
 
@@ -3273,6 +3283,7 @@ def _print_help() -> None:
         ("/team <子命令>", "团队协议 — status/handoff/blocker/decision/request/result"),
         ("/assistants [子命令]", "Agent — 创建、配置、打开、暂停与归档"),
         ("/library [子命令]", "资料库 — 版本、正文、导入、修订、分享与撤销"),
+        ("/items [子命令]", "事项 — 单次执行、暂停、恢复、报告与显式已读"),
         (
             "/agents result ack <投递ID> <SHA256>",
             "Agent Control — 确认一条持久结果已读",

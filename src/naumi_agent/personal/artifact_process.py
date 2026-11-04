@@ -415,6 +415,7 @@ async def execute_private_process(
     language: str = "shell",
     inputs: dict[str, bytes] | None = None,
     private: bool = True,
+    empty_workspace: bool = False,
     timeout_s: float = 60,
     image: str = "python:3.12-slim",
     max_output_bytes: int = 1048576,
@@ -423,6 +424,8 @@ async def execute_private_process(
     """Compute in Docker; private mode reads a snapshot and emits only /outputs files."""
     if (
         type(private) is not bool
+        or type(empty_workspace) is not bool
+        or empty_workspace and not private
         or language not in {"shell", "python", "javascript"}
         or not isinstance(command, str)
         or not command.strip()
@@ -453,14 +456,17 @@ async def execute_private_process(
     except (TypeError, ValueError, OSError) as error:
         raise _error("invalid_input", "受保护目录需要有效路径") from error
     values = {} if inputs is None else inputs
-    if not isinstance(values, dict) or len(values) > 32:
-        raise _error("invalid_input", "隔离资料需要不超过 32 个文件")
+    file_limit = 64 if empty_workspace else 32
+    if not isinstance(values, dict) or len(values) > file_limit:
+        raise _error("invalid_input", f"隔离资料需要不超过 {file_limit} 个文件")
     total = 0
     names = set()
     for name, content in values.items():
         _relative(name)
         if not isinstance(content, bytes):
             raise _error("invalid_input", "隔离资料需要确切文件字节")
+        if empty_workspace and len(content) > 20 * 1024**2:
+            raise _error("invalid_input", "单份事项资料超过 20 MB")
         normalized = name.casefold()
         if normalized in names or any(
             normalized.startswith(n + "/") or n.startswith(normalized + "/") for n in names
@@ -468,8 +474,9 @@ async def execute_private_process(
             raise _error("invalid_input", "隔离资料文件名重复或相互覆盖")
         names.add(normalized)
         total += len(content)
-    if total > _OUTPUT_BYTES:
-        raise _error("invalid_input", "本次隔离资料超过 20 MB，请分开处理")
+    total_limit = 50 * 1024**2 if empty_workspace else _OUTPUT_BYTES
+    if total > total_limit:
+        raise _error("invalid_input", "本次隔离资料超过授权大小上限，请分开处理")
     docker = shutil.which("docker")
     if docker is None:
         raise _error(
@@ -497,9 +504,14 @@ async def execute_private_process(
         in_dir.mkdir(mode=0o755)
         out_dir.mkdir(mode=0o777)
         out_dir.chmod(0o777)
-        workspace_info, masks = await _disk(
-            _prepare_workspace, workspace, snapshot, private, protected
-        )
+        if empty_workspace:
+            snapshot.mkdir(mode=0o755)
+            workspace_info = {"files": 0, "bytes": 0, "entries": 0, "excluded_dirs": []}
+            masks = []
+        else:
+            workspace_info, masks = await _disk(
+                _prepare_workspace, workspace, snapshot, private, protected
+            )
         if any("," in relative for relative, _ in masks):
             raise _error("invalid_input", "受保护目录名称不能包含逗号")
         for filename, content in values.items():

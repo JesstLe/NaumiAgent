@@ -1,3 +1,4 @@
+import type { PersonalItem, PersonalItemAction, PersonalItemControl, PersonalItemExecution, PersonalItemInput, PersonalItemPage, PersonalItemReadInput, PersonalItemReadReceipt, PersonalItemResult, PersonalItemResultsPage, PersonalItemUpdate } from './personalItems'
 import { WorkbenchApiClient } from '@naumi/shared/api/WorkbenchApiClient'
 import type {
   EnginesResponse,
@@ -415,6 +416,40 @@ export class WorkbenchRuntimeClient extends WorkbenchApiClient {
   }
   async config(): Promise<ModelConfig> {
     return (await this.fetch('/config')).json()
+  }
+  async personalItems(query: { state?: string; query?: string; limit?: number; offset?: number } = {}, signal?: AbortSignal): Promise<PersonalItemPage> {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== '') params.set(key, String(value))
+    return (await this.fetch(`/personal/items?${params}`, { signal, cache: 'no-store' })).json()
+  }
+  async personalItem(id: string, signal?: AbortSignal): Promise<PersonalItem> {
+    return (await this.fetch(`/personal/items/${encodeURIComponent(id)}`, { signal, cache: 'no-store' })).json()
+  }
+  async createPersonalItem(body: PersonalItemInput): Promise<PersonalItem> {
+    return (await this.fetch('/personal/items', { method: 'POST', body: JSON.stringify(body) })).json()
+  }
+  async updatePersonalItem(id: string, body: PersonalItemUpdate): Promise<PersonalItem> {
+    return (await this.fetch(`/personal/items/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) })).json()
+  }
+  async controlPersonalItem(id: string, action: PersonalItemAction, body: PersonalItemControl): Promise<PersonalItem> {
+    return (await this.fetch(`/personal/items/${encodeURIComponent(id)}/${action}`, { method: 'POST', body: JSON.stringify(body) })).json()
+  }
+  async personalItemHistory(id: string, signal?: AbortSignal): Promise<{ history: PersonalItem[] }> {
+    return (await this.fetch(`/personal/items/${encodeURIComponent(id)}/history`, { signal, cache: 'no-store' })).json()
+  }
+  async personalItemOccurrences(id: string, signal?: AbortSignal): Promise<{ occurrences: PersonalItemExecution[] }> {
+    return (await this.fetch(`/personal/items/${encodeURIComponent(id)}/occurrences`, { signal, cache: 'no-store' })).json()
+  }
+  async personalItemResults(query: { unread?: boolean; limit?: number; offset?: number } = {}, signal?: AbortSignal): Promise<PersonalItemResultsPage> {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(query)) if (value !== undefined) params.set(key, String(value))
+    return (await this.fetch(`/personal/item-results?${params}`, { signal, cache: 'no-store' })).json()
+  }
+  async personalItemResult(id: string, signal?: AbortSignal): Promise<PersonalItemResult> {
+    return (await this.fetch(`/personal/item-results/${encodeURIComponent(id)}`, { signal, cache: 'no-store' })).json()
+  }
+  async readPersonalItemResult(id: string, body: PersonalItemReadInput): Promise<PersonalItemResult | PersonalItemReadReceipt> {
+    return (await this.fetch(`/personal/item-results/${encodeURIComponent(id)}/read`, { method: 'POST', body: JSON.stringify(body) })).json()
   }
   async personalAgents(includeArchived = false): Promise<{ agents: PersonalAgent[] }> {
     return (await this.fetch(`/personal/agents?include_archived=${includeArchived}`)).json()

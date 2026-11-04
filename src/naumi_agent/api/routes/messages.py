@@ -398,6 +398,9 @@ async def list_messages(
     auth: str = AuthDep,
 ):
     engine = request.app.state.engine
+    items = getattr(engine, "personal_items", None)
+    if items is not None:
+        await items.authorize_session_read(session_id)
     session = await engine.session_store.load(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -431,6 +434,9 @@ async def list_chat_runs(
     limit: int = Query(50, ge=1, le=200),
     auth: str = AuthDep,
 ):
+    items = getattr(request.app.state.engine, "personal_items", None)
+    if items is not None:
+        await items.authorize_session_read(session_id)
     store = _chat_run_store(request)
     runs = await store.list_runs(session_id, limit=limit)
     runs = await _restore_legacy_tool_previews(runs, request, session_id)
@@ -450,6 +456,9 @@ async def get_chat_run(
     request: Request,
     auth: str = AuthDep,
 ):
+    items = getattr(request.app.state.engine, "personal_items", None)
+    if items is not None:
+        await items.authorize_session_read(session_id)
     run = await _chat_run_store(request).get_run(session_id, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Chat run not found")

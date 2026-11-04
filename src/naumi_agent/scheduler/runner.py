@@ -69,6 +69,8 @@ class SchedulerRunner:
         """Create a schedule and persist it."""
         normalized_kind = _parse_kind(kind)
         normalized_target = _parse_target(target)
+        if normalized_target is not ScheduleTarget.SESSION_MESSAGE:
+            raise ValueError("请通过事项入口创建个人执行调度")
         prompt = prompt.strip()
         if not prompt:
             raise ValueError("提醒内容不能为空")
@@ -94,8 +96,52 @@ class SchedulerRunner:
         self._store.save_job(job)
         return job
 
+    def create_personal_item(
+        self, *, schedule_id: str, due_at: str, prompt: str,
+        scope_key: str, binding_sha256: str,
+    ) -> ScheduleJob:
+        if (
+            not schedule_id.startswith("sch_pi_") or not scope_key
+            or len(binding_sha256) != 64
+            or any(c not in "0123456789abcdef" for c in binding_sha256)
+        ):
+            raise ValueError("事项调度缺少确切版本绑定")
+        when = _to_utc_iso(_parse_datetime(due_at))
+        return self._store.create_managed_job(ScheduleJob(
+            id=schedule_id, kind=ScheduleKind.ONCE, expression=when, prompt=prompt,
+            target=ScheduleTarget.PERSONAL_ITEM, status=ScheduleStatus.ACTIVE,
+            next_fire_at=when, created_at=_to_utc_iso(self._now_fn()),
+            scope_key=scope_key, binding_sha256=binding_sha256,
+        ))
+
+    def fire_personal_item_now(
+        self, schedule_id: str, *, scope_key: str, binding_sha256: str,
+    ) -> ScheduleEvent | None:
+        job = self._store.get_job(schedule_id)
+        if job is None:
+            return None
+        if (
+            job.target is not ScheduleTarget.PERSONAL_ITEM or job.scope_key != scope_key
+            or job.binding_sha256 != binding_sha256
+        ):
+            raise ValueError("事项调度身份不一致")
+        if job.status is ScheduleStatus.PAUSED:
+            raise ValueError("事项已暂停，请先恢复")
+        nominal = job.next_fire_at or job.last_fired_at
+        if not nominal:
+            return None
+        event_id = _event_id(job.id, nominal)
+        if job.status is ScheduleStatus.ACTIVE:
+            self._store.apply_fire(
+                job.id, expected_fire_at=nominal, event_id=event_id, next_fire_at="",
+            )
+        return self._store.get_event(event_id)
+
     def list_jobs(self, *, include_inactive: bool = True) -> list[ScheduleJob]:
-        return self._store.list_jobs(include_inactive=include_inactive)
+        return [
+            job for job in self._store.list_jobs(include_inactive=include_inactive)
+            if job.target is ScheduleTarget.SESSION_MESSAGE
+        ]
 
     def get(self, schedule_id: str) -> ScheduleJob | None:
         return self._store.get_job(schedule_id)
@@ -104,6 +150,8 @@ class SchedulerRunner:
         job = self._store.get_job(schedule_id)
         if job is None:
             return None
+        if job.target is not ScheduleTarget.SESSION_MESSAGE:
+            raise ValueError("请在事项中取消本次委托")
         if job.status not in {ScheduleStatus.CANCELLED, ScheduleStatus.COMPLETED}:
             job.status = ScheduleStatus.CANCELLED
             job.next_fire_at = ""
@@ -114,6 +162,8 @@ class SchedulerRunner:
         job = self._store.get_job(schedule_id)
         if job is None:
             return None
+        if job.target is not ScheduleTarget.SESSION_MESSAGE:
+            raise ValueError("请在事项中暂停本次委托")
         if job.status == ScheduleStatus.ACTIVE:
             job.status = ScheduleStatus.PAUSED
             self._store.save_job(job)
@@ -123,6 +173,8 @@ class SchedulerRunner:
         job = self._store.get_job(schedule_id)
         if job is None:
             return None
+        if job.target is not ScheduleTarget.SESSION_MESSAGE:
+            raise ValueError("请在事项中恢复本次委托")
         if job.status in {ScheduleStatus.CANCELLED, ScheduleStatus.COMPLETED}:
             return job
         if job.kind == ScheduleKind.CRON:
@@ -143,35 +195,28 @@ class SchedulerRunner:
             if not job.next_fire_at:
                 continue
             fired_at = job.next_fire_at
-            event = ScheduleEvent(
-                id=_event_id(job.id, fired_at),
-                schedule_id=job.id,
-                fired_at=fired_at,
-                prompt=job.prompt,
-                target=job.target,
-            )
-            if self._store.add_event(event):
-                fired += 1
-
-            job.last_fired_at = fired_at
-            job.fired_count += 1
             if job.kind == ScheduleKind.ONCE:
-                job.status = ScheduleStatus.COMPLETED
-                job.next_fire_at = ""
+                next_fire_at = ""
             else:
                 next_base = max(_parse_datetime(fired_at), now)
                 next_fire_at = CronSchedule.parse(job.expression).next_after(
                     _as_local(next_base)
                 )
-                job.next_fire_at = _to_utc_iso(next_fire_at)
-            self._store.save_job(job)
+                next_fire_at = _to_utc_iso(next_fire_at)
+            if self._store.apply_fire(
+                job.id, expected_fire_at=fired_at, event_id=_event_id(job.id, fired_at),
+                next_fire_at=next_fire_at,
+            ):
+                fired += 1
         return fired
 
     def collect_notifications(self, limit: int = 10) -> list[str]:
         """Return due schedule notifications and mark them delivered."""
         self.tick_due()
         notifications: list[str] = []
-        for event in self._store.pending_events(limit=limit):
+        for event in self._store.pending_events(
+            limit=limit, target=ScheduleTarget.SESSION_MESSAGE,
+        ):
             notifications.append(format_notification(event))
             self._store.mark_event_delivered(event.id)
         return notifications
@@ -295,4 +340,5 @@ def _kind_label(kind: ScheduleKind) -> str:
 def _target_label(target: ScheduleTarget) -> str:
     return {
         ScheduleTarget.SESSION_MESSAGE: "会话提醒",
+        ScheduleTarget.PERSONAL_ITEM: "个人事项",
     }[target]

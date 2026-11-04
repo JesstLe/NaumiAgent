@@ -9,7 +9,7 @@
     "audio_analysis": "mean_volume=-91.0dB; max_volume=-91.0dB; visual review only",
     "review_method": "49 timestamped frames at 10-second intervals across full duration; full-resolution targeted inspection; additional frames at 07:55/07:57/07:59"
   },
-  "scope": "All 24 capability requirements retained. PA-00 and PA-06 delegation/peer slices retain their own local evidence. The current team-conversation and staged team-execution slice has independent real-model, HTTP/browser and completed-record cold-restart acceptance. Scoped leaf activity and unknown token-breakdown fixes have local regression evidence; 36 final team integration/TUI tests pass; broader regression baseline failures and source-copy rollback are tracked in the current team transaction VERIFICATION.txt. No full-product, deployment or platform-completion claim. PA-08 adds immutable private artifacts, exact-version sharing/revocation, real Page/Library and actual Docker calculation. Generic user-named Agents keep stable identities. Its real provider and browser evidence is recorded separately from deterministic concurrency barriers and baseline regression failures; full-product completion remains unclaimed.",
+  "scope": "All 24 capability requirements retained. PA-00 and PA-06 delegation/peer slices retain their own local evidence. The current team-conversation and staged team-execution slice has independent real-model, HTTP/browser and completed-record cold-restart acceptance. Scoped leaf activity and unknown token-breakdown fixes have local regression evidence; 36 final team integration/TUI tests pass; broader regression baseline failures and source-copy rollback are tracked in the current team transaction VERIFICATION.txt. No full-product, deployment or platform-completion claim. PA-08 adds immutable private artifacts, exact-version sharing/revocation, real Page/Library and actual Docker calculation. Generic user-named Agents keep stable identities. Its real provider and browser evidence is recorded separately from deterministic concurrency barriers and baseline regression failures; full-product completion remains unclaimed. PA-01 now has independent real provider/Docker/HTTP/browser/cold-restart evidence for durable one-shot items, exact reports, inbox and explicit human-read receipts. All 24 requirements remain in scope and partial where their original acceptance is incomplete.",
   "evidence_kinds": {
     "visible_ui": "可见实体、消息或状态；不代表后台与外部状态已核验",
     "visible_artifact": "可见可读的产物/对话；其外部事实仍需核验",
@@ -37,9 +37,9 @@
         "src/naumi_agent/agents/factory.py",
         "src/naumi_agent/workbench/service.py"
       ],
-      "requirement": "一句话创建多个可持久存在的专员，不只是临时提示词角色。创建结果有真实身份与可打开入口。",
+      "requirement": "一句话创建多个可持久存在的Agent，不只是临时提示词角色。创建结果有真实身份与可打开入口。",
       "acceptance": [
-        "三种专员实际创建并逐个对话；重启后 ID 和会话仍一致。",
+        "三种Agent实际创建并逐个对话；重启后 ID 和会话仍一致。",
         "重复请求按同一操作身份去重，部分创建失败可恢复。"
       ],
       "implementation_note": "PA-00已实现用户动态创建、档案版本和独立专员入口；本轮团队日常对话与规划→成员DAG→汇总执行已实现，真实主模型查询已有目录并委托已有团队，不预置角色。团队已有独立真实模型、HTTP浏览器和新进程已完成记录读回证据；最终团队36项通过，整合旧失败对照与副本回滚见本轮VERIFICATION.txt，其余语义记忆、声音/账户等原验收保持未全量通过，状态partial。",
@@ -71,17 +71,17 @@
         "src/naumi_agent/workbench/models.py",
         "src/naumi_agent/memory/long_term.py"
       ],
-      "requirement": "个人主助理和专员具有长期身份；个人共享偏好与角色私有上下文分开，不把所有角色混进一个对话。",
+      "requirement": "个人主助理和Agent具有长期身份；个人共享偏好与角色私有上下文分开，不把所有角色混进一个对话。",
       "acceptance": [
-        "两个专员分别保存不同上下文，重启后正确召回。",
-        "未共享的专员资料不跨角色泄露，删除/纠正后旧记忆不再生效。"
+        "两个Agent分别保存不同上下文，重启后正确召回。",
+        "未共享的Agent资料不跨角色泄露，删除/纠正后旧记忆不再生效。"
       ],
       "implementation_note": "专员与团队拥有独立持久对话，团队成员使用独立执行Session/Run，后台append-once结果不覆盖新消息；主会话私有历史不自动传给成员。本轮真实模型/浏览器验证单次交付，新进程读回2个团队回合、7个根Job/Run会话、4条原消息一致且未POST/调用模型/重复消息；分范围语义记忆、纠正/删除和跨工作区召回仍待PA-02，私有文件ACL不由聊天隔离代替。",
       "implementation_record": "../../development/personal-agent/PA-00.md"
     },
     {
       "id": "VID-03",
-      "title": "同领域多个策略专员与重复角色澄清",
+      "title": "同领域多个策略Agent与重复角色澄清",
       "status": "partial",
       "in_scope": true,
       "verified_in_naumi": false,
@@ -109,7 +109,7 @@
     },
     {
       "id": "VID-04",
-      "title": "专员职责、工具、账户与声音配置",
+      "title": "Agent职责、工具、账户与声音配置",
       "status": "partial",
       "in_scope": true,
       "verified_in_naumi": false,
@@ -206,7 +206,7 @@
     },
     {
       "id": "VID-07",
-      "title": "专员直接互相请求资料与可打开的双方对话",
+      "title": "Agent直接互相请求资料与可打开的双方对话",
       "status": "partial",
       "in_scope": true,
       "verified_in_naumi": false,
@@ -268,7 +268,7 @@
       ],
       "requirement": "主控拆任务、按依赖派发和收口；支持串行接力及可并行独立分支。并行与恢复属于所需工程验收，不冒充视频实证。",
       "acceptance": [
-        "至少三位专员各有独立 Run/工具证据，上游完成才解锁依赖步骤。",
+        "至少三位Agent各有独立 Run/工具证据，上游完成才解锁依赖步骤。",
         "失败/取消/未知结果阻断依赖，重启不重复外部动作。"
       ],
       "implementation_note": "PA-06已有1至12步DAG、串并行依赖、真实Job/Run和失败/取消/UNKNOWN阻断。TeamTurn持久回合采用规划协调器Job结束释放容量→成员DAG Jobs→汇总协调器Job，单容量可完成；nested roster祖先版本fence、实际授权叶子active、默认只读grant、实际余量预算和append-once写回均保留。有限token预算遇分项缺失/与根Job不符时保留unknown/usage_unknown，不用零计数解锁后续阶段。真实2成员CSV复核汇总825元共4个独立Job/Run；浏览器另完成TEAM_ACK提问/授权闭环，新进程读回2回合/7根Job与Run会话/4消息无重复。最终团队36项通过，整合旧失败对照与副本回滚见本轮VERIFICATION.txt，产物版本/私有ACL仍在后续切片，状态partial。",
@@ -339,7 +339,7 @@
         "关闭聊天界面、保持执行服务在线时仍继续，重新打开能接上。",
         "超时/重启/取消与回执确认一致，不用状态动画代替真实执行。"
       ],
-      "implementation_note": "PA-06协作在服务在线时独立于聊天页面执行，真实Job/Run/结果持久化，取消与租约失效保留UNKNOWN。本轮团队浏览器后台交付保留新草稿，新进程仅GET读回2个原已完成回合、7个根Job/Run会话、4条消息，原身份/结果/用量一致，无POST/模型调用/重复消息；不把已完成记录读回冒充所有进行中崩溃恢复或主动送达/已读回执，后者仍待PA-04。",
+      "implementation_note": "PA-06协作在服务在线时独立于聊天页面执行，真实Job/Run/结果持久化，取消与租约失效保留UNKNOWN。本轮团队浏览器后台交付保留新草稿，新进程仅GET读回2个原已完成回合、7个根Job/Run会话、4条消息，原身份/结果/用量一致，无POST/模型调用/重复消息；不把已完成记录读回冒充所有进行中崩溃恢复或主动送达/已读回执，后者仍待PA-04。 PA-01已实现多事项、一次性IANA时区调度、共享AgentJob/独立Run、私有报告、持久收件箱和typed人工已读。工作/生活/学习三项真实provider及Docker计算、GUI管理/收件箱、原三Run冷重启零新增均有本轮独立证据；周期/外部账户/设备送达等原条件未借此标为完成。记录见development/personal-agent/PA-01.md与pa01-20261104事务。",
       "implementation_record": "../../development/personal-agent/PA-06.md"
     },
     {
@@ -400,7 +400,8 @@
       "acceptance": [
         "真实指定项目产生任务、负责人、截止时间和可追溯产物。",
         "复盘使用真实数据，未知/未连接项不伪造。"
-      ]
+      ],
+      "implementation_note": " PA-01已实现多事项、一次性IANA时区调度、共享AgentJob/独立Run、私有报告、持久收件箱和typed人工已读。工作/生活/学习三项真实provider及Docker计算、GUI管理/收件箱、原三Run冷重启零新增均有本轮独立证据；周期/外部账户/设备送达等原条件未借此标为完成。记录见development/personal-agent/PA-01.md与pa01-20261104事务。"
     },
     {
       "id": "VID-13",
@@ -496,7 +497,7 @@
     },
     {
       "id": "VID-16",
-      "title": "每个专员的单次/周期例行任务",
+      "title": "每个Agent的单次/周期例行任务",
       "status": "planned",
       "in_scope": true,
       "verified_in_naumi": false,
@@ -524,7 +525,8 @@
       "acceptance": [
         "在真实到期时触发一次，执行回执可重开，重启和重复扫描无重复。",
         "提议、已创建、启用、已触发、已执行、已送达分别显示。"
-      ]
+      ],
+      "implementation_note": " PA-01已实现多事项、一次性IANA时区调度、共享AgentJob/独立Run、私有报告、持久收件箱和typed人工已读。工作/生活/学习三项真实provider及Docker计算、GUI管理/收件箱、原三Run冷重启零新增均有本轮独立证据；周期/外部账户/设备送达等原条件未借此标为完成。记录见development/personal-agent/PA-01.md与pa01-20261104事务。"
     },
     {
       "id": "VID-17",
@@ -629,7 +631,7 @@
     },
     {
       "id": "VID-20",
-      "title": "投资研究专员与关注清单",
+      "title": "投资研究Agent与关注清单",
       "status": "planned",
       "in_scope": true,
       "verified_in_naumi": false,
@@ -709,7 +711,7 @@
     },
     {
       "id": "VID-23",
-      "title": "专员电脑/浏览器操作与执行环境",
+      "title": "Agent电脑/浏览器操作与执行环境",
       "status": "planned",
       "in_scope": true,
       "verified_in_naumi": false,
@@ -735,7 +737,7 @@
     },
     {
       "id": "VID-24",
-      "title": "语音输入/回复与专员声音设置",
+      "title": "语音输入/回复与Agent声音设置",
       "status": "planned",
       "in_scope": true,
       "verified_in_naumi": false,

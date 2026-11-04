@@ -1344,7 +1344,7 @@ async def test_schema_v1_migrates_capacity_policy_without_losing_jobs(
             WHERE type = 'table' AND name = 'agent_job_capacity_policy'
             """
         ).fetchone()
-    assert version == AGENT_JOB_SCHEMA_VERSION == 7
+    assert version == AGENT_JOB_SCHEMA_VERSION == 8
     assert table == ("agent_job_capacity_policy",)
 
 
@@ -1375,7 +1375,7 @@ async def test_schema_v2_adds_terminal_payload_without_losing_jobs(
             row[1]
             for row in db.execute("PRAGMA table_info(agent_jobs)").fetchall()
         }
-    assert version == AGENT_JOB_SCHEMA_VERSION == 7
+    assert version == AGENT_JOB_SCHEMA_VERSION == 8
     assert "terminal_payload_envelope_json" in columns
 
 
@@ -2266,7 +2266,7 @@ async def test_schema_v3_adds_publication_outbox_and_replay_backfills(
                 """
             ).fetchall()
         }
-    assert version == AGENT_JOB_SCHEMA_VERSION == 7
+    assert version == AGENT_JOB_SCHEMA_VERSION == 8
     assert {
         "agent_job_publications",
         "agent_job_publication_events",
@@ -2342,7 +2342,7 @@ async def test_schema_v4_adds_result_inbox_without_losing_publication(
               AND name = 'agent_job_publication_deliveries'
             """
         ).fetchone()
-    assert version == AGENT_JOB_SCHEMA_VERSION == 7
+    assert version == AGENT_JOB_SCHEMA_VERSION == 8
     assert table == ("agent_job_publication_deliveries",)
 
 
@@ -2440,7 +2440,7 @@ async def test_schema_v5_adds_quarantine_authority_without_losing_publication(
               AND name = 'agent_job_publication_quarantines'
             """
         ).fetchone()
-    assert version == AGENT_JOB_SCHEMA_VERSION == 7
+    assert version == AGENT_JOB_SCHEMA_VERSION == 8
     assert table == ("agent_job_publication_quarantines",)
 
 
@@ -2487,7 +2487,7 @@ async def test_schema_v6_adds_result_acknowledgement_authority_without_losing_de
               AND name = 'agent_job_result_acknowledgements'
             """
         ).fetchone()
-    assert version == AGENT_JOB_SCHEMA_VERSION == 7
+    assert version == AGENT_JOB_SCHEMA_VERSION == 8
     assert table == ("agent_job_result_acknowledgements",)
 
 

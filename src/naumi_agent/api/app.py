@@ -75,6 +75,7 @@ def create_app() -> FastAPI:
         commands,
         engines,
         health,
+        items,
         messages,
         output_assets,
         personal,
@@ -90,6 +91,7 @@ def create_app() -> FastAPI:
     app.include_router(output_assets.router, prefix="/api/v1")
     app.include_router(personal.router, prefix="/api/v1")
     app.include_router(artifacts.router, prefix="/api/v1")
+    app.include_router(items.router, prefix="/api/v1")
     app.include_router(tools.router, prefix="/api/v1")
     app.include_router(workbench.router, prefix="/api/v1")
     app.include_router(workspace_controls.router, prefix="/api/v1")

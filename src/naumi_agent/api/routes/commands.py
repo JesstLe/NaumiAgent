@@ -36,7 +36,7 @@ _SUPPORTED = frozenset(
 /chaos /scale /state /vibe /eval /page /heal /dspy /graph /mcts /route
 /speculate /jit /pointer /cooe /sleep /entropy /ooda /probe /hook /vision
 /spar /world /fusion /consensus /pid /zkp /genesis /macro /cosmos /watchdog
-/supervisor /autopsy /feedback /evolution /assistants /library
+/supervisor /autopsy /feedback /evolution /assistants /library /items
 """.split()
 )
 
@@ -97,12 +97,16 @@ class _CommandEngine:
         object.__setattr__(self, "_engine", engine)
         object.__setattr__(self, "_callback", callback)
         object.__setattr__(self, "failed", False)
+        object.__setattr__(self, "_personal_items_manual_channel", "web")
 
     def __getattr__(self, name):
         return getattr(self._engine, name)
 
     def __setattr__(self, name, value):
         setattr(self._engine, name, value)
+
+    def mark_manual_command_failed(self):
+        object.__setattr__(self, "failed", True)
 
     async def execute_tool(self, tool_call, **kwargs):
         tool_call = ToolCall(
@@ -127,6 +131,10 @@ async def run_command(
     session = await engine.session_store.load(session_id)
     if not session:
         raise HTTPException(404, "会话不存在")
+    if command.split(maxsplit=1)[0] == "/items" and getattr(
+        session, "personal_execution_id", ""
+    ):
+        raise HTTPException(409, "这是只读执行记录，请在日常对话或事项页面管理事项")
     if body.edit_message_id:
         if (getattr(session, "engine", "naumi") or "naumi") == "pi":
             raise HTTPException(

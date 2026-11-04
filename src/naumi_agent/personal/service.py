@@ -18,6 +18,7 @@ from naumi_agent.personal.store import PersonalAgentStore
 logger = logging.getLogger(__name__)
 
 _TOOL_LABELS = {
+    "personal_items": "安排、查询和控制当前 Agent 范围内的个人事项",
     "personal_artifacts": "读取、创建、修订与分享当前 Agent 的资料和产物",
     "glob": "按文件名查找文件",
     "grep": "搜索文件内容",
@@ -66,6 +67,7 @@ _TOOL_LABELS = {
 # catalog, global-memory, delegation, or code-generation/registration authority.
 ASSIGNABLE_TOOL_NAMES = frozenset(
     {
+        "personal_items",
         "personal_artifacts",
         "glob",
         "grep",

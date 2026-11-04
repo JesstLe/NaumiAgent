@@ -4260,6 +4260,9 @@ class AgentEngine:
         from naumi_agent.personal.artifacts import PersonalArtifactService
 
         self.personal_artifacts = PersonalArtifactService(self)
+        from naumi_agent.personal.items import PersonalItemService
+
+        self.personal_items = PersonalItemService(self)
         self._personal_turn_snapshot = None
         self.goal_store = resources.goal_store
         self.pursuit_store = resources.pursuit_store
@@ -4396,6 +4399,9 @@ class AgentEngine:
         from naumi_agent.personal.artifact_tools import PersonalArtifactsTool
 
         self._tool_registry.register(PersonalArtifactsTool(self))
+        from naumi_agent.personal.item_tools import PersonalItemsTool
+
+        self._tool_registry.register(PersonalItemsTool(self.personal_items))
         self._tool_registry.register(OutputPublishTool(self))
         self._tool_registry.register(OutputAssetRetentionPreviewTool(self))
         self._tool_registry.register(OutputAssetRetentionRunTool(self))
@@ -4982,6 +4988,7 @@ class AgentEngine:
 
     async def shutdown(self) -> None:
         """释放资源（关闭数据库连接、浏览器、MCP 连接等）."""
+        await self._shutdown_component("personal_items", self.personal_items.stop)
         await self._shutdown_component("personal_teams", self.personal_teams.stop)
         await self._shutdown_component("personal_collaborations", self.personal_collaborations.stop)
         self._advance_session_authorization_generation()
@@ -5675,8 +5682,10 @@ class AgentEngine:
                 result_worker.start()
         self.start_session_retention_worker()
         if not self._isolated_child:
+            self.scheduler_runner.start()
             self.personal_collaborations.start()
             self.personal_teams.start()
+            self.personal_items.start()
         return recovered
 
     async def enqueue_stable_promotion_runtime_admission_delivery(
@@ -9243,7 +9252,9 @@ class AgentEngine:
             events = self._coerce_engine_events(on_event)
         await personal_runtime.authorize_execution(self)
         denial = (
-            None if agent_name == "cli" and tc.name in {"personal_agents", "personal_artifacts"}
+            None if agent_name == "cli" and tc.name in {
+                "personal_agents", "personal_artifacts", "personal_items",
+            }
             else personal_runtime.tool_denial(self, tc.name)
         )
         if denial:
@@ -9554,7 +9565,9 @@ class AgentEngine:
 
         await personal_runtime.authorize_execution(self)
         denial = (
-            None if agent_name == "cli" and tc.name in {"personal_agents", "personal_artifacts"}
+            None if agent_name == "cli" and tc.name in {
+                "personal_agents", "personal_artifacts", "personal_items",
+            }
             else personal_runtime.tool_denial(self, tc.name)
         )
         if denial:
