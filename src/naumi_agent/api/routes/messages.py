@@ -88,39 +88,33 @@ async def update_session(
     request: Request,
     auth: str = AuthDep,
 ):
-    engine = request.app.state.engine
-    _assert_writable_session(engine, session_id)
-    session = await engine.session_store.load(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-    personal = getattr(engine, "personal_agents", None)
-    if getattr(session, "personal_agent_id", "") or (
-        personal is not None and personal.current(session_id) is not None
-    ):
-        if body.model is not None or body.system_prompt is not None:
-            raise HTTPException(409, "该会话属于专员，请在助理设置中修改职责和模型")
-    if body.model is not None:
-        session.model = body.model
-    if body.title is not None:
-        session.title = body.title
-    if body.system_prompt is not None:
-        # Re-write system message if one exists, otherwise append.
-        system_index = next(
-            (i for i, m in enumerate(session.messages) if m.get("role") == "system"),
-            None,
-        )
-        if system_index is not None:
-            session.messages[system_index]["content"] = body.system_prompt
-        else:
-            session.add_message("system", body.system_prompt)
-    session.updated_at = datetime.now()
-    await engine.session_store.save(session)
-    active = getattr(engine, "_session", None)
-    if active is not None and active.id == session_id:
-        active.title = session.title
-        active.model = session.model
-    return _session_to_response(session)
-
+    async with _engine_lock(request):
+        engine = request.app.state.engine
+        _assert_writable_session(engine, session_id)
+        session = await engine.session_store.load(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        personal = getattr(engine, "personal_agents", None)
+        if getattr(session, "personal_agent_id", "") or (
+            personal is not None and personal.current(session_id) is not None
+        ):
+            if body.model is not None or body.system_prompt is not None:
+                raise HTTPException(409, "该会话属于专员，请在助理设置中修改职责和模型")
+        try:
+            session = await engine.session_store.update_metadata(
+                session_id, title=body.title, model=body.model, system_prompt=body.system_prompt,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        active = getattr(engine, "_session", None)
+        if active is not None and active.id == session_id:
+            active.title = session.title
+            active.model = session.model
+            if body.system_prompt is not None:
+                engine.set_system_prompt(body.system_prompt)
+        return _session_to_response(session)
 
 @router.post("/sessions/{session_id}/pin", response_model=SessionResponse)
 async def pin_session(

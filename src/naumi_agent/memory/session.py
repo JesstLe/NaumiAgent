@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 import uuid
+from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from functools import wraps
+from typing import Any, Concatenate
 
 import aiosqlite
 
@@ -20,6 +23,27 @@ from naumi_agent.memory.lifecycle import (
 )
 
 logger = logging.getLogger(__name__)
+
+def _serialized[**P, T](
+    method: Callable[Concatenate[SessionStore, P], Awaitable[T]],
+) -> Callable[Concatenate[SessionStore, P], Awaitable[T]]:
+    """Keep each shared-connection operation and its rollback indivisible."""
+    @wraps(method)
+    async def wrapped(self: SessionStore, *args: P.args, **kwargs: P.kwargs) -> T:
+        async with self._operation_lock:
+            try:
+                return await method(self, *args, **kwargs)
+            except BaseException:
+                if self._db is not None:
+                    cleanup = asyncio.create_task(self._db.rollback())
+                    while not cleanup.done():
+                        try:
+                            await asyncio.shield(cleanup)
+                        except asyncio.CancelledError:
+                            continue
+                    cleanup.result()
+                raise
+    return wrapped
 
 
 @dataclass
@@ -212,15 +236,23 @@ class SessionStore:
     def __init__(self, config: MemoryConfig) -> None:
         self._db_path = config.session_db_path
         self._db: aiosqlite.Connection | None = None
+        self._initialize_lock = asyncio.Lock()
+        self._operation_lock = asyncio.Lock()
 
     async def _get_db(self) -> aiosqlite.Connection:
-        if self._db is None:
-            os.makedirs(os.path.dirname(self._db_path) or ".", exist_ok=True)
-            self._db = await aiosqlite.connect(self._db_path)
-            self._db.row_factory = aiosqlite.Row
-            await self._db.execute(_CREATE_TABLE)
-            await self._ensure_schema(self._db)
-            await self._db.commit()
+        async with self._initialize_lock:
+            if self._db is None:
+                os.makedirs(os.path.dirname(self._db_path) or ".", exist_ok=True)
+                db = await aiosqlite.connect(self._db_path)
+                try:
+                    db.row_factory = aiosqlite.Row
+                    await db.execute(_CREATE_TABLE)
+                    await self._ensure_schema(db)
+                    await db.commit()
+                except BaseException:
+                    await db.close()
+                    raise
+                self._db = db
         return self._db
 
     async def _ensure_schema(self, db: aiosqlite.Connection) -> None:
@@ -262,6 +294,7 @@ class SessionStore:
         await self.save(session)
         return session
 
+    @_serialized
     async def save(self, session: Session) -> None:
         marker = session.personal_agent_id
         if (
@@ -301,18 +334,22 @@ class SessionStore:
         )
         # Ownership is sticky in SQL even when a stale caller saves an unmarked object.
         saved = await cursor.fetchone()
+        await cursor.close()
         await db.commit()
         if saved is not None:
             session.personal_agent_id = saved["personal_agent_id"]
 
+    @_serialized
     async def load(self, session_id: str) -> Session | None:
         db = await self._get_db()
         cursor = await db.execute(_GET, (session_id,))
         row = await cursor.fetchone()
+        await cursor.close()
         if row is None:
             return None
         return Session.from_row(dict(row))
 
+    @_serialized
     async def resume(
         self,
         session_id: str,
@@ -347,6 +384,7 @@ class SessionStore:
         data["archived_at"] = None
         return Session.from_row(data)
 
+    @_serialized
     async def scan_retention_candidates(
         self,
         *,
@@ -399,6 +437,7 @@ class SessionStore:
             total_archived_bytes=total_archived_bytes,
         )
 
+    @_serialized
     async def list_sessions(
         self,
         page: int = 1,
@@ -438,12 +477,14 @@ class SessionStore:
 
         return sessions, total
 
+    @_serialized
     async def delete(self, session_id: str) -> bool:
         db = await self._get_db()
         cursor = await db.execute(_DELETE, (session_id,))
         await db.commit()
         return cursor.rowcount > 0
 
+    @_serialized
     async def delete_if_archived(self, session_id: str) -> bool:
         """Atomically delete only while retention authority is still valid."""
         db = await self._get_db()
@@ -454,6 +495,7 @@ class SessionStore:
         await db.commit()
         return cursor.rowcount > 0
 
+    @_serialized
     async def archive(self, session_id: str) -> bool:
         db = await self._get_db()
         timestamp = datetime.now().isoformat()
@@ -461,6 +503,7 @@ class SessionStore:
         await db.commit()
         return cursor.rowcount > 0
 
+    @_serialized
     async def set_pinned(self, session_id: str, pinned: bool) -> bool:
         db = await self._get_db()
         pinned_at = datetime.now().isoformat() if pinned else None
@@ -490,11 +533,51 @@ class SessionStore:
             git_branch=source.git_branch,
             summary=source.summary,
             personal_agent_id=source.personal_agent_id,
+            engine=source.engine,
         )
         await self.save(duplicate)
         return duplicate
 
+    @_serialized
     async def close(self) -> None:
         if self._db:
             await self._db.close()
             self._db = None
+
+    @_serialized
+    async def update_metadata(
+        self, session_id: str, *, title: str | None = None,
+        model: str | None = None, system_prompt: str | None = None,
+    ) -> Session | None:
+        """Patch only requested fields, never replay an earlier message snapshot."""
+        db = await self._get_db()
+        await db.execute("BEGIN IMMEDIATE")
+        async with db.execute(_GET, (session_id,)) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            await db.rollback()
+            return None
+        session = Session.from_row(dict(row))
+        if session.personal_agent_id and (model is not None or system_prompt is not None):
+            raise ValueError("该会话属于专员，请在助理设置中修改职责和模型")
+        changes: dict[str, Any] = {"updated_at": datetime.now().isoformat()}
+        if title is not None:
+            changes["title"] = title
+        if model is not None:
+            changes["model"] = model
+        if system_prompt is not None:
+            message = next((m for m in session.messages if m.get("role") == "system"), None)
+            if message is None:
+                session.add_message("system", system_prompt)
+            else:
+                message["content"] = system_prompt
+            changes["messages"] = json.dumps(session.messages, ensure_ascii=False)
+        assignments = ", ".join(f"{field} = ?" for field in changes)
+        await db.execute(
+            f"UPDATE sessions SET {assignments} WHERE id = ?",
+            (*changes.values(), session_id),
+        )
+        async with db.execute(_GET, (session_id,)) as cursor:
+            updated = await cursor.fetchone()
+        await db.commit()
+        return Session.from_row(dict(updated))
