@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-from unittest.mock import Mock
-
 import pytest
 
 from naumi_agent.tools.sandbox import (
     _MAX_OUTPUT_BYTES,
     MAX_CODE_CHARS,
     CodeExecuteTool,
-    _kill_process,
     _normalize_execution_inputs,
     _truncate,
     create_sandbox_tools,
@@ -38,20 +35,6 @@ class TestTruncate:
         text = "你" * (_MAX_OUTPUT_BYTES + 1000)
         result = _truncate(text)
         assert "截断" in result
-
-
-class TestKillProcess:
-    @pytest.mark.asyncio
-    async def test_kill_calls_proc_kill(self):
-        mock_proc = Mock()
-        await _kill_process(mock_proc)
-        mock_proc.kill.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_kill_ignores_process_lookup_error(self):
-        mock_proc = Mock()
-        mock_proc.kill.side_effect = ProcessLookupError
-        await _kill_process(mock_proc)
 
 
 class TestCodeExecuteTool:

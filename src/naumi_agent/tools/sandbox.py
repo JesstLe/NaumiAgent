@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
-import sys
 import tempfile
+import uuid
 from typing import Any
 
+from naumi_agent.runtime.owned_process import (
+    finish_cleanup,
+    resolve_python_executable,
+    run_owned_process,
+)
 from naumi_agent.tools.base import Tool, ToolMetadata
 
 logger = logging.getLogger(__name__)
@@ -95,15 +99,9 @@ class CodeExecuteTool(Tool):
             return _docker_available_cache
 
         try:
-            proc = await asyncio.create_subprocess_exec(
-                "docker",
-                "info",
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            await asyncio.wait_for(proc.wait(), timeout=5)
-            _docker_available_cache = proc.returncode == 0
-        except (TimeoutError, FileNotFoundError):
+            result = await run_owned_process(["docker", "info"], timeout=5)
+            _docker_available_cache = result.returncode == 0
+        except (TimeoutError, OSError):
             _docker_available_cache = False
 
         return _docker_available_cache
@@ -125,6 +123,7 @@ class CodeExecuteTool(Tool):
             f.write(code)
             host_path = f.name
 
+        container_name = "naumi-code-" + uuid.uuid4().hex
         try:
             container_path = f"/tmp/code{ext}"
             cmd_map = {
@@ -134,48 +133,39 @@ class CodeExecuteTool(Tool):
             }
             cmd = cmd_map.get(language, ["python", container_path])
 
-            proc = await asyncio.create_subprocess_exec(
-                "docker",
-                "run",
-                "--rm",
-                "-v",
-                f"{host_path}:{container_path}:ro",
-                "--network",
-                "none",
-                "--memory",
-                "256m",
-                "--cpus",
-                "1",
-                image,
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-
             try:
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(), timeout=timeout,
+                result = await run_owned_process(
+                    [
+                        "docker", "run", "--rm", "--name", container_name,
+                        "-v", f"{host_path}:{container_path}:ro",
+                        "--network", "none", "--memory", "256m", "--cpus", "1",
+                        image, *cmd,
+                    ],
+                    timeout=timeout,
                 )
             except TimeoutError:
-                await _kill_process(proc)
                 return f"Error: Execution timed out after {timeout}s"
 
-            out = _truncate(stdout.decode("utf-8", errors="replace"))
-            err = _truncate(stderr.decode("utf-8", errors="replace"))
+            out = _truncate(result.stdout.decode("utf-8", errors="replace"))
+            err = _truncate(result.stderr.decode("utf-8", errors="replace"))
 
             parts: list[str] = []
             if out.strip():
                 parts.append(out)
             if err.strip():
                 parts.append(f"[stderr]\n{err}")
-            if proc.returncode != 0:
-                parts.append(f"[exit code: {proc.returncode}]")
+            if result.returncode != 0:
+                parts.append(f"[exit code: {result.returncode}]")
 
             return "\n".join(parts) if parts else "(no output)"
         except Exception as e:
             return f"Error: {type(e).__name__}: {e}"
         finally:
-            os.unlink(host_path)
+            try:
+                # Killing the docker CLI does not stop a daemon-owned container.
+                await finish_cleanup(_remove_container(container_name))
+            finally:
+                os.unlink(host_path)
 
     async def _run_local(self, code: str, language: str, timeout: int) -> str:
         """Docker 不可用时，在本地临时目录执行（受限降级方案）."""
@@ -188,53 +178,44 @@ class CodeExecuteTool(Tool):
                 f.write(code)
 
             cmd_map = {
-                "python": [sys.executable, file_path],
                 "javascript": ["node", file_path],
                 "bash": ["bash", file_path],
             }
-            cmd = cmd_map.get(language, [sys.executable, file_path])
 
             try:
-                proc = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    cwd=tmpdir,
+                cmd = (
+                    [resolve_python_executable(), file_path]
+                    if language == "python" else cmd_map[language]
                 )
-
                 try:
-                    stdout, stderr = await asyncio.wait_for(
-                        proc.communicate(), timeout=timeout,
-                    )
+                    result = await run_owned_process(cmd, timeout=timeout, cwd=tmpdir)
                 except TimeoutError:
-                    await _kill_process(proc)
                     return (
                         f"Error: Execution timed out after {timeout}s "
                         "(本地模式，无资源隔离)"
                     )
 
-                out = _truncate(stdout.decode("utf-8", errors="replace"))
-                err = _truncate(stderr.decode("utf-8", errors="replace"))
+                out = _truncate(result.stdout.decode("utf-8", errors="replace"))
+                err = _truncate(result.stderr.decode("utf-8", errors="replace"))
 
                 parts: list[str] = []
                 if out.strip():
                     parts.append(out)
                 if err.strip():
                     parts.append(f"[stderr]\n{err}")
-                if proc.returncode != 0:
-                    parts.append(f"[exit code: {proc.returncode}]")
+                if result.returncode != 0:
+                    parts.append(f"[exit code: {result.returncode}]")
 
                 return "\n".join(parts) if parts else "(no output)"
             except Exception as e:
                 return f"Error: {type(e).__name__}: {e}"
 
 
-async def _kill_process(proc: asyncio.subprocess.Process) -> None:
-    """Kill a subprocess, best-effort."""
-    try:
-        proc.kill()
-    except ProcessLookupError:
-        pass
+async def _remove_container(name: str) -> None:
+    """Remove only this invocation's container, with bounded CLI cleanup."""
+    result = await run_owned_process(["docker", "rm", "--force", name], timeout=5)
+    if result.returncode and b"No such container" not in result.stderr:
+        raise RuntimeError("代码容器清理失败，请检查 Docker 状态后确认容器已停止。")
 
 
 def _truncate(text: str, max_bytes: int = _MAX_OUTPUT_BYTES) -> str:
