@@ -82,12 +82,18 @@ router = APIRouter(tags=["personal-agents"], route_class=PersonalRoute)
 class AgentCreate(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid", str_strip_whitespace=True)
     request_id: str = Field(min_length=1, max_length=128)
-    name: str = Field(min_length=1, max_length=80)
+    name: str = Field(
+        min_length=1, max_length=80,
+        description="用户指定的 Agent 名称，与职责分离；保持原名，不自动追加职业后缀。",
+    )
     description: str = Field(default="", max_length=500)
     instructions: str = Field(min_length=1, max_length=12000)
     model_tier: Literal["fast", "capable", "reasoning"] = "capable"
     tool_names: list[str] = Field(default_factory=list, max_length=128)
-    kind: Literal["specialist", "team"] = "specialist"
+    kind: Literal["specialist", "team"] = Field(
+        default="specialist",
+        description="兼容类型值：specialist 表示独立 Agent，不限定职业；team 表示团队。",
+    )
     member_ids: list[str] = Field(default_factory=list, max_length=128)
 
 

@@ -19,7 +19,7 @@
   "capabilities": [
     {
       "id": "VID-01",
-      "title": "自然语言组建多个专业助手/团队",
+      "title": "自然语言创建多个 Agent / 团队",
       "status": "partial",
       "in_scope": true,
       "verified_in_naumi": false,
@@ -39,7 +39,7 @@
       ],
       "requirement": "一句话创建多个可持久存在的Agent，不只是临时提示词角色。创建结果有真实身份与可打开入口。",
       "acceptance": [
-        "三种Agent实际创建并逐个对话；重启后 ID 和会话仍一致。",
+        "三个用户命名的 Agent实际创建并逐个对话；重启后 ID 和会话仍一致。",
         "重复请求按同一操作身份去重，部分创建失败可恢复。"
       ],
       "implementation_note": "PA-00已实现用户动态创建、档案版本和独立 Agent 入口；本轮团队日常对话与规划→成员DAG→汇总执行已实现，真实主模型查询已有目录并委托已有团队，不预置角色。团队已有独立真实模型、HTTP浏览器和新进程已完成记录读回证据；最终团队36项通过，整合旧失败对照与副本回滚见本轮VERIFICATION.txt，其余语义记忆、声音/账户等原验收保持未全量通过，状态partial。",
@@ -47,7 +47,7 @@
     },
     {
       "id": "VID-02",
-      "title": "每位助手的独立身份、会话与记忆",
+      "title": "每个 Agent 的独立身份、会话与记忆",
       "status": "partial",
       "in_scope": true,
       "verified_in_naumi": false,
@@ -71,7 +71,7 @@
         "src/naumi_agent/workbench/models.py",
         "src/naumi_agent/memory/long_term.py"
       ],
-      "requirement": "个人主助理和Agent具有长期身份；个人共享偏好与角色私有上下文分开，不把所有角色混进一个对话。",
+      "requirement": "个人主 Agent和Agent具有长期身份；个人共享偏好与角色私有上下文分开，不把所有角色混进一个对话。",
       "acceptance": [
         "两个Agent分别保存不同上下文，重启后正确召回。",
         "未共享的Agent资料不跨角色泄露，删除/纠正后旧记忆不再生效。"
@@ -81,7 +81,7 @@
     },
     {
       "id": "VID-03",
-      "title": "同领域多个策略Agent与重复角色澄清",
+      "title": "同领域不同策略的 Agent 与重复创建澄清",
       "status": "partial",
       "in_scope": true,
       "verified_in_naumi": false,
@@ -109,7 +109,7 @@
     },
     {
       "id": "VID-04",
-      "title": "Agent职责、工具、账户与声音配置",
+      "title": "Agent 职责、工具、账户与声音配置",
       "status": "partial",
       "in_scope": true,
       "verified_in_naumi": false,
@@ -177,7 +177,7 @@
     },
     {
       "id": "VID-06",
-      "title": "主助理查询团队目录与全局进展",
+      "title": "主 Agent 查询团队目录与全局进展",
       "status": "partial",
       "in_scope": true,
       "verified_in_naumi": false,
@@ -196,7 +196,7 @@
         "src/naumi_agent/agent_control/service.py",
         "src/naumi_agent/agent_control/models.py"
       ],
-      "requirement": "主助理基于持久任务状态回答谁在做什么、等待什么、结果在哪里，而非靠对话猜测。",
+      "requirement": "主 Agent基于持久任务状态回答谁在做什么、等待什么、结果在哪里，而非靠对话猜测。",
       "acceptance": [
         "多个执行状态与列表同步，已完成/等待确认/失败分开显示。",
         "状态来源失联时显示未知，不声称全部完成。"
@@ -206,7 +206,7 @@
     },
     {
       "id": "VID-07",
-      "title": "Agent直接互相请求资料与可打开的双方对话",
+      "title": "Agent 直接互相请求资料与可打开的双方对话",
       "status": "partial",
       "in_scope": true,
       "verified_in_naumi": false,
@@ -238,12 +238,12 @@
         "消息有稳定 message_id、sender/recipient、task/run 和交付回执。",
         "重启、重发和接收方离线后可恢复且不重复处理。"
       ],
-      "implementation_note": "PA-06专员双向消息具有显式版本/工具grant、独立接收Session/Engine/Run、持久outbox/回答/SHA与回执、双方对话和user/agent ACK。上一peer切片583项后端、178项前端及真实模型/浏览器/冷重启属于自身事务。本轮团队另有真实模型、浏览器提问/成员授权/单次交付和新进程读回证据；最终团队36项通过，整合旧失败对照与副本回滚见本轮VERIFICATION.txt，完整产物版本/私有资料ACL未完成，状态partial。",
+      "implementation_note": "PA-06Agent双向消息具有显式版本/工具grant、独立接收Session/Engine/Run、持久outbox/回答/SHA与回执、双方对话和user/agent ACK。上一peer切片583项后端、178项前端及真实模型/浏览器/冷重启属于自身事务。本轮团队另有真实模型、浏览器提问/成员授权/单次交付和新进程读回证据；最终团队36项通过，整合旧失败对照与副本回滚见本轮VERIFICATION.txt，完整产物版本/私有资料ACL未完成，状态partial。",
       "implementation_record": "../../development/personal-agent/PA-06.md"
     },
     {
       "id": "VID-08",
-      "title": "主助理组织多角色接力与依赖执行",
+      "title": "主 Agent 组织多 Agent 接力与依赖执行",
       "status": "partial",
       "in_scope": true,
       "verified_in_naumi": false,
@@ -276,7 +276,7 @@
     },
     {
       "id": "VID-09",
-      "title": "跨角色传递上下文、约束与产物版本",
+      "title": "跨 Agent 传递上下文、约束与产物版本",
       "status": "partial",
       "in_scope": true,
       "verified_in_naumi": false,
@@ -431,7 +431,7 @@
         "src/naumi_agent/worktree/",
         "src/naumi_agent/runs/git_probe.py"
       ],
-      "requirement": "个人主助理可把工作委托派到实际编码环境，链接仓库、任务、提交/PR和状态；云端执行作为平台实现单独验收。",
+      "requirement": "个人主 Agent可把工作委托派到实际编码环境，链接仓库、任务、提交/PR和状态；云端执行作为平台实现单独验收。",
       "acceptance": [
         "真实测试仓库完成读取→隔离改动→测试→PR/提交读回；不触碰无关工作。",
         "Merged 只来自远端状态核验，不以模型回复作为合并证据。"
@@ -497,7 +497,7 @@
     },
     {
       "id": "VID-16",
-      "title": "每个Agent的单次/周期例行任务",
+      "title": "每个 Agent 的单次/周期例行任务",
       "status": "partial",
       "in_scope": true,
       "verified_in_naumi": false,
@@ -631,7 +631,7 @@
     },
     {
       "id": "VID-20",
-      "title": "投资研究Agent与关注清单",
+      "title": "投资研究能力与关注清单",
       "status": "planned",
       "in_scope": true,
       "verified_in_naumi": false,
@@ -659,7 +659,7 @@
     },
     {
       "id": "VID-21",
-      "title": "主助理复核专家结果并指出矛盾",
+      "title": "主 Agent 复核其他 Agent 的结果并指出矛盾",
       "status": "planned",
       "in_scope": true,
       "verified_in_naumi": false,
@@ -714,7 +714,7 @@
     },
     {
       "id": "VID-23",
-      "title": "Agent电脑/浏览器操作与执行环境",
+      "title": "Agent 电脑/浏览器操作与执行环境",
       "status": "planned",
       "in_scope": true,
       "verified_in_naumi": false,
@@ -740,7 +740,7 @@
     },
     {
       "id": "VID-24",
-      "title": "语音输入/回复与Agent声音设置",
+      "title": "语音输入/回复与 Agent 声音设置",
       "status": "planned",
       "in_scope": true,
       "verified_in_naumi": false,
@@ -761,5 +761,25 @@
         "噪声、权限拒绝、切换角色、断流与用户打断均有明确结果。"
       ]
     }
-  ]
+  ],
+  "agent_identity": {
+    "entity_name": "Agent",
+    "initial_agents": [
+      "main"
+    ],
+    "creation_policy": "explicit_user_request",
+    "fixed_occupations": false,
+    "name_policy": "preserve_user_name",
+    "kind_compatibility": {
+      "specialist": "Agent",
+      "team": "团队"
+    },
+    "configuration": [
+      "instructions",
+      "model_tier",
+      "tool_names",
+      "member_ids"
+    ],
+    "continuity": "职责调整保持原 Agent ID、名称、会话与历史；不自动重命名已有对象。"
+  }
 }

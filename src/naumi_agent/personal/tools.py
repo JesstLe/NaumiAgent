@@ -95,7 +95,7 @@ class PersonalAgentsTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "按用户明确要求管理长期存在的个人Agent或团队。初始没有预置Agent。"
+            "按用户明确要求管理长期存在的独立 Agent 或团队。初始只有主 Agent，其余不预置。"
             "可查看、创建、修改、查看历史和打开独立会话。创建须提供稳定 request_id；"
             "修改须提供当前 expected_version。工具列表为空代表无工具权限。"
             "collaborate 将明确任务委派给已有Agent，steps 绑定AgentID与版本；"
@@ -116,7 +116,7 @@ class PersonalAgentsTool(Tool):
         return ToolMetadata(
             requires_confirmation=True,
             user_facing_name="管理 Agent",
-            search_hint="personal agents persistent specialist team create update session",
+            search_hint="personal agents persistent independent agent team create update session",
         )
 
     @property
@@ -128,7 +128,12 @@ class PersonalAgentsTool(Tool):
                 "operation": {"type": "string", "enum": list(_FIELDS)},
                 "agent_id": {"type": "string", "pattern": "^pa_[0-9a-f]{32}$"},
                 "request_id": {"type": "string", "minLength": 1, "maxLength": 128},
-                "name": {"type": "string", "minLength": 1, "maxLength": 80},
+                "name": {
+                    "type": "string", "minLength": 1, "maxLength": 80,
+                    "description": (
+                        "用户指定的 Agent 名称，与职责分离；保持原名，不自动追加职业后缀。"
+                    ),
+                },
                 "description": {"type": "string", "maxLength": 500},
                 "instructions": {"type": "string", "minLength": 1, "maxLength": 12000},
                 "model_tier": {"type": "string", "enum": ["fast", "capable", "reasoning"]},
@@ -144,7 +149,12 @@ class PersonalAgentsTool(Tool):
                     "uniqueItems": True,
                     "items": {"type": "string", "pattern": "^pa_[0-9a-f]{32}$"},
                 },
-                "kind": {"type": "string", "enum": ["specialist", "team"]},
+                "kind": {
+                    "type": "string", "enum": ["specialist", "team"],
+                    "description": (
+                        "兼容类型值：specialist 表示独立 Agent，不限定职业；team 表示团队。"
+                    ),
+                },
                 "status": {"type": "string", "enum": ["active", "paused", "archived"]},
                 "expected_version": {"type": "integer", "minimum": 1},
                 "include_archived": {"type": "boolean"},

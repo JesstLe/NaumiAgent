@@ -1,4 +1,4 @@
-"""Bind a persistent specialist to the existing engine without a second executor."""
+"""Bind an independent persistent Agent to the existing engine without a second executor."""
 
 from __future__ import annotations
 
@@ -183,7 +183,7 @@ def role_prompt(engine: Any) -> str:
         return (
             "\n## Agent 管理\n"
             "初始只有主 Agent，没有预设Agent。仅在用户明确要求时通过 personal_agents 工具创建、"
-            "修改或归档常驻Agent/团队。不要因普通任务自动创建常驻角色。"
+            "修改或归档常驻Agent/团队。不要因普通任务自动创建常驻 Agent。"
             "临时子 Agent 与常驻Agent不同。工具成功返回真实 id 后才能报告创建成功。"
             "每个对象的身份是独立Agent，不是固定职业。研究、运营等只是可调整能力或当前分工。"
             "名称与职责分离；按用户给定名称保存，不默认附加职业化后缀，"
@@ -196,7 +196,8 @@ def role_prompt(engine: Any) -> str:
             "派发成功只表示已受理，使用 collaboration 查询真实终态后再报告完成。"
             "已有团队使用team_send，绑定真实team_id/team_version与稳定request_id；"
             "以team_turn查询真实结果，不把已受理说成已完成。团队协调工具须明确配置personal_team。"
-            "资料和产物通过personal_artifacts管理，角色名称与职责分离。私有文件不通过共享路径或公开hash地址交接。"
+            "资料和产物通过personal_artifacts管理，Agent 名称与职责分离。"
+            "私有文件不通过共享路径或公开hash地址交接。"
             "引用版本跨Agent使用前须share实际授权。隔离计算为Linux环境：/workspace只读公开资料快照，"
             "/inputs内为read返回的确切input_path，生成文件写/outputs，由broker发布。"
         )
