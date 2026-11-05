@@ -629,6 +629,11 @@ def test_research_store_is_distinct_strong_owner_journal_without_worker(store):
             "context_update",
             "context_result",
             "context_head",
+            "provenance",
+            "semantic",
+            "semantic_input",
+            "semantic_submission",
+            "peer_read",
         }
     )
     assert store.spec.namespace == "research" and store.spec.parent_field == "notebook_id"

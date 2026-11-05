@@ -26,6 +26,11 @@ _HELP = """研究命令：
 /research source <来源ID> [--revision N]
 /research history <研究ID> [--limit N] [--after-revision N]
 /research request <原request_id>
+/research semantic-preview-json '<完整JSON>'
+/research semantic-list <研究ID>
+/research semantic-get <复核ID>
+/research semantic-request <原request_id>
+/research <semantic-start|semantic-reconcile|semantic-cancel>-json '<完整JSON>'
 /research egress-list [--limit N] [--after 原外发ID]
 /research egress-get <原外发ID>
 /research egress-request <原request_id>
@@ -45,6 +50,10 @@ _JSON = frozenset(
         "egress-decide",
         "egress-execute",
         "context-rollforward",
+        "semantic-preview",
+        "semantic-start",
+        "semantic-reconcile",
+        "semantic-cancel",
     }
 )
 
@@ -102,13 +111,16 @@ def parse_research_command(argument):
             value.update(session_id=args[0], actor_id=args[1])
         elif action in {"list", "egress_list"}:
             value.update(_options(args, {"limit", "after"}))
-        elif action == "egress_get" and len(args) == 1:
+        elif action in {"egress_get", "semantic_get", "semantic_list"} and len(args) == 1:
             value["id"] = args[0]
         elif action in {"get", "source", "history"} and args:
             value["id"] = args[0]
             options = {"limit", "after_revision"} if action == "history" else {"revision"}
             value.update(_options(args[1:], options))
-        elif action in {"request", "egress_request", "context_request"} and len(args) == 1:
+        elif (
+            action in {"request", "egress_request", "context_request", "semantic_request"}
+            and len(args) == 1
+        ):
             value["request_id"] = args[0]
         else:
             raise _invalid()

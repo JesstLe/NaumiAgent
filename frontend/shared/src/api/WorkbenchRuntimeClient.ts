@@ -2,6 +2,7 @@ import type { FollowupArguments, FollowupContext, FollowupResponses } from './pe
 import type { ResearchContext, ResearchHistory, ResearchPage, ResearchRequest, ResearchResult, ResearchSourceView, ResearchView } from './personalResearch'
 import type { ResearchEgressPage, ResearchEgressRequest, ResearchEgressView } from './personalResearchEgress'
 import type { ResearchSessionContextPreview, ResearchSessionContextReceipt, ResearchSessionContextRequest, ResearchSessionContextWrite } from './personalResearchContext'
+import type { ResearchSemanticMutation, ResearchSemanticPreview, ResearchSemanticRequest, ResearchSemanticReview, ResearchSemanticStart } from './personalResearchSemantic'
 import type { WorkspaceArguments, WorkspaceContext, WorkspaceOperation, WorkspaceResponses } from './personalWorkspaces'
 import type { NotificationBatch, NotificationClaim, NotificationContext, NotificationMutation, NotificationPage, NotificationPreferencesView, NotificationPreferenceWrite, NotificationPresentation, NotificationPrompt, NotificationQuery, NotificationRead, NotificationRequest } from './personalNotifications'
 import type { TodayContext, TodayDayView, TodayHistory, TodayMetadataView, TodayMutation, TodayOperation, TodayQuery, TodayRequest, TodaySources, TodayWriteBodies } from './personalToday'
@@ -549,6 +550,25 @@ export class WorkbenchRuntimeClient extends WorkbenchApiClient {
   }
   async getPersonalResearchContextRequest(requestId: string, signal?: AbortSignal): Promise<ResearchSessionContextRequest> {
     return (await this.fetch(`/personal/research/context-requests/${encodeURIComponent(requestId)}`, { signal, cache: 'no-store' })).json()
+  }
+  async getPersonalResearchSemanticContext(id: string, sourceSessionId: string, reviewerAgentId: string, signal?: AbortSignal): Promise<ResearchSemanticPreview> {
+    const params = new URLSearchParams({ source_session_id: sourceSessionId, reviewer_agent_id: reviewerAgentId })
+    return (await this.fetch(`/personal/research/${encodeURIComponent(id)}/semantic-context?${params}`, { signal, cache: 'no-store' })).json()
+  }
+  async listPersonalResearchSemanticReviews(id: string, signal?: AbortSignal): Promise<{ reviews: ResearchSemanticReview[] }> {
+    return (await this.fetch(`/personal/research/${encodeURIComponent(id)}/semantic-reviews`, { signal, cache: 'no-store' })).json()
+  }
+  async getPersonalResearchSemanticReview(id: string, signal?: AbortSignal): Promise<ResearchSemanticReview> {
+    return (await this.fetch(`/personal/research/semantic-reviews/${encodeURIComponent(id)}`, { signal, cache: 'no-store' })).json()
+  }
+  async getPersonalResearchSemanticRequest(requestId: string, signal?: AbortSignal): Promise<ResearchSemanticRequest> {
+    return (await this.fetch(`/personal/research/semantic-requests/${encodeURIComponent(requestId)}`, { signal, cache: 'no-store' })).json()
+  }
+  async startPersonalResearchSemanticReview(body: ResearchSemanticStart, signal?: AbortSignal): Promise<ResearchSemanticReview> {
+    return (await this.fetch('/personal/research/operations/semantic_start', { method: 'POST', signal: signal ?? AbortSignal.timeout(120000), cache: 'no-store', body: JSON.stringify(body) })).json()
+  }
+  async operatePersonalResearchSemanticReview(operation: 'semantic_reconcile' | 'semantic_cancel', body: ResearchSemanticMutation, signal?: AbortSignal): Promise<ResearchSemanticReview> {
+    return (await this.fetch(`/personal/research/operations/${operation}`, { method: 'POST', signal: signal ?? AbortSignal.timeout(120000), cache: 'no-store', body: JSON.stringify(body) })).json()
   }
   async listPersonalResearchEgress(query: { limit?: number; after?: string } = {}, signal?: AbortSignal): Promise<ResearchEgressPage> {
     const params = new URLSearchParams()

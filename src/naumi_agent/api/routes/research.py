@@ -27,6 +27,7 @@ _QUERY = {
     "get_notebook": frozenset({"revision"}),
     "get_source": frozenset({"revision"}),
     "history": frozenset({"limit", "after_revision"}),
+    "semantic_context": frozenset({"source_session_id", "reviewer_agent_id"}),
 }
 _STATUS = {
     "scope_denied": 403,
@@ -52,6 +53,7 @@ _STATUS = {
     "action_expired": 409,
     "action_locked": 409,
     "lease_lost": 409,
+    "execution_fenced": 409,
 }
 
 
@@ -199,6 +201,26 @@ async def operation(operation: str, request: Request):
 @router.get("/personal/research/{id}/history")
 async def history(id: str, request: Request):
     return await _execute(request, {"operation": "history", "id": id, **_query(request)})
+
+
+@router.get("/personal/research/semantic-reviews/{id}")
+async def semantic_review(id: str, request: Request):
+    return await _execute(request, {"operation": "semantic_get", "id": id})
+
+
+@router.get("/personal/research/semantic-requests/{request_id}")
+async def semantic_request(request_id: str, request: Request):
+    return await _execute(request, {"operation": "semantic_request", "request_id": request_id})
+
+
+@router.get("/personal/research/{id}/semantic-context")
+async def semantic_context(id: str, request: Request):
+    return await _execute(request, {"operation": "semantic_preview", "id": id, **_query(request)})
+
+
+@router.get("/personal/research/{id}/semantic-reviews")
+async def semantic_reviews(id: str, request: Request):
+    return await _execute(request, {"operation": "semantic_list", "id": id})
 
 
 @router.get("/personal/research/{id}")

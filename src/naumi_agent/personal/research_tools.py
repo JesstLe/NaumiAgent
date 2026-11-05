@@ -23,6 +23,7 @@ from naumi_agent.personal.research_models import (
     SourceId,
     StrictPayload,
 )
+from naumi_agent.personal.research_semantic_models import SEMANTIC_OPERATIONS
 from naumi_agent.tools.base import Tool, ToolExecutionError, ToolMetadata
 
 MAX_REQUEST_BYTES = 512 * 1024
@@ -57,6 +58,7 @@ _MESSAGES = {
     "action_expired": "原外发提案已过期，请核对原记录",
     "action_locked": "原外发已经进入发送阶段，请核对原请求",
     "lease_lost": "原外发执行权已变化，请核对原请求",
+    "execution_fenced": "原复核执行已结束或执行权已变化，请核对原执行",
 }
 
 
@@ -194,6 +196,7 @@ def request_schema():
         *_OPERATIONS.values(),
         *(model for name, model in EGRESS_OPERATIONS.items() if name != "egress_decide"),
         *(model for name, model in CONTEXT_OPERATIONS.items() if name != "context_rollforward"),
+        *SEMANTIC_OPERATIONS.values(),
     ]:
         schema = model.model_json_schema()
         for key, value in schema.pop("$defs", {}).items():
@@ -220,7 +223,7 @@ def validate_research_arguments(value, *, human=False):
                 raise PersonalAgentError("scope_denied", "更新对话依据需要用户确认")
             model = CONTEXT_OPERATIONS[value["operation"]]
             return model.model_validate(value).model_dump(mode="json")
-        model = _OPERATIONS.get(value["operation"])
+        model = _OPERATIONS.get(value["operation"]) or SEMANTIC_OPERATIONS.get(value["operation"])
         if model is None:
             raise ValueError()
         return model.model_validate(value).model_dump(mode="json", exclude_none=True)
@@ -277,6 +280,11 @@ class PersonalResearchTool(Tool):
         "机械检查引用与数值，按确切复核摘要保存报告。来源时效与未核实标签会保留；"
         "私有上下文需要检索或读取网页时，先用egress_propose提出确切外发提案，"
         "用户批准后用egress_execute执行一次；egress_get/list/request可核对原状态。"
+        "独立语义复核使用semantic_preview确认资料范围，再用semantic_start委派用户创建的另一个Agent；"
+        "复核执行中用semantic_sources/source读取冻结正文，并以semantic_submit提交逐条结论和确切引文；"
+        "引文直接逐字复制来源候选锚点的submission_evidence对象，不改写空白或换行；"
+        "修改提交内容时使用新的request_id，已提交结果只读回原记录。"
+        "semantic_get/list/request/reconcile/cancel核对原执行，不重复启动。"
         "不提供外部发布、交易或人工批准。私有上下文中的网络请求需要明确外发授权。"
     )
 
@@ -293,7 +301,15 @@ class PersonalResearchTool(Tool):
 
     @property
     def parameters_schema(self):
-        return copy.deepcopy(request_schema())
+        schema = copy.deepcopy(request_schema())
+        if getattr(self.engine, "_personal_semantic_review", None) is not None:
+            schema["oneOf"] = [
+                branch
+                for branch in schema["oneOf"]
+                if branch["properties"]["operation"]["const"]
+                in {"semantic_sources", "semantic_source", "semantic_submit"}
+            ]
+        return schema
 
     def parse_arguments(self, raw):
         try:

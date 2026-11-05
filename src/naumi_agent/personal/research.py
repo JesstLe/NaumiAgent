@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import os
 import re
@@ -16,7 +17,14 @@ from naumi_agent.personal.research_authority import ResearchAuthority, read_ref
 from naumi_agent.personal.research_context import ResearchContextMixin
 from naumi_agent.personal.research_egress import ResearchEgressMixin
 from naumi_agent.personal.research_models import CreateNotebook, ReviseNotebook, validate_payload
+from naumi_agent.personal.research_peer_authority import (
+    _CACHE_KINDS,
+    _RECORD_CACHE,
+    ResearchPeerAuthorityMixin,
+)
+from naumi_agent.personal.research_provenance import ResearchProvenanceMixin
 from naumi_agent.personal.research_review import review_notebook
+from naumi_agent.personal.research_semantic import ResearchSemanticMixin
 from naumi_agent.personal.research_store import ResearchStore
 
 _ACTOR = re.compile(r"^(main|pa_[a-f0-9]{32})$")
@@ -27,7 +35,14 @@ _CHANNELS = {"web", "cli", "tui"}
 MAX_SOURCES = 64
 
 
-class PersonalResearchService(ResearchContextMixin, ResearchEgressMixin, ResearchAuthority):
+class PersonalResearchService(
+    ResearchSemanticMixin,
+    ResearchPeerAuthorityMixin,
+    ResearchProvenanceMixin,
+    ResearchContextMixin,
+    ResearchEgressMixin,
+    ResearchAuthority,
+):
     def __init__(self, engine, *, store=None, clock=None, capture=None, discover=None):
         self.engine, self.personal, self.artifacts = (
             engine,
@@ -147,6 +162,14 @@ class PersonalResearchService(ResearchContextMixin, ResearchEgressMixin, Researc
         return result
 
     async def _record(self, kind, identity, *, revision=None, missing=False):
+        cache = _RECORD_CACHE.get()
+        cacheable = (
+            cache is not None and kind in _CACHE_KINDS and type(revision) is int and revision > 0
+        )
+        key = (self.owner_key, self.workspace_key, kind, identity, revision) if cacheable else None
+        if cacheable and key in cache:
+            return copy.deepcopy(cache[key])
+
         def read(tx):
             if tx is None:
                 if missing:
@@ -154,7 +177,10 @@ class PersonalResearchService(ResearchContextMixin, ResearchEgressMixin, Researc
                 raise PersonalAgentError("not_found", "原研究记录不存在")
             return tx.get(kind, identity, revision=revision, missing=missing)
 
-        return await self._read(read)
+        value = await self._read(read)
+        if cacheable and value is not None:
+            cache[key] = copy.deepcopy(value)
+        return value
 
     def _actor(self, caller_actor=None):
         actor = caller_actor or "main"
@@ -242,6 +268,9 @@ class PersonalResearchService(ResearchContextMixin, ResearchEgressMixin, Researc
                 source_refs=snapshot["source_refs"],
                 evidence={
                     "research_read_refs": retained,
+                    "research_authoring_provenance_refs": snapshot.get("evidence", {}).get(
+                        "research_authoring_provenance_refs", []
+                    ),
                     "source_kind": "research_revision_context",
                     "semantic_verification": "not_performed",
                 },
@@ -662,9 +691,26 @@ class PersonalResearchService(ResearchContextMixin, ResearchEgressMixin, Researc
             "created_at": stamp,
             "updated_at": stamp,
         }
-        notebook["context_refs"] = await self._context_refs(actor, _model, identity)
+        if intent["stage"] is None:
+            notebook["context_refs"] = await self._context_refs(actor, _model, identity)
+            provenance = await self._prepare_authoring_provenance(
+                notebook, actor, intent, from_model=_model
+            )
+            intent = await self._stage(
+                intent,
+                "authoring_prepared",
+                {
+                    "notebook": notebook,
+                    "provenance": provenance,
+                },
+            )
+        if intent["phase"] != "authoring_prepared":
+            raise PersonalAgentError("request_pending", "原研究写作依据待核对")
+        notebook, provenance = intent["stage"]["notebook"], intent["stage"]["provenance"]
+        await self._recheck_authoring_provenance(notebook, provenance, actor, from_model=_model)
 
         def write(tx):
+            self._commit_authoring_provenance(tx, notebook, provenance)
             tx.put("notebook", notebook, expected_revision=0)
             return {"notebook_id": identity, "notebook_revision": 1}
 
@@ -689,19 +735,36 @@ class PersonalResearchService(ResearchContextMixin, ResearchEgressMixin, Researc
             "revision": original["revision"] + 1,
             "updated_at": intent["created_at"],
         }
-        refs = {
-            canonical(ref): ref
-            for ref in [
-                *original.get("context_refs", []),
-                *await self._context_refs(actor, _model, identity),
-            ]
-        }
-        if len(refs) > 64:
-            raise PersonalAgentError("input_limit", "研究上下文超过 64 个确切版本")
-        value["context_refs"] = list(refs.values())
+        if intent["stage"] is None:
+            refs = {
+                canonical(ref): ref
+                for ref in [
+                    *original.get("context_refs", []),
+                    *await self._context_refs(actor, _model, identity),
+                ]
+            }
+            if len(refs) > 64:
+                raise PersonalAgentError("input_limit", "研究上下文超过 64 个确切版本")
+            value["context_refs"] = list(refs.values())
+            provenance = await self._prepare_authoring_provenance(
+                value, actor, intent, from_model=_model, previous=original
+            )
+            intent = await self._stage(
+                intent,
+                "authoring_prepared",
+                {
+                    "notebook": value,
+                    "provenance": provenance,
+                },
+            )
+        if intent["phase"] != "authoring_prepared":
+            raise PersonalAgentError("request_pending", "原研究写作依据待核对")
+        value, provenance = intent["stage"]["notebook"], intent["stage"]["provenance"]
         await self._inputs(value, actor)
+        await self._recheck_authoring_provenance(value, provenance, actor, from_model=_model)
 
         def write(tx):
+            self._commit_authoring_provenance(tx, value, provenance)
             tx.put("notebook", value, expected_revision=original["revision"])
             return {"notebook_id": identity, "notebook_revision": value["revision"]}
 
@@ -1241,6 +1304,18 @@ class PersonalResearchService(ResearchContextMixin, ResearchEgressMixin, Researc
         if caller_actor is not None and trusted_channel is not None:
             raise PersonalAgentError("scope_denied", "研究调用不能声明人工身份")
         operation = arguments["operation"]
+        if getattr(
+            self.engine, "_personal_semantic_review", None
+        ) is not None and operation not in {
+            "semantic_sources",
+            "semantic_source",
+            "semantic_submit",
+        }:
+            raise PersonalAgentError("scope_denied", "本次复核仅允许读取确切资料包和提交结构化结论")
+        if operation.startswith("semantic_"):
+            return await getattr(self, operation)(
+                arguments, caller_actor=caller_actor, trusted_channel=trusted_channel
+            )
         if operation in {"context_preview", "context_rollforward", "context_request"}:
             return await getattr(self, operation)(
                 arguments, caller_actor=caller_actor, trusted_channel=trusted_channel

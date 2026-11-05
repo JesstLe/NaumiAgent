@@ -21,13 +21,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from naumi_agent.personal.artifact_models import normalize_refs
 from naumi_agent.personal.models import PersonalAgentError
 from naumi_agent.personal.peer_models import agent_id as normalized_agent_id
 from naumi_agent.personal.peer_models import dispatch, grants
 from naumi_agent.personal.peer_models import tool_names as normalized_tool_names
 from naumi_agent.personal.peer_models import version as normalized_version
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 _COLLABORATION_ID = re.compile(r"^pc_[0-9a-f]{32}$")
 _AGENT_ID = re.compile(r"^pa_[0-9a-f]{32}$")
 _STEP_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -219,6 +220,41 @@ def _team_execution(value: Any) -> dict | None:
     return result
 
 
+def normalize_research_execution(value: Any) -> dict | None:
+    """Normalize only the service-owned, exact semantic-review input contract."""
+    if value is None:
+        return None
+    fields = {"review_id", "review_digest", "packet_ref", "reviewer_id", "reviewer_version"}
+    if not isinstance(value, dict) or set(value) != fields:
+        raise _invalid("研究复核执行凭据字段不正确")
+    result = {
+        "review_id": _identifier(
+            value["review_id"], re.compile(r"^rsv_[a-f0-9]{32}$"), "研究复核编号", 36
+        ),
+        "review_digest": _identifier(
+            value["review_digest"], re.compile(r"^[a-f0-9]{64}$"), "研究复核摘要", 64
+        ),
+        "packet_ref": normalize_refs([value["packet_ref"]])[0],
+        "reviewer_id": normalized_agent_id(value["reviewer_id"]),
+        "reviewer_version": normalized_version(value["reviewer_version"]),
+    }
+    return result
+
+
+def _research_step(binding: dict, steps: list[dict]) -> None:
+    if len(steps) != 1:
+        raise _invalid("独立研究复核只允许一个确切执行步骤")
+    step = steps[0]
+    if (
+        step.get("agent_id") != binding["reviewer_id"]
+        or step.get("agent_version") != binding["reviewer_version"]
+        or step.get("depends_on") != []
+        or "message" in step
+        or step.get("tool_names") != ["personal_research"]
+    ):
+        raise _invalid("研究复核步骤与原 Agent 或工具范围不一致")
+
+
 def _event_data(value: Any) -> str:
     if not isinstance(value, dict):
         raise _invalid("协作事件内容必须是 JSON 对象")
@@ -257,10 +293,16 @@ def _event_data(value: Any) -> str:
 def _plan(row: sqlite3.Row) -> dict[str, Any]:
     try:
         result = json.loads(row["plan_json"])
+        if "research_execution" in result:
+            binding = normalize_research_execution(result["research_execution"])
+            if binding is None or result.get("team_execution") or result.get("peer_agents"):
+                raise _invalid("研究复核执行凭据与其他协作范围冲突")
+            _research_step(binding, result["steps"])
+            result["research_execution"] = binding
         result["cancel_requested"] = bool(row["cancel_requested"])
         result["updated_at"] = row["updated_at"]
         return result
-    except (TypeError, ValueError, KeyError) as exc:
+    except (TypeError, ValueError, KeyError, PersonalAgentError) as exc:
         raise PersonalAgentError("storage_error", "协作计划资料不完整，请恢复资料库后继续") from exc
 
 
@@ -300,8 +342,13 @@ class CollaborationStore:
     def db_path(self) -> Path:
         return self._db_path
 
-    def _open(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path, timeout=10, isolation_level=None)
+    def _open(self, *, existing_only: bool = False) -> sqlite3.Connection:
+        conn = sqlite3.connect(
+            self._db_path.as_uri() + "?mode=rw" if existing_only else self._db_path,
+            timeout=10,
+            isolation_level=None,
+            uri=existing_only,
+        )
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA busy_timeout=10000")
         conn.execute("PRAGMA foreign_keys=ON")
@@ -330,7 +377,8 @@ class CollaborationStore:
                             )
                         for statement in _TABLES:
                             conn.execute(statement)
-                        conn.execute("PRAGMA user_version=1")
+                        version = conn.execute("PRAGMA user_version").fetchone()[0]
+                        conn.execute(f"PRAGMA user_version={max(1, version)}")
                         conn.commit()
                         self._initialized = True
                         return
@@ -347,12 +395,19 @@ class CollaborationStore:
                 ) from exc
 
     @contextmanager
-    def _connection(self, *, write: bool = False) -> Iterator[sqlite3.Connection]:
-        self._initialize()
+    def _connection(
+        self, *, write: bool = False, initialize_store: bool = True
+    ) -> Iterator[sqlite3.Connection]:
+        if initialize_store:
+            self._initialize()
         conn: sqlite3.Connection | None = None
         try:
-            conn = self._open()
+            conn = self._open() if initialize_store else self._open(existing_only=True)
             conn.execute("BEGIN IMMEDIATE" if write else "BEGIN")
+            if conn.execute("PRAGMA user_version").fetchone()[0] > _SCHEMA_VERSION:
+                raise PersonalAgentError(
+                    "unsupported_schema", "协作资料库来自较新版本，请先更新应用"
+                )
             yield conn
             conn.commit()
         except sqlite3.Error as exc:
@@ -398,6 +453,7 @@ class CollaborationStore:
         title: str = "",
         peer_agents: list[dict] | None = None,
         team_execution: dict | None = None,
+        research_execution: dict | None = None,
     ) -> dict[str, Any]:
         workspace_key = _text(workspace_key, "工作区标识", 2048)
         source_session_id = _text(source_session_id, "来源会话编号", 128)
@@ -407,7 +463,16 @@ class CollaborationStore:
         request_id = _identifier(request_id, _REQUEST_ID, "请求编号", 128)
         normalized_steps = _steps(steps)
         owner = _team_execution(team_execution)
-        if owner is None and any("tool_names" in step for step in normalized_steps):
+        research = normalize_research_execution(research_execution)
+        if research is not None:
+            if owner is not None or peer_agents:
+                raise _invalid("研究复核不与团队阶段或互询范围混用")
+            _research_step(research, normalized_steps)
+        if (
+            owner is None
+            and research is None
+            and any("tool_names" in step for step in normalized_steps)
+        ):
             raise _invalid("单步工具范围需要可信团队执行凭据")
         payload = {
             "workspace_key": workspace_key,
@@ -425,6 +490,8 @@ class CollaborationStore:
             payload["peer_agents"] = normalized_grants
         if owner is not None:
             payload["team_execution"] = owner
+        if research is not None:
+            payload["research_execution"] = research
         payload_sha256 = _sha256(_canonical(payload))
         with self._connection(write=True) as conn:
             existing = conn.execute(
@@ -438,6 +505,10 @@ class CollaborationStore:
                         "idempotency_conflict", "该请求编号已用于不同协作，请核对原任务后重新发起"
                     )
                 return _plan(existing)
+            if research is not None:
+                # Older coordinators must not reinterpret this owner-bound
+                # packet execution as an ordinary ALL-pins collaboration.
+                conn.execute("PRAGMA user_version=2")
             collaboration_id = f"pc_{uuid.uuid4().hex}"
             now = _now()
             plan = {
@@ -477,6 +548,52 @@ class CollaborationStore:
                 ],
             )
             return _plan(self._required(conn, collaboration_id, workspace_key))
+
+    @staticmethod
+    def _business_digest(conn: sqlite3.Connection) -> str:
+        checksum = hashlib.sha256()
+        for table, ordering in (
+            ("collaborations", "id"),
+            ("collaboration_events", "collaboration_id,sequence"),
+            ("collaboration_sessions", "workspace_key,session_id"),
+        ):
+            checksum.update((table + "\n").encode("utf-8"))
+            for row in conn.execute(f"SELECT * FROM {table} ORDER BY {ordering}"):
+                checksum.update((_canonical(dict(row)) + "\n").encode("utf-8"))
+        return checksum.hexdigest()
+
+    def promote_research_schema(self) -> dict[str, Any]:
+        """Explicitly fence old readers of already-existing research plans.
+
+        Operators stop original coordinators first. This operation changes only
+        SQLite compatibility metadata; it never creates, starts, rewrites or
+        replays a plan, AgentJob, Session or ChatRun. Reads do not call it.
+        """
+        if not self.db_path.is_file():
+            raise PersonalAgentError("not_found", "原协作资料库不存在")
+        if not self.db_path.stat().st_size:
+            raise PersonalAgentError("storage_error", "原协作资料库尚不完整，未修改兼容元数据")
+        with self._connection(write=True, initialize_store=False) as conn:
+            before = conn.execute("PRAGMA user_version").fetchone()[0]
+            if before not in {1, 2}:
+                raise PersonalAgentError("storage_error", "原协作兼容版本不完整，未修改元数据")
+            plans = [_plan(row) for row in conn.execute("SELECT * FROM collaborations ORDER BY id")]
+            count = sum(plan.get("research_execution") is not None for plan in plans)
+            original = self._business_digest(conn)
+            after = 2 if count else before
+            if after != before:
+                conn.execute("PRAGMA user_version=2")
+            observed = self._business_digest(conn)
+            if observed != original:
+                raise PersonalAgentError("binding_conflict", "兼容元数据核验未通过，原协作未作重写")
+            return {
+                "before_version": before,
+                "after_version": after,
+                "research_plans": count,
+                "changed": after != before,
+                "business_sha256_before": original,
+                "business_sha256_after": observed,
+            }
 
     def find_request(
         self, workspace_key: str, source_session_id: str, request_id: str

@@ -58,9 +58,7 @@ class PersonalArtifactService:
                 self._boundary_required
                 or self.runtime_boundary_marker.exists()
                 or self.boundary_marker.exists()
-                or (
-                self.store.base_dir.exists() and any(self.store.base_dir.iterdir())
-                )
+                or (self.store.base_dir.exists() and any(self.store.base_dir.iterdir()))
             )
             self._boundary_required = required
             return required
@@ -79,6 +77,7 @@ class PersonalArtifactService:
                     stream.write(expected)
                     stream.flush()
                     import os
+
                     os.fsync(stream.fileno())
             except FileExistsError:
                 if marker.is_symlink() or marker.read_bytes() != expected:
@@ -168,8 +167,10 @@ class PersonalArtifactService:
     async def _checked(self, actor_id: str, snapshot: dict):
         research = getattr(self.engine, "personal_research", None)
         if research is not None:
-            async with research.artifact_context_scope(snapshot, actor_id):
-                return await self._checked_impl(actor_id, snapshot)
+            async with research._peer_record_scope():
+                async with research.peer_artifact_scope(snapshot, actor_id):
+                    async with research.artifact_context_scope(snapshot, actor_id):
+                        return await self._checked_impl(actor_id, snapshot)
         return await self._checked_impl(actor_id, snapshot)
 
     async def _checked_impl(self, actor_id: str, snapshot: dict):
@@ -194,16 +195,21 @@ class PersonalArtifactService:
                 seen.add(identity)
                 if len(seen) > 1024:
                     raise PersonalAgentError("storage_error", "周期产物来源链超过校验上限")
-                if (value.get("evidence", {}).get("routine_refs")
-                        or value.get("evidence", {}).get("routine_plan_refs")):
+                if value.get("evidence", {}).get("routine_refs") or value.get("evidence", {}).get(
+                    "routine_plan_refs"
+                ):
                     raise PersonalAgentError(
                         "routine_source_unavailable", "周期资料需要原执行授权组件"
                     )
                 for ref in value.get("source_refs", []):
-                    stack.append(await self._call(
-                        "get", actor_id=actor_id, artifact_id=ref["artifact_id"],
-                        version=ref["version"],
-                    ))
+                    stack.append(
+                        await self._call(
+                            "get",
+                            actor_id=actor_id,
+                            artifact_id=ref["artifact_id"],
+                            version=ref["version"],
+                        )
+                    )
         today = getattr(self.engine, "personal_today", None)
         if today is not None:
             await today.authorize_artifact(snapshot, actor_id)
@@ -220,8 +226,14 @@ class PersonalArtifactService:
                 if value.get("evidence", {}).get("today_read_refs"):
                     raise PersonalAgentError("source_unavailable", "今日资料需要原计划授权组件")
                 for ref in value.get("source_refs", []):
-                    stack.append(await self._call("get", actor_id=actor_id,
-                        artifact_id=ref["artifact_id"], version=ref["version"]))
+                    stack.append(
+                        await self._call(
+                            "get",
+                            actor_id=actor_id,
+                            artifact_id=ref["artifact_id"],
+                            version=ref["version"],
+                        )
+                    )
         notifications = getattr(self.engine, "personal_notifications", None)
         if notifications is not None:
             await notifications.authorize_artifact(snapshot, actor_id)
@@ -238,8 +250,14 @@ class PersonalArtifactService:
                 if value.get("evidence", {}).get("notification_read_refs"):
                     raise PersonalAgentError("source_unavailable", "通知资料需要原通知授权组件")
                 for ref in value.get("source_refs", []):
-                    stack.append(await self._call("get", actor_id=actor_id,
-                        artifact_id=ref["artifact_id"], version=ref["version"]))
+                    stack.append(
+                        await self._call(
+                            "get",
+                            actor_id=actor_id,
+                            artifact_id=ref["artifact_id"],
+                            version=ref["version"],
+                        )
+                    )
         workspaces = getattr(self.engine, "personal_workspaces", None)
         if workspaces is not None:
             await workspaces.authorize_artifact(snapshot, actor_id)
@@ -256,8 +274,14 @@ class PersonalArtifactService:
                 if value.get("evidence", {}).get("workspace_read_refs"):
                     raise PersonalAgentError("source_unavailable", "工作区资料需要原连接授权组件")
                 for ref in value.get("source_refs", []):
-                    stack.append(await self._call("get", actor_id=actor_id,
-                        artifact_id=ref["artifact_id"], version=ref["version"]))
+                    stack.append(
+                        await self._call(
+                            "get",
+                            actor_id=actor_id,
+                            artifact_id=ref["artifact_id"],
+                            version=ref["version"],
+                        )
+                    )
         followups = getattr(self.engine, "personal_followups", None)
         if followups is not None:
             await followups.authorize_artifact(snapshot, actor_id)
@@ -271,12 +295,17 @@ class PersonalArtifactService:
                 seen.add(identity)
                 if len(seen) > 4096:
                     raise PersonalAgentError("source_unavailable", "跟进资料来源超过校验上限")
-                if (value.get("evidence", {}).get("followup_read_refs")
-                        or value.get("evidence", {}).get("followup_effect_refs")):
+                if value.get("evidence", {}).get("followup_read_refs") or value.get(
+                    "evidence", {}
+                ).get("followup_effect_refs"):
                     raise PersonalAgentError("source_unavailable", "跟进资料需要原授权组件")
                 for ref in value.get("source_refs", []):
-                    parent = await self._call("get", actor_id=actor_id,
-                        artifact_id=ref["artifact_id"], version=ref["version"])
+                    parent = await self._call(
+                        "get",
+                        actor_id=actor_id,
+                        artifact_id=ref["artifact_id"],
+                        version=ref["version"],
+                    )
                     if parent["sha256"] != ref["sha256"]:
                         raise PersonalAgentError("source_unavailable", "原跟进资料摘要已变化")
                     stack.append(parent)
@@ -293,13 +322,23 @@ class PersonalArtifactService:
                 seen.add(identity)
                 if len(seen) > 4096:
                     raise PersonalAgentError("storage_error", "研究资料来源超过校验上限")
-                if (value.get("evidence", {}).get("research_read_refs")
-                        or value.get("evidence", {}).get("research_egress_read_refs")
-                        or value.get("evidence", {}).get("research_context_refs")):
+                if (
+                    value.get("evidence", {}).get("research_read_refs")
+                    or value.get("evidence", {}).get("research_egress_read_refs")
+                    or value.get("evidence", {}).get("research_context_refs")
+                    or value.get("evidence", {}).get("research_peer_read_refs")
+                    or value.get("evidence", {}).get("research_authoring_provenance_refs")
+                ):
                     raise PersonalAgentError("source_unavailable", "研究资料需要原授权组件")
                 for ref in value.get("source_refs", []):
-                    stack.append(await self._call("get", actor_id=actor_id,
-                        artifact_id=ref["artifact_id"], version=ref["version"]))
+                    stack.append(
+                        await self._call(
+                            "get",
+                            actor_id=actor_id,
+                            artifact_id=ref["artifact_id"],
+                            version=ref["version"],
+                        )
+                    )
         connections = getattr(self.engine, "personal_connections", None)
         if connections is not None:
             await connections.authorize_artifact(snapshot, actor_id)
@@ -313,14 +352,21 @@ class PersonalArtifactService:
                 seen.add(identity)
                 if len(seen) > 1024:
                     raise PersonalAgentError("storage_error", "产物来源链超过校验上限")
-                if (value.get("evidence", {}).get("connection_sources")
-                        or value.get("evidence", {}).get("connection_action_refs")):
+                if value.get("evidence", {}).get("connection_sources") or value.get(
+                    "evidence", {}
+                ).get("connection_action_refs"):
                     raise PersonalAgentError(
                         "connection_source_revoked", "日历资料需要当前账户授权组件"
                     )
                 for ref in value.get("source_refs", []):
-                    stack.append(await self._call("get", actor_id=actor_id,
-                        artifact_id=ref["artifact_id"], version=ref["version"]))
+                    stack.append(
+                        await self._call(
+                            "get",
+                            actor_id=actor_id,
+                            artifact_id=ref["artifact_id"],
+                            version=ref["version"],
+                        )
+                    )
         return {
             **snapshot,
             "can_revise": snapshot["owner_id"] == actor_id,
@@ -346,8 +392,11 @@ class PersonalArtifactService:
                 result.append(await self._checked(actor_id, value))
             except PersonalAgentError as exc:
                 if exc.code not in {
-                    "version_conflict", "agent_inactive", "not_found",
-                    "connection_source_revoked", "connection_revoked",
+                    "version_conflict",
+                    "agent_inactive",
+                    "not_found",
+                    "connection_source_revoked",
+                    "connection_revoked",
                 }:
                     raise
         return result
@@ -372,6 +421,13 @@ class PersonalArtifactService:
         return await asyncio.to_thread(preview, content, snapshot["suffix"])
 
     async def authorize_refs(self, *, actor_id: str, refs: list[dict]):
+        research = getattr(self.engine, "personal_research", None)
+        if research is not None:
+            async with research._peer_record_scope():
+                return await self._authorize_refs_impl(actor_id=actor_id, refs=refs)
+        return await self._authorize_refs_impl(actor_id=actor_id, refs=refs)
+
+    async def _authorize_refs_impl(self, *, actor_id: str, refs: list[dict]):
         normalized = await self._call("authorize_refs", actor_id=actor_id, refs=refs)
         for ref in normalized:
             snapshot = await self.get(
@@ -467,6 +523,9 @@ class PersonalArtifactService:
             refs.extend(await self.session_refs(session_id, actor_id))
         refs = list({json.dumps(ref, sort_keys=True): ref for ref in refs}.values())
         refs = await self.authorize_refs(actor_id=actor_id, refs=refs)
+        research = getattr(self.engine, "personal_research", None)
+        if research is not None:
+            evidence = await research.prepare_research_evidence(evidence or {})
         initialize = self._enable()
         snapshot = await self._call(
             "publish",

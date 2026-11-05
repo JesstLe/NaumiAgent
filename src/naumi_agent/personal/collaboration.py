@@ -33,7 +33,10 @@ from naumi_agent.daemons.agent_worker_contract import (
 )
 from naumi_agent.memory.session import Session
 from naumi_agent.model.router import ModelTier
-from naumi_agent.personal.collaboration_store import CollaborationStore
+from naumi_agent.personal.collaboration_store import (
+    CollaborationStore,
+    normalize_research_execution,
+)
 from naumi_agent.personal.engine_execution import bounded_execution, make_execution_child
 from naumi_agent.personal.models import PersonalAgentError
 from naumi_agent.user_interaction import (
@@ -141,6 +144,7 @@ class PersonalCollaborationService:
         peer_agents: list[dict] | None = None,
         _manual_dispatch: bool = False,
         _team_execution: dict | None = None,
+        _research_execution: dict | None = None,
     ) -> dict:
         session = await self.engine.session_store.load(source_session_id)
         if session is None:
@@ -158,6 +162,23 @@ class PersonalCollaborationService:
         # Replays must still return the original plan if a role was subsequently
         # paused/edited. Validate the payload first, then inspect only new plans.
         existing = self.store.find_request(self.workspace_key, source_session_id, request_id)
+        research = normalize_research_execution(_research_execution)
+        if research is not None:
+            if _manual_dispatch or _team_execution is not None or peer_agents:
+                raise PersonalAgentError("invalid_input", "研究复核不与消息、团队或互询混用")
+            service = getattr(self.engine, "personal_research", None)
+            validate = getattr(service, "validate_semantic_execution", None)
+            if not callable(validate):
+                raise PersonalAgentError("configuration_error", "研究复核执行组件尚未就绪")
+            await validate(
+                research,
+                source_session_id=source_session_id,
+                request_id=request_id,
+                steps=steps,
+                context=context,
+                title=title,
+                peer_agents=peer_agents,
+            )
         if isinstance(steps, list) and any(isinstance(s, dict) and "message" in s for s in steps):
             if not _manual_dispatch:
                 raise PersonalAgentError("invalid_input", "请使用 Agent 消息入口派送消息")
@@ -193,10 +214,12 @@ class PersonalCollaborationService:
                         "version_conflict", "Agent 配置已变更，请刷新后发起协作"
                     )
                 if "tool_names" in step and (
-                    _team_execution is None
+                    (_team_execution is None and research is None)
                     or not set(step["tool_names"]) <= set(profile.tool_names)
                 ):
                     raise PersonalAgentError("team_scope_denied", "成员步骤超出本次团队工具范围")
+                if research is not None and "personal_research" not in profile.tool_names:
+                    raise PersonalAgentError("scope_denied", "所选 Agent 未启用研究工具")
         plan = self.store.create(
             workspace_key=self.workspace_key,
             source_session_id=source_session_id,
@@ -207,6 +230,7 @@ class PersonalCollaborationService:
             title=title,
             peer_agents=peer_agents,
             team_execution=_team_execution,
+            research_execution=research,
         )
         feedback = getattr(self.engine, "_active_feedback_turn", None)
         if existing is None:
@@ -253,8 +277,10 @@ class PersonalCollaborationService:
         return [await self._view(plan, include_events=False) for plan in plans]
 
     @_public_operation
-    async def get(self, collaboration_id: str) -> dict:
-        return await self._view(self.store.get(collaboration_id, self.workspace_key))
+    async def get(self, collaboration_id: str, *, _repair_bindings: bool = True) -> dict:
+        return await self._view(
+            self.store.get(collaboration_id, self.workspace_key), repair_bindings=_repair_bindings
+        )
 
     @_public_operation
     async def cancel(self, collaboration_id: str) -> dict:
@@ -328,7 +354,9 @@ class PersonalCollaborationService:
         self._wake.set()
         return {"status": "answered", **event["data"]}
 
-    async def _view(self, plan: dict, *, include_events: bool = True) -> dict:
+    async def _view(
+        self, plan: dict, *, include_events: bool = True, repair_bindings: bool = True
+    ) -> dict:
         events = self._events(plan)
         prepared = {
             e["step_id"]: e["data"]["request"] for e in events if e["kind"] == "dispatch_prepared"
@@ -369,6 +397,10 @@ class PersonalCollaborationService:
                     and callable(marker_writer)
                     and saved_session.personal_execution_id != source["task_id"]
                 ):
+                    if not repair_bindings:
+                        raise PersonalAgentError(
+                            "binding_conflict", "原执行会话归属不一致，读取未作修复"
+                        )
                     self.personal._session_valid(saved_session)
                     try:
                         await marker_writer(
@@ -517,6 +549,40 @@ class PersonalCollaborationService:
 
     async def _advance(self, plan: dict) -> None:
         view = await self._view(plan)
+        if plan.get("research_execution"):
+            try:
+                await self._authorize_research(plan)
+            except PersonalAgentError as exc:
+                self._event(
+                    plan,
+                    "research-invalid:" + exc.code,
+                    "research_authority_lost",
+                    data={"code": exc.code, "message": exc.message},
+                )
+                self.store.request_cancel(plan["id"], self.workspace_key)
+                for step in view["steps"]:
+                    active = self._active.get(step["task_id"])
+                    if active is not None and not active.cancelling():
+                        active.cancel()
+                    if step["job_id"]:
+                        job = await self.jobs.get(step["job_id"])
+                        if job is not None and job.state is AgentJobState.ADMITTED:
+                            try:
+                                await self.jobs.cancel_before_claim(job.job_id)
+                            except AgentJobLifecycleConflictError:
+                                pass  # A concurrent owner must honor the same authority fence.
+                    elif not any(
+                        event["kind"] == "dispatch_prepared" and event["step_id"] == step["id"]
+                        for event in view["events"]
+                    ):
+                        self._event(
+                            plan,
+                            "reject:" + step["id"],
+                            "dispatch_rejected",
+                            step_id=step["id"],
+                            data={"code": exc.code, "message": exc.message},
+                        )
+                return
         if plan.get("team_execution"):
             try:
                 await self.engine.personal_teams.authorize_execution(plan)
@@ -754,7 +820,16 @@ class PersonalCollaborationService:
             shared["manual_message"] = step["message"]
         if plan.get("team_execution"):
             shared["team_execution"] = plan["team_execution"]
+        if plan.get("research_execution"):
+            shared["research_execution"] = plan["research_execution"]
         return json.dumps(shared, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+    async def _authorize_research(self, plan: dict) -> None:
+        service = getattr(self.engine, "personal_research", None)
+        authorize = getattr(service, "authorize_semantic_execution", None)
+        if not callable(authorize):
+            raise PersonalAgentError("configuration_error", "研究复核执行组件尚未就绪")
+        await authorize(plan)
 
     async def _renew(self, job, execution: asyncio.Task) -> None:
         try:
@@ -776,6 +851,8 @@ class PersonalCollaborationService:
                     return
                 if plan and plan.get("team_execution"):
                     await self.engine.personal_teams.authorize_execution(plan)
+                if plan and plan.get("research_execution"):
+                    await self._authorize_research(plan)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -983,6 +1060,11 @@ class PersonalCollaborationService:
             child._personal_collaboration_task_id = step["task_id"]
             if plan.get("team_execution"):
                 self.engine.personal_teams.bind_execution(child, plan, step)
+            if plan.get("research_execution"):
+                bind = getattr(self.engine.personal_research, "bind_semantic_execution", None)
+                if not callable(bind):
+                    raise PersonalAgentError("configuration_error", "研究复核执行组件尚未就绪")
+                await bind(child, plan, step)
 
             async def authorize():
                 authority = await self.jobs.get(job.job_id)
@@ -1001,6 +1083,8 @@ class PersonalCollaborationService:
                     )
                 if plan.get("team_execution"):
                     await self.engine.personal_teams.authorize_execution(plan)
+                if plan.get("research_execution"):
+                    await self._authorize_research(plan)
                 source_profile = (
                     self.personal.require_active_profile(step["agent_id"])
                     if coordinator
@@ -1016,27 +1100,55 @@ class PersonalCollaborationService:
 
             child._personal_execution_authorizer = authorize
             artifacts = getattr(self.engine, "personal_artifacts", None)
+            if plan.get("research_execution") and (artifacts is None or not artifacts.enabled):
+                raise PersonalAgentError("configuration_error", "研究复核资料访问边界尚未就绪")
             if artifacts is not None and artifacts.enabled:
                 child_artifacts = getattr(child, "personal_artifacts", None)
                 if child_artifacts is None:
                     raise PersonalAgentError(
                         "configuration_error", "本次执行器缺少私有资料访问边界"
                     )
-                source_sessions = [plan["source_session_id"]]
-                source_sessions.extend(
-                    item["session_id"] for item in plan["steps"] if item["id"] in step["depends_on"]
-                )
-                for source_session_id in source_sessions:
-                    await child_artifacts.propagate(
-                        source_session_id, step["session_id"], profile.id
+                if plan.get("research_execution"):
+                    if not child_artifacts.enabled:
+                        raise PersonalAgentError(
+                            "configuration_error", "研究复核执行器资料访问边界尚未就绪"
+                        )
+                    await authorize()
+                    await child_artifacts.bind_refs(
+                        step["session_id"],
+                        profile.id,
+                        [plan["research_execution"]["packet_ref"]],
                     )
+                else:
+                    source_sessions = [plan["source_session_id"]]
+                    source_sessions.extend(
+                        item["session_id"]
+                        for item in plan["steps"]
+                        if item["id"] in step["depends_on"]
+                    )
+                    for source_session_id in source_sessions:
+                        await child_artifacts.propagate(
+                            source_session_id, step["session_id"], profile.id
+                        )
+
+            if plan.get("research_execution"):
+                # The packet carries its own live memory ancestry. Reviewer Runs
+                # must not opportunistically retrieve unrelated profile memories.
+                child._personal_memory_parent_enabled = False
+                config = getattr(child, "config", None)
+                if config is not None:
+                    config.memory.long_term_enabled = False
 
             from naumi_agent.personal.engine_execution import bind_execution_memory
 
             await bind_execution_memory(
-                child, actor_id=profile.id, origin_actor_id=plan["source_agent_id"] or "main",
+                child,
+                actor_id=profile.id,
+                origin_actor_id=plan["source_agent_id"] or "main",
                 parent=self.engine,
             )
+            if plan.get("research_execution"):
+                await authorize()
             child._personal_effective_tools = frozenset(job.request.tool_scope)
             if plan.get("peer_agents"):
                 from naumi_agent.personal.messages import PeerRoot

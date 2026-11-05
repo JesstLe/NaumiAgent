@@ -12,6 +12,7 @@ from naumi_agent.personal.memory_models import normalize_ref as memory_ref
 from naumi_agent.personal.models import PersonalAgentError
 from naumi_agent.personal.owner_journal import canonical, digest
 from naumi_agent.personal.research_context import archived_read
+from naumi_agent.personal.research_provenance import provenance_ref
 
 _READ = re.compile(r"^rread_[a-f0-9]{32}$")
 _SHA = re.compile(r"^[a-f0-9]{64}$")
@@ -62,14 +63,21 @@ class ResearchAuthority:
         if require_current and digest(current) != digest(notebook):
             raise PersonalAgentError("source_stale", "研究版本已变化，请重新读取")
         basis, refs, upstream, visited = [], [], [], set()
+        provenance_records, legacy_unknown = {}, False
 
         async def walk(value, path):
+            nonlocal legacy_unknown
             key = (value["id"], value["revision"])
             if key in path or len(path) >= 16 or len(visited) >= 64:
                 raise PersonalAgentError("source_unavailable", "研究上游存在循环或超过校验深度")
             if key in visited:
                 return
             visited.add(key)
+            provenance = await self.notebook_provenance(value, value["actor_id"])
+            legacy_unknown |= provenance["status"] == "legacy_unknown"
+            for record in provenance["records"]:
+                provenance_records[record["id"]] = record
+                refs.extend(record["artifact_refs"])
             context_refs = value.get("context_refs", [])
             await self.artifacts.authorize_refs(actor_id=value["actor_id"], refs=context_refs)
             refs.extend(context_refs)
@@ -122,9 +130,15 @@ class ResearchAuthority:
         unique = {canonical(ref): ref for ref in refs}
         if len(unique) > 64:
             raise PersonalAgentError("input_limit", "研究资料超过 64 个确切版本")
-        return {"notebook_digest": digest(notebook), "sources": basis, "upstream": upstream}, list(
-            unique.values()
-        )
+        return {
+            "notebook_digest": digest(notebook),
+            "sources": basis,
+            "upstream": upstream,
+            "authoring_provenance": {
+                "status": "legacy_unknown" if legacy_unknown else "complete",
+                "refs": [provenance_ref(record) for record in provenance_records.values()],
+            },
+        }, list(unique.values())
 
     async def _new_read(
         self,
@@ -143,6 +157,7 @@ class ResearchAuthority:
         basis, refs = await self._basis(
             notebook, require_current=require_current, extra_source=extra_source
         )
+        provenance_records = await self._read_provenance_records(basis)
         if egress_context is not None:
             if (
                 type(egress_context) is not dict
@@ -178,6 +193,7 @@ class ResearchAuthority:
             "publication": publication,
             "body_sha256": hashlib.sha256(content).hexdigest(),
             "source_refs": refs,
+            "authoring_provenance_records": provenance_records,
         }
         if egress_context is not None:
             record["egress_context"] = egress_context
@@ -186,11 +202,17 @@ class ResearchAuthority:
         return record, content
 
     async def _read_authority(self, record, actor):
+        from naumi_agent.personal.research_peer_authority import peer_read_allowed
+
         self._actor(actor)
         self._actor(record["actor_id"])
         if record["workspace_key"] != self.workspace_key:
             raise PersonalAgentError("source_unavailable", "研究来源不可用")
-        if actor != record["actor_id"] and not record["publication"]:
+        if (
+            actor != record["actor_id"]
+            and not record["publication"]
+            and not peer_read_allowed(self, record, actor)
+        ):
             raise PersonalAgentError("source_unavailable", "研究读取与当前 Agent 不一致")
         key = (id(self), record["id"], actor)
         if key in _WALKING.get() or len(_WALKING.get()) >= 64:
@@ -206,6 +228,12 @@ class ResearchAuthority:
             # live model material; explicitly historical reports retain live ACLs.
             if digest(notebook) != record["basis"]["notebook_digest"]:
                 raise self._broken()
+            await self.notebook_provenance(notebook, record["actor_id"])
+            provenance_records = await self._read_provenance_records(record["basis"])
+            if record.get("authoring_provenance_records", []) != provenance_records:
+                raise self._broken()
+            for authoring in provenance_records:
+                await self._authorize_authoring_record(authoring, authoring["actor_id"])
             if (
                 record["require_current"]
                 and not record["publication"]
@@ -255,7 +283,7 @@ class ResearchAuthority:
                         ref, record["actor_id"], item_id=context["memory_item_id"]
                     )
                     if actor != record["actor_id"]:
-                        await memory.resolve_ref(ref, actor, item_id=context["memory_item_id"])
+                        await self._peer_memory(ref, actor, context["memory_item_id"])
             # A shared report requires every exact upstream version for its reader.
             for ref in refs:
                 snapshot = await self.artifacts.get(
@@ -281,6 +309,8 @@ class ResearchAuthority:
                 await self.authorize_context_artifact(value, actor_id)
             research_evidence(evidence)
             research_evidence(evidence, egress=True)
+            for raw in evidence.get("research_authoring_provenance_refs", []):
+                await self.authorize_authoring_ref(raw, actor_id)
             for raw in [
                 *evidence.get("research_read_refs", []),
                 *evidence.get("research_egress_read_refs", []),
@@ -304,7 +334,7 @@ class ResearchAuthority:
                 stack.append(original)
 
     async def model_result(self, arguments, body, actor):
-        if arguments["operation"].startswith("egress_"):
+        if arguments["operation"].startswith(("egress_", "semantic_")):
             return body
         if arguments["operation"] == "context":
             return body

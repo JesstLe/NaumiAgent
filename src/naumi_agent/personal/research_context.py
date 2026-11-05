@@ -300,9 +300,13 @@ class ResearchContextMixin:
         return view
 
     async def _authorize_context_record(self, record, actor, *, historical=False):
-        if record["workspace_key"] != self.workspace_key or record["actor_id"] != actor:
+        from naumi_agent.personal.research_peer_authority import peer_context_allowed
+
+        if record["workspace_key"] != self.workspace_key or (
+            record["actor_id"] != actor and not peer_context_allowed(self, record, actor)
+        ):
             raise PersonalAgentError("scope_denied", "对话依据与原身份不一致")
-        identity = await self._context_identity(record["session_id"], actor)
+        identity = await self._context_identity(record["session_id"], record["actor_id"])
         if not historical and identity["actor_version"] != record["actor_version"]:
             raise PersonalAgentError("source_stale", "Agent 已更新，请重新核对对话依据")
         if not historical:

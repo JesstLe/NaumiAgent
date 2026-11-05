@@ -64,8 +64,10 @@ def _routine_evidence(evidence):
     if not isinstance(evidence, dict):
         raise invalid("周期来源证据格式不正确")
     found = False
-    for key, normalize in (("routine_refs", normalize_routine_ref),
-                           ("routine_plan_refs", normalize_plan_ref)):
+    for key, normalize in (
+        ("routine_refs", normalize_routine_ref),
+        ("routine_plan_refs", normalize_plan_ref),
+    ):
         refs = evidence.get(key, [])
         if not isinstance(refs, list) or len(refs) > 64:
             raise invalid("周期来源引用需要有效列表，且不超过 64 项")
@@ -118,6 +120,25 @@ def _research_context_evidence(evidence):
     if len({canonical(ref) for ref in normalized}) != len(normalized):
         raise invalid("研究上下文凭据重复")
     return bool(refs)
+
+
+def _research_peer_evidence(evidence):
+    from naumi_agent.personal.research_peer_authority import normalize_peer_ref
+    from naumi_agent.personal.research_provenance import normalize_provenance_ref
+
+    found = False
+    for key, normalizer, maximum in (
+        ("research_peer_read_refs", normalize_peer_ref, 64),
+        ("research_authoring_provenance_refs", normalize_provenance_ref, 256),
+    ):
+        refs = evidence.get(key, [])
+        if type(refs) is not list or len(refs) > maximum:
+            raise invalid("研究复核凭据数量不正确")
+        normalized = [normalizer(ref) for ref in refs]
+        if len({canonical(ref) for ref in normalized}) != len(refs):
+            raise invalid("研究复核凭据重复")
+        found |= bool(refs)
+    return found
 
 
 _VERSION_FIELDS = {
@@ -355,18 +376,33 @@ class ArtifactStore:
             research_bound = _research_evidence(value["evidence"])
             egress_bound = _research_evidence(value["evidence"], egress=True)
             context_bound = _research_context_evidence(value["evidence"])
+            peer_bound = _research_peer_evidence(value["evidence"])
         except PersonalAgentError:
             raise _broken() from None
         expected_authority = (
-            8 if context_bound else
-            7 if egress_bound else 6 if research_bound else 5 if followup_bound else
-            4 if workspace_bound else 3 if routine_bound else 2 if connection_bound else None
+            9
+            if peer_bound
+            else 8
+            if context_bound
+            else 7
+            if egress_bound
+            else 6
+            if research_bound
+            else 5
+            if followup_bound
+            else 4
+            if workspace_bound
+            else 3
+            if routine_bound
+            else 2
+            if connection_bound
+            else None
         )
         if value.get("authority_version") != expected_authority:
             raise _broken()
         if "authority_version" in value and (
             type(value["authority_version"]) is not int
-            or value["authority_version"] not in {2, 3, 4, 5, 6, 7, 8}
+            or value["authority_version"] not in {2, 3, 4, 5, 6, 7, 8, 9}
         ):
             raise _broken()
         if (
@@ -701,10 +737,14 @@ class ArtifactStore:
                         for ref in refs
                     }
                 )
-                if (_workspace_evidence(previous_record["evidence"])
-                        or _followup_evidence(previous_record["evidence"])
-                        or _research_evidence(previous_record["evidence"])
-                        or _research_evidence(previous_record["evidence"], egress=True)):
+                if (
+                    _workspace_evidence(previous_record["evidence"])
+                    or _followup_evidence(previous_record["evidence"])
+                    or _research_evidence(previous_record["evidence"])
+                    or _research_evidence(previous_record["evidence"], egress=True)
+                    or _research_context_evidence(previous_record["evidence"])
+                    or _research_peer_evidence(previous_record["evidence"])
+                ):
                     # Revisions cannot erase an opaque external read by omitting evidence.
                     previous_ref = {
                         key: previous_record[key] for key in ("artifact_id", "version", "sha256")
@@ -743,7 +783,10 @@ class ArtifactStore:
             research_bound = _research_evidence(evidence)
             egress_bound = _research_evidence(evidence, egress=True)
             context_bound = _research_context_evidence(evidence)
-            if context_bound:
+            peer_bound = _research_peer_evidence(evidence)
+            if peer_bound:
+                record["authority_version"] = 9
+            elif context_bound:
                 record["authority_version"] = 8
             elif egress_bound:
                 record["authority_version"] = 7

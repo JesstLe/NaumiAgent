@@ -23,10 +23,26 @@ KINDS = frozenset(
         "context_update",
         "context_result",
         "context_head",
+        "provenance",
+        "semantic",
+        "semantic_input",
+        "semantic_submission",
+        "peer_read",
     }
 )
 APPEND_ONLY = frozenset(
-    {"review", "read", "discovery", "egress_decision", "context_update", "context_result"}
+    {
+        "review",
+        "read",
+        "discovery",
+        "egress_decision",
+        "context_update",
+        "context_result",
+        "provenance",
+        "semantic_input",
+        "semantic_submission",
+        "peer_read",
+    }
 )
 _SPEC = JournalSpec(
     namespace="research",

@@ -535,3 +535,9 @@ UNKNOWN不重发及captured原结果显式继续保存，复用原研究Journal�
 ### PA-07 对话依据更新（2026-11-06）
 
 明确的Session上下文checkpoint已实现：保留原引用、原对话和UTF-8字节，使用authority8历史镜像、原权限与当前来源checkpoint，不把旧内容描述为新事实。Tool读取与人工API/CLI/TUI/Web2更新共用服务；UNKNOWN不自动重放。实现、自审及集中测试、真实模型/浏览器、冷读和副本回滚证据分别记录于[对话依据更新](../../development/personal-agent/PA-07-context.md)。VID-11、VID-18、VID-21仍为partial；原24项范围、观察和验收不变。
+
+### 2026-11-06 独立 Agent 复核切片
+
+2026-11-06独立Agent复核切片另见PA-07-semantic.md：用户选择已有Agent、确认确切资料和接收方授权，使用独立Job/Session/ChatRun并提交逐条支持/反驳/依据不足、原文字符及UTF-8锚点；原始Memory写作依据、双方授权及撤回持续校验。机械semantic_verification不改成已核实，独立结果只覆盖provided_sources；本轮专项/模型/HTTP/冷读/回滚以独立事务实测为准，Item研究、跨主题质量和完整24项验收仍未关闭。
+
+涉及 VID-11, VID-12, VID-18, VID-20, VID-21；原能力条目、验收要求和 partial 状态不变。
