@@ -1082,12 +1082,11 @@ class PersonalItemExecutionService:
         return await self._inbox_view(intent, job_id, value)
 
     async def _inbox_view(self, intent, job_id, value):
-        inbox = await self.jobs.list_result_inbox_records(intent["execution_session_id"])
-        matching = [r for r in inbox if r.delivery.job_id == job_id]
-        if len(matching) > 1:
-            raise PersonalAgentError("binding_conflict", "事项出现多个不同结果投递")
-        if matching:
-            delivery = matching[0].delivery
+        record = await self.jobs.get_result_inbox_record_for_job(
+            intent["execution_session_id"], job_id,
+        )
+        if record is not None:
+            delivery = record.delivery
             value.update(
                 delivery_id=delivery.delivery_id,
                 delivery_sha256=delivery.delivery_sha256,

@@ -4269,6 +4269,9 @@ class AgentEngine:
         from naumi_agent.personal.connections import PersonalConnectionService
 
         self.personal_connections = PersonalConnectionService(self)
+        from naumi_agent.personal.notifications import PersonalNotificationService
+
+        self.personal_notifications = PersonalNotificationService(self)
         from naumi_agent.personal.memories import PersonalMemoryService
         from naumi_agent.personal.memory_adapter import ScopedMemoryAdapter
         from naumi_agent.personal.memory_runtime import PersonalMemoryRuntime
@@ -4429,6 +4432,9 @@ class AgentEngine:
         from naumi_agent.personal.today_tools import PersonalTodayTool
 
         self._tool_registry.register(PersonalTodayTool(self.personal_today))
+        from naumi_agent.personal.notification_tools import PersonalNotificationsTool
+
+        self._tool_registry.register(PersonalNotificationsTool(self.personal_notifications))
         from naumi_agent.personal.connection_tools import (
             PersonalActionsTool,
             PersonalConnectionsTool,
@@ -5022,6 +5028,7 @@ class AgentEngine:
 
     async def shutdown(self) -> None:
         """释放资源（关闭数据库连接、浏览器、MCP 连接等）."""
+        await self._shutdown_component("personal_notifications", self.personal_notifications.stop)
         await self._shutdown_component("personal_routines", self.personal_routines.stop)
         await self._shutdown_component("personal_connections", self.personal_connections.stop)
         await self._shutdown_component("personal_memory", self.personal_memory.stop)
@@ -5726,6 +5733,7 @@ class AgentEngine:
             self.personal_routines.start()
             self.personal_memory.start()
             self.personal_connections.start()
+            self.personal_notifications.start()
         return recovered
 
     async def enqueue_stable_promotion_runtime_admission_delivery(

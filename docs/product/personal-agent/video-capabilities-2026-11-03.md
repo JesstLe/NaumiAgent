@@ -490,3 +490,7 @@ NaumiAgent 的 Team 因此要明确成员关系和真实 Run，不根据命名�
 用户已选择 Google Calendar，按读取事件→事项/草稿→人工审批→写回读回验收。选择不等于账户已连接。
 
 Today 的日计划、截止、优先级、人工勾选与原结果入口已经接线；使用原 Item/Job/Run，不新增执行器。来源撤权、确切历史、稳定请求、CAS、IANA/DST 和时区变化确认分别实施。最终本地测试、HTTP/冷重开和回滚证据见 [Today 记录](../../development/personal-agent/PA-04-today.md)。原24项要求、视频证据和缺口不因局部实现改变；跨工作区、通知、真实provider/账户与部署继续独立验收。
+
+### PA-04 持久应用内通知更新（2026-11-05）
+
+独立来源引用账本、认证结果/失败/日历草稿通知、100 成员不可变合并批次、IANA 勿扰/静音、一次领取与 UNKNOWN 原请求核对、真实客户端呈现和人工通知已读均已接通共享 Tool/API/CLI/TUI/Web。通知不复制私有正文，不重跑执行，不批准行动，也不代替原结果人工已读；每次访问重新授权，模型读取实际 bytes 与不可变 provenance 绑定原会话。集中本地回归、独立 loopback HTTP/冷进程、生产组件 DOM 与源码副本回滚分别记入 [通知模块记录](../../development/personal-agent/PA-04-notifications.md)。原24项要求不变；OS/mobile push、跨设备、真实 Google 账户和整体发布仍独立验收。

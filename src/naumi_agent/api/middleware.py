@@ -15,7 +15,8 @@ from naumi_agent.api.deps import extract_api_key
 
 def _routine_headers(request: Request) -> dict[str, str]:
     path = request.url.path
-    prefixes = ("/api/v1/personal/routines", "/api/v1/personal/today")
+    prefixes = ("/api/v1/personal/routines", "/api/v1/personal/today",
+                "/api/v1/personal/notifications")
     if any(path == prefix or path.startswith(prefix + "/") for prefix in prefixes):
         return {"Cache-Control": "no-store", "Pragma": "no-cache"}
     return {}

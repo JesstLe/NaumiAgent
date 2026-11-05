@@ -1835,6 +1835,54 @@ class AgentJobStore:
         )
         return tuple(record.delivery for record in records)
 
+    async def get_result_inbox_record_for_job(
+        self, session_id: str, job_id: str,
+    ) -> AgentJobResultInboxRecord | None:
+        """Resolve an exact job delivery with the same authentication as inbox pages."""
+        _require_text(session_id, field="session_id", maximum=_MAX_SESSION_ID_BYTES,
+                      allow_empty=True)
+        _require_identifier(job_id, field="job_id")
+        if not _regular_file_exists(self._db_path):
+            return None
+        key = self._runtime_key()
+        await self._ensure_schema()
+        routing = _session_routing_hmac(session_id, key=key.key_bytes)
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN")
+                cursor = await db.execute(
+                    "SELECT d.delivery_id,a.acknowledgement_id "
+                    "FROM agent_job_publication_deliveries d "
+                    "LEFT JOIN agent_job_result_acknowledgements a "
+                    "ON a.delivery_id=d.delivery_id "
+                    "WHERE d.job_id=? AND d.session_routing_hmac=? AND d.sink=?",
+                    (job_id, routing, AgentJobDeliverySink.RESULT_INBOX.value),
+                )
+                rows = await cursor.fetchall()
+                if len(rows) > 1:
+                    raise AgentJobError("事项结果出现多个不同投递。")
+                if not rows:
+                    await db.commit()
+                    return None
+                delivery = await _require_publication_delivery(db, rows[0]["delivery_id"], key=key)
+                await _validate_delivery_binding(db, delivery, key=key)
+                if (delivery.job_id != job_id or delivery.session_routing_hmac != routing
+                        or delivery.sink is not AgentJobDeliverySink.RESULT_INBOX):
+                    raise AgentJobError("事项结果投递与原对话不一致。")
+                ack_id = rows[0]["acknowledgement_id"]
+                ack = (await _require_result_acknowledgement(db, ack_id, key=key)
+                       if ack_id is not None else None)
+                if ack is not None:
+                    _validate_result_acknowledgement_binding(
+                        delivery, ack, expected_session_routing_hmac=routing,
+                    )
+                await db.commit()
+                return AgentJobResultInboxRecord(delivery=delivery, acknowledgement=ack)
+        except AgentJobError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise AgentJobError("事项结果投递读取失败。") from exc
+
     async def list_result_inbox_records(
         self,
         session_id: str,

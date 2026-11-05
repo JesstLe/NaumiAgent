@@ -1,3 +1,4 @@
+import type { NotificationBatch, NotificationClaim, NotificationContext, NotificationMutation, NotificationPage, NotificationPreferencesView, NotificationPreferenceWrite, NotificationPresentation, NotificationPrompt, NotificationQuery, NotificationRead, NotificationRequest } from './personalNotifications'
 import type { TodayContext, TodayDayView, TodayHistory, TodayMetadataView, TodayMutation, TodayOperation, TodayQuery, TodayRequest, TodaySources, TodayWriteBodies } from './personalToday'
 import type { PersonalItem, PersonalItemAction, PersonalItemControl, PersonalItemExecution, PersonalItemInput, PersonalItemPage, PersonalItemReadInput, PersonalItemReadReceipt, PersonalItemResult, PersonalItemResultsPage, PersonalItemUpdate } from './personalItems'
 import type { PersonalRoutine, PersonalRoutineAction, PersonalRoutineConfirm, PersonalRoutineContext, PersonalRoutineControl, PersonalRoutineOccurrence, PersonalRoutineOccurrencesPage, PersonalRoutinePage, PersonalRoutinePreview, PersonalRoutinePreviewInput, PersonalRoutineRequestReceipt, PersonalRoutineRevise, RoutineStatus } from './personalRoutines'
@@ -556,6 +557,38 @@ export class WorkbenchRuntimeClient extends WorkbenchApiClient {
   }
   async mutatePersonalToday<K extends TodayOperation>(operation: K, body: TodayWriteBodies[K]): Promise<TodayMutation> {
     return (await this.fetch(`/personal/today/${operation}`, { method: 'POST', cache: 'no-store', body: JSON.stringify(body) })).json()
+  }
+  async getPersonalNotificationContext(signal?: AbortSignal): Promise<NotificationContext> {
+    return (await this.fetch('/personal/notifications/context', { signal, cache: 'no-store' })).json()
+  }
+  async getPersonalNotifications(query: NotificationQuery = {}, signal?: AbortSignal): Promise<NotificationPage> {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== '') params.set(key, String(value))
+    return (await this.fetch(`/personal/notifications?${params}`, { signal, cache: 'no-store' })).json()
+  }
+  async getPersonalNotificationPreferences(signal?: AbortSignal): Promise<NotificationPreferencesView> {
+    return (await this.fetch('/personal/notifications/preferences', { signal, cache: 'no-store' })).json()
+  }
+  async getPersonalNotificationBatch(id: string, signal?: AbortSignal): Promise<NotificationBatch> {
+    return (await this.fetch(`/personal/notifications/batches/${encodeURIComponent(id)}`, { signal, cache: 'no-store' })).json()
+  }
+  async getPersonalNotificationRequest(id: string, signal?: AbortSignal): Promise<NotificationRequest> {
+    return (await this.fetch(`/personal/notifications/requests/${encodeURIComponent(id)}`, { signal, cache: 'no-store' })).json()
+  }
+  async getPersonalNotificationPrompt(signal?: AbortSignal): Promise<NotificationPrompt> {
+    return (await this.fetch('/personal/notifications/prompt', { signal, cache: 'no-store' })).json()
+  }
+  async setPersonalNotificationPreferences(body: NotificationPreferenceWrite): Promise<NotificationMutation> {
+    return (await this.fetch('/personal/notifications/preferences', { method: 'POST', cache: 'no-store', body: JSON.stringify(body) })).json()
+  }
+  async claimPersonalNotification(body: NotificationClaim): Promise<NotificationMutation> {
+    return (await this.fetch('/personal/notifications/claim', { method: 'POST', cache: 'no-store', body: JSON.stringify(body) })).json()
+  }
+  async presentPersonalNotification(body: NotificationPresentation): Promise<NotificationMutation> {
+    return (await this.fetch('/personal/notifications/presentation', { method: 'POST', cache: 'no-store', body: JSON.stringify(body) })).json()
+  }
+  async readPersonalNotifications(body: NotificationRead): Promise<NotificationMutation> {
+    return (await this.fetch('/personal/notifications/notice-read', { method: 'POST', cache: 'no-store', body: JSON.stringify(body) })).json()
   }
   async personalRoutineContext(signal?: AbortSignal): Promise<PersonalRoutineContext> {
     return (await this.fetch('/personal/routines/context', { signal, cache: 'no-store' })).json()

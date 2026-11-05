@@ -79,6 +79,7 @@ def create_app() -> FastAPI:
         items,
         memories,
         messages,
+        notifications,
         output_assets,
         personal,
         routines,
@@ -98,6 +99,7 @@ def create_app() -> FastAPI:
     app.include_router(items.router, prefix="/api/v1")
     app.include_router(routines.router, prefix="/api/v1")
     app.include_router(today.router, prefix="/api/v1")
+    app.include_router(notifications.router, prefix="/api/v1")
     app.include_router(memories.router, prefix="/api/v1")
     app.include_router(connections.router, prefix="/api/v1")
     app.include_router(tools.router, prefix="/api/v1")

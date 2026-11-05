@@ -453,10 +453,19 @@ async def test_actual_engine_composition_router_leaf_tools_and_shared_cli_tui(tm
     try:
         assert isinstance(engine.personal_connections, PersonalConnectionService)
         assert isinstance(engine.tool_registry.get("personal_actions"), PersonalActionsTool)
+        from naumi_agent.personal.notification_tools import PersonalNotificationsTool
+        from naumi_agent.personal.notifications import PersonalNotificationService
+
+        assert isinstance(engine.personal_notifications, PersonalNotificationService)
+        assert isinstance(
+            engine.tool_registry.get("personal_notifications"), PersonalNotificationsTool,
+        )
+        assert "personal_notifications" in ASSIGNABLE_TOOL_NAMES
         assert {"personal_connections", "personal_actions"} <= ASSIGNABLE_TOOL_NAMES
         await engine.get_or_create_session()
         app = create_app()
-        assert len(app.routes) == 203
+        assert len(app.routes) == 213
+        assert len([r for r in app.routes if "/personal/notifications" in r.path]) == 10
         assert len([route for route in app.routes if "/personal/routines" in route.path]) == 10
         assert (
             len(
@@ -475,6 +484,13 @@ async def test_actual_engine_composition_router_leaf_tools_and_shared_cli_tui(tm
         assert "actions" in await execute_slash_command(engine, "/actions list")
         names = {item.name for item in COMMANDS_META}
         assert {"/connections", "/actions"} <= names
+        assert "/notifications" in names
+        notification_cli = await execute_slash_command(engine, "/notifications context")
+        assert '"configured": false' in notification_cli
+        engine.personal_notifications.start()
+        assert engine.personal_notifications._worker is not None
+        await engine.personal_notifications.stop()
+        assert engine.personal_notifications._worker is None
         for command in ["/connections context", "/actions list"]:
             with pytest.raises(HTTPException):
                 validate_command(command)

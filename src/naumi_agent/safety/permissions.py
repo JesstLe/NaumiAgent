@@ -1692,6 +1692,16 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         tool_family="personal_today",
         allow_session_grant=False,
     ),
+    "personal_notifications": PermissionRule(
+        tool_name="personal_notifications",
+        allowed_modes=[PermissionMode.BYPASS, PermissionMode.PERMISSIVE,
+                       PermissionMode.MODERATE, PermissionMode.STRICT],
+        requires_confirmation=False,
+        max_calls_per_session=200,
+        risk_level=PermissionRiskLevel.LOW,
+        tool_family="personal_notifications",
+        allow_session_grant=False,
+    ),
     "personal_routines": PermissionRule(
         tool_name="personal_routines",
         allowed_modes=[

@@ -37,7 +37,8 @@ _SUPPORTED = frozenset(
 /chaos /scale /state /vibe /eval /page /heal /dspy /graph /mcts /route
 /speculate /jit /pointer /cooe /sleep /entropy /ooda /probe /hook /vision
 /spar /world /fusion /consensus /pid /zkp /genesis /macro /cosmos /watchdog
-/supervisor /autopsy /feedback /evolution /assistants /library /items /memory /routines /today
+/supervisor /autopsy /feedback /evolution /assistants /library /items /memory
+/routines /today /notifications
 """.split()
 )
 
@@ -101,6 +102,7 @@ class _CommandEngine:
         object.__setattr__(self, "_personal_items_manual_channel", "web")
         object.__setattr__(self, "_personal_routines_manual_channel", "web")
         object.__setattr__(self, "_personal_today_manual_channel", "web")
+        object.__setattr__(self, "_personal_notifications_manual_channel", "web")
         object.__setattr__(self, "_personal_memory_manual_channel", "management_web")
 
     def __getattr__(self, name):
@@ -134,7 +136,7 @@ async def run_command(
     auth: str = AuthDep,
 ):
     command = validate_command(body.command)
-    routine_command = command.split(maxsplit=1)[0] in {"/routines", "/today"}
+    routine_command = command.split(maxsplit=1)[0] in {"/routines", "/today", "/notifications"}
     private_headers = (
         {"Cache-Control": "no-store", "Pragma": "no-cache"} if routine_command else None
     )
@@ -150,7 +152,9 @@ async def run_command(
     session = await engine.session_store.load(session_id)
     if not session:
         raise HTTPException(404, "会话不存在", headers=private_headers)
-    if command.split(maxsplit=1)[0] in {"/items", "/memory", "/routines", "/today"} and getattr(
+    if command.split(maxsplit=1)[0] in {
+        "/items", "/memory", "/routines", "/today", "/notifications",
+    } and getattr(
         session, "personal_execution_id", ""
     ):
         raise HTTPException(
@@ -240,17 +244,25 @@ async def _command_stream(request, session_id, command, mode, *, edit_message_id
                     if memory_command else output
                 )
                 today_command = command.split(maxsplit=1)[0] == "/today"
-                if today_command:
+                notification_command = command.split(maxsplit=1)[0] == "/notifications"
+                if today_command or notification_command:
                     # Management output can contain another planner's private data.
                     # Persist only the opaque command receipt, never unpinned bodies
                     # or raw JSON arguments that would enter the next model turn.
-                    persisted_output = json.dumps({"type": "personal_today_command",
+                    persisted_output = json.dumps({"type": (
+                        "personal_notifications_command" if notification_command
+                        else "personal_today_command"),
                         "operation": (
                             command.split(maxsplit=2)[1] if len(command.split()) > 1 else "context"
                         ),
                         "run_id": run.id, "status": "failed" if adapter.failed else "completed"},
                         ensure_ascii=False)
-                session.add_message("user", "/today" if today_command else command)
+                saved_command = command
+                if today_command:
+                    saved_command = "/today"
+                elif notification_command:
+                    saved_command = "/notifications"
+                session.add_message("user", saved_command)
                 if memory_command:
                     session.add_message(
                         "assistant", persisted_output, metadata={"personal_memory_refs": refs},

@@ -43,8 +43,9 @@ function useDirtyNavigation(dirty: boolean) {
   return leaving ? <Modal title="放弃未保存修改？" onClose={() => { leaving.cancel?.(); setLeaving(null) }}><div className="pc-modal-body"><p>日程草稿尚未保存。</p></div><footer><button onClick={() => { leaving.cancel?.(); setLeaving(null) }}>继续编辑</button><button className="pc-danger" onClick={() => { const proceed = leaving.proceed; setLeaving(null); proceed() }}>放弃修改</button></footer></Modal> : null
 }
 
-export function ConnectionWorkspace({ api, namespace, agents, connected, onClose, onOpenItems, onOpenArtifact, onOpenMemory }: {
+export function ConnectionWorkspace({ api, namespace, agents, connected, initialActionId, onClose, onOpenItems, onOpenArtifact, onOpenMemory }: {
   api: PersonalConnectionsApi; namespace: string; agents: PersonalAgent[]; connected: boolean; onClose: () => void; onOpenItems?: () => void
+  initialActionId?: string | null
   onOpenArtifact?: (actorId: string, ref: PersonalArtifactRef) => void
   onOpenMemory?: (actorId: string, ref: PersonalMemoryRef, itemId: string | null) => void
 }) {
@@ -52,6 +53,8 @@ export function ConnectionWorkspace({ api, namespace, agents, connected, onClose
   const [tab, setTab] = useState<'calendar' | 'actions'>('calendar'), [accountId, setAccountId] = useState('')
   const [offset, setOffset] = useState(0), [events, setEvents] = useState<CalendarEvent[]>([]), [next, setNext] = useState<number | null>(null)
   const [eventId, setEventId] = useState(''), [actionId, setActionId] = useState(''), [query, setQuery] = useState('')
+  const [exactAction, setExactAction] = useState<CalendarAction | null>(null)
+  const [unavailableActionId, setUnavailableActionId] = useState('')
   const [eventLoading, setEventLoading] = useState(false), [detailError, setDetailError] = useState('')
   const [editor, setEditor] = useState<{ action?: CalendarAction; event?: CalendarEvent } | null>(null)
   const [now, setNow] = useState(Date.now)
@@ -61,10 +64,15 @@ export function ConnectionWorkspace({ api, namespace, agents, connected, onClose
   const [accountSnapshot, setAccountSnapshot] = useState<PersonalConnection | null>(null)
   const [remoteRevoke, setRemoteRevoke] = useState(false), [sharing, setSharing] = useState(false), [shareActor, setShareActor] = useState('')
   const file = useRef<HTMLInputElement>(null), alive = useRef(true)
+  useEffect(() => {
+    if (!initialActionId) return
+    setExactAction(null); setActionId(initialActionId); setTab('actions'); setEditor(null); setDetailError(''); setConfirm(null); setReviewSnapshot(null)
+  }, [namespace, initialActionId])
   useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
   const account = state.connections.find(value => value.id === accountId) || state.connections[0]
   const event = events.find(value => value.occurrence_key === eventId)
-  const action = state.actions.find(value => value.id === actionId)
+  const listedAction = state.actions.find(value => value.id === actionId)
+  const action = unavailableActionId === actionId ? undefined : exactAction?.id === actionId && (!listedAction || exactAction.revision > listedAction.revision) ? exactAction : listedAction
   useEffect(() => { if (action?.status !== 'draft') return; const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer) }, [action?.id, action?.status])
   const availableActors = actors(agents)
   const accountCanDraft = account?.status === 'connected'
@@ -81,9 +89,10 @@ export function ConnectionWorkspace({ api, namespace, agents, connected, onClose
     return () => controller.abort()
   }, [api, account?.id, account?.auth_epoch, offset, connected, tab, state.refreshToken])
   useEffect(() => {
+    setExactAction(null); setUnavailableActionId('')
     if (!actionId || !connected || tab !== 'actions') return
     const controller = new AbortController()
-    void api.personalCalendarAction(actionId, controller.signal).then(value => { if (controller.signal.aborted) return; if (validateAction(value).id !== actionId) throw new Error('动作编号不一致'); state.observeAction(value) }).catch(cause => { if (!controller.signal.aborted) setDetailError(calendarError(cause)) })
+    void api.personalCalendarAction(actionId, controller.signal).then(value => { if (controller.signal.aborted) return; if (validateAction(value).id !== actionId) throw new Error('动作编号不一致'); setExactAction(value); state.observeAction(value) }).catch(cause => { if (!controller.signal.aborted) { setUnavailableActionId(actionId); setDetailError(calendarError(cause)) } })
     return () => controller.abort()
   }, [api, actionId, tab, connected, state.refreshToken])
   const navigate = (callback: () => void) => requestArtifactNavigation(callback)

@@ -215,6 +215,24 @@ class PersonalArtifactService:
                 for ref in value.get("source_refs", []):
                     stack.append(await self._call("get", actor_id=actor_id,
                         artifact_id=ref["artifact_id"], version=ref["version"]))
+        notifications = getattr(self.engine, "personal_notifications", None)
+        if notifications is not None:
+            await notifications.authorize_artifact(snapshot, actor_id)
+        else:
+            stack, seen = [snapshot], set()
+            while stack:
+                value = stack.pop()
+                identity = (value["artifact_id"], value["version"])
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                if len(seen) > 4096:
+                    raise PersonalAgentError("storage_error", "通知资料来源超过校验上限")
+                if value.get("evidence", {}).get("notification_read_refs"):
+                    raise PersonalAgentError("source_unavailable", "通知资料需要原通知授权组件")
+                for ref in value.get("source_refs", []):
+                    stack.append(await self._call("get", actor_id=actor_id,
+                        artifact_id=ref["artifact_id"], version=ref["version"]))
         connections = getattr(self.engine, "personal_connections", None)
         if connections is not None:
             await connections.authorize_artifact(snapshot, actor_id)

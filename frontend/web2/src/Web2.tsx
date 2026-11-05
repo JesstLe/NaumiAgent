@@ -101,6 +101,7 @@ import {
 } from '@naumi/shared/projects/workspaceProjects'
 import { ProjectCreationDialog, type ProjectCreationInput } from './ProjectCreationDialog'
 import { PersonalToday } from './personal/today/PersonalToday'
+import { PersonalNotifications } from './personal/notifications/PersonalNotifications'
 import { PersonalItems } from './personal/items/PersonalItems'
 import { PersonalRoutines } from './personal/routines/PersonalRoutines'
 import { ConnectionWorkspace } from './personal/connections/ConnectionWorkspace'
@@ -307,10 +308,13 @@ export function Web2() {
     if (changed) history.pushState({}, '', url)
   }
   const [connectionsOpen, setConnectionsOpen] = useState(() => new URLSearchParams(location.search).get('connections') === '1')
+  const [notificationsOpen, setNotificationsOpen] = useState(false)
+  const [actionSelection, setActionSelection] = useState<string | null>(() => new URLSearchParams(location.search).get('action_id'))
   const closeConnections = () => {
     setConnectionsOpen(false)
+    setActionSelection(null)
     const url = new URL(location.href)
-    if (url.searchParams.has('connections')) { url.searchParams.delete('connections'); history.pushState({}, '', url) }
+    if (url.searchParams.has('connections') || url.searchParams.has('action_id')) { url.searchParams.delete('connections'); url.searchParams.delete('action_id'); history.pushState({}, '', url) }
   }
   const [memoriesOpen, setMemoriesOpen] = useState(() => new URLSearchParams(location.search).get('memories') === '1')
   const closeMemories = () => {
@@ -348,6 +352,7 @@ export function Web2() {
         setRoutinesOpen(new URLSearchParams(location.search).get('routines') === '1')
         setMemoriesOpen(new URLSearchParams(location.search).get('memories') === '1')
         setConnectionsOpen(new URLSearchParams(location.search).get('connections') === '1')
+        setActionSelection(query.get('action_id'))
       }
       if (todayOpen || routinesOpen || itemsOpen || memoriesOpen || connectionsOpen) requestArtifactNavigation(accept, () => history.pushState({}, '', acceptedUrl))
       else accept()
@@ -408,9 +413,11 @@ export function Web2() {
     setMemoriesOpen(true)
     if (window.innerWidth < 580) setSidebar(false)
   })
-  const openConnections = () => requestArtifactNavigation(() => {
+  const openConnections = (actionId?: string) => requestArtifactNavigation(() => {
     closeToday(); closeRoutines(); closeItems(); closeLibrary(); closeMemories()
-    const url = new URL(location.href); url.searchParams.set('connections', '1'); history.pushState({}, '', url)
+    const url = new URL(location.href); url.searchParams.set('connections', '1'); url.searchParams.delete('action_id')
+    if (actionId) url.searchParams.set('action_id', actionId)
+    setActionSelection(actionId || null); history.pushState({}, '', url)
     setConnectionsOpen(true)
     if (window.innerWidth < 580) setSidebar(false)
   })
@@ -945,6 +952,7 @@ export function Web2() {
           </div>}
         </div>
         <div className="w2-title-end">
+          <PersonalNotifications api={w.api} namespace={`${w.base}:${workspaceRoot || ''}`} connected={Boolean(w.daemon)} agents={personal.agents} open={notificationsOpen} onClose={() => setNotificationsOpen(false)} onToggle={() => setNotificationsOpen(value => !value)} onOpenResult={id => openItems({ kind: 'result', id })} onOpenItem={id => openItems({ kind: 'item', id })} onOpenAction={openConnections} />
           <span className={`w2-connection-dot ${w.daemon ? 'online' : ''}`} />
           {w.connecting ? '连接中' : w.daemon ? '本地工作区' : '未连接'}
         </div>
@@ -980,7 +988,7 @@ export function Web2() {
           <button onClick={() => openRoutines()} className={routinesOpen ? 'selected' : ''}><Clock3 />周期计划</button>
           <button onClick={openMemories} className={memoriesOpen ? 'selected' : ''}><BrainCircuit />记忆</button>
           <button onClick={() => openLibrary()} className={libraryOpen ? 'selected' : ''}><Library />资料库</button>
-          <button onClick={openConnections} className={connectionsOpen ? 'selected' : ''}><Link2 />连接</button>
+          <button onClick={() => openConnections()} className={connectionsOpen ? 'selected' : ''}><Link2 />连接</button>
           <button onClick={() => openPanel('schedules')} className={!todayOpen && !routinesOpen && !itemsOpen && !libraryOpen && !memoriesOpen && !connectionsOpen && panel === 'schedules' ? 'selected' : ''}><Clock3 />定时任务</button>
           <button onClick={() => openPanel('plugins')} className={!todayOpen && !routinesOpen && !itemsOpen && !libraryOpen && !memoriesOpen && !connectionsOpen && panel === 'plugins' ? 'selected' : ''}><Plug />插件</button>
         </nav>
@@ -1126,7 +1134,7 @@ export function Web2() {
 
       <main className={`w2-main ${terminal ? 'has-terminal' : ''} ${todayOpen || routinesOpen || libraryOpen || itemsOpen || memoriesOpen || connectionsOpen ? 'is-library' : ''}`}>
         {todayOpen && <PersonalToday key={`today:${w.base}:${workspaceRoot || ''}:${todayLocationVersion}`} api={w.api} namespace={`${w.base}:${workspaceRoot || ''}`} connected={Boolean(w.daemon)} onClose={closeToday} onOpenItem={id => showItems({ kind: 'item', id })} onOpenResult={id => showItems({ kind: 'result', id })} onOpenRoutine={showRoutines} />}
-        {connectionsOpen && <ConnectionWorkspace key={`connections:${w.base}:${workspaceRoot || ''}`} api={w.api} namespace={`${w.base}:${workspaceRoot || ''}`} agents={personal.agents} connected={Boolean(w.daemon)} onClose={closeConnections} onOpenItems={openItems} onOpenArtifact={openItemArtifact} onOpenMemory={openActionMemory} />}
+        {connectionsOpen && <ConnectionWorkspace key={`connections:${w.base}:${workspaceRoot || ''}`} api={w.api} namespace={`${w.base}:${workspaceRoot || ''}`} agents={personal.agents} connected={Boolean(w.daemon)} initialActionId={actionSelection} onClose={closeConnections} onOpenItems={openItems} onOpenArtifact={openItemArtifact} onOpenMemory={openActionMemory} />}
         {memoriesOpen && <MemoryWorkspace key={`memories:${w.base}:${workspaceRoot || ''}`} api={w.api} namespace={`${w.base}:${workspaceRoot || ''}`} initialActorId={personal.current?.id || 'main'} agents={personal.agents} connected={Boolean(w.daemon)} onClose={closeMemories} />}
         {routinesOpen && <PersonalRoutines key={`routines:${w.base}:${workspaceRoot || ''}`} api={w.api} namespace={`${w.base}:${workspaceRoot || ''}`} agents={personal.agents} connected={Boolean(w.daemon)} initialRoutineId={routineSelection} onClose={closeRoutines} onOpenArtifact={openItemArtifact} />}
         {itemsOpen && <PersonalItems key={`items:${w.base}:${workspaceRoot || ''}`} api={w.api} namespace={`${w.base}:${workspaceRoot || ''}`} agents={personal.agents} connected={Boolean(w.daemon)} originSessionId={w.sessionId || undefined} initialSelection={itemSelection} onClose={closeItems} onOpenArtifact={openItemArtifact} />}
