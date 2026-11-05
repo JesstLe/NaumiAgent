@@ -113,6 +113,43 @@ describe('followup host, notifications and HTTP adapters', () => {
 
 
 describe('Today followup foreground ownership', () => {
+  it('retains exact selected proof and verified target when a parent echoes the same initial proposal id', async () => {
+    const target = { kind: 'today_place' as const, day_id: dayId, day_revision: 3, metadata_id: metadataId, placement_id: placementId, item_ref: ref }
+    const original = proposal({ decision: { revision: 1, status: 'accepted', presentation_epoch: 0, snooze_until: null, effect_id: effectId }, effect_status: 'materialized', target }), api = apiMock(original)
+    const ui = renderHook(({ initialProposalId }: { initialProposalId: string | null }) => useFollowups({ api, namespace: 'same-id-proof', connected: true, initialProposalId }), { initialProps: { initialProposalId: null as string | null } })
+    await waitFor(() => { expect(ui.result.current.context).not.toBeNull(); expect(ui.result.current.loading).toBe(false) })
+    act(() => ui.result.current.select(proposalId))
+    await waitFor(() => { expect(ui.result.current.selected).toEqual(original); expect(ui.result.current.detailLoading).toBe(false) })
+    await act(async () => { await ui.result.current.verifyTarget(proposalId) })
+    const selected = ui.result.current.selected, readback = ui.result.current.readback, calls = api.executePersonalFollowupOperation.mock.calls.length
+    expect(readback).toMatchObject({ proposal_id: proposalId, target, verified: true })
+    expect(api.getPersonalTodayDay).toHaveBeenCalledWith(dayId, undefined, expect.any(AbortSignal))
+    ui.rerender({ initialProposalId: proposalId })
+    expect(ui.result.current.selected).toEqual(selected)
+    expect(ui.result.current.readback).toEqual(readback)
+    expect(ui.result.current.notice).toBe('原安排已读回')
+    expect(api.executePersonalFollowupOperation.mock.calls).toHaveLength(calls)
+    expect(api.getPersonalTodayDay).toHaveBeenCalledTimes(1)
+    expect(api.executePersonalFollowupOperation.mock.calls.every(([name]) => ['rules', 'list', 'get'].includes(name))).toBe(true)
+  })
+  it('still clears verified targets for a different initial proposal and a namespace boundary', async () => {
+    const otherId = `fp_${'9'.repeat(32)}`, target = { kind: 'today_place' as const, day_id: dayId, day_revision: 3, metadata_id: metadataId, placement_id: placementId, item_ref: ref }
+    const original = proposal({ decision: { revision: 1, status: 'accepted', presentation_epoch: 0, snooze_until: null, effect_id: effectId }, effect_status: 'materialized', target }), other = proposal({ id: otherId, proposal_ref: { ...proposal().proposal_ref, proposal_id: otherId } }), api = apiMock(original)
+    const implementation = api.executePersonalFollowupOperation.getMockImplementation()!
+    api.executePersonalFollowupOperation.mockImplementation((name: string, args: any) => name === 'get' && args.proposal_id === otherId ? Promise.resolve(other) : implementation(name, args))
+    const ui = renderHook(({ namespace, initialProposalId }: { namespace: string; initialProposalId: string }) => useFollowups({ api, namespace, connected: true, initialProposalId }), { initialProps: { namespace: 'same-id-proof', initialProposalId: proposalId } })
+    await waitFor(() => { expect(ui.result.current.selected).toEqual(original); expect(ui.result.current.loading).toBe(false) })
+    await act(async () => { await ui.result.current.verifyTarget(proposalId) })
+    expect(ui.result.current.readback?.verified).toBe(true)
+    ui.rerender({ namespace: 'same-id-proof', initialProposalId: otherId })
+    expect(ui.result.current.readback).toBeNull()
+    await waitFor(() => expect(ui.result.current.selected?.id).toBe(otherId))
+    ui.rerender({ namespace: 'other-proof', initialProposalId: otherId })
+    expect(ui.result.current.readback).toBeNull()
+    expect(ui.result.current.notice).toBe('')
+    await waitFor(() => expect(ui.result.current.selected?.id).toBe(otherId))
+    expect(api.executePersonalFollowupOperation.mock.calls.every(([name]) => ['rules', 'list', 'get'].includes(name))).toBe(true)
+  })
   it.each(['url', 'notification'] as const)('starts directly in followups from %s without launching a hidden Today context or bulk day read', async entrypoint => {
     history.replaceState({}, '', `/web2?today=1&today_date=2026-11-05&today_timezone=UTC${entrypoint === 'url' ? '&today_view=followups' : ''}`)
     const api = todayHostApi(), props = { api, namespace: 'foreground-A', connected: true, initialFollowupId: entrypoint === 'notification' ? proposalId : null, onClose: vi.fn(), onOpenItem: vi.fn(), onOpenResult: vi.fn(), onOpenRoutine: vi.fn() }

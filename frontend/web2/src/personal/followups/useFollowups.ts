@@ -43,7 +43,11 @@ export function useFollowups({ api, namespace, connected, initialProposalId }: {
     return () => { window.removeEventListener('storage', restore); writeController.current?.abort(); readController.current?.abort(); generation.current++; detailSequence.current++; readSequence.current++ }
   }, [key])
   useEffect(() => { if (!connected) { writeController.current?.abort(); readController.current?.abort() } }, [connected])
-  useEffect(() => { if (initialProposalId) { setSelectedId(initialProposalId); setSelected(null); setReadback(null); detailSequence.current++ } }, [initialProposalId])
+  useEffect(() => {
+    // A parent may echo an already selected URL after acceptance. Preserve its
+    // exact proof; scope and connection effects still clear changed authority.
+    if (initialProposalId && initialProposalId !== live.current.selectedId) { setSelectedId(initialProposalId); setSelected(null); setReadback(null); detailSequence.current++ }
+  }, [initialProposalId])
   useEffect(() => {
     const controller = new AbortController(), run = ++generation.current
     let timer: ReturnType<typeof setTimeout> | undefined
