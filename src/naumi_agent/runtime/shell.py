@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import ntpath
 import os
 import re
 import shutil
@@ -87,6 +88,62 @@ def build_shell_argv(
     return ("/bin/sh", "-c", command)
 
 
+def build_shell_environment(
+    shell: str | Path,
+    *,
+    platform: str | None = None,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, str] | None:
+    """Supply selected Bash utilities only to its child, never the caller's environment."""
+    active_platform = sys.platform if platform is None else platform
+    if active_platform != "win32":
+        return dict(env) if env is not None else None
+
+    child = dict(os.environ if env is None else env)
+    parent = Path(shell).absolute().parent
+    candidates = [parent]
+    if parent.name.casefold() == "bin" and parent.parent.name.casefold() != "usr":
+        utilities = parent.parent / "usr" / "bin"
+        if utilities.is_dir():
+            candidates.insert(0, utilities)
+
+    # Windows environment keys and search paths are case-insensitive. Preserve
+    # unrelated entries, including caller-specified empty search components.
+    original_path: str | None = None
+    for key in tuple(child):
+        if key.casefold() == "path":
+            original_path = child.pop(key)
+    prefixes = [str(path) for path in candidates if path.is_dir()]
+    seen: set[str] = set()
+    entries: list[str] = []
+    inherited = original_path.split(";") if original_path is not None else []
+    for entry in (*prefixes, *inherited):
+        normalized = ntpath.normcase(ntpath.normpath(entry)) if entry else ""
+        if normalized in seen and normalized:
+            continue
+        if normalized:
+            seen.add(normalized)
+        entries.append(entry)
+    child["PATH"] = ";".join(entries)
+    return child
+
+
+def build_bash_script_argv(
+    script_path: str | Path,
+    *,
+    platform: str | None = None,
+    env: Mapping[str, str] | None = None,
+    which: Which | None = None,
+    is_file: IsFile | None = None,
+) -> tuple[str, ...]:
+    """Run a script with the same Windows Bash selection as command execution."""
+    active_platform = sys.platform if platform is None else platform
+    if active_platform == "win32":
+        bash = resolve_git_bash(env=env, which=which, is_file=is_file)
+        return (str(bash), "--noprofile", "--norc", str(script_path))
+    return ("bash", str(script_path))
+
+
 async def create_shell_process(
     command: str,
     *,
@@ -98,12 +155,42 @@ async def create_shell_process(
 ) -> asyncio.subprocess.Process:
     """Start a shell command in its own process group for reliable cleanup."""
     argv = build_shell_argv(command, env=env)
+    return await _create_bash_process(
+        argv, cwd=cwd, stdin=stdin, stdout=stdout, stderr=stderr, env=env,
+    )
+
+
+async def create_bash_script_process(
+    script_path: str | Path,
+    *,
+    cwd: str | Path | None = None,
+    stdin: int | None = None,
+    stdout: int | None = None,
+    stderr: int | None = None,
+    env: Mapping[str, str] | None = None,
+) -> asyncio.subprocess.Process:
+    """Start a Bash script with utility discovery and owned process-group cleanup."""
+    argv = build_bash_script_argv(script_path, env=env)
+    return await _create_bash_process(
+        argv, cwd=cwd, stdin=stdin, stdout=stdout, stderr=stderr, env=env,
+    )
+
+
+async def _create_bash_process(
+    argv: tuple[str, ...],
+    *,
+    cwd: str | Path | None,
+    stdin: int | None,
+    stdout: int | None,
+    stderr: int | None,
+    env: Mapping[str, str] | None,
+) -> asyncio.subprocess.Process:
     kwargs: dict[str, object] = {
         "cwd": str(cwd) if cwd is not None else None,
         "stdin": stdin,
         "stdout": stdout,
         "stderr": stderr,
-        "env": dict(env) if env is not None else None,
+        "env": build_shell_environment(argv[0], env=env),
     }
     if sys.platform == "win32":
         kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
@@ -123,7 +210,7 @@ def run_shell_command(
     argv = build_shell_argv(command, env=env)
     kwargs: dict[str, object] = {
         "cwd": str(cwd) if cwd is not None else None,
-        "env": dict(env) if env is not None else None,
+        "env": build_shell_environment(argv[0], env=env),
         "stdout": subprocess.PIPE,
         "stderr": subprocess.PIPE,
         "text": True,

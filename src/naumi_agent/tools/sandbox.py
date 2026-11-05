@@ -9,6 +9,7 @@ import sys
 import tempfile
 from typing import Any
 
+from naumi_agent.runtime.shell import create_bash_script_process, terminate_process_tree
 from naumi_agent.tools.base import Tool, ToolMetadata
 
 logger = logging.getLogger(__name__)
@@ -184,34 +185,49 @@ class CodeExecuteTool(Tool):
             ext = ext_map.get(language, ".txt")
             file_path = os.path.join(tmpdir, f"code{ext}")
 
-            with open(file_path, "w", encoding="utf-8") as f:
+            with open(
+                file_path, "w", encoding="utf-8",
+                newline="\n" if language == "bash" else None,
+            ) as f:
                 f.write(code)
 
             cmd_map = {
                 "python": [sys.executable, file_path],
                 "javascript": ["node", file_path],
-                "bash": ["bash", file_path],
             }
             cmd = cmd_map.get(language, [sys.executable, file_path])
 
             try:
-                proc = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    cwd=tmpdir,
-                )
+                if language == "bash":
+                    proc = await create_bash_script_process(
+                        file_path, stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE, cwd=tmpdir,
+                    )
+                else:
+                    proc = await asyncio.create_subprocess_exec(
+                        *cmd,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                        cwd=tmpdir,
+                    )
 
                 try:
                     stdout, stderr = await asyncio.wait_for(
                         proc.communicate(), timeout=timeout,
                     )
                 except TimeoutError:
-                    await _kill_process(proc)
+                    if language == "bash":
+                        await terminate_process_tree(proc, force=True)
+                    else:
+                        await _kill_process(proc)
                     return (
                         f"Error: Execution timed out after {timeout}s "
                         "(本地模式，无资源隔离)"
                     )
+                except asyncio.CancelledError:
+                    if language == "bash":
+                        await asyncio.shield(terminate_process_tree(proc, force=True))
+                    raise
 
                 out = _truncate(stdout.decode("utf-8", errors="replace"))
                 err = _truncate(stderr.decode("utf-8", errors="replace"))

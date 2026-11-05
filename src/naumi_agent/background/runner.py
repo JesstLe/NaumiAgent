@@ -276,7 +276,7 @@ class BackgroundRunner:
                 status = BackgroundStatus.TIMED_OUT
                 error = f"后台任务超过 {timeout_seconds} 秒未完成，已终止"
 
-            output_path.write_text(output, encoding="utf-8")
+            output_path.write_text(output, encoding="utf-8", newline="")
             task = self._store.get(task_id)
             if task is None or task.status == BackgroundStatus.CANCELLED:
                 return
