@@ -122,6 +122,7 @@ export function usePersonalMemories({ api, namespace, actorId, scope, itemId, co
   const [query, setQueryState] = useState(''), [offset, setOffset] = useState(0), [nextOffset, setNextOffset] = useState<number | null>(null)
   const [diagnostics, setDiagnostics] = useState<Record<string, unknown> | null>(null)
   const [loading, setLoading] = useState(false), [posting, setPosting] = useState(false), [error, setError] = useState('')
+  const [readError, setReadError] = useState('')
   const [pending, setPending] = useState<MemoryPending | null>(null), [pendingError, setPendingError] = useState('')
   const [refreshToken, setRefreshToken] = useState(0), [notice, setNotice] = useState('')
   const alive = useRef(true), sequence = useRef(0), writeLock = useRef(false)
@@ -131,7 +132,7 @@ export function usePersonalMemories({ api, namespace, actorId, scope, itemId, co
   const key = context ? memoryPendingKey(namespace, context) : ''
   const refresh = useCallback(() => { setMemories([]); setDiagnostics(null); setRefreshToken(n => n + 1); if (contextFailed.current) setContextAttempt(n => n + 1) }, [])
   useEffect(() => {
-    alive.current = true; setContext(null); setContextError(''); setMemories([]); setPending(null); setPendingError('')
+    alive.current = true; setContext(null); setContextError(''); setMemories([]); setPending(null); setPendingError(''); setReadError('')
     const controller = new AbortController()
     if (connected) void api.personalMemoryContext(actorId, controller.signal).then(value => {
       if (!controller.signal.aborted) { setContext(validateContext(value, actorId)); contextFailed.current = false }
@@ -165,8 +166,9 @@ export function usePersonalMemories({ api, namespace, actorId, scope, itemId, co
         if (controller.signal.aborted || token !== sequence.current) return
         if (!Array.isArray(page.memories)) throw new Error('记忆目录不完整，请重新加载')
         setMemories(page.memories.map(value => validateMemory(value, actorId))); setNextOffset('next_offset' in page ? page.next_offset : null)
-        setDiagnostics('diagnostics' in page ? page.diagnostics : null); setError('')
-      }).catch(cause => { if (!controller.signal.aborted && token === sequence.current) setError(memoryError(cause)) })
+        // A catalogue read cannot acknowledge or erase an independent mutation error.
+        setDiagnostics('diagnostics' in page ? page.diagnostics : null); setReadError('')
+      }).catch(cause => { if (!controller.signal.aborted && token === sequence.current) setReadError(memoryError(cause)) })
         .finally(() => { if (!controller.signal.aborted && token === sequence.current) setLoading(false) })
     }, query ? 180 : 0)
     return () => { clearTimeout(timer); controller.abort() }
@@ -250,7 +252,7 @@ export function usePersonalMemories({ api, namespace, actorId, scope, itemId, co
   }
   return {
     context, memories, filter, query, offset, nextOffset, diagnostics, loading, posting, pending, pendingError, notice,
-    error: contextError || pendingError || error, refreshToken, refresh, submit, retry, discard, discardCorrupt,
+    error: contextError || pendingError || error || readError, refreshToken, refresh, submit, retry, discard, discardCorrupt,
     setFilter: (value: PersonalMemoryFilter) => { setFilterState(value); setOffset(0); setQueryState('') },
     setQuery: (value: string) => { setQueryState(value); setOffset(0) }, setOffset,
     locked: posting || Boolean(pending) || Boolean(pendingError) || !connected || !context,

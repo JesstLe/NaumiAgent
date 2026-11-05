@@ -145,10 +145,21 @@ describe('personal memory opaque request recovery', () => {
   it('preserves the opaque identity if discard metadata does not match', async () => {
     const f = apiMock(); f.api.applyPersonalMemoryRequest.mockRejectedValueOnce(new Error('503 UNKNOWN'))
     const state = hook(f.api); await waitFor(() => expect(state.result.current.context).not.toBeNull())
+    await waitFor(() => expect(f.api.personalMemories).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(state.result.current.loading).toBe(false))
     await act(async () => { await state.result.current.submit('create', { topic: '待清理', content: '原草稿', scope: 'personal' }) })
+    await waitFor(() => expect(f.api.personalMemories).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(state.result.current.loading).toBe(false))
     const original = state.result.current.pending!, discard = f.api.discardPersonalMemoryRequest.getMockImplementation()!
     f.api.discardPersonalMemoryRequest.mockImplementationOnce(async (...args) => ({ ...await discard(...args), fingerprint: '9'.repeat(64) }))
+    let finishCatalog!: (page: Awaited<ReturnType<typeof f.api.personalMemories>>) => void
+    const catalog = new Promise<Awaited<ReturnType<typeof f.api.personalMemories>>>(resolve => { finishCatalog = resolve })
+    f.api.personalMemories.mockImplementationOnce(() => catalog)
     await act(async () => { expect(await state.result.current.discard()).toBeNull() })
+    await waitFor(() => expect(f.api.personalMemories).toHaveBeenCalledTimes(3))
+    expect(state.result.current.pending).toEqual(original); expect(state.result.current.error).toContain('不一致'); expect(localStorage.length).toBe(1)
+    await act(async () => { finishCatalog({ memories: [f.getCurrent()], limit: 30, offset: 0, next_offset: null }); await catalog })
+    await waitFor(() => expect(state.result.current.loading).toBe(false))
     expect(state.result.current.pending).toEqual(original); expect(state.result.current.error).toContain('不一致'); expect(localStorage.length).toBe(1)
   })
   it('recovers an applied deletion tombstone without claiming the memory still exists', async () => {
