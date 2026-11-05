@@ -484,3 +484,9 @@ NaumiAgent 的 Team 因此要明确成员关系和真实 Run，不根据命名�
 [PA-06 实施记录](../../development/personal-agent/PA-06.md)记录持久委派、真实Agent接力、
 结构化提问与子执行授权的代码、验收和剩余项。VID-05 至 VID-10 保持 partial；
 已验证三名已有Agent的预算核算、Markdown整理与独立复核；这不替代研究引用核验、产物版本和送达回执。
+
+## 2026-11-05：Today 与首个真实平台
+
+用户已选择 Google Calendar，按读取事件→事项/草稿→人工审批→写回读回验收。选择不等于账户已连接。
+
+Today 的日计划、截止、优先级、人工勾选与原结果入口已经接线；使用原 Item/Job/Run，不新增执行器。来源撤权、确切历史、稳定请求、CAS、IANA/DST 和时区变化确认分别实施。最终本地测试、HTTP/冷重开和回滚证据见 [Today 记录](../../development/personal-agent/PA-04-today.md)。原24项要求、视频证据和缺口不因局部实现改变；跨工作区、通知、真实provider/账户与部署继续独立验收。

@@ -1682,6 +1682,16 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         risk_level=PermissionRiskLevel.MEDIUM,
         tool_family="personal_items",
     ),
+    "personal_today": PermissionRule(
+        tool_name="personal_today",
+        allowed_modes=[PermissionMode.BYPASS, PermissionMode.PERMISSIVE,
+                       PermissionMode.MODERATE, PermissionMode.STRICT],
+        requires_confirmation=False,
+        max_calls_per_session=200,
+        risk_level=PermissionRiskLevel.MEDIUM,
+        tool_family="personal_today",
+        allow_session_grant=False,
+    ),
     "personal_routines": PermissionRule(
         tool_name="personal_routines",
         allowed_modes=[
@@ -2546,6 +2556,10 @@ class PermissionChecker:
         # Calendar reads and local sync do not authorize starting a new Item.
         # Resolve namespaces first and derive a per-call rule without mutating defaults.
         if tool_name == "personal_connections" and args.get("operation") == "event_to_item":
+            rule = replace(rule, requires_confirmation=True, allow_session_grant=False)
+        if tool_name == "personal_today" and args.get("operation") in {
+            "set_metadata", "place", "reorder", "remove", "rebase",
+        }:
             rule = replace(rule, requires_confirmation=True, allow_session_grant=False)
 
         tool_family = rule.tool_family or tool_name

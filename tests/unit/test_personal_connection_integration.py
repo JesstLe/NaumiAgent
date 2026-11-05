@@ -456,7 +456,7 @@ async def test_actual_engine_composition_router_leaf_tools_and_shared_cli_tui(tm
         assert {"personal_connections", "personal_actions"} <= ASSIGNABLE_TOOL_NAMES
         await engine.get_or_create_session()
         app = create_app()
-        assert len(app.routes) == 189
+        assert len(app.routes) == 203
         assert len([route for route in app.routes if "/personal/routines" in route.path]) == 10
         assert (
             len(

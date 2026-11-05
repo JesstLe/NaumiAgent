@@ -17,14 +17,19 @@ const date = (value?: string) => value ? new Intl.DateTimeFormat('zh-CN', { date
 const executionError = (value: PersonalItemExecution['error']) => typeof value === 'string' ? value : value ? JSON.stringify(value, null, 2) : ''
 function Status({ status }: { status: string }) { return <span className={`pi-status pi-status-${status}`}>{status === 'running' && <Loader2 size={12} className="pa-spin" />}{itemStatusNames[status] || status}</span> }
 
-export function PersonalItems({ api, namespace, agents, connected, originSessionId, onClose, onOpenArtifact }: {
+export function PersonalItems({ api, namespace, agents, connected, originSessionId, initialSelection, onClose, onOpenArtifact }: {
   api: PersonalItemsApi; namespace: string; agents: PersonalAgent[]; connected: boolean; originSessionId?: string
+  initialSelection?: { kind: 'item' | 'result'; id: string } | null
   onClose: () => void; onOpenArtifact: (actorId: string, ref: PersonalArtifactRef) => void
 }) {
   const state = usePersonalItems({ api, namespace, connected })
-  const [selection, setSelection] = useState<{ kind: 'item' | 'result'; id: string } | null>(null)
+  const [selection, setSelection] = useState<{ kind: 'item' | 'result'; id: string } | null>(initialSelection || null)
   const [editor, setEditor] = useState<PersonalItem | 'create' | null>(null), [abandon, setAbandon] = useState(false)
   const [detailToken, setDetailToken] = useState(0)
+  useEffect(() => {
+    if (!initialSelection) return
+    setSelection(initialSelection); state.setTab(initialSelection.kind === 'result' ? 'results' : 'items'); setEditor(null)
+  }, [namespace, initialSelection?.kind, initialSelection?.id])
   const navigate = (proceed: () => void) => requestArtifactNavigation(proceed)
   const accepted = (value: unknown) => {
     if (value && typeof value === 'object' && 'item_id' in value && !('occurrence_id' in value)) {

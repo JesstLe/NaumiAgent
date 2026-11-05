@@ -4263,6 +4263,9 @@ class AgentEngine:
         from naumi_agent.personal.routines import PersonalRoutineService
 
         self.personal_routines = PersonalRoutineService(self)
+        from naumi_agent.personal.today import PersonalTodayService
+
+        self.personal_today = PersonalTodayService(self)
         from naumi_agent.personal.connections import PersonalConnectionService
 
         self.personal_connections = PersonalConnectionService(self)
@@ -4423,6 +4426,9 @@ class AgentEngine:
         from naumi_agent.personal.routine_tools import PersonalRoutinesTool
 
         self._tool_registry.register(PersonalRoutinesTool(self.personal_routines))
+        from naumi_agent.personal.today_tools import PersonalTodayTool
+
+        self._tool_registry.register(PersonalTodayTool(self.personal_today))
         from naumi_agent.personal.connection_tools import (
             PersonalActionsTool,
             PersonalConnectionsTool,

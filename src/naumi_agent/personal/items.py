@@ -296,6 +296,26 @@ class PersonalItemService:
             "next_offset": offset + limit if len(values) > offset + limit else None,
         }
 
+    async def source_page(self, *, limit=50, after="", caller_actor=None):
+        """Expose a bounded authorized source page without execution/report bodies."""
+        integer(limit, "每页事项数", 1, 100)
+        self._caller(caller_actor)
+        page = await self._call(
+            "list_reference_page", workspace_key=self.workspace_key,
+            after_item_id=after, limit=limit,
+        )
+        values = []
+        for value in page["items"]:
+            try:
+                self._scope(value, caller_actor)
+            except PersonalAgentError as exc:
+                if exc.code != "not_found":
+                    raise
+            else:
+                values.append(value)
+        return {"items": values, "next_after": page["next_after"],
+                "partial": page["next_after"] is not None, "consistency": "live_keyset"}
+
     @staticmethod
     def _payload(payload, *, fields, required):
         value = normalized_object(payload, "事项请求")

@@ -974,6 +974,7 @@ class PersonalItemExecutionService:
             "read_receipt": None,
             "usage_known": False,
             "usage": None,
+            "source_available": True,
             "namespace": self.namespace,
         }
         if job is None:
@@ -1013,6 +1014,7 @@ class PersonalItemExecutionService:
                 steps=[],
                 error="事项资料授权已失效，正文暂不可查看",
                 output_available=False,
+                source_available=False,
             )
             return await self._inbox_view(intent, job_id, value)
         if value["run_id"]:
@@ -1070,6 +1072,7 @@ class PersonalItemExecutionService:
                     answer="",
                     artifacts=[],
                     output_available=False,
+                    source_available=False,
                     receipt=None,
                     steps=[],
                     error="事项报告授权已失效，正文暂不可查看",
@@ -1089,6 +1092,7 @@ class PersonalItemExecutionService:
                 delivery_id=delivery.delivery_id,
                 delivery_sha256=delivery.delivery_sha256,
                 publication_id=delivery.publication_id,
+                delivered_at=delivery.delivered_at,
             )
             value["read_receipt"] = await self.jobs.get_human_result_inbox_read(
                 intent["execution_session_id"],

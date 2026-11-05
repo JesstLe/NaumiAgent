@@ -1,3 +1,4 @@
+import type { TodayContext, TodayDayView, TodayHistory, TodayMetadataView, TodayMutation, TodayOperation, TodayQuery, TodayRequest, TodaySources, TodayWriteBodies } from './personalToday'
 import type { PersonalItem, PersonalItemAction, PersonalItemControl, PersonalItemExecution, PersonalItemInput, PersonalItemPage, PersonalItemReadInput, PersonalItemReadReceipt, PersonalItemResult, PersonalItemResultsPage, PersonalItemUpdate } from './personalItems'
 import type { PersonalRoutine, PersonalRoutineAction, PersonalRoutineConfirm, PersonalRoutineContext, PersonalRoutineControl, PersonalRoutineOccurrence, PersonalRoutineOccurrencesPage, PersonalRoutinePage, PersonalRoutinePreview, PersonalRoutinePreviewInput, PersonalRoutineRequestReceipt, PersonalRoutineRevise, RoutineStatus } from './personalRoutines'
 import type { CalendarAction, CalendarActionInput, CalendarActionRevision, CalendarEventItemInput, CalendarEventPage, CalendarMutation, CalendarOAuthIntent, PersonalConnection, PersonalConnectionContext, PersonalConnectionRequest } from './personalConnections'
@@ -524,6 +525,37 @@ export class WorkbenchRuntimeClient extends WorkbenchApiClient {
   }
   async discardPersonalMemoryRequest(id: string, actorId: string, expectedFingerprint: string): Promise<PersonalMemoryRequest> {
     return (await this.fetch(`/personal/memory-requests/${encodeURIComponent(id)}/discard?actor_id=${encodeURIComponent(actorId)}`, { method: 'POST', body: JSON.stringify({ expected_fingerprint: expectedFingerprint }) })).json()
+  }
+  async getPersonalTodayContext(signal?: AbortSignal): Promise<TodayContext> {
+    return (await this.fetch('/personal/today/context', { signal, cache: 'no-store' })).json()
+  }
+  async getPersonalToday(query: TodayQuery, signal?: AbortSignal): Promise<TodayDayView> {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== '') params.set(key, String(value))
+    return (await this.fetch(`/personal/today?${params}`, { signal, cache: 'no-store' })).json()
+  }
+  async getPersonalTodaySources(query: { limit?: number; after?: string } = {}, signal?: AbortSignal): Promise<TodaySources> {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== '') params.set(key, String(value))
+    return (await this.fetch(`/personal/today/sources?${params}`, { signal, cache: 'no-store' })).json()
+  }
+  async getPersonalTodayMetadata(itemId: string, signal?: AbortSignal): Promise<TodayMetadataView> {
+    return (await this.fetch(`/personal/today/metadata/${encodeURIComponent(itemId)}`, { signal, cache: 'no-store' })).json()
+  }
+  async getPersonalTodayDay(dayId: string, revision?: number, signal?: AbortSignal): Promise<TodayDayView> {
+    const query = revision === undefined ? '' : `?revision=${revision}`
+    return (await this.fetch(`/personal/today/days/${encodeURIComponent(dayId)}${query}`, { signal, cache: 'no-store' })).json()
+  }
+  async getPersonalTodayHistory(kind: 'day' | 'metadata', identity: string, query: { limit?: number; after_revision?: number } = {}, signal?: AbortSignal): Promise<TodayHistory> {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(query)) if (value !== undefined) params.set(key, String(value))
+    return (await this.fetch(`/personal/today/history/${kind}/${encodeURIComponent(identity)}?${params}`, { signal, cache: 'no-store' })).json()
+  }
+  async getPersonalTodayRequest(requestId: string, signal?: AbortSignal): Promise<TodayRequest> {
+    return (await this.fetch(`/personal/today/requests/${encodeURIComponent(requestId)}`, { signal, cache: 'no-store' })).json()
+  }
+  async mutatePersonalToday<K extends TodayOperation>(operation: K, body: TodayWriteBodies[K]): Promise<TodayMutation> {
+    return (await this.fetch(`/personal/today/${operation}`, { method: 'POST', cache: 'no-store', body: JSON.stringify(body) })).json()
   }
   async personalRoutineContext(signal?: AbortSignal): Promise<PersonalRoutineContext> {
     return (await this.fetch('/personal/routines/context', { signal, cache: 'no-store' })).json()

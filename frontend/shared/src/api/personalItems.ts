@@ -29,8 +29,9 @@ export type PersonalItemAction = 'pause' | 'resume' | 'cancel' | 'run-now' | 're
 export interface PersonalItemReadReceipt { [key: string]: unknown }
 export interface PersonalItemExecution {
   occurrence_id: string; status: PersonalItemExecutionStatus; job_id: string; run_id: string; execution_session_id: string
+  source_available?: boolean
   answer?: string; artifacts: PersonalArtifactRef[]; delivery_id?: string; delivery_sha256?: string
-  read_receipt?: PersonalItemReadReceipt | null; error?: string | Record<string, unknown>; receipt?: Record<string, unknown>
+  delivered_at?: string | null; read_receipt?: PersonalItemReadReceipt | null; error?: string | Record<string, unknown>; receipt?: Record<string, unknown>
   steps?: Run['steps']
 }
 export interface PersonalItem {

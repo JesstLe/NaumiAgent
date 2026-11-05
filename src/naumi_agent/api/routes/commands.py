@@ -37,7 +37,7 @@ _SUPPORTED = frozenset(
 /chaos /scale /state /vibe /eval /page /heal /dspy /graph /mcts /route
 /speculate /jit /pointer /cooe /sleep /entropy /ooda /probe /hook /vision
 /spar /world /fusion /consensus /pid /zkp /genesis /macro /cosmos /watchdog
-/supervisor /autopsy /feedback /evolution /assistants /library /items /memory /routines
+/supervisor /autopsy /feedback /evolution /assistants /library /items /memory /routines /today
 """.split()
 )
 
@@ -100,6 +100,7 @@ class _CommandEngine:
         object.__setattr__(self, "failed", False)
         object.__setattr__(self, "_personal_items_manual_channel", "web")
         object.__setattr__(self, "_personal_routines_manual_channel", "web")
+        object.__setattr__(self, "_personal_today_manual_channel", "web")
         object.__setattr__(self, "_personal_memory_manual_channel", "management_web")
 
     def __getattr__(self, name):
@@ -133,7 +134,7 @@ async def run_command(
     auth: str = AuthDep,
 ):
     command = validate_command(body.command)
-    routine_command = command.split(maxsplit=1)[0] == "/routines"
+    routine_command = command.split(maxsplit=1)[0] in {"/routines", "/today"}
     private_headers = (
         {"Cache-Control": "no-store", "Pragma": "no-cache"} if routine_command else None
     )
@@ -149,7 +150,7 @@ async def run_command(
     session = await engine.session_store.load(session_id)
     if not session:
         raise HTTPException(404, "会话不存在", headers=private_headers)
-    if command.split(maxsplit=1)[0] in {"/items", "/memory", "/routines"} and getattr(
+    if command.split(maxsplit=1)[0] in {"/items", "/memory", "/routines", "/today"} and getattr(
         session, "personal_execution_id", ""
     ):
         raise HTTPException(
@@ -238,13 +239,24 @@ async def _command_stream(request, session_id, command, mode, *, edit_message_id
                     json.dumps({"type": "personal_memory_refs", "refs": refs}, ensure_ascii=False)
                     if memory_command else output
                 )
-                session.add_message("user", command)
+                today_command = command.split(maxsplit=1)[0] == "/today"
+                if today_command:
+                    # Management output can contain another planner's private data.
+                    # Persist only the opaque command receipt, never unpinned bodies
+                    # or raw JSON arguments that would enter the next model turn.
+                    persisted_output = json.dumps({"type": "personal_today_command",
+                        "operation": (
+                            command.split(maxsplit=2)[1] if len(command.split()) > 1 else "context"
+                        ),
+                        "run_id": run.id, "status": "failed" if adapter.failed else "completed"},
+                        ensure_ascii=False)
+                session.add_message("user", "/today" if today_command else command)
                 if memory_command:
                     session.add_message(
                         "assistant", persisted_output, metadata={"personal_memory_refs": refs},
                     )
                 else:
-                    session.add_message("assistant", output)
+                    session.add_message("assistant", persisted_output)
                 await engine.session_store.save(session)
                 await emit(EventType.TOKEN_DELTA, {"token": output})
                 status = "failed" if adapter.failed else "completed"

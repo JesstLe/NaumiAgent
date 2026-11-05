@@ -715,6 +715,29 @@ class PersonalItemStore:
             result.sort(key=lambda item: (item["updated_at"], item["item_id"]), reverse=True)
             return result[offset : offset + limit]
 
+    def list_reference_page(
+        self, *, owner_key, workspace_key, after_item_id="", limit=50,
+    ):
+        """Read a bounded live keyset, validating every returned original snapshot."""
+        owner = self._owner(owner_key)
+        text(workspace_key, "工作区标识", 64, pattern=SHA256)
+        integer(limit, "事项页大小", 1, 100)
+        after = self._id(after_item_id) if after_item_id else ""
+        if not self._exists():
+            return {"items": [], "next_after": None, "consistency": "live_keyset"}
+        with self._connection(owner) as db:
+            rows = db.execute(
+                "SELECT item_id FROM personal_items WHERE owner_key=? AND workspace_key=? "
+                "AND item_id>? ORDER BY item_id LIMIT ?",
+                (owner, workspace_key, after, limit + 1),
+            ).fetchall()
+            values = [self._item(db, owner, row[0]) for row in rows[:limit]]
+            if any(v["definition"]["route"]["workspace_key"] != workspace_key for v in values):
+                raise _broken()
+            return {"items": values,
+                    "next_after": values[-1]["item_id"] if len(rows) > limit else None,
+                    "consistency": "live_keyset"}
+
     def history(self, *, owner_key, item_id):
         owner, item_id = self._owner(owner_key), self._id(item_id)
         if not self._exists():
@@ -1043,6 +1066,27 @@ class PersonalItemStore:
                 (owner, item_id, once),
             ).fetchone()
             return None if row is None else self._intent(db, owner, row[0])
+
+    def list_intent_reference_page(
+        self, *, owner_key, workspace_key, after_occurrence_id="", limit=50,
+    ):
+        """Page exact historical executions, including pre-restart deliveries."""
+        owner = self._owner(owner_key)
+        text(workspace_key, "工作区标识", 64, pattern=SHA256)
+        integer(limit, "执行记录页大小", 1, 100)
+        after = text(after_occurrence_id, "原执行游标", 36, pattern=INTENT_ID) \
+            if after_occurrence_id else ""
+        if not self._exists():
+            return {"intents": [], "next_after": None}
+        with self._connection(owner) as db:
+            rows = db.execute(
+                "SELECT occurrence_id FROM personal_item_intents WHERE owner_key=? "
+                "AND workspace_key=? AND occurrence_id>? ORDER BY occurrence_id LIMIT ?",
+                (owner, workspace_key, after, limit + 1),
+            ).fetchall()
+            values = [self._intent(db, owner, row[0]) for row in rows[:limit]]
+            return {"intents": values,
+                    "next_after": values[-1]["occurrence_id"] if len(rows) > limit else None}
 
     def list_intents(self, *, owner_key, item_id=None, workspace_key=None, limit=100, offset=0):
         owner = self._owner(owner_key)

@@ -3019,6 +3019,16 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                 )
             output = await run_routines_command(engine, arg, trusted_channel=channel)
             console.print(output, markup=False, highlight=False, soft_wrap=True)
+        case "/today":
+            from naumi_agent.personal.today_commands import run_today_command
+
+            channel = getattr(engine, "_personal_today_manual_channel", None)
+            if channel is None:
+                channel = (
+                    "tui" if type(_active_cli).__module__.startswith("naumi_agent.tui.") else "cli"
+                )
+            output = await run_today_command(engine, arg, trusted_channel=channel)
+            console.print(output, markup=False, highlight=False, soft_wrap=True)
         case "/library":
             from naumi_agent.personal.artifact_commands import run_library_command
 
@@ -3311,6 +3321,7 @@ def _print_help() -> None:
         ("/library [子命令]", "资料库 — 版本、正文、导入、修订、分享与撤销"),
         ("/items [子命令]", "事项 — 单次执行、暂停、恢复、报告与显式已读"),
         ("/routines [子命令]", "周期 — 预览、启停、次数与估算费用、原发生核对"),
+        ("/today [子命令]", "今日 — 日计划、截止、优先级、排序与原请求核对"),
         (
             "/agents result ack <投递ID> <SHA256>",
             "Agent Control — 确认一条持久结果已读",

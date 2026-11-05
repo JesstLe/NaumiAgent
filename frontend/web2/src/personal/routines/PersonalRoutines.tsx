@@ -15,12 +15,14 @@ const occurrenceStatuses: Record<PersonalRoutineOccurrence['status'], string> = 
 type Editor = { definition?: PersonalRoutineDefinition; id?: string; revision?: number }
 const decisionText = (value: PersonalRoutineOccurrence['decision']) => typeof value === 'string' ? value : value ? JSON.stringify(value, null, 2) : ''
 
-export function PersonalRoutines({ api, namespace, agents, connected, onClose, onOpenArtifact }: {
+export function PersonalRoutines({ api, namespace, agents, connected, initialRoutineId, onClose, onOpenArtifact }: {
   api: PersonalRoutinesApi; namespace: string; agents: PersonalAgent[]; connected: boolean; onClose: () => void
+  initialRoutineId?: string | null
   onOpenArtifact: (actor: string, ref: PersonalArtifactRef) => void
 }) {
   const state = usePersonalRoutines({ api, namespace, connected })
-  const [selected, setSelected] = useState<string | null>(null), [editor, setEditor] = useState<Editor | null>(null), [abandon, setAbandon] = useState(false)
+  const [selected, setSelected] = useState<string | null>(initialRoutineId || null), [editor, setEditor] = useState<Editor | null>(null), [abandon, setAbandon] = useState(false)
+  useEffect(() => { if (initialRoutineId) { setSelected(initialRoutineId); setEditor(null) } }, [namespace, initialRoutineId])
   useEffect(() => {
     if (state.preview && !editor) setEditor({ definition: state.preview.definition, ...(state.preview.base_routine_id ? { id: state.preview.base_routine_id, revision: state.preview.base_revision! } : {}) })
   }, [state.preview, editor])
