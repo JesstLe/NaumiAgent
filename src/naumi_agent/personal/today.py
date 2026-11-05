@@ -979,7 +979,17 @@ class PersonalTodayService(TodayAuthorityMixin):
 
         return await self._mutate("set_metadata", p, caller_actor, trusted_channel, update)
 
-    async def place(self, payload, caller_actor=None, trusted_channel=None):
+    async def place_from_followup(self, effect_id):
+        followups = getattr(self.engine, "personal_followups", None)
+        if followups is None:
+            raise _error("source_unavailable", "原跟进授权组件不可用")
+        effect = await followups.resolve_effect(effect_id, expected_kind="today_place")
+        return await self.place(effect["payload"], trusted_channel=effect["channel"],
+                                _followup_effect=effect)
+
+    async def place(
+        self, payload, caller_actor=None, trusted_channel=None, *, _followup_effect=None
+    ):
         self._writer(caller_actor, trusted_channel)
         allowed = {
             "request_id",
@@ -995,17 +1005,34 @@ class PersonalTodayService(TodayAuthorityMixin):
             integer(p[key], "预期计划版本", 0)
         planner = self._planner(p.get("planner_id"), caller_actor, write=True)
         ref = normalize_item_ref(p["source_ref"])
-        replay = await self._replay("place", p, caller_actor, trusted_channel)
+        semantic = p
+        if _followup_effect is not None:
+            if (caller_actor is not None or _followup_effect["payload"] != p
+                    or _followup_effect["channel"] != trusted_channel
+                    or _followup_effect["actor_id"] != planner):
+                raise _error("scope_denied", "跟进采纳与原规划输入不一致")
+            semantic = {**p, "_followup_effect_id": _followup_effect["effect_id"]}
+        replay = await self._replay("place", semantic, caller_actor, trusted_channel)
         if replay is not None:
             return replay
         empty = self._virtual_day(p["date"], p["timezone"], planner)
         await self._authorize_item(ref, caller_actor, require_current=True)
         provenance = await self._capture_provenance(caller_actor)
+        if _followup_effect is not None:
+            artifact = _followup_effect["artifact_ref"]
+            await self._artifacts().authorize_refs(actor_id=planner, refs=[artifact])
+            provenance.append({"actor_id": planner, "context": {
+                "artifact_refs": [artifact], "memory_refs": [], "memory_item_id": None,
+                "context_session_ids": [],
+            }})
         previous_day = await self._day(p["date"], p["timezone"], planner, caller_actor)
         await self._authorize_metadata_sources(previous_day, caller_actor)
         await self._authorize_metadata_sources(await self._metadata_for(ref), caller_actor)
 
         def update(tx):
+            if _followup_effect is not None:
+                self.engine.personal_followups.check_effect_commit(
+                    _followup_effect["effect_id"], _followup_effect["proof"], p)
             day = self._tx_day(
                 tx,
                 empty["id"],
@@ -1054,7 +1081,7 @@ class PersonalTodayService(TodayAuthorityMixin):
                 sources=[ref],
             )
 
-        return await self._mutate("place", p, caller_actor, trusted_channel, update)
+        return await self._mutate("place", semantic, caller_actor, trusted_channel, update)
 
     async def _edit_day(self, operation, payload, caller_actor, trusted_channel):
         self._writer(caller_actor, trusted_channel)

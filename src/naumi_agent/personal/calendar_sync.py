@@ -6,6 +6,7 @@ import asyncio
 import uuid
 from datetime import timedelta
 
+from naumi_agent.personal.calendar_changes import CalendarChangeMixin
 from naumi_agent.personal.connection_models import (
     canonical,
     digest,
@@ -19,7 +20,7 @@ from naumi_agent.personal.google_oauth import GoogleProtocolError
 from naumi_agent.personal.models import PersonalAgentError
 
 
-class CalendarSyncMixin:
+class CalendarSyncMixin(CalendarChangeMixin):
     def _event_key(self, connection_id, event_id):
         return connection_id + ":" + text(event_id, "日程编号", 1024)
 
@@ -241,13 +242,33 @@ class CalendarSyncMixin:
                 current = tx.get("sync", identity)
                 if current["generation"] != checkpoint["generation"]:
                     raise PersonalAgentError("lease_lost", "同步执行权已更新")
+                cancelled_masters = {
+                    event["id"]: "master_cancelled"
+                    for event in staged.values()
+                    if event["status"] == "cancelled"
+                }
+                cancelled_masters.update(
+                    {
+                        old["event_id"]: "series_replaced"
+                        for old in previous
+                        if old["event"].get("recurrence")
+                        and old["event_id"] in staged
+                        and not staged[old["event_id"]].get("recurrence")
+                        and staged[old["event_id"]]["status"] != "cancelled"
+                    }
+                )
                 if checkpoint["full"]:
                     for old in tx.list("event", parent=identity, limit=10001):
                         if old["event_id"] not in staged and old.get("available", True):
-                            tx.put(
-                                "event",
+                            self._publish_calendar_event(
+                                tx,
                                 {**old, "available": False},
                                 expected_revision=old["revision"],
+                                reason=cancelled_masters.get(
+                                    old["event"].get("recurringEventId"),
+                                    "missing_in_full_snapshot",
+                                ),
+                                sync_generation=checkpoint["generation"],
                             )
                 for event in staged.values():
                     key = self._event_key(identity, event["id"])
@@ -272,25 +293,23 @@ class CalendarSyncMixin:
                         "fetched_at": self.stamp(),
                         "available": True,
                     }
-                    tx.put("event", value, expected_revision=0 if old is None else old["revision"])
-                cancelled_masters = {
-                    event["id"] for event in staged.values() if event["status"] == "cancelled"
-                }
-                cancelled_masters.update(
-                    old["event_id"]
-                    for old in previous
-                    if old["event"].get("recurrence")
-                    and old["event_id"] in staged
-                    and not staged[old["event_id"]].get("recurrence")
-                )
+                    self._publish_calendar_event(
+                        tx,
+                        value,
+                        expected_revision=0 if old is None else old["revision"],
+                        reason="provider_event",
+                        sync_generation=checkpoint["generation"],
+                    )
                 for instance in tx.list("event", parent=identity, limit=10001):
                     if instance["event"].get(
                         "recurringEventId"
                     ) in cancelled_masters and instance.get("available", True):
-                        tx.put(
-                            "event",
+                        self._publish_calendar_event(
+                            tx,
                             {**instance, "available": False},
                             expected_revision=instance["revision"],
+                            reason=cancelled_masters[instance["event"]["recurringEventId"]],
+                            sync_generation=checkpoint["generation"],
                         )
                 tx.put(
                     "sync",

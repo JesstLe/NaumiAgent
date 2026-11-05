@@ -3049,6 +3049,16 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                 )
             output = await run_workspaces_command(engine, arg, trusted_channel=channel)
             console.print(output, markup=False, highlight=False, soft_wrap=True)
+        case "/followups":
+            from naumi_agent.personal.followup_commands import run_followups_command
+
+            channel = getattr(engine, "_personal_followups_manual_channel", None)
+            if channel is None:
+                channel = (
+                    "tui" if type(_active_cli).__module__.startswith("naumi_agent.tui.") else "cli"
+                )
+            output = await run_followups_command(engine, arg, trusted_channel=channel)
+            console.print(output, markup=False, highlight=False, soft_wrap=True)
         case "/library":
             from naumi_agent.personal.artifact_commands import run_library_command
 
@@ -3344,6 +3354,7 @@ def _print_help() -> None:
         ("/today [子命令]", "今日 — 日计划、截止、优先级、排序与原请求核对"),
         ("/notifications [子命令]", "通知 — 列表、勿扰、呈现与独立已读确认"),
         ("/workspaces [子命令]", "工作区 — 授权、连接、事项汇总与原结果读取"),
+        ("/followups [子命令]", "跟进 — 规则、原建议、采纳、忽略与稍后提醒"),
         (
             "/agents result ack <投递ID> <SHA256>",
             "Agent Control — 确认一条持久结果已读",

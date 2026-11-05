@@ -18,7 +18,19 @@ REQUEST = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}$")
 CALENDAR_READ = "https://www.googleapis.com/auth/calendar.events.owned.readonly"
 CALENDAR_WRITE = "https://www.googleapis.com/auth/calendar.events.owned"
 EMAIL = "https://www.googleapis.com/auth/userinfo.email"
-KINDS = frozenset({"client", "connection", "oauth", "event", "sync", "binding", "action"})
+KINDS = frozenset(
+    {
+        "client",
+        "connection",
+        "oauth",
+        "event",
+        "sync",
+        "binding",
+        "action",
+        "calendar_change",
+        "calendar_change_head",
+    }
+)
 SOURCE_FIELDS = frozenset(
     {
         "connection_id",

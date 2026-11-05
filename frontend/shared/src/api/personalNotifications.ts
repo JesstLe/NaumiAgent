@@ -1,4 +1,4 @@
-export type NotificationKind = 'item_result' | 'item_failure' | 'calendar_approval'
+export type NotificationKind = 'item_result' | 'item_failure' | 'calendar_approval' | 'followup_proposal'
 export type NotificationFilter = 'unread' | 'attention' | 'all'
 export interface NotificationQuietWindow { weekdays: number[]; start: string; end: string; full_day: boolean }
 export interface NotificationPreferenceInput {
@@ -19,7 +19,7 @@ export interface PersonalNotificationEntry {
   id: string; event_digest: string; kind: NotificationKind; actor_id: string; actor_name: string | null
   title: string | null; occurred_at: string; availability: 'available' | 'resolved' | 'source_unavailable'
   priority: 'normal' | 'high'; unread: boolean; notice_read: Record<string, unknown> | null
-  source_ref: Record<string, unknown>; jump: { kind: 'result' | 'item' | 'calendar_action'; id: string } | null; batch_id: string | null
+  source_ref: Record<string, unknown>; jump: { kind: 'result' | 'item' | 'calendar_action' | 'followup'; id: string } | null; batch_id: string | null
 }
 export interface NotificationQuery { filter?: NotificationFilter; actor_id?: string; limit?: number; after?: string }
 export interface NotificationPage {

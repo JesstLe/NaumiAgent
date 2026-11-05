@@ -1,3 +1,4 @@
+import type { FollowupArguments, FollowupContext, FollowupResponses } from './personalFollowups'
 import type { WorkspaceArguments, WorkspaceContext, WorkspaceOperation, WorkspaceResponses } from './personalWorkspaces'
 import type { NotificationBatch, NotificationClaim, NotificationContext, NotificationMutation, NotificationPage, NotificationPreferencesView, NotificationPreferenceWrite, NotificationPresentation, NotificationPrompt, NotificationQuery, NotificationRead, NotificationRequest } from './personalNotifications'
 import type { TodayContext, TodayDayView, TodayHistory, TodayMetadataView, TodayMutation, TodayOperation, TodayQuery, TodayRequest, TodaySources, TodayWriteBodies } from './personalToday'
@@ -530,6 +531,12 @@ export class WorkbenchRuntimeClient extends WorkbenchApiClient {
   }
   async getPersonalTodayContext(signal?: AbortSignal): Promise<TodayContext> {
     return (await this.fetch('/personal/today/context', { signal, cache: 'no-store' })).json()
+  }
+  async getPersonalFollowupContext(signal?: AbortSignal): Promise<FollowupContext> {
+    return (await this.fetch('/personal/followups/context', { signal, cache: 'no-store' })).json()
+  }
+  async executePersonalFollowupOperation<K extends keyof FollowupArguments>(operation: K, args: FollowupArguments[K], signal?: AbortSignal): Promise<FollowupResponses[K]> {
+    return (await this.fetch('/personal/followups/operations', { method: 'POST', signal: signal ?? AbortSignal.timeout(180000), cache: 'no-store', body: JSON.stringify({ operation, ...args }) })).json()
   }
   async getPersonalToday(query: TodayQuery, signal?: AbortSignal): Promise<TodayDayView> {
     const params = new URLSearchParams()

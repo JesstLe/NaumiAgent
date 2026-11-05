@@ -6,7 +6,7 @@ import { NotificationSettings } from './NotificationSettings'
 import { usePersonalNotifications, type PersonalNotificationsApi, type PersonalNotificationsState } from './usePersonalNotifications'
 import './personal-notifications.css'
 
-const kindNames = { item_result: '执行结果', item_failure: '执行失败', calendar_approval: '日历待审批' }
+const kindNames = { item_result: '执行结果', item_failure: '执行失败', calendar_approval: '日历待审批', followup_proposal: '跟进建议' }
 const when = (value: string) => new Date(value).toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 function KindIcon({ kind }: { kind: PersonalNotificationEntry['kind'] }) { return kind === 'calendar_approval' ? <CalendarDays size={17} /> : kind === 'item_failure' ? <CircleAlert size={17} /> : <Inbox size={17} /> }
 
@@ -38,9 +38,9 @@ function ActiveToast({ batch, state, onOpen }: { batch: NotificationBatch; state
   </div>
 }
 
-export function PersonalNotifications({ api, namespace, connected, agents, open, onClose, onToggle, onOpenResult, onOpenItem, onOpenAction }: {
+export function PersonalNotifications({ api, namespace, connected, agents, open, onClose, onToggle, onOpenResult, onOpenItem, onOpenAction, onOpenFollowup }: {
   api: PersonalNotificationsApi; namespace: string; connected: boolean; agents: PersonalAgent[]; open: boolean
-  onClose: () => void; onToggle: () => void; onOpenResult: (id: string) => void; onOpenItem: (id: string) => void; onOpenAction: (id: string) => void
+  onClose: () => void; onToggle: () => void; onOpenResult: (id: string) => void; onOpenItem: (id: string) => void; onOpenAction: (id: string) => void; onOpenFollowup?: (id: string) => void
 }) {
   const state = usePersonalNotifications({ api, namespace, connected, open }), [settings, setSettings] = useState(false)
   const drawer = useRef<HTMLElement>(null), bell = useRef<HTMLButtonElement>(null)
@@ -56,6 +56,7 @@ export function PersonalNotifications({ api, namespace, connected, agents, open,
     onClose()
     if (entry.jump.kind === 'result') onOpenResult(entry.jump.id)
     else if (entry.jump.kind === 'item') onOpenItem(entry.jump.id)
+    else if (entry.jump.kind === 'followup') onOpenFollowup?.(entry.jump.id)
     else onOpenAction(entry.jump.id)
   }
   const unread = state.context?.unread_count || 0, quiet = state.context?.quiet
@@ -83,7 +84,7 @@ export function PersonalNotifications({ api, namespace, connected, agents, open,
         <div className="pn-list" aria-label="通知列表" aria-busy={state.loading}>
           {state.loading && !state.page && <div className="pn-empty" role="status"><Loader2 size={23} className="pn-spin" /><span>正在读取通知</span></div>}
           {state.page?.entries.map(entry => <article className={`pn-entry pn-kind-${entry.kind}${entry.unread ? ' unread' : ''}${entry.availability === 'source_unavailable' ? ' unavailable' : ''}`} key={entry.id}>
-            <span className="pn-entry-icon"><KindIcon kind={entry.kind} /></span><div className="pn-entry-body"><div className="pn-entry-meta"><span>{entry.actor_name || (entry.availability === 'source_unavailable' ? '来源不可用' : 'Agent')}</span><time dateTime={entry.occurred_at}>{when(entry.occurred_at)}</time></div><h3>{entry.title || (entry.availability === 'source_unavailable' ? '原来源已不可用' : kindNames[entry.kind])}</h3><div className="pn-entry-foot"><span>{entry.availability === 'resolved' ? '已处理' : kindNames[entry.kind]}</span><div>{entry.jump && entry.availability !== 'source_unavailable' && <button aria-label={`打开原${entry.jump.kind === 'calendar_action' ? '动作' : entry.jump.kind === 'result' ? '结果' : '事项'}：${entry.title || kindNames[entry.kind]}`} onClick={() => navigate(entry)}>查看<ArrowUpRight size={13} /></button>}{entry.unread ? <button disabled={state.locked} aria-label={`标记通知已读：${entry.title || '来源不可用'}`} onClick={() => void state.read([entry])}><Check size={13} />已读</button> : <CheckCheck size={14} aria-label="通知已读" />}</div></div></div>{entry.unread && <span className="pn-unread-dot" aria-label="未读通知" />}
+            <span className="pn-entry-icon"><KindIcon kind={entry.kind} /></span><div className="pn-entry-body"><div className="pn-entry-meta"><span>{entry.actor_name || (entry.availability === 'source_unavailable' ? '来源不可用' : 'Agent')}</span><time dateTime={entry.occurred_at}>{when(entry.occurred_at)}</time></div><h3>{entry.title || (entry.availability === 'source_unavailable' ? '原来源已不可用' : kindNames[entry.kind])}</h3><div className="pn-entry-foot"><span>{entry.availability === 'resolved' ? '已处理' : kindNames[entry.kind]}</span><div>{entry.jump && entry.availability !== 'source_unavailable' && <button aria-label={`打开原${entry.jump.kind === 'calendar_action' ? '动作' : entry.jump.kind === 'result' ? '结果' : entry.jump.kind === 'followup' ? '跟进' : '事项'}：${entry.title || kindNames[entry.kind]}`} onClick={() => navigate(entry)}>查看<ArrowUpRight size={13} /></button>}{entry.unread ? <button disabled={state.locked} aria-label={`标记通知已读：${entry.title || '来源不可用'}`} onClick={() => void state.read([entry])}><Check size={13} />已读</button> : <CheckCheck size={14} aria-label="通知已读" />}</div></div></div>{entry.unread && <span className="pn-unread-dot" aria-label="未读通知" />}
           </article>)}
           {!state.loading && state.page && !state.page.entries.length && state.context?.configured && <div className="pn-empty"><Inbox size={32} /><strong>{state.filter === 'unread' ? '没有未读通知' : state.filter === 'attention' ? '没有待处理通知' : '暂无通知'}</strong></div>}
         </div>

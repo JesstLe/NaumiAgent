@@ -1,6 +1,7 @@
 """Legacy-compatible connection journal specification and public store API."""
 
 from naumi_agent.personal.connection_models import KINDS
+from naumi_agent.personal.models import PersonalAgentError
 from naumi_agent.personal.owner_journal import (
     JournalSpec,
     JournalTransaction,
@@ -39,6 +40,11 @@ def checked_path(path):
 class ConnectionTransaction(JournalTransaction):
     def __init__(self, db, spec=_SPEC, owner_key=""):
         super().__init__(db, spec, owner_key)
+
+    def put(self, kind, value, *, expected_revision):
+        if kind == "calendar_change" and expected_revision != 0:
+            raise PersonalAgentError("immutable_calendar_change", "原日历变更已保存，请读取原凭据")
+        return super().put(kind, value, expected_revision=expected_revision)
 
 
 class ConnectionStore(OwnerJournal):

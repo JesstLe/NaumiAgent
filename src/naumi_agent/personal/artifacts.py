@@ -251,6 +251,28 @@ class PersonalArtifactService:
                 for ref in value.get("source_refs", []):
                     stack.append(await self._call("get", actor_id=actor_id,
                         artifact_id=ref["artifact_id"], version=ref["version"]))
+        followups = getattr(self.engine, "personal_followups", None)
+        if followups is not None:
+            await followups.authorize_artifact(snapshot, actor_id)
+        else:
+            stack, seen = [snapshot], set()
+            while stack:
+                value = stack.pop()
+                identity = (value["artifact_id"], value["version"])
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                if len(seen) > 4096:
+                    raise PersonalAgentError("source_unavailable", "跟进资料来源超过校验上限")
+                if (value.get("evidence", {}).get("followup_read_refs")
+                        or value.get("evidence", {}).get("followup_effect_refs")):
+                    raise PersonalAgentError("source_unavailable", "跟进资料需要原授权组件")
+                for ref in value.get("source_refs", []):
+                    parent = await self._call("get", actor_id=actor_id,
+                        artifact_id=ref["artifact_id"], version=ref["version"])
+                    if parent["sha256"] != ref["sha256"]:
+                        raise PersonalAgentError("source_unavailable", "原跟进资料摘要已变化")
+                    stack.append(parent)
         connections = getattr(self.engine, "personal_connections", None)
         if connections is not None:
             await connections.authorize_artifact(snapshot, actor_id)

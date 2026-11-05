@@ -200,6 +200,7 @@ class PersonalNotificationService(NotificationAuthorityMixin):
             "intent_after": None,
             "watch_after": None,
             "action_after": None,
+            "followup_after": None,
             "outbox_after": None,
             "max_wall": None,
             "last_tick_at": None,
@@ -404,7 +405,9 @@ class PersonalNotificationService(NotificationAuthorityMixin):
             "title": None,
             "occurred_at": event["occurred_at"],
             "availability": "source_unavailable",
-            "priority": "normal" if event["kind"] == "item_result" else "high",
+            "priority": (
+                "high" if event["kind"] in {"item_failure", "calendar_approval"} else "normal"
+            ),
             "unread": read is None,
             "notice_read": read,
             "source_ref": {"source_kind": event["kind"], "source_id": digest(event["source_ref"])},
@@ -470,7 +473,8 @@ class PersonalNotificationService(NotificationAuthorityMixin):
                 metadata = self._entry_metadata(tx, event, batches=batches)
                 if filter in {"unread", "attention"} and metadata["notice_read"] is not None:
                     continue
-                if filter == "attention" and event["kind"] == "item_result":
+                if (filter == "attention"
+                        and event["kind"] not in {"item_failure", "calendar_approval"}):
                     continue
                 values.append(metadata)
             return {"metadata": values, "next_after": page["next_after"]}
@@ -1015,7 +1019,7 @@ class PersonalNotificationService(NotificationAuthorityMixin):
                     self.now() - datetime.fromisoformat(chunk[-1][1]["first_seen_at"])
                 ).total_seconds()
                 if (
-                    kind != "item_result"
+                    kind in {"item_failure", "calendar_approval"}
                     or len(chunk) == 100
                     or age >= prefs["max_delay_seconds"]
                     or quiet_age >= prefs["debounce_seconds"]

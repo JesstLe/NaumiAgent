@@ -102,6 +102,7 @@ import {
 } from '@naumi/shared/projects/workspaceProjects'
 import { ProjectCreationDialog, type ProjectCreationInput } from './ProjectCreationDialog'
 import { PersonalToday } from './personal/today/PersonalToday'
+import { readFollowupLocation } from './personal/followups/Followups'
 import { WorkspaceOverview } from './personal/workspaces/WorkspaceOverview'
 import { PersonalNotifications } from './personal/notifications/PersonalNotifications'
 import { PersonalItems } from './personal/items/PersonalItems'
@@ -306,7 +307,7 @@ export function Web2() {
     setTodayOpen(false)
     const url = new URL(location.href)
     let changed = false
-    for (const key of ['today', 'today_date', 'today_timezone', 'today_planner']) if (url.searchParams.has(key)) { url.searchParams.delete(key); changed = true }
+    for (const key of ['today', 'today_date', 'today_timezone', 'today_planner', 'today_view', 'followup_id']) if (url.searchParams.has(key)) { url.searchParams.delete(key); changed = true }
     if (changed) history.pushState({}, '', url)
   }
   const [connectionsOpen, setConnectionsOpen] = useState(() => new URLSearchParams(location.search).get('connections') === '1')
@@ -413,7 +414,13 @@ export function Web2() {
   const openToday = () => requestArtifactNavigation(() => {
     closeWorkspaces()
     closeRoutines(); closeItems(); closeLibrary(); closeMemories(); closeConnections()
-    const url = new URL(location.href); url.searchParams.set('today', '1'); history.pushState({}, '', url)
+    const url = new URL(location.href); url.searchParams.set('today', '1'); url.searchParams.delete('today_view'); url.searchParams.delete('followup_id'); history.pushState({}, '', url)
+    setTodayLocationVersion(value => value + 1); setTodayOpen(true)
+    if (window.innerWidth < 580) setSidebar(false)
+  })
+  const openFollowup = (id: string) => requestArtifactNavigation(() => {
+    closeWorkspaces(); closeRoutines(); closeItems(); closeLibrary(); closeMemories(); closeConnections()
+    const url = new URL(location.href); url.searchParams.set('today', '1'); url.searchParams.set('today_view', 'followups'); url.searchParams.set('followup_id', id); history.pushState({}, '', url)
     setTodayLocationVersion(value => value + 1); setTodayOpen(true)
     if (window.innerWidth < 580) setSidebar(false)
   })
@@ -968,7 +975,7 @@ export function Web2() {
           </div>}
         </div>
         <div className="w2-title-end">
-          <PersonalNotifications api={w.api} namespace={`${w.base}:${workspaceRoot || ''}`} connected={Boolean(w.daemon)} agents={personal.agents} open={notificationsOpen} onClose={() => setNotificationsOpen(false)} onToggle={() => setNotificationsOpen(value => !value)} onOpenResult={id => openItems({ kind: 'result', id })} onOpenItem={id => openItems({ kind: 'item', id })} onOpenAction={openConnections} />
+          <PersonalNotifications api={w.api} namespace={`${w.base}:${workspaceRoot || ''}`} connected={Boolean(w.daemon)} agents={personal.agents} open={notificationsOpen} onClose={() => setNotificationsOpen(false)} onToggle={() => setNotificationsOpen(value => !value)} onOpenResult={id => openItems({ kind: 'result', id })} onOpenItem={id => openItems({ kind: 'item', id })} onOpenAction={openConnections} onOpenFollowup={openFollowup} />
           <span className={`w2-connection-dot ${w.daemon ? 'online' : ''}`} />
           {w.connecting ? '连接中' : w.daemon ? '本地工作区' : '未连接'}
         </div>
@@ -1151,7 +1158,7 @@ export function Web2() {
 
       <main className={`w2-main ${terminal ? 'has-terminal' : ''} ${workspacesOpen || todayOpen || routinesOpen || libraryOpen || itemsOpen || memoriesOpen || connectionsOpen ? 'is-library' : ''}`}>
         {workspacesOpen && <WorkspaceOverview key={`workspaces:${w.base}:${workspaceRoot || ''}`} api={w.api} namespace={`${w.base}:${workspaceRoot || ''}`} connected={Boolean(w.daemon)} onClose={closeWorkspaces} />}
-        {todayOpen && <PersonalToday key={`today:${w.base}:${workspaceRoot || ''}:${todayLocationVersion}`} api={w.api} namespace={`${w.base}:${workspaceRoot || ''}`} connected={Boolean(w.daemon)} onClose={closeToday} onOpenItem={id => showItems({ kind: 'item', id })} onOpenResult={id => showItems({ kind: 'result', id })} onOpenRoutine={showRoutines} />}
+        {todayOpen && <PersonalToday key={`today:${w.base}:${workspaceRoot || ''}:${todayLocationVersion}`} api={w.api} namespace={`${w.base}:${workspaceRoot || ''}`} connected={Boolean(w.daemon)} onClose={closeToday} onOpenItem={id => showItems({ kind: 'item', id })} onOpenResult={id => showItems({ kind: 'result', id })} onOpenRoutine={showRoutines} onOpenAction={openConnections} initialFollowupId={readFollowupLocation()} />}
         {connectionsOpen && <ConnectionWorkspace key={`connections:${w.base}:${workspaceRoot || ''}`} api={w.api} namespace={`${w.base}:${workspaceRoot || ''}`} agents={personal.agents} connected={Boolean(w.daemon)} initialActionId={actionSelection} onClose={closeConnections} onOpenItems={openItems} onOpenArtifact={openItemArtifact} onOpenMemory={openActionMemory} />}
         {memoriesOpen && <MemoryWorkspace key={`memories:${w.base}:${workspaceRoot || ''}`} api={w.api} namespace={`${w.base}:${workspaceRoot || ''}`} initialActorId={personal.current?.id || 'main'} agents={personal.agents} connected={Boolean(w.daemon)} onClose={closeMemories} />}
         {routinesOpen && <PersonalRoutines key={`routines:${w.base}:${workspaceRoot || ''}`} api={w.api} namespace={`${w.base}:${workspaceRoot || ''}`} agents={personal.agents} connected={Boolean(w.daemon)} initialRoutineId={routineSelection} onClose={closeRoutines} onOpenArtifact={openItemArtifact} />}

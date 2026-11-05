@@ -87,6 +87,21 @@ def _workspace_evidence(evidence):
     return bool(refs)
 
 
+def _followup_evidence(evidence):
+    from naumi_agent.personal.followup_models import normalize_reference
+
+    found = False
+    for field, kind in (("followup_read_refs", "read"), ("followup_effect_refs", "effect")):
+        refs = evidence.get(field, [])
+        if not isinstance(refs, list) or len(refs) > 64:
+            raise invalid("跟进来源需要有效列表，且不超过 64 项")
+        normalized = [normalize_reference(ref, kind) for ref in refs]
+        if len({canonical(ref) for ref in normalized}) != len(normalized):
+            raise invalid("跟进来源重复")
+        found = found or bool(refs)
+    return found
+
+
 _VERSION_FIELDS = {
     "artifact_id",
     "workspace_key",
@@ -318,16 +333,18 @@ class ArtifactStore:
             connection_bound = _connection_evidence(value["evidence"])
             routine_bound = _routine_evidence(value["evidence"])
             workspace_bound = _workspace_evidence(value["evidence"])
+            followup_bound = _followup_evidence(value["evidence"])
         except PersonalAgentError:
             raise _broken() from None
         expected_authority = (
-            4 if workspace_bound else 3 if routine_bound else 2 if connection_bound else None
+            5 if followup_bound else 4 if workspace_bound else
+            3 if routine_bound else 2 if connection_bound else None
         )
         if value.get("authority_version") != expected_authority:
             raise _broken()
         if "authority_version" in value and (
             type(value["authority_version"]) is not int
-            or value["authority_version"] not in {2, 3, 4}
+            or value["authority_version"] not in {2, 3, 4, 5}
         ):
             raise _broken()
         if (
@@ -662,7 +679,8 @@ class ArtifactStore:
                         for ref in refs
                     }
                 )
-                if _workspace_evidence(previous_record["evidence"]):
+                if (_workspace_evidence(previous_record["evidence"])
+                        or _followup_evidence(previous_record["evidence"])):
                     # Revisions cannot erase an opaque external read by omitting evidence.
                     previous_ref = {
                         key: previous_record[key] for key in ("artifact_id", "version", "sha256")
@@ -697,7 +715,10 @@ class ArtifactStore:
             routine_bound = _routine_evidence(evidence)
             connection_bound = _connection_evidence(evidence)
             workspace_bound = _workspace_evidence(evidence)
-            if workspace_bound:
+            followup_bound = _followup_evidence(evidence)
+            if followup_bound:
+                record["authority_version"] = 5
+            elif workspace_bound:
                 record["authority_version"] = 4
             elif routine_bound:
                 record["authority_version"] = 3

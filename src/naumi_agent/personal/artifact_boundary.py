@@ -37,6 +37,9 @@ def protected_roots(engine):
     workspaces = getattr(engine, "personal_workspaces", None)
     if workspaces is not None:
         roots.extend([workspaces.boundary, workspaces.store.base_dir.resolve()])
+    followups = getattr(engine, "personal_followups", None)
+    if followups is not None:
+        roots.extend([followups.boundary, followups.store.base_dir.resolve()])
     memory = getattr(engine, "personal_memory", None)
     if memory is not None:
         roots.extend([memory.runtime_boundary_marker, memory.owner_boundary_marker,
@@ -126,6 +129,7 @@ class ArtifactToolProxy:
                 "personal_today",
                 "personal_notifications",
                 "personal_workspaces",
+                "personal_followups",
                 "personal_memories",
                 "personal_connections",
                 "personal_actions",

@@ -7,6 +7,9 @@ import { TodayEditor } from './TodayEditor'
 import { TodaySourcePicker } from './TodaySourcePicker'
 import { todayDate, todayRequestId, writeTodayLocation } from './todayLocation'
 import { todayError, usePersonalToday, type PersonalTodayApi } from './usePersonalToday'
+import { Followups, FollowupRuleLauncher, readFollowupLocation } from '../followups/Followups'
+import type { FollowupApi } from '../followups/useFollowups'
+import type { FollowupRuleSeed } from '../followups/FollowupRuleEditor'
 import './personal-today.css'
 
 const time = (value: string | null | undefined, timezone: string) => {
@@ -16,11 +19,21 @@ const time = (value: string | null | undefined, timezone: string) => {
 const attention = new Set(['unknown', 'blocked', 'error', 'timeout', 'max_turns'])
 const priorityNames = { high: '高', normal: '普通', low: '低' }
 
-export function PersonalToday({ api, namespace, connected, onClose, onOpenItem, onOpenResult, onOpenRoutine }: {
-  api: PersonalTodayApi; namespace: string; connected: boolean; onClose: () => void
-  onOpenItem: (itemId: string) => void; onOpenResult: (occurrenceId: string) => void; onOpenRoutine: (routineId: string) => void
+export function PersonalToday({ api, namespace, connected, onClose, onOpenItem, onOpenResult, onOpenRoutine, onOpenAction, initialFollowupId }: {
+  api: PersonalTodayApi & Partial<FollowupApi>; namespace: string; connected: boolean; onClose: () => void
+  onOpenItem: (itemId: string) => void; onOpenResult: (occurrenceId: string) => void; onOpenRoutine: (routineId: string) => void; onOpenAction?: (actionId: string) => void; initialFollowupId?: string | null
 }) {
   const state = usePersonalToday({ api, namespace, connected })
+  const hasFollowups = typeof api.getPersonalFollowupContext === 'function' && typeof api.executePersonalFollowupOperation === 'function'
+  const [followupsOpen, setFollowupsOpen] = useState(() => new URLSearchParams(location.search).get('today_view') === 'followups' || Boolean(initialFollowupId))
+  const [followupSeed, setFollowupSeed] = useState<FollowupRuleSeed | null>(null)
+  const followupNavigation = useRef(namespace); followupNavigation.current = namespace
+  useEffect(() => () => { followupNavigation.current = '' }, [namespace])
+  useEffect(() => { if (initialFollowupId) setFollowupsOpen(true) }, [initialFollowupId])
+  const switchView = (followups: boolean) => requestArtifactNavigation(() => {
+    setEditor(null); setPicker(false); setFollowupSeed(null); setFollowupsOpen(followups)
+    const url = new URL(location.href); if (followups) url.searchParams.set('today_view', 'followups'); else { url.searchParams.delete('today_view'); url.searchParams.delete('followup_id') }; window.history.replaceState({}, '', url)
+  })
   const [picker, setPicker] = useState(false), [editor, setEditor] = useState<TodayEntry | null>(null)
   const [editorVersion, setEditorVersion] = useState(0)
   const [editorDirty, setEditorDirty] = useState(false), [order, setOrder] = useState<string[] | null>(null)
@@ -91,6 +104,7 @@ export function PersonalToday({ api, namespace, connected, onClose, onOpenItem, 
       <div className="pt-card-facts">{available && <span>{entry.assignee?.name}</span>}{status && <span className={attention.has(status) ? 'pt-attention' : ''}>{itemStatusNames[status] || '状态待核对'}</span>}{entry.human_check?.checked && <span className="pt-manual">人工已勾选</span>}</div>
       {entry.deadline && <time className={entry.deadline.status === 'timezone_data_changed' ? 'pt-deadline-unconfirmed' : entry.deadline.status === 'overdue' || !entry.deadline.status && Date.parse(entry.deadline.boundary_at || entry.deadline.resolved_at || '') <= Date.now() ? 'pt-overdue' : ''}>{entry.deadline.status === 'timezone_data_changed' ? '原截止' : '截止'} {entry.deadline.kind === 'date' ? entry.deadline.local_date : entry.deadline.local_time.replace('T', ' ')} <span>{entry.deadline.timezone}</span>{entry.deadline.status === 'timezone_data_changed' && <strong>时区规则待确认</strong>}</time>}
       <div className="pt-card-actions"><button onClick={() => navigate(() => setEditor(entry))}>{entry.availability === 'stale' ? '核对版本' : '设置'}</button>
+        {available && entry.deadline && hasFollowups && <button onClick={() => navigate(() => setFollowupSeed({ kind: 'deadline', item_id: entry.item_ref.item_id, actor_id: entry.item_ref.assignee_id }))}>跟进</button>}
         {available && <button onClick={() => navigate(() => onOpenItem(entry.item_ref.item_id))}>原事项<ArrowRight size={12} /></button>}
         {entry.report && available && <button onClick={() => navigate(() => onOpenResult(entry.report!.occurrence_id))}>报告</button>}
         {!entry.planned && available && <button disabled={state.locked || Boolean(order) || editorDirty} onClick={() => void place(entry)}>安排<Plus size={13} /></button>}
@@ -100,6 +114,10 @@ export function PersonalToday({ api, namespace, connected, onClose, onOpenItem, 
     </article>
   }
   return <section className="pt-workspace" aria-label="今日安排"><header className="pt-heading"><div className="pt-title"><CalendarDays size={25} /><h1>今日</h1></div><div><button aria-label="刷新今日安排" disabled={state.loading || !connected} onClick={() => navigate(() => { state.refresh(); setOrder(null) })}><RefreshCw size={16} className={state.loading ? 'pa-spin' : ''} /></button><button aria-label="关闭今日安排" onClick={() => navigate(onClose)}><X size={19} /></button></div></header>
+    {hasFollowups && <div className="pt-followup-tabs" role="tablist" aria-label="今日视图"><button role="tab" aria-selected={!followupsOpen} onClick={() => switchView(false)}>安排</button><button role="tab" aria-selected={followupsOpen} onClick={() => switchView(true)}>跟进</button></div>}
+    {followupsOpen && hasFollowups ? <Followups api={api as FollowupApi} namespace={namespace} connected={connected} initialProposalId={initialFollowupId || readFollowupLocation()} defaultDate={state.query.date} defaultTimezone={state.query.timezone} onOpenAction={onOpenAction} onAccepted={state.refresh} onOpenToday={id => {
+      void api.getPersonalTodayDay(id).then(value => { if (followupNavigation.current !== namespace) return; navigate(() => { state.changeQuery({ date: value.day.date, timezone: value.day.timezone, planner_id: value.day.planner_id }); writeTodayLocation({ date: value.day.date, timezone: value.day.timezone, planner_id: value.day.planner_id }); setFollowupsOpen(false); const url = new URL(location.href); url.searchParams.delete('today_view'); url.searchParams.delete('followup_id'); window.history.replaceState({}, '', url) }) }).catch(cause => { if (followupNavigation.current === namespace) setNotice(todayError(cause)) })
+    }} /> : <>
     <div className="pt-toolbar"><div className="pt-date"><button aria-label="前一天" onClick={() => changeDate(-1)}><ChevronLeft size={17} /></button><input aria-label="安排日期" type="date" value={state.query.date} onChange={event => { if (event.target.value) changeQuery({ ...state.query, date: event.target.value }) }} /><button aria-label="后一天" onClick={() => changeDate(1)}><ChevronRight size={17} /></button><button onClick={() => changeQuery({ ...state.query, date: todayDate(new Date(), state.query.timezone) })}>今天</button></div>
       <label className="pt-zone"><Clock3 size={14} /><input aria-label="安排时区" list="pt-timezones" value={zone} onChange={event => setZone(event.target.value)} /><datalist id="pt-timezones">{['Asia/Shanghai', 'Asia/Tokyo', 'America/New_York', 'Europe/London', 'UTC'].map(value => <option key={value} value={value} />)}</datalist>{zone !== state.query.timezone && <button onClick={() => { try { new Intl.DateTimeFormat('zh-CN', { timeZone: zone }).format(); changeQuery({ ...state.query, timezone: zone }) } catch { setNotice('请选择有效的 IANA 时区') } }}>切换</button>}</label>
       <select aria-label="规划 Agent" value={state.query.planner_id || ''} disabled={!state.context} onChange={event => changeQuery({ ...state.query, planner_id: event.target.value })}>{state.context?.planners.map(planner => <option key={planner.id} value={planner.id}>{planner.name}</option>)}</select>
@@ -125,6 +143,8 @@ export function PersonalToday({ api, namespace, connected, onClose, onOpenItem, 
     </>}
     {picker && state.context && <TodaySourcePicker api={api} workspaceKey={state.context.workspace_key} namespace={namespace} included={state.view?.entries.filter(entry => entry.planned).map(entry => entry.metadata_id) || []} locked={state.locked} onClose={() => setPicker(false)} onSelect={place} />}
     {editor && <TodayEditor key={`${namespace}:${editor.metadata_id}:${editorVersion}`} api={api} namespace={namespace} state={state} initial={editor} entry={state.view?.entries.find(entry => entry.metadata_id === editor.metadata_id) || null} onDirty={setEditorDirty} onClose={() => setEditor(null)} />}
+    </>}
+    {followupSeed && hasFollowups && <FollowupRuleLauncher api={api as FollowupApi} namespace={namespace} connected={connected} seed={followupSeed} onClose={() => setFollowupSeed(null)} />}
     {leave && <div className="pt-overlay"><section className="pt-leave" role="alertdialog" aria-modal="true" aria-label="保留未保存安排"><h2>保留未保存的修改？</h2><div><button onClick={() => { leave.cancel?.(); setLeave(null) }}>继续编辑</button><button className="pt-danger" onClick={() => { const next = leave; setLeave(null); setEditorDirty(false); setOrder(null); setEditor(null); setEditorVersion(value => value + 1); next.proceed() }}>放弃修改并继续</button></div></section></div>}
   </section>
 }

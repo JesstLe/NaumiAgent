@@ -16,7 +16,8 @@ from naumi_agent.api.deps import extract_api_key
 def _routine_headers(request: Request) -> dict[str, str]:
     path = request.url.path
     prefixes = ("/api/v1/personal/routines", "/api/v1/personal/today",
-                "/api/v1/personal/notifications", "/api/v1/personal/workspaces")
+                "/api/v1/personal/notifications", "/api/v1/personal/workspaces",
+                "/api/v1/personal/followups")
     if any(path == prefix or path.startswith(prefix + "/") for prefix in prefixes):
         return {"Cache-Control": "no-store", "Pragma": "no-cache"}
     return {}
@@ -58,8 +59,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
     PUBLIC_PATHS = {"/health", "/api/v1/health", "/docs", "/openapi.json", "/redoc"}
 
     async def dispatch(self, request: Request, call_next):
-        if (request.url.path == "/api/v1/personal/workspaces"
-                or request.url.path.startswith("/api/v1/personal/workspaces/")):
+        if any(request.url.path == prefix or request.url.path.startswith(prefix + "/")
+               for prefix in ("/api/v1/personal/workspaces", "/api/v1/personal/followups")):
             upstream = call_next
 
             async def workspace_next(incoming):

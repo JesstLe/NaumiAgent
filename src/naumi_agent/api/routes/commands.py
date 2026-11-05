@@ -38,7 +38,7 @@ _SUPPORTED = frozenset(
 /speculate /jit /pointer /cooe /sleep /entropy /ooda /probe /hook /vision
 /spar /world /fusion /consensus /pid /zkp /genesis /macro /cosmos /watchdog
 /supervisor /autopsy /feedback /evolution /assistants /library /items /memory
-/routines /today /notifications /workspaces
+/routines /today /notifications /workspaces /followups
 """.split()
 )
 
@@ -104,6 +104,7 @@ class _CommandEngine:
         object.__setattr__(self, "_personal_today_manual_channel", "web")
         object.__setattr__(self, "_personal_notifications_manual_channel", "web")
         object.__setattr__(self, "_personal_workspaces_manual_channel", "web")
+        object.__setattr__(self, "_personal_followups_manual_channel", "web")
         object.__setattr__(self, "_personal_memory_manual_channel", "management_web")
 
     def __getattr__(self, name):
@@ -138,7 +139,7 @@ async def run_command(
 ):
     command = validate_command(body.command)
     routine_command = command.split(maxsplit=1)[0] in {
-        "/routines", "/today", "/notifications", "/workspaces",
+        "/routines", "/today", "/notifications", "/workspaces", "/followups",
     }
     private_headers = (
         {"Cache-Control": "no-store", "Pragma": "no-cache"} if routine_command else None
@@ -156,7 +157,7 @@ async def run_command(
     if not session:
         raise HTTPException(404, "会话不存在", headers=private_headers)
     if command.split(maxsplit=1)[0] in {
-        "/items", "/memory", "/routines", "/today", "/notifications", "/workspaces",
+        "/items", "/memory", "/routines", "/today", "/notifications", "/workspaces", "/followups",
     } and getattr(
         session, "personal_execution_id", ""
     ):
@@ -249,6 +250,17 @@ async def _command_stream(request, session_id, command, mode, *, edit_message_id
                 today_command = command.split(maxsplit=1)[0] == "/today"
                 notification_command = command.split(maxsplit=1)[0] == "/notifications"
                 workspace_command = command.split(maxsplit=1)[0] == "/workspaces"
+                followup_command = command.split(maxsplit=1)[0] == "/followups"
+                followup_operation = "invalid"
+                if followup_command:
+                    from naumi_agent.personal.followup_commands import parse_followup_command
+
+                    try:
+                        followup_operation = parse_followup_command(
+                            command[len("/followups"):].strip()
+                        )["operation"]
+                    except ValueError:
+                        pass
                 workspace_operation = "invalid"
                 if workspace_command:
                     from naumi_agent.personal.workspace_commands import parse_workspace_command
@@ -259,15 +271,17 @@ async def _command_stream(request, session_id, command, mode, *, edit_message_id
                         )["operation"]
                     except ValueError:
                         pass
-                if today_command or notification_command or workspace_command:
+                if today_command or notification_command or workspace_command or followup_command:
                     # Management output can contain another planner's private data.
                     # Persist only the opaque command receipt, never unpinned bodies
                     # or raw JSON arguments that would enter the next model turn.
                     persisted_output = json.dumps({"type": (
+                        "personal_followups_command" if followup_command else
                         "personal_workspaces_command" if workspace_command else
                         "personal_notifications_command" if notification_command
                         else "personal_today_command"),
                         "operation": (
+                            followup_operation if followup_command else
                             workspace_operation if workspace_command else
                             command.split(maxsplit=2)[1] if len(command.split()) > 1 else "context"
                         ),
@@ -280,6 +294,8 @@ async def _command_stream(request, session_id, command, mode, *, edit_message_id
                     saved_command = "/notifications"
                 elif workspace_command:
                     saved_command = "/workspaces"
+                elif followup_command:
+                    saved_command = "/followups"
                 session.add_message("user", saved_command)
                 if memory_command:
                     session.add_message(

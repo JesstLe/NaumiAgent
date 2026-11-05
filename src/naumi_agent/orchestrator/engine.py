@@ -4275,6 +4275,9 @@ class AgentEngine:
         from naumi_agent.personal.workspaces import PersonalWorkspaceService
 
         self.personal_workspaces = PersonalWorkspaceService(self)
+        from naumi_agent.personal.followups import PersonalFollowupService
+
+        self.personal_followups = PersonalFollowupService(self)
         from naumi_agent.personal.memories import PersonalMemoryService
         from naumi_agent.personal.memory_adapter import ScopedMemoryAdapter
         from naumi_agent.personal.memory_runtime import PersonalMemoryRuntime
@@ -4441,6 +4444,9 @@ class AgentEngine:
         from naumi_agent.personal.workspace_tools import PersonalWorkspacesTool
 
         self._tool_registry.register(PersonalWorkspacesTool(self.personal_workspaces))
+        from naumi_agent.personal.followup_tools import PersonalFollowupsTool
+
+        self._tool_registry.register(PersonalFollowupsTool(self.personal_followups))
         from naumi_agent.personal.connection_tools import (
             PersonalActionsTool,
             PersonalConnectionsTool,
@@ -5034,6 +5040,7 @@ class AgentEngine:
 
     async def shutdown(self) -> None:
         """释放资源（关闭数据库连接、浏览器、MCP 连接等）."""
+        await self._shutdown_component("personal_followups", self.personal_followups.stop)
         await self._shutdown_component("personal_notifications", self.personal_notifications.stop)
         await self._shutdown_component("personal_routines", self.personal_routines.stop)
         await self._shutdown_component("personal_connections", self.personal_connections.stop)
@@ -5739,6 +5746,7 @@ class AgentEngine:
             self.personal_routines.start()
             self.personal_memory.start()
             self.personal_connections.start()
+            self.personal_followups.start()
             self.personal_notifications.start()
         return recovered
 

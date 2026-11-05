@@ -7,6 +7,8 @@ import hashlib
 import json
 import re
 
+from pydantic import ValidationError
+
 from naumi_agent.daemons.agent_jobs import AgentJobError, agent_job_id_for_request
 from naumi_agent.personal.calendar_actions import action_digest
 from naumi_agent.personal.item_execution import _request
@@ -27,6 +29,37 @@ class NotificationAuthorityMixin:
         if today is None:
             raise unavailable()
         return today
+
+    def _followups(self):
+        service = getattr(self.engine, "personal_followups", None)
+        if service is None:
+            raise unavailable()
+        return service
+
+    def _followup_source(self, raw):
+        from naumi_agent.personal.followup_tools import FollowupNotificationSource
+
+        try:
+            if (type(raw) is not dict
+                    or type(raw.get("proposal_ref", {}).get("revision")) is not int):
+                raise ValueError()
+            source = FollowupNotificationSource.model_validate(raw).model_dump()
+            if source["proposal_ref"]["workspace_key"] != self.workspace_key:
+                raise ValueError()
+            return source
+        except (ValidationError, TypeError, ValueError, AttributeError):
+            raise self._broken() from None
+
+    def _followup_event(self, raw):
+        source = self._followup_source(raw)
+        return {
+            "id": identity("ne_", {"kind": "followup_proposal", "source_ref": source}),
+            "workspace_key": self.workspace_key,
+            "kind": "followup_proposal",
+            "actor_id": source["actor_id"],
+            "source_ref": source,
+            "occurred_at": source["occurred_at"],
+        }
 
     async def _item_event(self, raw, reader=None):
         intent = self.items.executor._load(raw)
@@ -171,6 +204,31 @@ class NotificationAuthorityMixin:
             raise unavailable()
         if event["id"] != identity("ne_", {"kind": event["kind"], "source_ref": ref}):
             raise self._broken()
+        if event["kind"] == "followup_proposal":
+            source = self._followup_source(ref)
+            if source["actor_id"] != actor or source["occurred_at"] != event["occurred_at"]:
+                raise self._broken()
+            value = await self._followups().notification_projection(source, reader)
+            if (
+                type(value) is not dict
+                or set(value) != {"title", "actor_name", "availability", "jump"}
+                or type(value["availability"]) is not str
+                or value["availability"] not in {"available", "resolved"}
+                or value["title"] is not None and (
+                    type(value["title"]) is not str or len(value["title"]) > 500
+                )
+                or value["actor_name"] is not None and (
+                    type(value["actor_name"]) is not str or len(value["actor_name"]) > 200
+                )
+                or value["jump"] is not None and value["jump"] != {
+                    "kind": "followup", "id": source["proposal_ref"]["proposal_id"]
+                }
+                or value["availability"] == "resolved" and (
+                    value["title"] is not None or value["jump"] is not None
+                )
+            ):
+                raise self._broken()
+            return value
         if event["kind"] in {"item_result", "item_failure"}:
             intent = await self.items._call("get_intent", occurrence_id=ref["occurrence_id"])
             actual, _ = await self._item_event(intent, reader)
@@ -298,6 +356,37 @@ class NotificationAuthorityMixin:
                     if exc.code == "storage_error":
                         raise
                     source_errors = True
+        followup_page = {"events": [], "next_after": None, "partial": False}
+        followups = getattr(self.engine, "personal_followups", None)
+        if followups is not None:
+            followup_page = await followups.notification_page(
+                after=scan.get("followup_after"), limit=50
+            )
+            if (
+                type(followup_page) is not dict
+                or set(followup_page) != {"events", "next_after", "partial"}
+                or type(followup_page["events"]) is not list
+                or len(followup_page["events"]) > 50
+                or type(followup_page["partial"]) is not bool
+                or followup_page["next_after"] is not None and (
+                    type(followup_page["next_after"]) is not str
+                    or not re.fullmatch(r"fp_[a-f0-9]{32}", followup_page["next_after"])
+                )
+            ):
+                raise self._broken()
+            for raw in followup_page["events"]:
+                event = self._followup_event(raw)
+                try:
+                    view = await self._authorize_event(event, None)
+                    if view["availability"] == "available":
+                        events.append(event)
+                except PersonalAgentError as exc:
+                    if exc.code == "storage_error":
+                        raise
+                    source_errors = True
+        elif scan.get("followup_after") is not None:
+            # Missing optional code must not discard a previously pinned continuation.
+            followup_page.update(next_after=scan["followup_after"], partial=True)
         return (
             events,
             watches,
@@ -305,10 +394,13 @@ class NotificationAuthorityMixin:
                 "intent_after": page["next_after"],
                 "watch_after": watches_page["next_after"],
                 "action_after": action_page["next_after"],
+                "followup_after": followup_page["next_after"],
                 "partial": bool(
                     page["next_after"]
                     or watches_page["next_after"]
                     or action_page["next_after"]
+                    or followup_page["partial"]
+                    or followup_page["next_after"]
                     or source_errors
                 ),
             },
@@ -442,6 +534,28 @@ class NotificationAuthorityMixin:
 
         saved = await self._write(save)
         artifacts = today._artifacts()
+        followup_sources = []
+        for ref in refs:
+            event = await self._event(ref)
+            if event["kind"] == "followup_proposal":
+                followup_sources.append(self._followup_source(event["source_ref"]))
+        followup_evidence = {}
+        if followup_sources:
+            proof = await self._followups().notification_read_evidence(
+                body, actor, followup_sources
+            )
+            if (
+                type(proof) is not dict
+                or set(proof) != {"read_id", "revision", "digest", "workspace_key"}
+                or type(proof["revision"]) is not int or proof["revision"] != 1
+                or type(proof["read_id"]) is not str
+                or not re.fullmatch(r"fl_[a-f0-9]{32}", proof["read_id"])
+                or type(proof["digest"]) is not str
+                or not re.fullmatch(r"[a-f0-9]{64}", proof["digest"])
+                or proof["workspace_key"] != self.workspace_key
+            ):
+                raise self._broken()
+            followup_evidence["followup_read_refs"] = [proof]
         snapshot = await artifacts.publish(
             actor_id=actor,
             request_id="notification-read:" + digest({"read": saved["id"], "body": body}),
@@ -451,6 +565,7 @@ class NotificationAuthorityMixin:
             content=content,
             source_refs=[],
             evidence={
+                **followup_evidence,
                 "source_kind": "notification_read",
                 "notification_read_refs": [
                     {

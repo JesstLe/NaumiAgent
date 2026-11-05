@@ -75,6 +75,7 @@ def create_app() -> FastAPI:
         commands,
         connections,
         engines,
+        followups,
         health,
         items,
         memories,
@@ -102,6 +103,7 @@ def create_app() -> FastAPI:
     app.include_router(today.router, prefix="/api/v1")
     app.include_router(notifications.router, prefix="/api/v1")
     app.include_router(workspaces.router, prefix="/api/v1")
+    app.include_router(followups.router, prefix="/api/v1")
     app.include_router(memories.router, prefix="/api/v1")
     app.include_router(connections.router, prefix="/api/v1")
     app.include_router(tools.router, prefix="/api/v1")

@@ -43,13 +43,16 @@ const refsEqual = (left: NotificationEventRef[], right: NotificationEventRef[]) 
 }
 export function validateNotificationEntry(value: PersonalNotificationEntry): PersonalNotificationEntry {
   if (!value || !id(value.id, 'ne') || !hash(value.event_digest) || !actor(value.actor_id)
-    || !['item_result', 'item_failure', 'calendar_approval'].includes(value.kind) || !['available', 'resolved', 'source_unavailable'].includes(value.availability)
+    || !['item_result', 'item_failure', 'calendar_approval', 'followup_proposal'].includes(value.kind) || !['available', 'resolved', 'source_unavailable'].includes(value.availability)
     || !['normal', 'high'].includes(value.priority) || typeof value.unread !== 'boolean' || !Number.isFinite(Date.parse(value.occurred_at))
     || value.batch_id !== null && !id(value.batch_id, 'nb') || !value.source_ref || typeof value.source_ref !== 'object' || Array.isArray(value.source_ref)
     || value.notice_read !== null && (typeof value.notice_read !== 'object' || Array.isArray(value.notice_read))) throw new Error('通知记录待核对')
   if (value.availability === 'source_unavailable') return { ...value, title: null, actor_name: null, jump: null, source_ref: {} }
   if (value.title !== null && typeof value.title !== 'string' || value.actor_name !== null && typeof value.actor_name !== 'string'
-    || value.jump && (!['result', 'item', 'calendar_action'].includes(value.jump.kind) || typeof value.jump.id !== 'string' || !value.jump.id || value.jump.id.length > 256)) throw new Error('通知来源待核对')
+    || value.jump && (!['result', 'item', 'calendar_action', 'followup'].includes(value.jump.kind) || typeof value.jump.id !== 'string' || !value.jump.id || value.jump.id.length > 256)) throw new Error('通知来源待核对')
+  if (value.jump?.kind === 'followup' && (!/^fp_[a-f0-9]{32}$/.test(value.jump.id) || value.kind !== 'followup_proposal')) throw new Error('跟进通知来源身份待核对')
+  if (value.kind === 'followup_proposal' && value.jump && value.jump.kind !== 'followup') throw new Error('跟进通知跳转类型待核对')
+  if (value.kind === 'followup_proposal' && value.priority !== 'normal') throw new Error('跟进通知优先级待核对')
   return value
 }
 export function validateNotificationQuiet(value: NotificationQuietState): NotificationQuietState {
@@ -75,7 +78,7 @@ export function validateNotificationPreferences(value: NotificationPreferencesVi
 }
 export function validateNotificationBatch(value: NotificationBatch, workspace: string): NotificationBatch {
   if (!value || !id(value.id, 'nb') || !hash(value.digest) || value.workspace_key !== workspace || !actor(value.actor_id)
-    || !['item_result', 'item_failure', 'calendar_approval'].includes(value.kind) || !['ready', 'claimed', 'presented'].includes(value.presentation_status)
+    || !['item_result', 'item_failure', 'calendar_approval', 'followup_proposal'].includes(value.kind) || !['ready', 'claimed', 'presented'].includes(value.presentation_status)
     || typeof value.prompt_available !== 'boolean' || !Array.isArray(value.member_refs) || value.member_refs.length < 1 || value.member_refs.length > 100
     || !Array.isArray(value.entries) || !Number.isFinite(Date.parse(value.created_at))) throw new Error('通知批次身份待核对')
   const refs = value.member_refs.map(validateNotificationRef), entries = value.entries.map(validateNotificationEntry)
@@ -100,8 +103,8 @@ function mayShow(batch: NotificationBatch, context: NotificationContext | null) 
   const prefs = context?.preferences.preferences, quiet = batch.quiet
   return Boolean(prefs && context?.workspace_key === batch.workspace_key && prefs.enabled && !prefs.muted_actor_ids.includes(batch.actor_id)
     && !quiet.clock_rollback && !quiet.timezone_data_changed && !quiet.hold_reason
-    && (!quiet.quiet || batch.kind !== 'item_result' && prefs.bypass_kinds.includes(batch.kind))
-    && (!context?.quiet.quiet || batch.kind !== 'item_result' && prefs.bypass_kinds.includes(batch.kind))
+    && (!quiet.quiet || batch.kind !== 'item_result' && prefs.bypass_kinds.some(kind => kind === batch.kind))
+    && (!context?.quiet.quiet || batch.kind !== 'item_result' && prefs.bypass_kinds.some(kind => kind === batch.kind))
     && !context?.quiet.clock_rollback && !context?.quiet.timezone_data_changed && !context?.quiet.hold_reason)
 }
 

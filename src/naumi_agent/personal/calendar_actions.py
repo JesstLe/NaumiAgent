@@ -272,7 +272,14 @@ class CalendarActionMixin:
         await self.authorize_sources(result, actor)
         return result
 
-    async def prepare_action(self, payload, caller_actor=None):
+    async def prepare_action_from_followup(self, effect_id):
+        followups = getattr(self.engine, "personal_followups", None)
+        if followups is None:
+            raise PersonalAgentError("source_unavailable", "原跟进授权组件不可用")
+        effect = await followups.resolve_effect(effect_id, expected_kind="calendar_draft")
+        return await self.prepare_action(effect["payload"], _followup_effect=effect)
+
+    async def prepare_action(self, payload, caller_actor=None, *, _followup_effect=None):
         fields(
             payload,
             {
@@ -293,6 +300,10 @@ class CalendarActionMixin:
             "caller_actor": caller_actor,
             **payload,
         }
+        if _followup_effect is not None:
+            if caller_actor is not None or _followup_effect["payload"] != payload:
+                raise PersonalAgentError("scope_denied", "跟进采纳与原日程草稿输入不一致")
+            operation_payload["_followup_effect_id"] = _followup_effect["effect_id"]
         replay = await self._action_replay(
             payload["request_id"], "prepare_action", operation_payload, caller_actor
         )
@@ -300,6 +311,13 @@ class CalendarActionMixin:
             return replay
         actor = self._action_actor(payload, caller_actor)
         context = await self._action_context(actor, caller_actor)
+        if _followup_effect is not None:
+            if _followup_effect["actor_id"] != actor:
+                raise PersonalAgentError("scope_denied", "跟进采纳与原 Agent 不一致")
+            context["artifact_refs"] = normalize_refs([
+                *context["artifact_refs"], _followup_effect["artifact_ref"],
+            ])
+            await self._authorize_action_dependencies({**context, "actor_id": actor})
         connection = await self._connection(payload["connection_id"], actor)
         refs = await self._action_sources(
             payload["source_refs"], actor, manual=caller_actor is None
@@ -323,6 +341,9 @@ class CalendarActionMixin:
             event_id, etag = uuid.uuid4().hex, None
 
         def create(tx):
+            if _followup_effect is not None:
+                self.engine.personal_followups.check_effect_commit(
+                    _followup_effect["effect_id"], _followup_effect["proof"], payload)
             current = tx.get("connection", connection["id"])
             self._grant(current, actor)
             if current["auth_epoch"] != connection["auth_epoch"]:
@@ -367,7 +388,7 @@ class CalendarActionMixin:
         ref = await self._mutate(
             payload["request_id"],
             "prepare_action",
-            {"workspace_key": self.workspace_key, "caller_actor": caller_actor, **payload},
+            operation_payload,
             create,
         )
         return await self.get_action(ref["id"], caller_actor)
