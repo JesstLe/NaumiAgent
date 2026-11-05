@@ -6,7 +6,7 @@ import logging
 import os
 import shlex
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any, Protocol
 
@@ -78,6 +78,97 @@ class PermissionAwareTool(Protocol):
 
 # 工具权限表
 TOOL_PERMISSIONS: dict[str, PermissionRule] = {
+    "agent_result_acknowledge": PermissionRule(
+        tool_name="agent_result_acknowledge",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+        risk_level=PermissionRiskLevel.LOW,
+        tool_family="agent_result_inbox",
+    ),
+    "output_asset_retention_run": PermissionRule(
+        tool_name="output_asset_retention_run",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=True,
+        max_calls_per_session=50,
+        risk_level=PermissionRiskLevel.HIGH,
+        tool_family="output_asset_retention",
+        allow_session_grant=False,
+    ),
+    "evolution_capability_specification": PermissionRule(
+        tool_name="evolution_capability_specification",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+        max_calls_per_session=50,
+        risk_level=PermissionRiskLevel.MEDIUM,
+        tool_family="evolution_capability_specification",
+    ),
+    "evolution_capability_governance": PermissionRule(
+        tool_name="evolution_capability_governance",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+        max_calls_per_session=50,
+        risk_level=PermissionRiskLevel.MEDIUM,
+        tool_family="evolution_capability_governance",
+    ),
+    "evolution_capability_artifact": PermissionRule(
+        tool_name="evolution_capability_artifact",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+        max_calls_per_session=50,
+        risk_level=PermissionRiskLevel.MEDIUM,
+        tool_family="evolution_capability_artifact",
+    ),
+    "evolution_capability_scenario_binding": PermissionRule(
+        tool_name="evolution_capability_scenario_binding",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+        max_calls_per_session=50,
+        risk_level=PermissionRiskLevel.MEDIUM,
+        tool_family="evolution_capability_scenario_binding",
+    ),
+    "evolution_capability_sandbox_request": PermissionRule(
+        tool_name="evolution_capability_sandbox_request",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+        max_calls_per_session=50,
+        risk_level=PermissionRiskLevel.MEDIUM,
+        tool_family="evolution_capability_sandbox_request",
+    ),
     "output_publish": PermissionRule(
         tool_name="output_publish",
         allowed_modes=[
@@ -1602,6 +1693,30 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         risk_level=PermissionRiskLevel.MEDIUM,
         tool_family="personal_routines",
     ),
+    "personal_connections": PermissionRule(
+        tool_name="personal_connections",
+        allowed_modes=[
+            PermissionMode.BYPASS, PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE, PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+        max_calls_per_session=200,
+        risk_level=PermissionRiskLevel.MEDIUM,
+        tool_family="personal_connections",
+        allow_session_grant=False,
+    ),
+    "personal_actions": PermissionRule(
+        tool_name="personal_actions",
+        allowed_modes=[
+            PermissionMode.BYPASS, PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE, PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+        max_calls_per_session=200,
+        risk_level=PermissionRiskLevel.MEDIUM,
+        tool_family="personal_actions",
+        allow_session_grant=False,
+    ),
     "personal_agents": PermissionRule(
         tool_name="personal_agents",
         allowed_modes=[
@@ -2427,6 +2542,11 @@ class PermissionChecker:
                     code=PermissionReasonCode.UNKNOWN_TOOL,
                     risk_level=PermissionRiskLevel.HIGH,
                 )
+
+        # Calendar reads and local sync do not authorize starting a new Item.
+        # Resolve namespaces first and derive a per-call rule without mutating defaults.
+        if tool_name == "personal_connections" and args.get("operation") == "event_to_item":
+            rule = replace(rule, requires_confirmation=True, allow_session_grant=False)
 
         tool_family = rule.tool_family or tool_name
         language = args.get("language")

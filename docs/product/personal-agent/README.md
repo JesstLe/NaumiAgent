@@ -15,6 +15,9 @@ Agent双向消息、独立接收方 Run、双方对话及确认已通过真实�
 
 Tool/OpenAPI 的兼容类型、当前产品文档和身份连续性回归已同步，见[Agent 身份与分工](../../development/personal-agent/agent-identity.md)。
 
+已注册工具的正常权限入口及日程转事项确认合同见
+[工具权限接缝](../../development/personal-agent/permission-contracts.md)；账户真实验收仍独立记录。
+
 ## 1. 已确认的产品范围
 
 用户希望 NaumiAgent 成为 Personal Agent，并明确同时覆盖：
