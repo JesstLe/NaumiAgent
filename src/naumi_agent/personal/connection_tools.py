@@ -144,7 +144,7 @@ def payload(model, value):
 def _schema(operations):
     definitions, branches = {}, []
     for operation, (fields, required, body_type) in operations.items():
-        properties = {"operation": {"const": operation}, **copy.deepcopy(fields)}
+        properties = {"operation": {"type": "string", "const": operation}, **copy.deepcopy(fields)}
         if body_type is not None:
             body = body_type.model_json_schema()
             definitions.update(body.pop("$defs", {}))

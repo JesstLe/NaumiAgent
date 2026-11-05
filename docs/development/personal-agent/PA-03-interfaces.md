@@ -1,5 +1,9 @@
 # PA-03 API、模型工具与人工命令
 
+2026-11-06：模型工具 operation const 已补齐显式字符串类型，与事项的
+字符串枚举一并验证；参见[Provider Schema 合同](provider-schema-types.md)。
+操作集合、oneOf、身份校验及人工审批边界保持不变。
+
 ## 共享服务边界
 
 三条入口共用 `engine.personal_connections`；不创建第二 Engine、不切会话、不获取 Engine 大锁。注册 router、Tool 与 CLI/TUI 路由由 Root 的集成改动负责，本域不修改 app/main/engine/tui。

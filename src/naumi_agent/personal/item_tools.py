@@ -87,11 +87,11 @@ def request_schema() -> dict:
         "additionalProperties": False,
         "required": ["mode", "timezone"],
         "properties": {
-            "mode": {"enum": ["now", "once"]},
+            "mode": {"type": "string", "enum": ["now", "once"]},
             "local_time": string(64),
             "timezone": string(128),
             "fold": {"type": ["integer", "null"], "enum": [0, 1, None]},
-            "misfire_policy": {"enum": ["run_once", "skip"]},
+            "misfire_policy": {"type": "string", "enum": ["run_once", "skip"]},
             "grace_seconds": number(0, 604800),
         },
     }
@@ -104,6 +104,7 @@ def request_schema() -> dict:
                 "uniqueItems": True,
                 "maxItems": 5,
                 "items": {
+                    "type": "string",
                     "enum": ["personal_artifacts", "code_execute", "bash_run", "file_read", "read"]
                 },
             },
@@ -111,9 +112,9 @@ def request_schema() -> dict:
                 "type": "array",
                 "uniqueItems": True,
                 "maxItems": 3,
-                "items": {"enum": ["get", "read", "publish"]},
+                "items": {"type": "string", "enum": ["get", "read", "publish"]},
             },
-            "model_tier": {"enum": ["fast", "capable", "reasoning"]},
+            "model_tier": {"type": "string", "enum": ["fast", "capable", "reasoning"]},
             "max_turns": number(1, 100),
             "max_cost_microusd": number(0, 100000000),
             "timeout_seconds": number(1, 3600),
@@ -124,7 +125,7 @@ def request_schema() -> dict:
         "additionalProperties": False,
         "required": ["operation"],
         "properties": {
-            "operation": {"enum": list(FIELDS)},
+            "operation": {"type": "string", "enum": list(FIELDS)},
             "item_id": {"type": "string", "pattern": "^pi_[a-f0-9]{32}$"},
             "occurrence_id": {"type": "string", "pattern": "^pio_[a-f0-9]{32}$"},
             "request_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}$"},
@@ -152,7 +153,7 @@ def request_schema() -> dict:
                 },
             },
             "policy": policy,
-            "state": {"enum": ["active", "paused", "cancelled", "closed"]},
+            "state": {"type": "string", "enum": ["active", "paused", "cancelled", "closed"]},
             "query": {"type": "string", "maxLength": 200},
             "unread": {"type": "boolean"},
             "limit": number(1, 100),
