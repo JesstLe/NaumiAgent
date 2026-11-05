@@ -23,9 +23,25 @@ _HELP = """研究命令：
 /research source <来源ID> [--revision N]
 /research history <研究ID> [--limit N] [--after-revision N]
 /research request <原request_id>
+/research egress-list [--limit N] [--after 原外发ID]
+/research egress-get <原外发ID>
+/research egress-request <原request_id>
+/research <egress-propose|egress-decide|egress-execute>-json '<完整JSON>'
 /research <create|revise|search|capture|import|recheck|review|publish>-json '<完整JSON>'"""
 _JSON = frozenset(
-    {"create", "revise", "search", "capture", "import", "recheck", "review", "publish"}
+    {
+        "create",
+        "revise",
+        "search",
+        "capture",
+        "import",
+        "recheck",
+        "review",
+        "publish",
+        "egress-propose",
+        "egress-decide",
+        "egress-execute",
+    }
 )
 
 
@@ -70,18 +86,23 @@ def parse_research_command(argument):
             body = strict_json_loads(raw)
             if type(body) is not dict or "operation" in body:
                 raise _invalid()
-            return validate_research_arguments({"operation": action[:-5], **body}, human=True)
+            return validate_research_arguments(
+                {"operation": action[:-5].replace("-", "_"), **body}, human=True
+            )
         action, *args = shlex.split(argument)
+        action = action.replace("-", "_")
         value = {"operation": action}
         if action == "context" and not args:
             pass
-        elif action == "list":
+        elif action in {"list", "egress_list"}:
             value.update(_options(args, {"limit", "after"}))
+        elif action == "egress_get" and len(args) == 1:
+            value["id"] = args[0]
         elif action in {"get", "source", "history"} and args:
             value["id"] = args[0]
             options = {"limit", "after_revision"} if action == "history" else {"revision"}
             value.update(_options(args[1:], options))
-        elif action == "request" and len(args) == 1:
+        elif action in {"request", "egress_request"} and len(args) == 1:
             value["request_id"] = args[0]
         else:
             raise _invalid()

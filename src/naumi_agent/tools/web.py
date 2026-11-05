@@ -63,6 +63,54 @@ class SearchOutcome:
     message: str = ""
 
 
+def parse_brave_search_response(data, max_results: int) -> SearchOutcome:
+    """Parse provider data for both manual and approved transports."""
+    items = tuple(
+        SearchItem(
+            title=str(item.get("title", "")).strip(),
+            url=str(item.get("url", "")).strip(),
+            snippet=str(item.get("description", "")).strip(),
+        )
+        for item in data.get("web", {}).get("results", [])[:max_results]
+        if item.get("title") and item.get("url")
+    )
+    return SearchOutcome(
+        status=SearchStatus.SUCCESS if items else SearchStatus.EMPTY,
+        provider="brave",
+        items=items,
+        code="no_results" if not items else "",
+    )
+
+
+def parse_ddg_search_response(text: str, max_results: int) -> SearchOutcome:
+    """Parse returned search HTML without issuing another network request."""
+    link_pattern = re.compile(
+        r'<a[^>]*href="([^"]+)"[^>]*class=[\'"]result-link[\'"][^>]*>(.*?)</a>',
+        re.DOTALL,
+    )
+    snippet_pattern = re.compile(r"class=['\"]result-snippet['\"]>(.*?)</td>", re.DOTALL)
+
+    links = link_pattern.findall(text)
+    snippets = snippet_pattern.findall(text)
+
+    items: list[SearchItem] = []
+    for index, (url, raw_title) in enumerate(links[:max_results]):
+        title = html_mod.unescape(re.sub(r"<[^>]+>", "", raw_title).strip())
+        snippet = ""
+        if index < len(snippets):
+            snippet = html_mod.unescape(re.sub(r"<[^>]+>", "", snippets[index]).strip())
+        normalized_url = WebSearchTool._normalize_ddg_url(url)
+        if title and normalized_url:
+            items.append(SearchItem(title, normalized_url, snippet))
+
+    return SearchOutcome(
+        status=SearchStatus.SUCCESS if items else SearchStatus.EMPTY,
+        provider="duckduckgo",
+        items=tuple(items),
+        code="no_results" if not items else "",
+    )
+
+
 class WebToolInputError(ValueError):
     """Raised when user-provided web tool input is unsafe or invalid."""
 
@@ -231,21 +279,7 @@ class WebSearchTool(Tool):
                 resp.raise_for_status()
                 data = resp.json()
 
-            items = tuple(
-                SearchItem(
-                    title=str(item.get("title", "")).strip(),
-                    url=str(item.get("url", "")).strip(),
-                    snippet=str(item.get("description", "")).strip(),
-                )
-                for item in data.get("web", {}).get("results", [])[:max_results]
-                if item.get("title") and item.get("url")
-            )
-            return SearchOutcome(
-                status=SearchStatus.SUCCESS if items else SearchStatus.EMPTY,
-                provider="brave",
-                items=items,
-                code="no_results" if not items else "",
-            )
+            return parse_brave_search_response(data, max_results)
         except httpx.HTTPStatusError as exc:
             code = (
                 "authentication"
@@ -277,31 +311,7 @@ class WebSearchTool(Tool):
                 )
                 resp.raise_for_status()
 
-            link_pattern = re.compile(
-                r'<a[^>]*href="([^"]+)"[^>]*class=[\'"]result-link[\'"][^>]*>(.*?)</a>',
-                re.DOTALL,
-            )
-            snippet_pattern = re.compile(r"class=['\"]result-snippet['\"]>(.*?)</td>", re.DOTALL)
-
-            links = link_pattern.findall(resp.text)
-            snippets = snippet_pattern.findall(resp.text)
-
-            items: list[SearchItem] = []
-            for index, (url, raw_title) in enumerate(links[:max_results]):
-                title = html_mod.unescape(re.sub(r"<[^>]+>", "", raw_title).strip())
-                snippet = ""
-                if index < len(snippets):
-                    snippet = html_mod.unescape(re.sub(r"<[^>]+>", "", snippets[index]).strip())
-                normalized_url = self._normalize_ddg_url(url)
-                if title and normalized_url:
-                    items.append(SearchItem(title, normalized_url, snippet))
-
-            return SearchOutcome(
-                status=SearchStatus.SUCCESS if items else SearchStatus.EMPTY,
-                provider="duckduckgo",
-                items=tuple(items),
-                code="no_results" if not items else "",
-            )
+            return parse_ddg_search_response(resp.text, max_results)
         except httpx.HTTPStatusError as exc:
             return SearchOutcome(
                 status=SearchStatus.UNAVAILABLE,

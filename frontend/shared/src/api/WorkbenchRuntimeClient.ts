@@ -1,5 +1,6 @@
 import type { FollowupArguments, FollowupContext, FollowupResponses } from './personalFollowups'
 import type { ResearchContext, ResearchHistory, ResearchPage, ResearchRequest, ResearchResult, ResearchSourceView, ResearchView } from './personalResearch'
+import type { ResearchEgressPage, ResearchEgressRequest, ResearchEgressView } from './personalResearchEgress'
 import type { WorkspaceArguments, WorkspaceContext, WorkspaceOperation, WorkspaceResponses } from './personalWorkspaces'
 import type { NotificationBatch, NotificationClaim, NotificationContext, NotificationMutation, NotificationPage, NotificationPreferencesView, NotificationPreferenceWrite, NotificationPresentation, NotificationPrompt, NotificationQuery, NotificationRead, NotificationRequest } from './personalNotifications'
 import type { TodayContext, TodayDayView, TodayHistory, TodayMetadataView, TodayMutation, TodayOperation, TodayQuery, TodayRequest, TodaySources, TodayWriteBodies } from './personalToday'
@@ -538,6 +539,20 @@ export class WorkbenchRuntimeClient extends WorkbenchApiClient {
   }
   async getPersonalResearchContext(signal?: AbortSignal): Promise<ResearchContext> {
     return (await this.fetch('/personal/research/context', { signal, cache: 'no-store' })).json()
+  }
+  async listPersonalResearchEgress(query: { limit?: number; after?: string } = {}, signal?: AbortSignal): Promise<ResearchEgressPage> {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(query)) if (value !== undefined) params.set(key, String(value))
+    return (await this.fetch(`/personal/research/egress${params.size ? `?${params}` : ''}`, { signal, cache: 'no-store' })).json()
+  }
+  async getPersonalResearchEgress(id: string, signal?: AbortSignal): Promise<ResearchEgressView> {
+    return (await this.fetch(`/personal/research/egress/${encodeURIComponent(id)}`, { signal, cache: 'no-store' })).json()
+  }
+  async getPersonalResearchEgressRequest(id: string, signal?: AbortSignal): Promise<ResearchEgressRequest> {
+    return (await this.fetch(`/personal/research/egress/requests/${encodeURIComponent(id)}`, { signal, cache: 'no-store' })).json()
+  }
+  async operatePersonalResearchEgress(operation: 'egress_propose' | 'egress_decide' | 'egress_execute', payload: Record<string, unknown>, signal?: AbortSignal): Promise<ResearchEgressView> {
+    return (await this.fetch(`/personal/research/operations/${operation}`, { method: 'POST', signal: signal ?? AbortSignal.timeout(120000), cache: 'no-store', body: JSON.stringify(payload) })).json()
   }
   async listPersonalResearch(query: { limit?: number; after?: string } = {}, signal?: AbortSignal): Promise<ResearchPage> {
     const params = new URLSearchParams()

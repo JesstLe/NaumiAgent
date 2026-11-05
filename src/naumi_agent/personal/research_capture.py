@@ -12,7 +12,7 @@ import socket
 import unicodedata
 from datetime import UTC, datetime
 from email.message import Message
-from urllib.parse import urljoin, urlsplit, urlunsplit
+from urllib.parse import urlencode, urljoin, urlsplit, urlunsplit
 
 import httpx
 from lxml import html
@@ -20,7 +20,14 @@ from markdownify import markdownify
 from readability import Document
 
 from naumi_agent.personal.models import PersonalAgentError
-from naumi_agent.tools.web import MAX_SEARCH_RESULTS, SearchOutcome, SearchStatus, WebSearchTool
+from naumi_agent.tools.web import (
+    MAX_SEARCH_RESULTS,
+    SearchOutcome,
+    SearchStatus,
+    WebSearchTool,
+    parse_brave_search_response,
+    parse_ddg_search_response,
+)
 
 MAX_CAPTURE_BYTES = 1024 * 1024
 MAX_CAPTURE_CHARS = 120000
@@ -423,3 +430,191 @@ async def discover(search_tool, query, max_results=5):
             return result
         last = SearchOutcome(SearchStatus(result["status"]), provider, code=result["code"])
     return _discovery_result(query, last, attempts)
+
+
+def build_egress_plan(action, payload, engine):
+    """Freeze public request bytes and recipients without performing DNS or HTTP."""
+    from naumi_agent.personal.owner_journal import digest
+
+    plan = {
+        "kind": "search" if action == "search" else "url",
+        "provider": "direct",
+        "endpoint": "",
+        "method": "GET",
+        "parameters": {},
+        "headers": {"User-Agent": "NaumiAgent/ResearchCapture", "Accept-Encoding": "identity"},
+        "redirect_policy": "none",
+        "max_redirects": 0,
+        "trust_env": False,
+        "tls_verify": True,
+        "request_encoding": "none",
+        "routing_digest": digest({"transport": "pinned-public-tls-v1", "redirects": 0}),
+    }
+    if action in {"capture", "recheck"}:
+        plan["endpoint"] = _public_url(payload["url"])
+        return plan
+    if action != "search":
+        raise _error("invalid_input")
+    tool = engine.tool_registry.get("web_search")
+    if not isinstance(tool, WebSearchTool):
+        raise PersonalAgentError("configuration_error", "研究搜索尚未配置")
+    provider = payload["provider"]
+    config = tool._search_config
+    if provider not in config.provider_order or provider not in {"duckduckgo", "brave"}:
+        raise PersonalAgentError("configuration_error", "请选择已配置的直接搜索服务")
+    query, maximum = payload["query"], payload["max_results"]
+    if (
+        not isinstance(query, str)
+        or not query.strip()
+        or query != query.strip()
+        or len(query) > 400
+        or len(query.split()) > 50
+        or any(ord(char) < 32 or ord(char) == 127 for char in query)
+        or type(maximum) is not int
+        or not 1 <= maximum <= MAX_SEARCH_RESULTS
+    ):
+        raise _error("invalid_input")
+    plan["provider"] = provider
+    plan["routing_digest"] = digest(config.model_dump(mode="json"))
+    if provider == "duckduckgo":
+        plan.update(
+            endpoint="https://lite.duckduckgo.com/lite/",
+            method="POST",
+            parameters={"q": query, "kl": "wt-wt"},
+            request_encoding="form-url-encoded",
+            headers={
+                "User-Agent": "Mozilla/5.0 (compatible; NaumiAgent/1.0)",
+                "Accept-Encoding": "identity",
+            },
+        )
+    else:
+        brave = config.brave
+        key = brave.resolve_api_key() if brave.enabled else None
+        if not key:
+            raise PersonalAgentError("configuration_error", "该搜索服务尚未配置凭据")
+        params = {
+            "q": query,
+            "count": str(maximum),
+            "safesearch": brave.safesearch,
+            "spellcheck": "true" if brave.spellcheck else "false",
+        }
+        for name in ("country", "search_lang", "ui_lang", "freshness"):
+            if (value := getattr(brave, name)) is not None:
+                params[name] = value
+        plan.update(
+            endpoint="https://api.search.brave.com/res/v1/web/search",
+            parameters=params,
+            request_encoding="query",
+            credential_reference=brave.api_key_ref,
+            credential_fingerprint=hashlib.sha256(key.encode()).hexdigest(),
+            headers={
+                "Accept": "application/json",
+                "Accept-Encoding": "identity",
+                "User-Agent": "NaumiAgent/ResearchCapture",
+            },
+        )
+    return plan
+
+
+def validate_egress_plan(action, payload, engine, plan):
+    from naumi_agent.personal.owner_journal import canonical
+
+    try:
+        rebuilt = build_egress_plan(action, payload, engine)
+        if canonical(rebuilt) != canonical(plan):
+            raise ValueError()
+    except (PersonalAgentError, ValueError, KeyError, TypeError):
+        raise PersonalAgentError("source_stale", "外发接收方或配置已变化，请重新提出请求") from None
+    return rebuilt
+
+
+async def discover_approved(search_tool, query, max_results=5, *, plan):
+    """Use one frozen recipient, bounded bytes, no proxy inheritance or fallback."""
+    if not isinstance(search_tool, WebSearchTool) or plan.get("provider") not in {
+        "duckduckgo",
+        "brave",
+    }:
+        raise _error("invalid_input")
+    provider = plan["provider"]
+    endpoint = _public_url(plan["endpoint"])
+    expected = (
+        "https://lite.duckduckgo.com/lite/"
+        if provider == "duckduckgo"
+        else "https://api.search.brave.com/res/v1/web/search"
+    )
+    if endpoint != expected or plan["parameters"].get("q") != query:
+        raise _error("invalid_input")
+    parsed = urlsplit(endpoint)
+    params = urlencode(plan["parameters"]).encode("ascii")
+    headers = dict(plan["headers"])
+    content = None
+    if plan["request_encoding"] == "query":
+        path, request_query = parsed.path, params.decode("ascii")
+        key = search_tool._search_config.brave.resolve_api_key()
+        if not key or hashlib.sha256(key.encode()).hexdigest() != plan.get(
+            "credential_fingerprint"
+        ):
+            raise PersonalAgentError("source_stale", "搜索凭据已变化，请重新提出请求")
+        headers["X-Subscription-Token"] = key
+    else:
+        path, request_query = parsed.path, ""
+        content = params
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
+    outcome = SearchOutcome(SearchStatus.UNAVAILABLE, provider, code="provider_failed")
+    try:
+        async with asyncio.timeout(20):
+            addresses = await _resolve_public(parsed.hostname, 443)
+            for address in addresses:
+                _public_address(address)
+            pinned = str(_public_address(addresses[0]))
+            authority = f"[{pinned}]:443" if ":" in pinned else f"{pinned}:443"
+            url = urlunsplit(("https", authority, path, request_query, ""))
+            headers["Host"] = parsed.hostname
+            async with _make_client(20) as client:
+                async with client.stream(
+                    plan["method"],
+                    url,
+                    headers=headers,
+                    content=content,
+                    extensions={"sni_hostname": parsed.hostname},
+                ) as response:
+                    if response.status_code != 200:
+                        raise _error("source_unavailable")
+                    if response.headers.get("content-encoding", "identity").lower() != "identity":
+                        raise _error("source_unavailable")
+                    length = response.headers.get("content-length")
+                    if length is not None and (
+                        len(length) > 20
+                        or not length.isascii()
+                        or not length.isdecimal()
+                        or int(length) > MAX_CAPTURE_BYTES
+                    ):
+                        raise _error("source_unavailable")
+                    chunks, size = [], 0
+                    async for chunk in response.aiter_bytes(chunk_size=65536):
+                        size += len(chunk)
+                        if size > MAX_CAPTURE_BYTES:
+                            raise _error("source_unavailable")
+                        chunks.append(chunk)
+                    raw = b"".join(chunks)
+                    media = response.headers.get("content-type", "")
+                    if len(media) > 512:
+                        raise _error("source_unavailable")
+            if provider == "brave":
+                from naumi_agent.personal.artifact_models import strict_json_loads
+
+                outcome = parse_brave_search_response(strict_json_loads(raw), max_results)
+            else:
+                outcome = parse_ddg_search_response(_decode(raw, media), max_results)
+    except PersonalAgentError as exc:
+        outcome = SearchOutcome(SearchStatus.UNAVAILABLE, provider, code=exc.code)
+    except (httpx.HTTPError, OSError, TimeoutError):
+        outcome = SearchOutcome(SearchStatus.UNAVAILABLE, provider, code="source_fetch_failed")
+    except (ValueError, TypeError, KeyError, UnicodeError):
+        outcome = SearchOutcome(SearchStatus.UNAVAILABLE, provider, code="invalid_response")
+    result = _discovery_result(query, outcome, [])
+    result["attempts"] = [
+        {"provider": provider, "status": result["status"], "code": result["code"]}
+    ]
+    result["destination_plan"] = plan
+    return result

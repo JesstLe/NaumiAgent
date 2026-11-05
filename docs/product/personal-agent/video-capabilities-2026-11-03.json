@@ -373,7 +373,7 @@
         "引用可定位到支持结论的正文；失效或过时来源触发明确标记。",
         "至少一个真实研究任务完成检索→证据→结论→可重开产物。"
       ],
-      "implementation_note": "PA-07已实现持久研究、结构化搜索发现、显式正文采集、确切版本导入、引文锚定、有效期和版本化报告，前端26项研究测试通过。真实公网、模型和HTTP/浏览器研究闭环待本轮主Agent补齐；自主外发审批及独立语义复核未完成，semantic_verification始终为not_performed。24项目标与原验收不变。",
+      "implementation_note": "PA-07已实现持久研究、结构化发现、真实正文采集、确切引文、来源有效期和版本报告。c3c6187a切片已完成实际配置模型纠正比例、真实公网、认证HTTP、生产浏览器和冷读。后续确切外发提案、人工批准/拒绝/撤销、固定接收方单次发送及UNKNOWN/captured原结果恢复已实现；本轮588项后端、606项前端通过，实际配置模型提出原提案，真实UI批准后仅一次公网采集并打开原资料。冷读、旧reader边界和副本回滚见PA-07-egress.md及独立事务收据。后台Item研究、recheck原Session显式rollforward和独立语义复核仍待实现，semantic_verification=not_performed；24项目标与原验收不变。",
       "implementation_record": "../../development/personal-agent/PA-07.md"
     },
     {
@@ -594,7 +594,7 @@
         "事实字段有证据引用，估算有方法或前提，未知字段保持未知。",
         "来源失效/反证到达时能够修订结果并保留版本。"
       ],
-      "implementation_note": "PA-08保留fact/estimate/unknown、不可变确切来源卡、lineage和上游撤销访问约束；PA-07补充研究声明、估算前提、判断及失效条件、确切引文和字符/UTF-8字节锚点、上游未核实标签及报告历史。前端研究26项通过；真实研究闭环待本轮补齐，确切引文不证明语义支持，semantic_verification=not_performed。PA-07记录见../../development/personal-agent/PA-07.md。",
+      "implementation_note": "PA-08保留fact/estimate/unknown、确切来源卡、lineage和上游撤权约束。PA-07补充研究声明、估算前提、判断、失效条件、字符/UTF-8字节引文锚点和报告历史；原研究切片已有实际模型、来源、修订报告与生产浏览器证据。本轮审批化来源使用authority_version=7，保留原Artifact/Memory活授权及确切结果引用，真实生产UI打开原来源v1，刷新零写入、零重抓。588项相关后端及606项全前端通过。确切引文不证明语义支持，semantic_verification=not_performed；独立语义复核、持续更新和完整原验收仍保持partial。另见PA-07.md及PA-07-egress.md。",
       "implementation_record": "../../development/personal-agent/PA-08.md"
     },
     {
@@ -685,7 +685,7 @@
         "注入错误比例、币种或来源，主控识别并要求修复。",
         "重算/修订有独立产物版本，修复前不宣称通过。"
       ],
-      "implementation_note": "PA-07已实现确定性Decimal比例/百分比/合计/差值复算、单位/币种/期间及数量冲突检查、原文引用锚定与可修订报告；机械结果不伪装语义通过，所有声明independently_verified=False。真实主Agent工具、修订和报告闭环待本轮主Agent补齐；独立语义复核者尚未实现，完整能力保持partial。",
+      "implementation_note": "PA-07已实现Decimal比例/百分比/合计/差值复算、单位/币种/期间及数量冲突检查、原文引用锚定和可修订报告。c3c6187a实际配置主Agent读取检查结果，将预置30%错误修正为32.5%并形成保留旧版本的报告，实际浏览器与冷读已核对；本轮审批化来源新增真实模型提案和人工单次执行证据，不把它冒充独立复核。所有声明independently_verified=False；独立语义复核者、跨主题质量与完整原验收尚未完成，状态保持partial。",
       "implementation_record": "../../development/personal-agent/PA-07.md"
     },
     {

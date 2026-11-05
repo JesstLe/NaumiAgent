@@ -286,7 +286,8 @@ class PersonalArtifactService:
                 seen.add(identity)
                 if len(seen) > 4096:
                     raise PersonalAgentError("storage_error", "研究资料来源超过校验上限")
-                if value.get("evidence", {}).get("research_read_refs"):
+                if (value.get("evidence", {}).get("research_read_refs")
+                        or value.get("evidence", {}).get("research_egress_read_refs")):
                     raise PersonalAgentError("source_unavailable", "研究资料需要原授权组件")
                 for ref in value.get("source_refs", []):
                     stack.append(await self._call("get", actor_id=actor_id,

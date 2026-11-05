@@ -1,0 +1,93 @@
+.pres-egress { color: #292735; font-size: 13px; line-height: 1.6; font-family: inherit; }
+.pres-egress *, .pres-egress *::before, .pres-egress *::after { box-sizing: border-box; }
+.pres-egress-backdrop { position: fixed; inset: 0; z-index: 130; display: flex; align-items: center; justify-content: center; padding: 28px; background: #24212d36; backdrop-filter: blur(4px); }
+.pres-egress-backdrop + .pres-egress-backdrop { z-index: 132; background: #24212d48; }
+.pres-egress-dialog { display: flex; flex-direction: column; width: min(1120px, 100%); max-height: 89vh; overflow: hidden; border: 1px solid #e7e2ed; border-radius: 17px; background: #fff; box-shadow: 0 30px 90px #30253d2b; }
+.pres-egress button, .pres-egress select { font: inherit; }
+.pres-egress button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 34px; padding: 7px 11px; border: 1px solid #e5deed; border-radius: 7px; background: #fff; color: #67576f; cursor: pointer; }
+.pres-egress button:hover:not(:disabled) { background: #f6f3fa; border-color: #cfc1de; }
+.pres-egress button:disabled { opacity: .45; cursor: default; }
+.pres-egress button:focus-visible, .pres-egress select:focus-visible, .pres-egress summary:focus-visible, .pres-egress pre:focus-visible { outline: 2px solid #a592c5; outline-offset: 3px; }
+.pres-egress-heading { display: flex; align-items: center; justify-content: space-between; padding: 22px 25px; border-bottom: 1px solid #e9e5ef; gap: 15px; }
+.pres-egress-heading > div { display: flex; align-items: center; gap: 11px; color: #79648f; }
+.pres-egress-heading h2 { margin: 0; color: #302a39; font-size: 20px; line-height: 1.3; font-weight: 640; letter-spacing: -.4px; }
+.pres-egress-heading > button { border: 0; padding: 5px; color: #9e8caf; min-height: 25px; }
+.pres-egress-layout { display: grid; grid-template-columns: 292px minmax(0, 1fr); min-height: 440px; overflow: hidden; }
+.pres-egress-list { padding: 16px 12px; overflow: auto; border-right: 1px solid #e9e5ef; background: #f8f7fa; }
+.pres-egress-list-toolbar { display: flex; align-items: center; gap: 7px; margin: 0 3px 14px; }
+.pres-egress-list-toolbar > select { min-width: 0; flex: 1; padding: 8px; border: 1px solid #e5deed; border-radius: 7px; background: #fff; color: #756780; font-size: 11px; }
+.pres-egress-list-toolbar > button { padding: 7px; }
+.pres-egress-list nav { display: flex; flex-direction: column; gap: 8px; }
+.pres-egress button.pres-egress-card { display: flex; flex-direction: column; align-items: stretch; width: 100%; padding: 13px; gap: 8px; background: transparent; border-color: transparent; text-align: left; }
+.pres-egress button.pres-egress-card.selected { border-color: #dbcee9; background: #fff; box-shadow: 0 3px 10px #7f689606; }
+.pres-egress-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #9880ad; }
+.pres-egress-card > strong { font-size: 12px; line-height: 1.65; font-weight: 580; color: #675271; overflow-wrap: anywhere; }
+.pres-egress-card > span:not(.pres-egress-card-top), .pres-egress-card > small { font-size: 10px; color: #9788a2; overflow-wrap: anywhere; }
+.pres-egress-status { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; border-radius: 5px; padding: 3px 6px; font-size: 10px; color: #9b8467; background: #f9f3e9; border: 1px solid #eee1cd; }
+.pres-egress-status.is-approved, .pres-egress-status.is-completed { color: #5e816c; background: #f0f7f2; border-color: #dceade; }
+.pres-egress-status.is-started { color: #7c6598; background: #f4f0fa; border-color: #e7ddf0; }
+.pres-egress-status.is-rejected, .pres-egress-status.is-revoked, .pres-egress-status.is-expired, .pres-egress-status.is-stale, .pres-egress-status.is-unavailable { color: #9e858d; background: #f8f4f5; border-color: #eadfe3; }
+.pres-egress-detail { padding: 25px 31px 30px; min-width: 0; overflow: auto; background: #fff; }
+.pres-egress-detail-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.pres-egress-kind { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: #8c769f; }
+.pres-egress-detail > h2 { margin: 20px 0 8px; font-size: 23px; font-weight: 620; letter-spacing: -.5px; color: #302a38; overflow-wrap: anywhere; }
+.pres-egress-owner { display: flex; flex-wrap: wrap; align-items: center; gap: 9px 16px; color: #9a89a7; font-size: 10px; }
+.pres-egress-owner > span { display: inline-flex; align-items: center; gap: 4px; }
+.pres-egress-section { margin-top: 27px; min-width: 0; }
+.pres-egress-section h3 { margin: 0 0 10px; font-size: 12px; color: #796684; font-weight: 590; }
+.pres-egress pre { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; font-family: inherit; max-width: 100%; }
+.pres-egress-payload { margin: 0; padding: 15px 16px; border: 1px solid #e3d9ed; border-radius: 9px; background: #faf7fd; color: #5f4b70; font-size: 13px; line-height: 1.85; }
+.pres-egress-destination { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid #ebe5f0; border-radius: 8px; background: #fdfcfe; }
+.pres-egress-destination > code { font-size: 11px; color: #766180; line-height: 1.8; overflow-wrap: anywhere; min-width: 0; }
+.pres-egress-method { border: 1px solid #e5ddee; background: #f3eff8; color: #8c6d9f; border-radius: 4px; padding: 2px 5px; font-size: 9px; flex-shrink: 0; }
+.pres-egress-facts, .pres-egress-transport dl, .pres-egress-identities dl { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 8px 12px; margin: 12px 0 0; font-size: 11px; }
+.pres-egress-facts dt, .pres-egress-transport dt, .pres-egress-identities dt { color: #a290b0; }
+.pres-egress-facts dd, .pres-egress-transport dd, .pres-egress-identities dd { margin: 0; color: #7b6687; overflow-wrap: anywhere; }
+.pres-egress-parameters { margin-top: 12px; }
+.pres-egress-parameters > strong { color: #9783a5; font-size: 10px; font-weight: 500; }
+.pres-egress-parameters pre, .pres-egress-transport pre { margin: 5px 0 0; padding: 10px 12px; border: 1px solid #eee8f3; background: #fbf9fd; border-radius: 7px; color: #8a729b; font-size: 10px; line-height: 1.8; }
+.pres-egress-transport { margin-top: 11px; font-size: 10px; color: #a18caf; }
+.pres-egress-transport summary, .pres-egress-identities summary { display: flex; align-items: center; gap: 5px; list-style: none; cursor: pointer; }
+.pres-egress-transport[open] summary svg, .pres-egress-identities[open] summary svg { transform: rotate(90deg); }
+.pres-egress-transport > code { display: block; margin-top: 9px; color: #b3a1bf; font-size: 9px; overflow-wrap: anywhere; }
+.pres-egress-reason { margin: 0; color: #897393; font-size: 12px; line-height: 1.9; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pres-egress-dependencies { display: flex; flex-wrap: wrap; gap: 7px; }
+.pres-egress-dependencies > span { font-size: 10px; padding: 5px 8px; border: 1px solid #e9e1f0; border-radius: 5px; color: #9a83ac; background: #fbf9fd; }
+.pres-egress-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 23px; margin-top: 22px; border-top: 1px solid #eee8f4; }
+.pres-egress .pres-egress-primary { background: #6b5796; border-color: #6b5796; color: #fff; }
+.pres-egress .pres-egress-primary:hover:not(:disabled) { background: #5b4784; border-color: #5b4784; }
+.pres-workspace .pres-egress .pres-egress-dialog button.pres-egress-primary { color: #fff; }
+.pres-egress .pres-egress-danger { color: #a3727d; border-color: #ead5da; background: #fdf6f8; }
+.pres-egress-result { padding: 15px; background: #f7faf7; border: 1px solid #e3ece2; border-radius: 9px; }
+.pres-egress-result > time { margin-left: 10px; font-size: 10px; color: #94a18e; }
+.pres-egress-result > button { display: flex; margin-top: 13px; font-size: 11px; }
+.pres-egress-result > button > span { color: #9ca895; font-size: 10px; }
+.pres-egress-discoveries { margin-top: 10px; }
+.pres-egress-discoveries > article { border-top: 1px solid #e4ece1; padding-top: 12px; margin-top: 12px; min-width: 0; }
+.pres-egress-discoveries strong { display: block; font-size: 12px; font-weight: 550; color: #71866a; overflow-wrap: anywhere; }
+.pres-egress-discoveries code { display: block; font-size: 10px; color: #9aa88f; overflow-wrap: anywhere; }
+.pres-egress-discoveries p { margin: 7px 0 0; color: #8c9b81; font-size: 11px; line-height: 1.8; }
+.pres-egress-identities { border-top: 1px solid #eee8f4; padding-top: 14px; margin-top: 23px; font-size: 10px; color: #aa94b8; }
+.pres-egress-identities dd { font-family: monospace; font-size: 10px; }
+.pres-egress-message { display: flex; align-items: center; gap: 8px; background: #f7f3fc; border-bottom: 1px solid #e9e1f2; color: #9178a4; padding: 11px 23px; font-size: 11px; }
+.pres-egress-message.is-error { background: #fdf7f7; border-color: #efdfdf; color: #a67d86; }
+.pres-egress-pending { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 14px 23px; border-bottom: 1px solid #ece2d1; background: #fcfaf3; color: #9a8667; }
+.pres-egress-pending > span { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 130px; }
+.pres-egress-pending strong { font-size: 11px; font-weight: 550; }
+.pres-egress-pending code { font-size: 10px; overflow-wrap: anywhere; }
+.pres-egress-pending button { font-size: 10px; }
+.pres-egress-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 13px; padding: 38px 15px; text-align: center; color: #baa9c7; }
+.pres-egress-empty strong { color: #9a85aa; font-size: 12px; font-weight: 500; }
+.pres-egress-empty > span, .pres-egress-empty > code { font-size: 10px; overflow-wrap: anywhere; }
+.pres-egress-detail > .pres-egress-empty { min-height: 330px; }
+.pres-egress .pres-egress-more { width: 100%; margin-top: 12px; font-size: 11px; }
+.pres-egress-confirm { width: min(580px, 100%); }
+.pres-egress-confirm-body { overflow: auto; padding: 20px 25px 6px; }
+.pres-egress-confirm-owner { display: flex; flex-wrap: wrap; align-items: center; gap: 7px 15px; color: #a08bad; font-size: 11px; }
+.pres-egress-confirm-owner strong { color: #7c668a; font-weight: 580; }
+.pres-egress-confirm > footer { display: flex; justify-content: flex-end; gap: 9px; padding: 22px 25px; border-top: 1px solid #eee8f3; margin-top: 18px; }
+.pres-egress-spin { animation: pres-egress-spin 1.1s linear infinite; }
+@keyframes pres-egress-spin { to { transform: rotate(360deg); } }
+@media (max-width: 760px) { .pres-egress-backdrop { padding: 15px; }.pres-egress-dialog { max-height: 93vh; }.pres-egress-layout { grid-template-columns: 215px minmax(0, 1fr); }.pres-egress-detail { padding: 20px; }.pres-egress-card-top { align-items: flex-start; }.pres-egress-status { font-size: 9px; }.pres-egress-heading { padding: 19px 20px; } }
+@media (max-width: 550px) { .pres-egress-backdrop { padding: 9px; }.pres-egress-dialog { max-height: 96vh; border-radius: 12px; }.pres-egress-heading { padding: 16px; }.pres-egress-heading h2 { font-size: 18px; }.pres-egress-layout { display: flex; flex-direction: column; overflow: auto; }.pres-egress-list { overflow: visible; padding: 12px; border-right: 0; border-bottom: 1px solid #e9e5ef; }.pres-egress-list nav { flex-direction: row; overflow: auto; max-height: 180px; }.pres-egress button.pres-egress-card { flex: 0 0 230px; padding: 10px; }.pres-egress-detail { padding: 20px 16px; overflow: visible; }.pres-egress-detail > h2 { font-size: 21px; }.pres-egress-detail > .pres-egress-empty { min-height: 170px; }.pres-egress-section { margin-top: 22px; }.pres-egress-payload { padding: 12px; font-size: 12px; }.pres-egress-facts { grid-template-columns: 58px minmax(0, 1fr); gap: 8px; }.pres-egress-message, .pres-egress-pending { padding: 11px 16px; }.pres-egress-confirm-body { padding: 16px; }.pres-egress-confirm > footer { padding: 16px; }.pres-egress-result { padding: 12px; } }
+@media (prefers-reduced-motion: reduce) { .pres-egress-spin { animation: none; } }

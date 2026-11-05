@@ -7,9 +7,22 @@ from naumi_agent.personal.owner_journal import (
     OwnerJournal,
     integer,
 )
+from naumi_agent.personal.research_egress_models import EGRESS_CORE, egress_digest
 
-KINDS = frozenset({"notebook", "source", "review", "read", "intent", "publication", "discovery"})
-APPEND_ONLY = frozenset({"review", "read", "discovery"})
+KINDS = frozenset(
+    {
+        "notebook",
+        "source",
+        "review",
+        "read",
+        "intent",
+        "publication",
+        "discovery",
+        "egress",
+        "egress_decision",
+    }
+)
+APPEND_ONLY = frozenset({"review", "read", "discovery", "egress_decision"})
 _SPEC = JournalSpec(
     namespace="research",
     kinds=KINDS,
@@ -35,6 +48,46 @@ class ResearchTransaction(JournalTransaction):
             raise PersonalAgentError(f"immutable_{kind}", "原研究凭据已保存，请创建新的记录")
         if isinstance(value, dict) and kind in KINDS:
             existing = self.get(kind, value.get("id"), missing=True)
+            if kind == "egress":
+                if value.get("digest") != egress_digest(value):
+                    raise PersonalAgentError("binding_conflict", "外发内容与原提案摘要不一致")
+                if existing is None and (
+                    value.get("status") != "proposed"
+                    or value.get("approval") is not None
+                    or value.get("execution") is not None
+                ):
+                    raise PersonalAgentError("binding_conflict", "外发提案需要从未批准状态创建")
+                if existing is not None and any(
+                    value.get(key) != existing.get(key) for key in EGRESS_CORE
+                ):
+                    raise PersonalAgentError("binding_conflict", "原外发提案的内容和来源不能改变")
+                if existing is not None:
+                    transitions = {
+                        "proposed": {"proposed", "approved", "rejected", "revoked"},
+                        "approved": {"approved", "started", "rejected", "revoked"},
+                        "started": {"started", "completed"},
+                        "completed": {"completed"},
+                        "rejected": {"rejected"},
+                        "revoked": {"revoked"},
+                    }
+                    if value.get("status") not in transitions.get(existing.get("status"), set()):
+                        raise PersonalAgentError("binding_conflict", "原外发提案不能退回可发送状态")
+                    if (
+                        existing.get("approval") is not None
+                        and value.get("approval") != existing["approval"]
+                    ):
+                        raise PersonalAgentError("binding_conflict", "原外发批准凭据不能被替换")
+                    if existing.get("execution") is not None:
+                        old = existing["execution"]
+                        incoming = value.get("execution")
+                        if not isinstance(incoming, dict) or any(
+                            incoming.get(key) != item
+                            for key, item in old.items()
+                            if key not in {"status", "result"}
+                        ):
+                            raise PersonalAgentError("binding_conflict", "原外发执行身份不能被替换")
+                        if old.get("status") == "completed" and incoming != old:
+                            raise PersonalAgentError("binding_conflict", "原外发完成收据不能改变")
             if existing is not None:
                 for key in ("actor_id", "workspace_key", "notebook_id"):
                     if key in existing and value.get(key) != existing[key]:

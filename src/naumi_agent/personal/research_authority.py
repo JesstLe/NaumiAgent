@@ -7,7 +7,8 @@ import re
 import uuid
 from contextvars import ContextVar
 
-from naumi_agent.personal.artifact_models import strict_json_loads
+from naumi_agent.personal.artifact_models import normalize_refs, strict_json_loads
+from naumi_agent.personal.memory_models import normalize_ref as memory_ref
 from naumi_agent.personal.models import PersonalAgentError
 from naumi_agent.personal.owner_journal import canonical, digest
 
@@ -33,8 +34,8 @@ def normalize_read_ref(value):
     return dict(value)
 
 
-def research_evidence(evidence):
-    refs = evidence.get("research_read_refs", [])
+def research_evidence(evidence, *, egress=False):
+    refs = evidence.get("research_egress_read_refs" if egress else "research_read_refs", [])
     if not isinstance(refs, list) or len(refs) > 64:
         raise PersonalAgentError("invalid_input", "研究来源凭据数量不正确")
     normalized = [normalize_read_ref(ref) for ref in refs]
@@ -125,7 +126,15 @@ class ResearchAuthority:
         )
 
     async def _new_read(
-        self, body, notebook, actor, *, require_current, publication=False, extra_source=None
+        self,
+        body,
+        notebook,
+        actor,
+        *,
+        require_current,
+        publication=False,
+        extra_source=None,
+        egress_context=None,
     ):
         content = body if isinstance(body, bytes) else canonical(body).encode("utf-8")
         if len(content) > 2 * 1024 * 1024:
@@ -133,6 +142,27 @@ class ResearchAuthority:
         basis, refs = await self._basis(
             notebook, require_current=require_current, extra_source=extra_source
         )
+        if egress_context is not None:
+            if (
+                type(egress_context) is not dict
+                or set(egress_context) != {"artifact_refs", "memory_refs", "memory_item_id"}
+                or not isinstance(egress_context["memory_refs"], list)
+                or len(egress_context["memory_refs"]) > 64
+            ):
+                raise self._broken()
+            egress_context = {
+                "artifact_refs": normalize_refs(egress_context["artifact_refs"]),
+                "memory_refs": [memory_ref(ref) for ref in egress_context["memory_refs"]],
+                "memory_item_id": egress_context["memory_item_id"],
+            }
+            refs = normalize_refs(
+                list(
+                    {
+                        canonical(ref): ref for ref in [*refs, *egress_context["artifact_refs"]]
+                    }.values()
+                )
+            )
+            await self.artifacts.authorize_refs(actor_id=actor, refs=refs)
         record = {
             "id": "rread_" + uuid.uuid4().hex,
             "revision": 1,
@@ -148,6 +178,9 @@ class ResearchAuthority:
             "body_sha256": hashlib.sha256(content).hexdigest(),
             "source_refs": refs,
         }
+        if egress_context is not None:
+            record["egress_context"] = egress_context
+            record["authority_kind"] = "approved_research_egress_v1"
         await self._write(lambda tx: tx.put("read", record, expected_revision=0))
         return record, content
 
@@ -195,6 +228,29 @@ class ResearchAuthority:
                     raise self._broken()
             refs = record["source_refs"]
             await self.artifacts.authorize_refs(actor_id=record["actor_id"], refs=refs)
+            context = record.get("egress_context")
+            if context is not None:
+                if (
+                    record.get("authority_kind") != "approved_research_egress_v1"
+                    or type(context) is not dict
+                    or set(context) != {"artifact_refs", "memory_refs", "memory_item_id"}
+                    or not isinstance(context["memory_refs"], list)
+                    or len(context["memory_refs"]) > 64
+                ):
+                    raise self._broken()
+                await self.artifacts.authorize_refs(
+                    actor_id=record["actor_id"], refs=normalize_refs(context["artifact_refs"])
+                )
+                memory = getattr(self.engine, "personal_memory", None)
+                if context["memory_refs"] and memory is None:
+                    raise PersonalAgentError("source_unavailable", "研究的原记忆来源当前不可用")
+                for raw in context["memory_refs"]:
+                    ref = memory_ref(raw)
+                    await memory.resolve_ref(
+                        ref, record["actor_id"], item_id=context["memory_item_id"]
+                    )
+                    if actor != record["actor_id"]:
+                        await memory.resolve_ref(ref, actor, item_id=context["memory_item_id"])
             # A shared report requires every exact upstream version for its reader.
             for ref in refs:
                 snapshot = await self.artifacts.get(
@@ -215,11 +271,22 @@ class ResearchAuthority:
             seen.add(key)
             if len(seen) > 4096:
                 raise PersonalAgentError("source_unavailable", "研究来源超过校验上限")
-            for raw in value.get("evidence", {}).get("research_read_refs", []):
+            evidence = value.get("evidence", {})
+            research_evidence(evidence)
+            research_evidence(evidence, egress=True)
+            for raw in [
+                *evidence.get("research_read_refs", []),
+                *evidence.get("research_egress_read_refs", []),
+            ]:
                 ref = normalize_read_ref(raw)
                 record = await self._record("read", ref["read_id"], revision=1)
                 if read_ref(record) != ref or value["sha256"] != record["body_sha256"]:
                     raise PersonalAgentError("source_unavailable", "研究正文与原凭据不一致")
+                if (
+                    raw in evidence.get("research_egress_read_refs", [])
+                    and record.get("authority_kind") != "approved_research_egress_v1"
+                ):
+                    raise PersonalAgentError("source_unavailable", "外发材料与原上下文凭据不一致")
                 await self._read_authority(record, actor_id)
             for ref in value.get("source_refs", []):
                 original = await self.artifacts._call(
@@ -230,6 +297,8 @@ class ResearchAuthority:
                 stack.append(original)
 
     async def model_result(self, arguments, body, actor):
+        if arguments["operation"].startswith("egress_"):
+            return body
         if arguments["operation"] == "context":
             return body
         operation = arguments["operation"]
@@ -287,8 +356,21 @@ class ResearchAuthority:
         session_id = session.id
         if await self.artifacts.session_actor(session_id) != actor:
             raise PersonalAgentError("binding_conflict", "研究与当前对话身份不一致")
+        discovery_ref = (
+            body.get("discovery", {}).get("artifact_ref") if isinstance(body, dict) else None
+        )
+        context = (
+            {"artifact_refs": [discovery_ref], "memory_refs": [], "memory_item_id": None}
+            if discovery_ref
+            else None
+        )
         record, content = await self._new_read(
-            body, notebook, actor, require_current=False, extra_source=extra_source
+            body,
+            notebook,
+            actor,
+            require_current=False,
+            extra_source=extra_source,
+            egress_context=context,
         )
         material = await self.artifacts.publish(
             actor_id=actor,
@@ -298,7 +380,9 @@ class ResearchAuthority:
             filename="research.json",
             content=content,
             source_refs=record["source_refs"],
-            evidence={"research_read_refs": [read_ref(record)]},
+            evidence={
+                "research_egress_read_refs" if context else "research_read_refs": [read_ref(record)]
+            },
         )
         await self.artifacts.bind_refs(session_id, actor, [self.artifacts.reference(material)])
         if (
@@ -306,5 +390,38 @@ class ResearchAuthority:
             or await self.artifacts.session_actor(session_id) != actor
         ):
             raise PersonalAgentError("source_stale", "研究读取期间对话已变化")
+        await self._read_authority(record, actor)
+        return strict_json_loads(content)
+
+    async def _pin_egress_result(self, body, proposal, actor):
+        if body.get("availability") == "source_unavailable":
+            return body
+        session = self.engine._session
+        if session is None or await self.artifacts.session_actor(session.id) != actor:
+            raise PersonalAgentError("binding_conflict", "外发记录与当前对话身份不一致")
+        notebook = await self._notebook(
+            proposal["notebook_id"], actor, revision=proposal["notebook_revision"]
+        )
+        record, content = await self._new_read(
+            body,
+            notebook,
+            actor,
+            require_current=False,
+            publication=True,
+            egress_context=proposal["output_context"],
+        )
+        material = await self.artifacts.publish(
+            actor_id=actor,
+            request_id="research-egress-read-" + record["id"],
+            title="研究外发确切读取",
+            kind="material",
+            filename="research-egress.json",
+            content=content,
+            source_refs=record["source_refs"],
+            evidence={"research_egress_read_refs": [read_ref(record)]},
+        )
+        await self.artifacts.bind_refs(session.id, actor, [self.artifacts.reference(material)])
+        if self.engine._session is not session:
+            raise PersonalAgentError("source_stale", "外发记录读取期间对话已变化")
         await self._read_authority(record, actor)
         return strict_json_loads(content)

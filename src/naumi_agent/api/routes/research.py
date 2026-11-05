@@ -21,6 +21,7 @@ from naumi_agent.personal.research_tools import (
 
 _HEADERS = {"Cache-Control": "no-store", "Pragma": "no-cache"}
 _QUERY = {
+    "list_egress": frozenset({"limit", "after", "notebook_id"}),
     "list_notebooks": frozenset({"limit", "after"}),
     "get_notebook": frozenset({"revision"}),
     "get_source": frozenset({"revision"}),
@@ -45,6 +46,11 @@ _STATUS = {
     "configuration_error": 503,
     "input_limit": 413,
     "research_unknown": 503,
+    "approval_required": 409,
+    "approval_invalidated": 409,
+    "action_expired": 409,
+    "action_locked": 409,
+    "lease_lost": 409,
 }
 
 
@@ -132,6 +138,21 @@ async def _execute(request, arguments):
 @router.get("/personal/research/context")
 async def context(request: Request):
     return await _execute(request, {"operation": "context"})
+
+
+@router.get("/personal/research/egress")
+async def list_egress(request: Request):
+    return await _execute(request, {"operation": "egress_list", **_query(request)})
+
+
+@router.get("/personal/research/egress/requests/{request_id}")
+async def original_egress_request(request_id: str, request: Request):
+    return await _execute(request, {"operation": "egress_request", "request_id": request_id})
+
+
+@router.get("/personal/research/egress/{id}")
+async def get_egress(id: str, request: Request):
+    return await _execute(request, {"operation": "egress_get", "id": id})
 
 
 @router.get("/personal/research")

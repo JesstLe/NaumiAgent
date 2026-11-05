@@ -13,6 +13,7 @@ from naumi_agent.personal.artifact_models import is_text_artifact, strict_json_l
 from naumi_agent.personal.models import PersonalAgentError
 from naumi_agent.personal.owner_journal import canonical, checked_path, digest
 from naumi_agent.personal.research_authority import ResearchAuthority, read_ref
+from naumi_agent.personal.research_egress import ResearchEgressMixin
 from naumi_agent.personal.research_models import CreateNotebook, ReviseNotebook, validate_payload
 from naumi_agent.personal.research_review import review_notebook
 from naumi_agent.personal.research_store import ResearchStore
@@ -25,7 +26,7 @@ _CHANNELS = {"web", "cli", "tui"}
 MAX_SOURCES = 64
 
 
-class PersonalResearchService(ResearchAuthority):
+class PersonalResearchService(ResearchEgressMixin, ResearchAuthority):
     def __init__(self, engine, *, store=None, clock=None, capture=None, discover=None):
         self.engine, self.personal, self.artifacts = (
             engine,
@@ -57,6 +58,9 @@ class PersonalResearchService(ResearchAuthority):
 
         self.capture_transport = capture or capture_url
         self.discovery_transport = discover or search
+        from naumi_agent.personal.research_capture import discover_approved
+
+        self.approved_discovery_transport = discover_approved
 
     @staticmethod
     def _broken():
@@ -570,6 +574,8 @@ class PersonalResearchService(ResearchAuthority):
             if current["fingerprint"] != intent["fingerprint"]:
                 raise self._broken()
             result = callback(tx)
+            if result.get("egress_id") and current["operation"] in {"search", "capture", "recheck"}:
+                self._finish_egress(tx, result["egress_id"], result)
             value = {
                 **current,
                 "revision": current["revision"] + 1,
@@ -587,7 +593,11 @@ class PersonalResearchService(ResearchAuthority):
         view = await self.get(
             receipt["notebook_id"], receipt.get("notebook_revision"), caller_actor=actor
         )
-        if receipt.get("artifact_ref") and view["availability"] == "available":
+        if (
+            receipt.get("artifact_ref")
+            and not receipt.get("discovery_id")
+            and view["availability"] == "available"
+        ):
             ref = receipt["artifact_ref"]
             await self.artifacts.authorize_refs(actor_id=actor, refs=[ref])
             snapshot = await self.artifacts.get(
@@ -600,6 +610,10 @@ class PersonalResearchService(ResearchAuthority):
             discovery = await self._record("discovery", receipt["discovery_id"])
             if discovery["actor_id"] != actor or discovery["workspace_key"] != self.workspace_key:
                 raise PersonalAgentError("not_found", "原检索请求不存在")
+            if discovery.get("artifact_ref"):
+                await self.artifacts.authorize_refs(
+                    actor_id=actor, refs=[discovery["artifact_ref"]]
+                )
             return {"discovery": discovery, "view": view}
         return view
 
@@ -698,22 +712,40 @@ class PersonalResearchService(ResearchAuthority):
         context = getattr(self.engine, "_personal_item_context", None)
         session = getattr(self.engine, "_session", None)
         refs = await self.artifacts.session_refs(session.id, actor) if session else []
-        if refs or context is not None and context.force_private:
+        private = [
+            *refs,
+            *getattr(self.engine, "_personal_artifact_refs", []),
+            *getattr(self.engine, "_personal_memory_artifact_refs", []),
+            *getattr(self.engine, "_personal_memory_runtime_refs", []),
+        ]
+        if private or context is not None and context.force_private:
             raise PersonalAgentError(
                 "artifact_network_denied", "私有资料上下文不能外发新的检索词或网址"
             )
 
-    async def _capture(self, operation, arguments, actor, trusted_channel):
+    async def _capture(self, operation, arguments, actor, trusted_channel, *, _approved=None):
         if operation == "recheck":
-            source = await self._record("source", arguments["source_id"])
-            notebook = await self._notebook(source["notebook_id"], actor)
+            source = await self._record(
+                "source",
+                arguments["source_id"],
+                revision=(arguments["expected_revision"] if _approved else None),
+            )
+            notebook = await self._notebook(
+                source["notebook_id"],
+                actor,
+                revision=(_approved["notebook_revision"] if _approved else None),
+            )
             if source["origin"] != "url":
                 raise PersonalAgentError(
                     "invalid_input", "这条来源不是网页，请导入新的确切资料版本"
                 )
             target = source["id"]
         else:
-            notebook = await self._notebook(arguments["id"], actor)
+            notebook = await self._notebook(
+                arguments["id"],
+                actor,
+                revision=(_approved["notebook_revision"] if _approved else None),
+            )
             source = None
             target = "rs_" + self._request_identity(actor, arguments["request_id"])[3:]
         intent = await self._begin(operation, arguments, actor, notebook_id=notebook["id"])
@@ -724,9 +756,13 @@ class PersonalResearchService(ResearchAuthority):
         if not source and len(await self._source_records(notebook["id"])) >= MAX_SOURCES:
             raise PersonalAgentError("input_limit", "每份研究最多保存 64 条来源")
         if intent["phase"] == "reserved":
-            if operation != "import":
+            if _approved is not None:
+                intent = await self._start_approved(intent, _approved)
+            elif operation != "import":
                 await self._network_allowed(actor, trusted_channel)
-            intent = await self._stage(intent, "started", None)
+                intent = await self._stage(intent, "started", None)
+            else:
+                intent = await self._stage(intent, "started", None)
             try:
                 if operation == "import":
                     ref = arguments["artifact_ref"]
@@ -755,7 +791,8 @@ class PersonalResearchService(ResearchAuthority):
                     }
                 else:
                     capture = await self.capture_transport(
-                        source["url"] if source else arguments["url"]
+                        source["url"] if source else arguments["url"],
+                        **({"max_redirects": 0} if _approved is not None else {}),
                     )
                     stage = {
                         **capture,
@@ -788,8 +825,36 @@ class PersonalResearchService(ResearchAuthority):
         if stage["body"] is not None:
             self._actor(actor)
             refs = [stage["input_ref"]] if stage.get("input_ref") else []
-            refs.extend(await self._context_refs(actor, trusted_channel is None, notebook["id"]))
+            refs.extend(
+                _approved["output_context"]["artifact_refs"]
+                if _approved is not None
+                else await self._context_refs(actor, trusted_channel is None, notebook["id"])
+            )
             refs = list({canonical(ref): ref for ref in refs}.values())
+            evidence = {
+                "source_kind": "research_capture",
+                "captured_at": stage["captured_at"],
+                "origin": stage["origin"],
+                "semantic_verification": "not_performed",
+            }
+            if _approved is not None:
+                if stage.get("_egress_read_id"):
+                    read = await self._record("read", stage["_egress_read_id"], revision=1)
+                else:
+                    read, _ = await self._new_read(
+                        stage["body"].encode(),
+                        notebook,
+                        actor,
+                        require_current=False,
+                        publication=True,
+                        egress_context=_approved["output_context"],
+                    )
+                    intent = await self._stage(
+                        intent, "captured", {**stage, "_egress_read_id": read["id"]}
+                    )
+                await self._read_authority(read, actor)
+                evidence["research_egress_read_refs"] = [read_ref(read)]
+                refs = read["source_refs"]
             material = await self.artifacts.publish(
                 actor_id=actor,
                 request_id="research-source-" + intent["id"],
@@ -798,12 +863,7 @@ class PersonalResearchService(ResearchAuthority):
                 filename="research-source.txt",
                 content=stage["body"].encode(),
                 source_refs=refs,
-                evidence={
-                    "source_kind": "research_capture",
-                    "captured_at": stage["captured_at"],
-                    "origin": stage["origin"],
-                    "semantic_verification": "not_performed",
-                },
+                evidence=evidence,
             )
             artifact_ref = self.artifacts.reference(material)
             await self.artifacts.authorize_refs(actor_id=actor, refs=refs)
@@ -871,29 +931,49 @@ class PersonalResearchService(ResearchAuthority):
             ):
                 raise PersonalAgentError("input_limit", "研究来源数量已达上限")
             tx.put("source", value, expected_revision=0 if source is None else source["revision"])
-            return {"notebook_id": notebook["id"], "notebook_revision": notebook["revision"]}
+            return {
+                "notebook_id": notebook["id"],
+                "notebook_revision": notebook["revision"],
+                "source_id": target,
+                "source_revision": value["revision"],
+                "source_ref": artifact_ref,
+                **({"egress_id": _approved["id"]} if _approved is not None else {}),
+            }
 
         return await self._result(await self._complete(intent, write), actor)
 
-    async def search(self, arguments, *, caller_actor=None, trusted_channel=None):
+    async def search(self, arguments, *, caller_actor=None, trusted_channel=None, _approved=None):
         actor = self._actor(caller_actor)
-        notebook = await self._notebook(arguments["id"], actor)
+        notebook = await self._notebook(
+            arguments["id"], actor, revision=(_approved["notebook_revision"] if _approved else None)
+        )
         intent = await self._begin("search", arguments, actor, notebook_id=notebook["id"])
         if intent["status"] == "completed":
             return await self._result(intent["result"], actor)
         if intent["phase"] == "reserved":
-            await self._network_allowed(actor, trusted_channel)
-            intent = await self._stage(intent, "started", None)
+            if _approved is not None:
+                intent = await self._start_approved(intent, _approved)
+            else:
+                await self._network_allowed(actor, trusted_channel)
+                intent = await self._stage(intent, "started", None)
             tool = self.engine.tool_registry.get("web_search")
             if tool is None:
                 raise PersonalAgentError("source_unavailable", "网络搜索尚未配置")
-            result = await self.discovery_transport(
-                tool, arguments["query"], arguments.get("max_results", 5)
+            transport = (
+                self.approved_discovery_transport
+                if _approved is not None
+                else self.discovery_transport
+            )
+            result = await transport(
+                tool,
+                arguments["query"],
+                arguments.get("max_results", 5),
+                **({"plan": _approved["destination_plan"]} if _approved is not None else {}),
             )
             intent = await self._stage(intent, "captured", result)
         if intent["phase"] != "captured":
             raise PersonalAgentError("request_pending", "原检索结果待核对，未重复外部检索")
-        result = intent["stage"]
+        result = {key: value for key, value in intent["stage"].items() if key != "_egress_read_id"}
         discovery = {
             **result,
             "id": "rd_" + intent["id"][3:],
@@ -907,6 +987,39 @@ class PersonalResearchService(ResearchAuthority):
             ),
             "evidence_kind": "discovery_only",
         }
+        if _approved is not None:
+            content = canonical(discovery).encode("utf-8")
+            if intent["stage"].get("_egress_read_id"):
+                read = await self._record("read", intent["stage"]["_egress_read_id"], revision=1)
+            else:
+                read, content = await self._new_read(
+                    discovery,
+                    notebook,
+                    actor,
+                    require_current=False,
+                    publication=True,
+                    egress_context=_approved["output_context"],
+                )
+                intent = await self._stage(
+                    intent, "captured", {**result, "_egress_read_id": read["id"]}
+                )
+            if read["body_sha256"] != hashlib.sha256(content).hexdigest():
+                raise self._broken()
+            await self._read_authority(read, actor)
+            material = await self.artifacts.publish(
+                actor_id=actor,
+                request_id="research-discovery-" + intent["id"],
+                title="已批准的研究检索结果",
+                kind="material",
+                filename="research-discovery.json",
+                content=content,
+                source_refs=read["source_refs"],
+                evidence={
+                    "research_egress_read_refs": [read_ref(read)],
+                    "evidence_kind": "discovery_only",
+                },
+            )
+            discovery["artifact_ref"] = self.artifacts.reference(material)
 
         def write(tx):
             tx.put("discovery", discovery, expected_revision=0)
@@ -914,6 +1027,11 @@ class PersonalResearchService(ResearchAuthority):
                 "notebook_id": notebook["id"],
                 "notebook_revision": notebook["revision"],
                 "discovery_id": discovery["id"],
+                **(
+                    {"egress_id": _approved["id"], "artifact_ref": discovery["artifact_ref"]}
+                    if _approved is not None
+                    else {}
+                ),
             }
 
         return await self._result(await self._complete(intent, write), actor)
@@ -1122,6 +1240,10 @@ class PersonalResearchService(ResearchAuthority):
         if caller_actor is not None and trusted_channel is not None:
             raise PersonalAgentError("scope_denied", "研究调用不能声明人工身份")
         operation = arguments["operation"]
+        if operation.startswith("egress_"):
+            return await getattr(self, operation)(
+                arguments, caller_actor=caller_actor, trusted_channel=trusted_channel
+            )
         fields = {key: value for key, value in arguments.items() if key != "operation"}
         if operation in {"capture", "import", "recheck"}:
             return await self._capture(operation, fields, actor, trusted_channel)

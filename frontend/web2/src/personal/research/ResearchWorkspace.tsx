@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, BookOpen, ChevronDown, ChevronRight, ClipboardCheck, ExternalLink, FileDown, FileText, History, Link2, Loader2, Plus, Quote, RefreshCw, Save, Search, ShieldAlert, Trash2, X } from 'lucide-react'
+import { ArrowLeft, BookOpen, ChevronDown, ChevronRight, ClipboardCheck, ExternalLink, FileDown, FileText, History, Link2, Loader2, Plus, Quote, RefreshCw, Save, Search, ShieldAlert, ShieldCheck, Trash2, X } from 'lucide-react'
+import type { ResearchEgressApi } from '@naumi/shared/api/personalResearchEgress'
 import { artifactNavigationEvent, requestArtifactNavigation, type ArtifactNavigation } from '../library/navigation'
 import { cloneResearch, parseResearchPending, researchDomains, researchDraft, researchError, researchKinds, researchPendingKey, researchRequestId, researchReviewNames, researchStances, validateResearchDraft, validateResearchView } from './types'
 import type { ResearchApi, ResearchCalculation, ResearchClaim, ResearchContext, ResearchDiscovery, ResearchDraft, ResearchHistory, ResearchOperation, ResearchPending, ResearchResult, ResearchSource, ResearchSourceView, ResearchSummary, ResearchView } from './types'
+import { ResearchEgress } from './ResearchEgress'
 import './research.css'
 
 const lines = (value: string) => value.split('\n').map(text => text.trim()).filter(Boolean)
@@ -23,11 +25,13 @@ const definitiveFailure = (cause: unknown) => {
   return status >= 400 && status < 500 && ![408, 425, 429].includes(status)
 }
 
-export function ResearchWorkspace({ api, namespace, connected, onClose, onOpenArtifact }: {
-  api: ResearchApi; namespace: string; connected: boolean; onClose: () => void
+export function ResearchWorkspace({ api, namespace, connected, onClose, onOpenArtifact, onOpenScopedArtifact }: {
+  api: ResearchApi & Partial<ResearchEgressApi>; namespace: string; connected: boolean; onClose: () => void
   onOpenArtifact?: (id: string, version: number) => void
+  onOpenScopedArtifact?: (actorId: string, id: string, version: number) => void
 }) {
   const [context, setContext] = useState<ResearchContext | null>(null)
+  const [egressOpen, setEgressOpen] = useState(false)
   const [scopeKey, setScopeKey] = useState(''), [pendingScope, setPendingScope] = useState('')
   const [notebooks, setNotebooks] = useState<ResearchSummary[]>([]), [nextAfter, setNextAfter] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState(''), [view, setView] = useState<ResearchView | null>(null)
@@ -59,6 +63,8 @@ export function ResearchWorkspace({ api, namespace, connected, onClose, onOpenAr
   const dirtyRef = useRef(dirty); dirtyRef.current = dirty
   const locked = posting || Boolean(pending) || !connected || !context
   const scopeReady = scopeKey === key && connected
+  const egressReady = typeof api.listPersonalResearchEgress === 'function' && typeof api.getPersonalResearchEgress === 'function'
+    && typeof api.getPersonalResearchEgressRequest === 'function' && typeof api.operatePersonalResearchEgress === 'function'
   const displayed = scopeReady ? historical || view : null
   const editable = Boolean(scopeReady && draft && view && !historical)
   const filtered = useMemo(() => scopeReady ? notebooks.filter(item => !listQuery.trim() || `${item.title}\n${item.question}`.toLowerCase().includes(listQuery.trim().toLowerCase())) : [], [notebooks, listQuery, scopeReady])
@@ -86,6 +92,7 @@ export function ResearchWorkspace({ api, namespace, connected, onClose, onOpenAr
     const scope = currentContext.current
     if (scope && (next.notebook.workspace_key && next.notebook.workspace_key !== scope.workspace_key || next.notebook.actor_id && next.notebook.actor_id !== scope.actor_id)) throw new Error('研究记录与当前身份不一致')
     if (next.availability === 'source_unavailable') {
+      setEgressOpen(false)
       const opaque: ResearchView = { ...next, notebook: { ...next.notebook, title: '来源不可用', question: '', claims: [], conclusion: { stance: 'undecided', premises: [], invalidators: [] } }, sources: [], publication: null,
         review: { status: 'needs_sources', semantic_verification: 'not_performed', findings: [], anchors: [] } }
       setSelectedId(next.notebook.id); selected.current = next.notebook.id; setView(opaque); currentView.current = opaque
@@ -157,7 +164,7 @@ export function ResearchWorkspace({ api, namespace, connected, onClose, onOpenAr
   useEffect(() => {
     epoch.current += 1; for (const read of readControllers.current) read.abort(); readControllers.current.clear(); moreLock.current = false
     detailSequence.current += 1; sourceSequence.current += 1; historySequence.current += 1
-    setContext(null); setScopeKey(''); setNotebooks([]); setNextAfter(null); setView(null); setDraft(null); setBaseRevision(0); setSelectedId(''); selected.current = ''
+    setContext(null); setScopeKey(''); setNotebooks([]); setNextAfter(null); setView(null); setDraft(null); setBaseRevision(0); setSelectedId(''); selected.current = ''; setEgressOpen(false)
     setSource(null); setQuote(''); setHistory(null); setHistorical(null); setHistoryOpen(false); setDiscovery(null); setSourceForm(false); setNewOpen(false); setNotice(''); setError(''); setActiveClaim(''); setLeave(null)
     setSourceLoading(false); setHistoryLoading(false); setLoadingDetail(false); setLoading(false)
     setQuery(''); setSourceUrl(''); setListQuery(''); setArtifact({ artifact_id: '', version: 1, sha256: '', grant_id: '', grant_revision: 0 })
@@ -307,7 +314,7 @@ export function ResearchWorkspace({ api, namespace, connected, onClose, onOpenAr
   const visibleClaims = historical ? historical.notebook.claims : draft?.claims || []
 
   return <section className="pres-workspace" aria-label="研究工作台">
-    <header className="pres-header"><div className="pres-heading"><span className="pres-mark"><BookOpen size={21} /></span><h1>研究</h1>{!connected && <span className="pres-status">已断开</span>}</div><div className="pres-header-actions"><button aria-label="刷新研究目录" disabled={!connected || loading} onClick={() => navigate(() => { recovery.current.delete(key); setSelectedId(''); selected.current = ''; setView(null); setDraft(null); draftRef.current = null; void loadList() })}><RefreshCw size={16} /></button><button aria-label="关闭研究工作台" onClick={() => navigate(onClose)}><X size={19} /></button></div></header>
+    <header className="pres-header"><div className="pres-heading"><span className="pres-mark"><BookOpen size={21} /></span><h1>研究</h1>{!connected && <span className="pres-status">已断开</span>}</div><div className="pres-header-actions">{egressReady && <button disabled={!scopeReady || !context} onClick={() => setEgressOpen(true)}><ShieldCheck size={16} />外发审批</button>}<button aria-label="刷新研究目录" disabled={!connected || loading} onClick={() => navigate(() => { recovery.current.delete(key); setSelectedId(''); selected.current = ''; setView(null); setDraft(null); draftRef.current = null; void loadList() })}><RefreshCw size={16} /></button><button aria-label="关闭研究工作台" onClick={() => navigate(onClose)}><X size={19} /></button></div></header>
     {error && <div className="pres-alert" role="alert"><ShieldAlert size={16} /><span>{error}</span><button aria-label="关闭研究错误" onClick={() => setError('')}><X size={14} /></button></div>}
     {notice && <div className="pres-notice" role="status">{notice}<button aria-label="关闭研究提示" onClick={() => setNotice('')}><X size={13} /></button></div>}
     {pending && pendingScope === key && <div className="pres-pending" role="status"><Loader2 size={16} className={posting ? 'pres-spin' : ''} /><strong>{operationNames[pending.operation]}</strong><span>结果待核对</span><code>{pending.request_id}</code><div><button disabled={posting || !connected || !api.getPersonalResearchRequest} onClick={() => void reconcile()}>核对原请求</button>{frozen.current?.key === key && frozen.current.saved.request_id === pending.request_id && <button disabled={posting || !connected} onClick={() => { const original = frozen.current; if (original) void perform(original.operation, original.payload, original.saved.target, true) }}>重试原请求</button>}</div></div>}
@@ -336,6 +343,7 @@ export function ResearchWorkspace({ api, namespace, connected, onClose, onOpenAr
     {newOpen && scopeReady && <div className="pres-dialog-backdrop"><section className="pres-dialog" role="dialog" aria-modal="true" aria-labelledby="pres-create-title"><header><h2 id="pres-create-title">新建研究</h2><button aria-label="关闭新建研究" disabled={posting} onClick={() => navigate(() => setNewOpen(false))}><X size={18} /></button></header><label>标题<input aria-label="新研究标题" autoFocus maxLength={160} value={newDraft.title} onChange={event => setNewDraft({ ...newDraft, title: event.target.value })} /></label><label>问题<textarea aria-label="新研究问题" rows={4} maxLength={4000} value={newDraft.question} onChange={event => setNewDraft({ ...newDraft, question: event.target.value })} /></label><label>类型<select aria-label="新研究类型" value={newDraft.domain} onChange={event => setNewDraft({ ...newDraft, domain: event.target.value as ResearchDraft['domain'] })}>{Object.entries(researchDomains).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><footer><button disabled={posting} onClick={() => navigate(() => setNewOpen(false))}>取消</button><button className="pres-primary" disabled={locked || !newDraft.title.trim() || !newDraft.question.trim()} onClick={() => void create()}>创建</button></footer></section></div>}
     {historyOpen && scopeReady && <div className="pres-dialog-backdrop"><section className="pres-dialog pres-history-dialog" role="dialog" aria-modal="true" aria-labelledby="pres-history-title"><header><h2 id="pres-history-title">研究历史</h2><button aria-label="关闭研究历史" onClick={() => setHistoryOpen(false)}><X size={18} /></button></header>{history?.history.map(item => <button className="pres-history-row" key={item.revision} onClick={() => navigate(() => { setHistoryOpen(false); if (view) void loadNotebook(view.notebook.id, item.revision) })}><span>v{item.revision}</span><strong>{item.title}</strong><small>{item.claim_count} 条声明 · {time(item.updated_at)}</small><ChevronRight size={15} /></button>)}{historyLoading && <div className="pres-loading" role="status"><Loader2 size={16} className="pres-spin" />读取历史</div>}{history && !history.history.length && <div className="pres-empty"><History size={28} /><strong>暂无历史</strong></div>}{history?.next_after_revision && <button className="pres-more" disabled={historyLoading} onClick={() => void readHistory(true)}>更多版本</button>}</section></div>}
     {leave && <div className="pres-dialog-backdrop"><section className="pres-dialog pres-leave-dialog" role="dialog" aria-modal="true" aria-labelledby="pres-leave-title"><h2 id="pres-leave-title">放弃未保存的修改？</h2><footer><button onClick={() => { leave.cancel?.(); setLeave(null) }}>继续编辑</button><button className="pres-danger" onClick={() => { const next = leave; dirtyRef.current = false; recovery.current.delete(key); if (currentView.current) { const clean = researchDraft(currentView.current.notebook); setDraft(clean); draftRef.current = clean; setBaseRevision(currentView.current.notebook.revision) }; setNewDraft(researchDraft()); setLeave(null); next.proceed() }}>放弃修改</button></footer></section></div>}
+    {egressOpen && egressReady && scopeReady && context && <ResearchEgress key={`egress:${namespace}:${context.workspace_key}`} api={api as ResearchApi & ResearchEgressApi} namespace={namespace} workspaceKey={context.workspace_key} serverNow={context.server_now} connected={connected} onClose={() => setEgressOpen(false)} onOpenScopedArtifact={onOpenScopedArtifact} />}
   </section>
 }
 

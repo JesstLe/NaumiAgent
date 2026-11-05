@@ -11,6 +11,7 @@ from pydantic import Field, ValidationError, model_validator
 
 from naumi_agent.personal.artifact_models import normalize_refs, strict_json_loads
 from naumi_agent.personal.models import PersonalAgentError
+from naumi_agent.personal.research_egress_models import EGRESS_OPERATIONS, validate_egress_arguments
 from naumi_agent.personal.research_models import (
     CreateNotebook,
     Digest,
@@ -46,6 +47,15 @@ _MESSAGES = {
     "configuration_error": "研究组件尚未就绪，请检查当前运行配置",
     "input_limit": "研究请求或结果超过容量，请缩小范围后核对原请求",
     "research_unknown": "研究操作结果待核对，请先查询原请求",
+    "egress_not_approved": "外发请求尚未获准，请先由用户核对确切内容",
+    "egress_expired": "原外发批准已过期，请核对原记录",
+    "egress_consumed": "原外发已进入发送阶段，请核对原请求",
+    "egress_revoked": "原外发请求已撤销，请核对原记录",
+    "approval_required": "请先由用户核对并批准这份确切外发提案",
+    "approval_invalidated": "原外发批准或依据已变化，请重新核对原记录",
+    "action_expired": "原外发提案已过期，请核对原记录",
+    "action_locked": "原外发已经进入发送阶段，请核对原请求",
+    "lease_lost": "原外发执行权已变化，请核对原请求",
 }
 
 
@@ -179,7 +189,10 @@ _OPERATIONS = {
 
 def request_schema():
     definitions, branches = {}, []
-    for model in _OPERATIONS.values():
+    for model in [
+        *_OPERATIONS.values(),
+        *(model for name, model in EGRESS_OPERATIONS.items() if name != "egress_decide"),
+    ]:
         schema = model.model_json_schema()
         for key, value in schema.pop("$defs", {}).items():
             if key in definitions and definitions[key] != value:
@@ -198,13 +211,18 @@ def validate_research_arguments(value, *, human=False):
         encoded = json.dumps(value, ensure_ascii=False, allow_nan=False)
         if len(encoded.encode("utf-8")) > MAX_REQUEST_BYTES:
             raise ValueError()
+        if value["operation"].startswith("egress_"):
+            return validate_egress_arguments(value, human=human)
         model = _OPERATIONS.get(value["operation"])
         if model is None:
             raise ValueError()
         return model.model_validate(value).model_dump(mode="json", exclude_none=True)
+    except PersonalAgentError as exc:
+        if exc.code == "scope_denied":
+            raise
+        raise PersonalAgentError("invalid_input", public_error("invalid_input")) from None
     except (
         ValidationError,
-        PersonalAgentError,
         ValueError,
         TypeError,
         UnicodeError,
@@ -250,6 +268,8 @@ class PersonalResearchTool(Tool):
     description = (
         "管理有来源的研究：创建问题、检索、捕获或导入确切资料、修订事实/估算/未知主张，"
         "机械检查引用与数值，按确切复核摘要保存报告。来源时效与未核实标签会保留；"
+        "私有上下文需要检索或读取网页时，先用egress_propose提出确切外发提案，"
+        "用户批准后用egress_execute执行一次；egress_get/list/request可核对原状态。"
         "不提供外部发布、交易或人工批准。私有上下文中的网络请求需要明确外发授权。"
     )
 
