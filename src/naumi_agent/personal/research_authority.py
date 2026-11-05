@@ -11,6 +11,7 @@ from naumi_agent.personal.artifact_models import normalize_refs, strict_json_loa
 from naumi_agent.personal.memory_models import normalize_ref as memory_ref
 from naumi_agent.personal.models import PersonalAgentError
 from naumi_agent.personal.owner_journal import canonical, digest
+from naumi_agent.personal.research_context import archived_read
 
 _READ = re.compile(r"^rread_[a-f0-9]{32}$")
 _SHA = re.compile(r"^[a-f0-9]{64}$")
@@ -205,7 +206,11 @@ class ResearchAuthority:
             # live model material; explicitly historical reports retain live ACLs.
             if digest(notebook) != record["basis"]["notebook_digest"]:
                 raise self._broken()
-            if record["require_current"] and not record["publication"]:
+            if (
+                record["require_current"]
+                and not record["publication"]
+                and not archived_read(self, record)
+            ):
                 current = await self._notebook(notebook["id"], record["actor_id"])
                 if digest(current) != digest(notebook):
                     raise PersonalAgentError("source_stale", "研究版本已变化")
@@ -213,7 +218,7 @@ class ResearchAuthority:
                 source = await self._record("source", ref["id"], revision=ref["revision"])
                 if digest(source) != ref["digest"]:
                     raise self._broken()
-                if not record["publication"]:
+                if not record["publication"] and not archived_read(self, record):
                     latest = await self._record("source", ref["id"])
                     if (
                         digest(latest) != ref["latest_digest"]
@@ -272,6 +277,8 @@ class ResearchAuthority:
             if len(seen) > 4096:
                 raise PersonalAgentError("source_unavailable", "研究来源超过校验上限")
             evidence = value.get("evidence", {})
+            if evidence.get("research_context_refs"):
+                await self.authorize_context_artifact(value, actor_id)
             research_evidence(evidence)
             research_evidence(evidence, egress=True)
             for raw in [

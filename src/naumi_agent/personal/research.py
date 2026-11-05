@@ -13,6 +13,7 @@ from naumi_agent.personal.artifact_models import is_text_artifact, strict_json_l
 from naumi_agent.personal.models import PersonalAgentError
 from naumi_agent.personal.owner_journal import canonical, checked_path, digest
 from naumi_agent.personal.research_authority import ResearchAuthority, read_ref
+from naumi_agent.personal.research_context import ResearchContextMixin
 from naumi_agent.personal.research_egress import ResearchEgressMixin
 from naumi_agent.personal.research_models import CreateNotebook, ReviseNotebook, validate_payload
 from naumi_agent.personal.research_review import review_notebook
@@ -26,7 +27,7 @@ _CHANNELS = {"web", "cli", "tui"}
 MAX_SOURCES = 64
 
 
-class PersonalResearchService(ResearchEgressMixin, ResearchAuthority):
+class PersonalResearchService(ResearchContextMixin, ResearchEgressMixin, ResearchAuthority):
     def __init__(self, engine, *, store=None, clock=None, capture=None, discover=None):
         self.engine, self.personal, self.artifacts = (
             engine,
@@ -1240,6 +1241,10 @@ class PersonalResearchService(ResearchEgressMixin, ResearchAuthority):
         if caller_actor is not None and trusted_channel is not None:
             raise PersonalAgentError("scope_denied", "研究调用不能声明人工身份")
         operation = arguments["operation"]
+        if operation in {"context_preview", "context_rollforward", "context_request"}:
+            return await getattr(self, operation)(
+                arguments, caller_actor=caller_actor, trusted_channel=trusted_channel
+            )
         if operation.startswith("egress_"):
             return await getattr(self, operation)(
                 arguments, caller_actor=caller_actor, trusted_channel=trusted_channel

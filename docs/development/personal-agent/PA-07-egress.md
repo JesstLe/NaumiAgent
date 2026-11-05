@@ -317,10 +317,10 @@ owner列表当前返回完整提案envelope；UI仅缓存摘要并GET详情，�
 
 ## 9. 自审与明确保留的后续工作
 
-1. **原 Session 的 recheck 上下文 rollforward**：recheck 可以持久完成，结果通过 mirror
-   保留原 ACL；原 Session 中早先的 live research pin 仍可能因 source head 变化而 stale。
-   后续模型发送会按原合同停止。需要独立实现可审计、字节等价且保留原授权的显式上下文
-   rollforward；本轮没有删除 append-only refs 或静默放宽 freshness。
+1. **原 Session 的 recheck 上下文**：后续已接入明确的上下文checkpoint，详见
+   [对话依据更新](PA-07-context.md)。它保留原Session refs和消息、原字节及活授权，
+   显式历史镜像与当前来源checkpoint使原会话可以继续；来源再次变化仍要求重新确认。
+   本文外发审批的原验收不替代后续独立集中验证、真实模型/浏览器、冷读和回滚证据。
 2. **后台 Item 集成**：`ItemExecutionContext.authorize_tool()` 当前仍只允许既有代码、文件
    与部分 Artifact 操作。Agent 日常对话的外发审批不等于后台事项已经获准执行研究。
    其 policy、独立执行、恢复和送达还需对应实现与真实验收。

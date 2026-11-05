@@ -531,3 +531,7 @@ UNKNOWN不重发及captured原结果显式继续保存，复用原研究Journal�
 [本轮记录](../../development/personal-agent/PA-07-egress.md)。
 独立语义复核、后台Item研究、原Session显式rollforward、真实Google账户及整体发布
 各自继续验收；上述局部证据不关闭完整产品目标。
+
+### PA-07 对话依据更新（2026-11-06）
+
+明确的Session上下文checkpoint已实现：保留原引用、原对话和UTF-8字节，使用authority8历史镜像、原权限与当前来源checkpoint，不把旧内容描述为新事实。Tool读取与人工API/CLI/TUI/Web2更新共用服务；UNKNOWN不自动重放。实现、自审及集中测试、真实模型/浏览器、冷读和副本回滚证据分别记录于[对话依据更新](../../development/personal-agent/PA-07-context.md)。VID-11、VID-18、VID-21仍为partial；原24项范围、观察和验收不变。

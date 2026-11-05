@@ -108,6 +108,18 @@ def _research_evidence(evidence, *, egress=False):
     return research_evidence(evidence, egress=egress)
 
 
+def _research_context_evidence(evidence):
+    from naumi_agent.personal.research_context import normalize_context_ref
+
+    refs = evidence.get("research_context_refs", [])
+    if not isinstance(refs, list) or len(refs) > 64:
+        raise invalid("研究上下文凭据需要有效列表，且不超过 64 项")
+    normalized = [normalize_context_ref(ref) for ref in refs]
+    if len({canonical(ref) for ref in normalized}) != len(normalized):
+        raise invalid("研究上下文凭据重复")
+    return bool(refs)
+
+
 _VERSION_FIELDS = {
     "artifact_id",
     "workspace_key",
@@ -342,9 +354,11 @@ class ArtifactStore:
             followup_bound = _followup_evidence(value["evidence"])
             research_bound = _research_evidence(value["evidence"])
             egress_bound = _research_evidence(value["evidence"], egress=True)
+            context_bound = _research_context_evidence(value["evidence"])
         except PersonalAgentError:
             raise _broken() from None
         expected_authority = (
+            8 if context_bound else
             7 if egress_bound else 6 if research_bound else 5 if followup_bound else
             4 if workspace_bound else 3 if routine_bound else 2 if connection_bound else None
         )
@@ -352,7 +366,7 @@ class ArtifactStore:
             raise _broken()
         if "authority_version" in value and (
             type(value["authority_version"]) is not int
-            or value["authority_version"] not in {2, 3, 4, 5, 6, 7}
+            or value["authority_version"] not in {2, 3, 4, 5, 6, 7, 8}
         ):
             raise _broken()
         if (
@@ -728,7 +742,10 @@ class ArtifactStore:
             followup_bound = _followup_evidence(evidence)
             research_bound = _research_evidence(evidence)
             egress_bound = _research_evidence(evidence, egress=True)
-            if egress_bound:
+            context_bound = _research_context_evidence(evidence)
+            if context_bound:
+                record["authority_version"] = 8
+            elif egress_bound:
                 record["authority_version"] = 7
             elif research_bound:
                 record["authority_version"] = 6

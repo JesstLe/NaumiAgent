@@ -1,0 +1,54 @@
+.pres-context-backdrop { position: fixed; inset: 0; z-index: 135; display: grid; place-items: center; padding: 26px; background: #24212d36; backdrop-filter: blur(4px); }
+.pres-context-dialog { display: flex; flex-direction: column; width: min(700px, 100%); max-height: min(850px, 91vh); border: 1px solid #e8e3ed; border-radius: 17px; background: #fff; color: #302a39; box-shadow: 0 30px 90px #30253d2b; font-family: inherit; font-size: 13px; line-height: 1.65; overflow: hidden; }
+.pres-context-dialog *, .pres-context-dialog *::before, .pres-context-dialog *::after { box-sizing: border-box; }
+.pres-context-dialog button { display: inline-flex; justify-content: center; align-items: center; gap: 7px; min-height: 34px; padding: 7px 11px; border: 1px solid #e5deed; border-radius: 7px; background: #fff; color: #756480; font: inherit; cursor: pointer; }
+.pres-context-dialog button:disabled { cursor: default; opacity: .45; }
+.pres-context-dialog button:hover:not(:disabled) { background: #f8f5fb; border-color: #d6c9e3; }
+.pres-context-dialog button:focus-visible { outline: 2px solid #a592c5; outline-offset: 3px; }
+.pres-context-heading { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 20px 25px; border-bottom: 1px solid #ece6f2; }
+.pres-context-heading > div { display: flex; align-items: center; gap: 11px; color: #88719d; }
+.pres-context-heading h2 { color: #302a39; margin: 0; font-size: 19px; letter-spacing: -.4px; font-weight: 620; }
+.pres-context-heading > button { min-height: 28px; padding: 5px; border: 0; color: #a38cb4; }
+.pres-context-body { padding: 23px 26px 27px; overflow: auto; min-height: 230px; }
+.pres-context-owner > span { color: #9c83ad; font-size: 11px; }
+.pres-context-owner h3 { margin: 4px 0 5px; color: #4f425b; font-size: 20px; line-height: 1.5; font-weight: 580; overflow-wrap: anywhere; }
+.pres-context-owner > code { color: #b1a1bb; font-size: 10px; overflow-wrap: anywhere; }
+.pres-context-section-title { display: flex; gap: 9px; align-items: center; margin: 23px 0 10px; }
+.pres-context-section-title h3 { margin: 0; color: #82708e; font-size: 12px; font-weight: 550; }
+.pres-context-section-title > span { display: inline-grid; place-items: center; min-width: 18px; min-height: 18px; background: #f6f2fa; color: #a18caf; border-radius: 4px; font-size: 10px; }
+.pres-context-materials { display: flex; flex-direction: column; gap: 8px; }
+.pres-context-materials article { display: flex; gap: 11px; padding: 12px; background: #fcfafe; border: 1px solid #eae2f2; border-radius: 8px; }
+.pres-context-materials article > svg { margin-top: 3px; color: #aa94be; flex: 0 0 auto; }
+.pres-context-materials article > div { display: flex; flex-direction: column; min-width: 0; gap: 3px; }
+.pres-context-materials strong { color: #786185; font-size: 12px; font-weight: 550; overflow-wrap: anywhere; }
+.pres-context-materials span { color: #ae9cbb; font-size: 10px; }
+.pres-context-materials code { color: #baacc5; font-size: 9px; overflow-wrap: anywhere; }
+.pres-context-changes { display: flex; flex-direction: column; }
+.pres-context-changes article { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 12px; padding: 10px 0; border-bottom: 1px solid #f0ebf4; }
+.pres-context-changes code { color: #ab96bb; font-size: 10px; overflow-wrap: anywhere; }
+.pres-context-changes article > div { display: flex; align-items: center; gap: 10px; color: #8f79a0; font-size: 11px; }
+.pres-context-historical { margin: 21px 0 0; padding: 12px 14px; border-left: 2px solid #d6c9e2; border-radius: 0 6px 6px 0; background: #faf8fc; color: #9e8caa; font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pres-context-current { display: flex; align-items: center; gap: 9px; margin-top: 25px; padding: 15px; border: 1px solid #e0ebe2; border-radius: 8px; background: #f6faf7; color: #87a18a; }
+.pres-context-current strong { font-size: 12px; font-weight: 550; }
+.pres-context-empty { display: flex; min-height: 180px; flex-direction: column; gap: 14px; align-items: center; justify-content: center; color: #b4a0c2; }
+.pres-context-empty strong { font-size: 12px; font-weight: 500; }
+.pres-context-alert, .pres-context-notice { display: flex; align-items: center; gap: 9px; padding: 11px 24px; border-bottom: 1px solid #e7e0ed; background: #faf7fd; color: #9e85ae; font-size: 11px; }
+.pres-context-alert { color: #a47f89; background: #fdf7f8; border-color: #eddee3; }
+.pres-context-alert > svg, .pres-context-notice > svg { flex: 0 0 auto; }
+.pres-context-pending { display: flex; justify-content: space-between; align-items: center; gap: 15px; padding: 12px 24px; background: #fcfaf5; border-bottom: 1px solid #eee7d6; }
+.pres-context-pending > div { display: flex; flex-direction: column; min-width: 0; gap: 3px; color: #a28f70; }
+.pres-context-pending strong { font-size: 11px; font-weight: 550; }
+.pres-context-pending code { font-size: 10px; overflow-wrap: anywhere; }
+.pres-context-pending button { font-size: 11px; flex-shrink: 0; }
+.pres-context-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 16px 24px; border-top: 1px solid #eee8f3; background: #fdfcfe; }
+.pres-context-actions > div { display: flex; gap: 8px; }
+.pres-context-dialog button.pres-context-primary { color: #fff; background: #745b98; border-color: #745b98; }
+.pres-context-dialog button.pres-context-primary:hover:not(:disabled) { background: #634a88; border-color: #634a88; }
+.pres-context-confirm { margin-top: 22px; padding: 14px 16px; border: 1px solid #ddd0eb; border-radius: 9px; background: #f8f4fc; }
+.pres-context-confirm strong, .pres-context-confirm > span { display: block; color: #83649a; font-size: 12px; }
+.pres-context-confirm > span { margin-top: 5px; color: #a18aae; font-size: 11px; overflow-wrap: anywhere; }
+.pres-context-confirm p { margin: 8px 0 0; color: #a08baa; font-size: 11px; }
+.pres-context-spin { animation: pres-context-spin 1.1s linear infinite; }
+@keyframes pres-context-spin { to { transform: rotate(360deg); } }
+@media (max-width: 650px) { .pres-context-backdrop { padding: 12px; }.pres-context-dialog { max-height: 94vh; }.pres-context-heading { padding: 18px; }.pres-context-body { padding: 18px; }.pres-context-actions { padding: 14px 18px; }.pres-context-alert, .pres-context-notice, .pres-context-pending { padding: 12px 18px; }.pres-context-owner h3 { font-size: 18px; }.pres-context-pending { flex-wrap: wrap; }.pres-context-actions button { font-size: 11px; }.pres-header-actions { flex-wrap: wrap; justify-content: flex-end; }.pres-header { align-items: flex-start; gap: 9px; } }
+@media (prefers-reduced-motion: reduce) { .pres-context-spin { animation: none; } }

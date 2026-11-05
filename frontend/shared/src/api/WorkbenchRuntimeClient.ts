@@ -1,6 +1,7 @@
 import type { FollowupArguments, FollowupContext, FollowupResponses } from './personalFollowups'
 import type { ResearchContext, ResearchHistory, ResearchPage, ResearchRequest, ResearchResult, ResearchSourceView, ResearchView } from './personalResearch'
 import type { ResearchEgressPage, ResearchEgressRequest, ResearchEgressView } from './personalResearchEgress'
+import type { ResearchSessionContextPreview, ResearchSessionContextReceipt, ResearchSessionContextRequest, ResearchSessionContextWrite } from './personalResearchContext'
 import type { WorkspaceArguments, WorkspaceContext, WorkspaceOperation, WorkspaceResponses } from './personalWorkspaces'
 import type { NotificationBatch, NotificationClaim, NotificationContext, NotificationMutation, NotificationPage, NotificationPreferencesView, NotificationPreferenceWrite, NotificationPresentation, NotificationPrompt, NotificationQuery, NotificationRead, NotificationRequest } from './personalNotifications'
 import type { TodayContext, TodayDayView, TodayHistory, TodayMetadataView, TodayMutation, TodayOperation, TodayQuery, TodayRequest, TodaySources, TodayWriteBodies } from './personalToday'
@@ -539,6 +540,15 @@ export class WorkbenchRuntimeClient extends WorkbenchApiClient {
   }
   async getPersonalResearchContext(signal?: AbortSignal): Promise<ResearchContext> {
     return (await this.fetch('/personal/research/context', { signal, cache: 'no-store' })).json()
+  }
+  async getPersonalResearchSessionContext(sessionId: string, actorId: string, signal?: AbortSignal): Promise<ResearchSessionContextPreview> {
+    return (await this.fetch(`/personal/research/session-context/${encodeURIComponent(sessionId)}?${new URLSearchParams({ actor_id: actorId })}`, { signal, cache: 'no-store' })).json()
+  }
+  async rollforwardPersonalResearchContext(body: ResearchSessionContextWrite, signal?: AbortSignal): Promise<ResearchSessionContextReceipt> {
+    return (await this.fetch('/personal/research/operations/context_rollforward', { method: 'POST', signal: signal ?? AbortSignal.timeout(120000), cache: 'no-store', body: JSON.stringify(body) })).json()
+  }
+  async getPersonalResearchContextRequest(requestId: string, signal?: AbortSignal): Promise<ResearchSessionContextRequest> {
+    return (await this.fetch(`/personal/research/context-requests/${encodeURIComponent(requestId)}`, { signal, cache: 'no-store' })).json()
   }
   async listPersonalResearchEgress(query: { limit?: number; after?: string } = {}, signal?: AbortSignal): Promise<ResearchEgressPage> {
     const params = new URLSearchParams()

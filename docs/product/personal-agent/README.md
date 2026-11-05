@@ -347,7 +347,7 @@ INSERT 草稿，并沿原请求读回；不借扫描创建 Job/Run 或批准日�
 `semantic_verification=not_performed`，机械检查不代表引文支持结论或外部事实已独立核实；
 界面保留“语义待核实”，完整 24 项视频目标不变。
 审批化外发的新合同与本轮证据分开记录于 [PA-07 外发审批](../../development/personal-agent/PA-07-egress.md)；
-原 Session 的 recheck 上下文 rollforward、后台 Item 研究 policy 与完整平台验收仍有明确待完成项。
+原 Session 的 recheck 上下文现已有明确预览/确认、字节等价历史镜像和发送前原权限重核，见[对话依据记录](../../development/personal-agent/PA-07-context.md)。后台 Item 研究 policy、独立语义复核与完整平台验收仍有明确待完成项。
 
 交付：搜索、读取、引用、时效、事实/估算区分、明确结论与失效条件；
 对研究、竞品、运营和市场领域提供不同输出契约，不把语气自信作为质量标准。

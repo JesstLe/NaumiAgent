@@ -20,9 +20,14 @@ KINDS = frozenset(
         "discovery",
         "egress",
         "egress_decision",
+        "context_update",
+        "context_result",
+        "context_head",
     }
 )
-APPEND_ONLY = frozenset({"review", "read", "discovery", "egress_decision"})
+APPEND_ONLY = frozenset(
+    {"review", "read", "discovery", "egress_decision", "context_update", "context_result"}
+)
 _SPEC = JournalSpec(
     namespace="research",
     kinds=KINDS,

@@ -18,6 +18,9 @@ from naumi_agent.personal.research_tools import (
 
 _HELP = """研究命令：
 /research context
+/research context-preview <原session_id> <actor_id>
+/research context-request <原request_id>
+/research context-rollforward-json '<完整JSON>'
 /research list [--limit N] [--after 原研究ID]
 /research get <研究ID> [--revision N]
 /research source <来源ID> [--revision N]
@@ -41,6 +44,7 @@ _JSON = frozenset(
         "egress-propose",
         "egress-decide",
         "egress-execute",
+        "context-rollforward",
     }
 )
 
@@ -94,6 +98,8 @@ def parse_research_command(argument):
         value = {"operation": action}
         if action == "context" and not args:
             pass
+        elif action == "context_preview" and len(args) == 2:
+            value.update(session_id=args[0], actor_id=args[1])
         elif action in {"list", "egress_list"}:
             value.update(_options(args, {"limit", "after"}))
         elif action == "egress_get" and len(args) == 1:
@@ -102,7 +108,7 @@ def parse_research_command(argument):
             value["id"] = args[0]
             options = {"limit", "after_revision"} if action == "history" else {"revision"}
             value.update(_options(args[1:], options))
-        elif action in {"request", "egress_request"} and len(args) == 1:
+        elif action in {"request", "egress_request", "context_request"} and len(args) == 1:
             value["request_id"] = args[0]
         else:
             raise _invalid()

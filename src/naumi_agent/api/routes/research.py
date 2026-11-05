@@ -21,6 +21,7 @@ from naumi_agent.personal.research_tools import (
 
 _HEADERS = {"Cache-Control": "no-store", "Pragma": "no-cache"}
 _QUERY = {
+    "session_context": frozenset({"actor_id"}),
     "list_egress": frozenset({"limit", "after", "notebook_id"}),
     "list_notebooks": frozenset({"limit", "after"}),
     "get_notebook": frozenset({"revision"}),
@@ -143,6 +144,18 @@ async def context(request: Request):
 @router.get("/personal/research/egress")
 async def list_egress(request: Request):
     return await _execute(request, {"operation": "egress_list", **_query(request)})
+
+
+@router.get("/personal/research/session-context/{session_id}")
+async def session_context(session_id: str, request: Request):
+    return await _execute(
+        request, {"operation": "context_preview", "session_id": session_id, **_query(request)}
+    )
+
+
+@router.get("/personal/research/context-requests/{request_id}")
+async def context_request(request_id: str, request: Request):
+    return await _execute(request, {"operation": "context_request", "request_id": request_id})
 
 
 @router.get("/personal/research/egress/requests/{request_id}")

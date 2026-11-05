@@ -166,6 +166,13 @@ class PersonalArtifactService:
             self.actor(identity, write=True)
 
     async def _checked(self, actor_id: str, snapshot: dict):
+        research = getattr(self.engine, "personal_research", None)
+        if research is not None:
+            async with research.artifact_context_scope(snapshot, actor_id):
+                return await self._checked_impl(actor_id, snapshot)
+        return await self._checked_impl(actor_id, snapshot)
+
+    async def _checked_impl(self, actor_id: str, snapshot: dict):
         grants = await self._call(
             "access_grants",
             actor_id=actor_id,
@@ -287,7 +294,8 @@ class PersonalArtifactService:
                 if len(seen) > 4096:
                     raise PersonalAgentError("storage_error", "研究资料来源超过校验上限")
                 if (value.get("evidence", {}).get("research_read_refs")
-                        or value.get("evidence", {}).get("research_egress_read_refs")):
+                        or value.get("evidence", {}).get("research_egress_read_refs")
+                        or value.get("evidence", {}).get("research_context_refs")):
                     raise PersonalAgentError("source_unavailable", "研究资料需要原授权组件")
                 for ref in value.get("source_refs", []):
                     stack.append(await self._call("get", actor_id=actor_id,
@@ -383,6 +391,10 @@ class PersonalArtifactService:
     async def session_refs(self, session_id: str, actor_id: str):
         try:
             refs = await self._call("session_refs", actor_id=actor_id, session_id=session_id)
+            research = getattr(self.engine, "personal_research", None)
+            resolve = getattr(research, "effective_context_refs", None)
+            if resolve is not None:
+                refs = await resolve(session_id, actor_id, refs)
             return await self.authorize_refs(actor_id=actor_id, refs=refs)
         except PersonalAgentError as exc:
             if exc.code in {"not_found", "version_conflict", "agent_inactive"}:
@@ -397,6 +409,11 @@ class PersonalArtifactService:
         result = await self._call(
             "bind_session_refs", actor_id=actor_id, session_id=session_id, refs=refs
         )
+        research = getattr(self.engine, "personal_research", None)
+        resolve = getattr(research, "effective_context_refs", None)
+        if resolve is not None:
+            result = await resolve(session_id, actor_id, result)
+        result = await self.authorize_refs(actor_id=actor_id, refs=result)
         session = getattr(self.engine, "_session", None)
         if result and session is not None and session.id == session_id:
             self.engine._personal_artifact_refs = result

@@ -11,6 +11,7 @@ from pydantic import Field, ValidationError, model_validator
 
 from naumi_agent.personal.artifact_models import normalize_refs, strict_json_loads
 from naumi_agent.personal.models import PersonalAgentError
+from naumi_agent.personal.research_context import CONTEXT_OPERATIONS
 from naumi_agent.personal.research_egress_models import EGRESS_OPERATIONS, validate_egress_arguments
 from naumi_agent.personal.research_models import (
     CreateNotebook,
@@ -192,6 +193,7 @@ def request_schema():
     for model in [
         *_OPERATIONS.values(),
         *(model for name, model in EGRESS_OPERATIONS.items() if name != "egress_decide"),
+        *(model for name, model in CONTEXT_OPERATIONS.items() if name != "context_rollforward"),
     ]:
         schema = model.model_json_schema()
         for key, value in schema.pop("$defs", {}).items():
@@ -213,6 +215,11 @@ def validate_research_arguments(value, *, human=False):
             raise ValueError()
         if value["operation"].startswith("egress_"):
             return validate_egress_arguments(value, human=human)
+        if value["operation"] in CONTEXT_OPERATIONS:
+            if value["operation"] == "context_rollforward" and not human:
+                raise PersonalAgentError("scope_denied", "更新对话依据需要用户确认")
+            model = CONTEXT_OPERATIONS[value["operation"]]
+            return model.model_validate(value).model_dump(mode="json")
         model = _OPERATIONS.get(value["operation"])
         if model is None:
             raise ValueError()

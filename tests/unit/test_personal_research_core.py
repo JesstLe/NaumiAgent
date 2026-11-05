@@ -626,6 +626,9 @@ def test_research_store_is_distinct_strong_owner_journal_without_worker(store):
             "discovery",
             "egress",
             "egress_decision",
+            "context_update",
+            "context_result",
+            "context_head",
         }
     )
     assert store.spec.namespace == "research" and store.spec.parent_field == "notebook_id"

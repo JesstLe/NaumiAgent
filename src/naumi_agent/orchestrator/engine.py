@@ -6547,6 +6547,9 @@ class AgentEngine:
             messages, update_engine_context=update_engine_context, preserve_metadata=True,
         )
         prepared = await self.personal_memory_runtime.prepare_messages(sanitized)
+        research = getattr(self, "personal_research", None)
+        if research is not None:
+            prepared = await research.context_model_messages(prepared)
         await personal_runtime.authorize_execution(self)
         # Provenance metadata is consumed before removing non-provider fields.
         return [{key: value for key, value in message.items() if key != "metadata"}
