@@ -265,6 +265,9 @@ MCP 可以作为 adapter 的实现方式，不等于连接体验本身。
 [今日事项模块记录](../../development/personal-agent/PA-04-today.md)与
 [通知与勿扰模块记录](../../development/personal-agent/PA-04-notifications.md)。
 
+通知列表另有[批量读取与末次授权优化](../../development/personal-agent/PA-04-notification-reads.md)：
+普通计数不遍历全域报告正文，原来源复查、失权清理与确切已读过滤保留；实际同数据读取性能和回归独立记录。
+
 交付：周期委托、每日安排、跨工作区事项汇总、截止时间跟进、事件驱动的下一步建议、
 通知合并/勿扰、成本与执行次数上限。
 

@@ -54,6 +54,8 @@ context 不返回来源标题或报告。未读数量原本就包含来源失效
 
 独立 cProfile 定位了 Windows 路径 / 实例验证的重复开销：原两条来源的 context 调度 to-thread 166 次、list 317 次；profile 时间分别约 5.9 / 11.1 秒，包含 instrumentation，不能当作无 profiler 的 SLA。后续进一步合并来源 proof / descriptor-bound 验证须独立证明 owner、witness、hardlink、reparse、撤权和最终发送 fence，不能用全局授权缓存或提高超时冒充优化。
 
+通知列表的后续独立优化已将普通计数与来源正文分离、本域 metadata 合入短批量快照，并保留初次／末次来源授权、最终 receipt 过滤和 raw keyset cursor。[列表读取记录](PA-04-notification-reads.md)分别记录同一真实数据的前后 HTTP／生产组件测量、集中回归及源码副本回滚；不是跨请求正文或授权缓存。
+
 ## 验收记录
 
 事务目录：`.naumi/transactions/pa04-notifications-20261105/`。完整命令、literal output、exit status、源码 hash、原失败、集中回归、HTTP/冷进程、生产组件浏览器及副本回滚见该目录 `VERIFICATION.txt`。四产物为 `MODIFIED_FILE.py`、`DIFF_FILE.patch`、`VERIFICATION.txt`、可执行 `ROLLBACK.sh`。回滚只作用于独立源码副本，不回退业务数据库、凭据或外部动作。

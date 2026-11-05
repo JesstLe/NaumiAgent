@@ -327,17 +327,74 @@ class PersonalNotificationService(NotificationAuthorityMixin):
             )
         )
 
+    def _entry_metadata(self, tx, event, *, batches=None):
+        """Read detached local facts within one authenticated, non-awaiting snapshot."""
+        if event["workspace_key"] != self.workspace_key:
+            raise self._broken()
+        ref = {"event_id": event["id"], "event_digest": record_digest(event)}
+        read = tx.get("notice_read", identity("nr_", {"event_id": event["id"]}), missing=True)
+        if read is not None and (
+            read["workspace_key"] != self.workspace_key or read["event_ref"] != ref
+        ):
+            raise self._broken()
+        outbox = tx.get("outbox", identity("no_", {"event_id": event["id"]}), missing=True)
+        if outbox is not None:
+            if (
+                outbox["workspace_key"] != self.workspace_key
+                or outbox["event_id"] != event["id"]
+                or outbox["actor_id"] != event["actor_id"]
+                or outbox["kind"] != event["kind"]
+                or outbox["status"] not in {"pending", "sealed"}
+                or (outbox["status"] == "pending") != (outbox["batch_id"] is None)
+            ):
+                raise self._broken()
+            if outbox["batch_id"] is not None:
+                batches = batches if batches is not None else {}
+                batch_id = outbox["batch_id"]
+                if batch_id not in batches:
+                    batches[batch_id] = tx.get("batch", batch_id)
+                batch = batches[batch_id]
+                if (
+                    batch["workspace_key"] != self.workspace_key
+                    or batch["actor_id"] != event["actor_id"]
+                    or batch["kind"] != event["kind"]
+                    or ref not in batch["member_refs"]
+                ):
+                    raise self._broken()
+        return {"event": event, "notice_read": read, "outbox": outbox}
+
+    async def _refresh_entry_metadata(self, events):
+        def snapshot(tx):
+            if tx is None:
+                if events:
+                    raise self._broken()
+                return []
+            result, batches = [], {}
+            for original in events:
+                current = tx.get("event", original["id"])
+                if record_digest(current) != record_digest(original):
+                    raise self._broken()
+                result.append(self._entry_metadata(tx, current, batches=batches))
+            return result
+
+        return await self._read(snapshot)
+
     async def _entry(self, event, caller=None):
         if event["workspace_key"] != self.workspace_key:
             raise self._broken()
         if caller is not None and event["actor_id"] != caller:
             raise error("not_found", "通知不在当前 Agent 范围")
-        read = await self._record(
-            "notice_read", identity("nr_", {"event_id": event["id"]}), missing=True
-        )
-        outbox = await self._record(
-            "outbox", identity("no_", {"event_id": event["id"]}), missing=True
-        )
+        metadata = (await self._refresh_entry_metadata([event]))[0]
+        return await self._project_entry(event, caller, metadata)
+
+    async def _project_entry(self, event, caller, metadata):
+        if event["workspace_key"] != self.workspace_key:
+            raise self._broken()
+        if caller is not None and event["actor_id"] != caller:
+            raise error("not_found", "通知不在当前 Agent 范围")
+        if record_digest(metadata["event"]) != record_digest(event):
+            raise self._broken()
+        read, outbox = metadata["notice_read"], metadata["outbox"]
         view = {
             "id": event["id"],
             "event_digest": record_digest(event),
@@ -390,18 +447,46 @@ class PersonalNotificationService(NotificationAuthorityMixin):
         integer(limit, "每页通知数", 1, 100)
         if after is not None:
             text(after, "续读位置", 35, pattern=re.compile(r"^ne_[a-f0-9]{32}$"))
-        # Counts are bounded and explicitly partial; continuation itself has no 10000-row cap.
-        counts_rows, partial = await self._entries(caller_actor)
-        page = await self._page("event", after=after, limit=limit)
+        # Counts contain opaque local identities; only actionable high-priority
+        # counters need source bodies. Never project every normal private result
+        # just to count it. Summary is bounded; raw continuation is not capped.
+        summary = await self._summary(caller_actor)
+
+        def snapshot(tx):
+            if tx is None:
+                return {"metadata": [], "next_after": None}
+            page = tx.page("event", parent=self.workspace_key, after=after, limit=limit)
+            values, batches = [], {}
+            for event in page["records"]:
+                if event["workspace_key"] != self.workspace_key:
+                    raise self._broken()
+                if (
+                    caller_actor is not None
+                    and event["actor_id"] != caller_actor
+                    or actor_id is not None
+                    and event["actor_id"] != actor_id
+                ):
+                    continue
+                metadata = self._entry_metadata(tx, event, batches=batches)
+                if filter in {"unread", "attention"} and metadata["notice_read"] is not None:
+                    continue
+                if filter == "attention" and event["kind"] == "item_result":
+                    continue
+                values.append(metadata)
+            return {"metadata": values, "next_after": page["next_after"]}
+
+        page = await self._read(snapshot)
+        scan = await self._scan()
+        events = [value["event"] for value in page["metadata"]]
+        for event, metadata in zip(events, page["metadata"], strict=True):
+            await self._project_entry(event, caller_actor, metadata)
+        # Refresh local metadata before the final source pass, not after it.
+        # No SQLite lock spans an await and no post-authorization DB await can
+        # make a previously authorized title bypass the final source boundary.
+        final = await self._refresh_entry_metadata(events)
         rows = []
-        for event in page["records"]:
-            if (
-                (caller_actor is not None and event["actor_id"] != caller_actor)
-                or actor_id is not None
-                and event["actor_id"] != actor_id
-            ):
-                continue
-            row = await self._entry(event, caller_actor)
+        for event, metadata in zip(events, final, strict=True):
+            row = await self._project_entry(event, caller_actor, metadata)
             if filter == "unread" and not row["unread"]:
                 continue
             if filter == "attention" and not (
@@ -409,15 +494,14 @@ class PersonalNotificationService(NotificationAuthorityMixin):
             ):
                 continue
             rows.append(row)
-        for n, row in enumerate(rows):
-            rows[n] = await self._entry(await self._record("event", row["id"]), caller_actor)
-        scan = await self._scan()
         return {
             "entries": rows,
             "next_after": page["next_after"],
-            "partial": partial or scan["partial"],
+            "partial": summary["partial"] or scan["partial"],
             "consistency": "live_keyset",
-            **self._counts(counts_rows),
+            "counts_consistency": "journal_snapshot",
+            "unread_count": summary["unread_count"],
+            "attention_count": summary["attention_count"],
         }
 
     async def get_batch(self, batch_id, caller_actor=None):
