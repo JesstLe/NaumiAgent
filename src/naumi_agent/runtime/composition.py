@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
+import re
 import sys
+from dataclasses import fields, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -550,9 +553,57 @@ def create_agent_engine(
     service_overrides: RuntimeServiceOverrides | None = None,
 ) -> AgentEngine:
     """Create one Engine from the authoritative default Port composition."""
-    from naumi_agent.orchestrator.engine import AgentEngine
+    return _compose_engine(
+        config,
+        paths=build_runtime_paths(config),
+        port_overrides=port_overrides,
+        resource_overrides=resource_overrides,
+        service_overrides=service_overrides,
+    )
+
+
+def create_isolated_agent_engine(
+    config: AppConfig,
+    *,
+    execution_key: str,
+    nested_execution_key: str | None = None,
+) -> AgentEngine:
+    """Compose a durable child without accepting arbitrary resource paths or flags."""
+    for name, value in (("execution_key", execution_key),
+                        ("nested_execution_key", nested_execution_key)):
+        if name == "nested_execution_key" and value is None:
+            continue
+        if type(value) is not str:
+            raise TypeError(f"{name} 必须是小写 32 位十六进制字符串。")
+        if re.fullmatch(r"[0-9a-f]{32}", value) is None:
+            raise ValueError(f"{name} 必须是小写 32 位十六进制字符串。")
 
     paths = build_runtime_paths(config)
+    directory = paths.runtime_data_dir / "personal-executions" / execution_key
+    if nested_execution_key is not None:
+        directory = directory / "p" / nested_execution_key
+    shared = {"workspace_root", "session_db_path", "runtime_data_dir", "chat_run_db_path"}
+    changes = {
+        item.name: directory / hashlib.sha256(item.name.encode()).hexdigest()[:12]
+        / getattr(paths, item.name).name
+        for item in fields(paths) if item.name not in shared
+    }
+    isolated_paths = replace(paths, **changes)
+    return _compose_engine(config, paths=isolated_paths, execution_data_dir=directory)
+
+
+def _compose_engine(
+    config: AppConfig,
+    *,
+    paths: RuntimePaths,
+    port_overrides: RuntimePortOverrides[Session] | None = None,
+    resource_overrides: RuntimeResourceOverrides | None = None,
+    service_overrides: RuntimeServiceOverrides | None = None,
+    execution_data_dir: Path | None = None,
+) -> AgentEngine:
+    """Keep complete dependency injection and the sole Engine constructor together."""
+    from naumi_agent.orchestrator.engine import AgentEngine
+
     ports = build_runtime_ports(config, paths=paths, overrides=port_overrides)
     resources = build_runtime_resources(paths, overrides=resource_overrides)
     services = build_runtime_services(
@@ -561,12 +612,17 @@ def create_agent_engine(
         resources=resources,
         overrides=service_overrides,
     )
+    engine_options = (
+        {"isolated_child": True, "execution_data_dir": execution_data_dir}
+        if execution_data_dir is not None else {}
+    )
     return AgentEngine(
         config,
         ports=ports,
         paths=paths,
         resources=resources,
         services=services,
+        **engine_options,
     )
 
 
@@ -576,4 +632,5 @@ __all__ = [
     "build_runtime_resources",
     "build_runtime_services",
     "create_agent_engine",
+    "create_isolated_agent_engine",
 ]
