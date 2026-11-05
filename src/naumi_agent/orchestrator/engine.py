@@ -4272,6 +4272,9 @@ class AgentEngine:
         from naumi_agent.personal.notifications import PersonalNotificationService
 
         self.personal_notifications = PersonalNotificationService(self)
+        from naumi_agent.personal.workspaces import PersonalWorkspaceService
+
+        self.personal_workspaces = PersonalWorkspaceService(self)
         from naumi_agent.personal.memories import PersonalMemoryService
         from naumi_agent.personal.memory_adapter import ScopedMemoryAdapter
         from naumi_agent.personal.memory_runtime import PersonalMemoryRuntime
@@ -4435,6 +4438,9 @@ class AgentEngine:
         from naumi_agent.personal.notification_tools import PersonalNotificationsTool
 
         self._tool_registry.register(PersonalNotificationsTool(self.personal_notifications))
+        from naumi_agent.personal.workspace_tools import PersonalWorkspacesTool
+
+        self._tool_registry.register(PersonalWorkspacesTool(self.personal_workspaces))
         from naumi_agent.personal.connection_tools import (
             PersonalActionsTool,
             PersonalConnectionsTool,

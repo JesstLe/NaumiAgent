@@ -1,0 +1,10 @@
+import { ArrowLeft } from 'lucide-react'
+import type { WorkspaceState } from './useWorkspaceOverview'
+import { workspaceAvailability, workspaceExecutionStates } from './workspacePresentation'
+
+export function SourceResultDetail({ state }: { state: WorkspaceState }) {
+  const value = state.result, result = value?.availability === 'available' ? value.result : null
+  return <section className="pw-result" aria-label="源工作区结果"><header className="pw-heading"><div><button aria-label="返回汇总事项" onClick={state.closeResult}><ArrowLeft size={18} /></button><h2>{value?.item?.title || '执行结果'}</h2></div><span className="pw-badge">只读</span></header>
+    {state.resultLoading ? <div className="pw-empty" role="status">正在读取原结果…</div> : !result ? <div className="pw-empty" role="status">{value ? workspaceAvailability(value.code) : '原结果尚待核对'}</div> : <><div className="pw-result-meta"><span>{state.connections.find(row => row.id === value?.connection_id)?.label}</span><span>{workspaceExecutionStates[result.status] || '待核对'}</span></div><article className="pw-answer"><h3>回答</h3><pre>{result.answer || '原结果没有回答正文'}</pre></article><section className="pw-artifacts"><h3>材料 · {result.artifacts.length}</h3>{result.artifacts.map(artifact => <article key={`${artifact.artifact_id}:${artifact.version}`}><header><strong>{artifact.title}</strong><span>v{artifact.version}</span></header><pre>{artifact.content_text}</pre><details><summary>材料身份</summary><code>{artifact.artifact_id}<br />{artifact.sha256}</code></details></article>)}</section><details className="pw-evidence"><summary>原交付身份</summary><pre>{JSON.stringify({ connection_id: value?.connection_id, connection_revision: value?.connection_revision, source: value?.source, recipient: value?.recipient, item_ref: value?.item?.source_ref, occurrence_id: result.occurrence_id, job_id: result.job_id, run_id: result.run_id, delivery_id: result.delivery_id, delivery_sha256: result.delivery_sha256, read_receipt: result.read_receipt }, null, 2)}</pre></details></>}
+  </section>
+}

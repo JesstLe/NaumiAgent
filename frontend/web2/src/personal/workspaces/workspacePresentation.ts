@@ -1,0 +1,3 @@
+export const workspaceAvailability = (code: string | null) => ({ source_unavailable: '来源暂时离线', source_stale: '来源身份已变化', grant_revoked: '授权已撤销', not_found: '尚无可读取的原交付', input_limit: '结果超出读取上限', version_conflict: '来源版本已变化' }[code || ''] || '来源暂不可用')
+export const workspaceItemStates: Record<string, string> = { active: '进行中', paused: '已暂停', cancelled: '已取消', closed: '已关闭' }
+export const workspaceExecutionStates: Record<string, string> = { prepared: '已准备', queued: '排队中', running: '执行中', completed: '已完成', error: '执行失败', timeout: '已超时', max_turns: '达到轮数上限', cancelled: '已取消', unknown: '待核对', blocked: '受阻', skipped: '已跳过' }

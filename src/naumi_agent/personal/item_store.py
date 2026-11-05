@@ -674,6 +674,12 @@ class PersonalItemStore:
         with self._connection(owner) as db:
             return db.execute("SELECT instance_id FROM item_store_meta").fetchone()[0]
 
+    def ensure_identity(self, *, owner_key):
+        """Explicit enrollment initializes metadata only, never an item or execution."""
+        owner = self._owner(owner_key)
+        with self._connection(owner, write=True) as db:
+            return db.execute("SELECT instance_id FROM item_store_meta").fetchone()[0]
+
     def get(self, *, owner_key, item_id):
         owner, item_id = self._owner(owner_key), self._id(item_id)
         if not self._exists():

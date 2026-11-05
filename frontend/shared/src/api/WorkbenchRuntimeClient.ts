@@ -1,3 +1,4 @@
+import type { WorkspaceArguments, WorkspaceContext, WorkspaceOperation, WorkspaceResponses } from './personalWorkspaces'
 import type { NotificationBatch, NotificationClaim, NotificationContext, NotificationMutation, NotificationPage, NotificationPreferencesView, NotificationPreferenceWrite, NotificationPresentation, NotificationPrompt, NotificationQuery, NotificationRead, NotificationRequest } from './personalNotifications'
 import type { TodayContext, TodayDayView, TodayHistory, TodayMetadataView, TodayMutation, TodayOperation, TodayQuery, TodayRequest, TodaySources, TodayWriteBodies } from './personalToday'
 import type { PersonalItem, PersonalItemAction, PersonalItemControl, PersonalItemExecution, PersonalItemInput, PersonalItemPage, PersonalItemReadInput, PersonalItemReadReceipt, PersonalItemResult, PersonalItemResultsPage, PersonalItemUpdate } from './personalItems'
@@ -560,6 +561,12 @@ export class WorkbenchRuntimeClient extends WorkbenchApiClient {
   }
   async getPersonalNotificationContext(signal?: AbortSignal): Promise<NotificationContext> {
     return (await this.fetch('/personal/notifications/context', { signal, cache: 'no-store' })).json()
+  }
+  async getPersonalWorkspaceContext(signal?: AbortSignal): Promise<WorkspaceContext> {
+    return (await this.fetch('/personal/workspaces/context', { signal, cache: 'no-store' })).json()
+  }
+  async executePersonalWorkspaceOperation<K extends WorkspaceOperation>(operation: K, args: WorkspaceArguments[K], signal?: AbortSignal): Promise<WorkspaceResponses[K]> {
+    return (await this.fetch('/personal/workspaces/operations', { method: 'POST', signal, cache: 'no-store', body: JSON.stringify({ operation, ...args }) })).json()
   }
   async getPersonalNotifications(query: NotificationQuery = {}, signal?: AbortSignal): Promise<NotificationPage> {
     const params = new URLSearchParams()
