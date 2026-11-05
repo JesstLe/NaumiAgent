@@ -112,6 +112,12 @@ class ArtifactToolProxy:
                     "artifact_export_required",
                     "本对话含私有资料，请先保存为产物，再由用户明确分享或导出",
                 )
+            if private and self.name == "personal_research" and args.get("operation") in {
+                "search", "capture", "recheck",
+            }:
+                raise PersonalAgentError(
+                    "artifact_network_denied", "私有资料上下文不能外发新的检索词或网址"
+                )
             if private and self.name not in {
                 "personal_artifacts",
                 "bash_run",
@@ -130,6 +136,7 @@ class ArtifactToolProxy:
                 "personal_notifications",
                 "personal_workspaces",
                 "personal_followups",
+                "personal_research",
                 "personal_memories",
                 "personal_connections",
                 "personal_actions",

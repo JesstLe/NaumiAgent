@@ -345,7 +345,7 @@
     {
       "id": "VID-11",
       "title": "有来源的调研、趋势和竞品研究",
-      "status": "planned",
+      "status": "partial",
       "in_scope": true,
       "verified_in_naumi": false,
       "owners": [
@@ -372,7 +372,9 @@
       "acceptance": [
         "引用可定位到支持结论的正文；失效或过时来源触发明确标记。",
         "至少一个真实研究任务完成检索→证据→结论→可重开产物。"
-      ]
+      ],
+      "implementation_note": "PA-07已实现持久研究、结构化搜索发现、显式正文采集、确切版本导入、引文锚定、有效期和版本化报告，前端26项研究测试通过。真实公网、模型和HTTP/浏览器研究闭环待本轮主Agent补齐；自主外发审批及独立语义复核未完成，semantic_verification始终为not_performed。24项目标与原验收不变。",
+      "implementation_record": "../../development/personal-agent/PA-07.md"
     },
     {
       "id": "VID-12",
@@ -592,7 +594,7 @@
         "事实字段有证据引用，估算有方法或前提，未知字段保持未知。",
         "来源失效/反证到达时能够修订结果并保留版本。"
       ],
-      "implementation_note": "Page支持fact/estimate/unknown及不可变确切来源卡，修订保留lineage；上游撤销阻断旧引用的后续访问/衍生。真实预算Page保留支付状态未知。此为产物证据底座，不等于PA-07研究检索、反证与推荐质量已实现。",
+      "implementation_note": "PA-08保留fact/estimate/unknown、不可变确切来源卡、lineage和上游撤销访问约束；PA-07补充研究声明、估算前提、判断及失效条件、确切引文和字符/UTF-8字节锚点、上游未核实标签及报告历史。前端研究26项通过；真实研究闭环待本轮补齐，确切引文不证明语义支持，semantic_verification=not_performed。PA-07记录见../../development/personal-agent/PA-07.md。",
       "implementation_record": "../../development/personal-agent/PA-08.md"
     },
     {
@@ -660,7 +662,7 @@
     {
       "id": "VID-21",
       "title": "主 Agent 复核其他 Agent 的结果并指出矛盾",
-      "status": "planned",
+      "status": "partial",
       "in_scope": true,
       "verified_in_naumi": false,
       "owners": [
@@ -682,7 +684,9 @@
       "acceptance": [
         "注入错误比例、币种或来源，主控识别并要求修复。",
         "重算/修订有独立产物版本，修复前不宣称通过。"
-      ]
+      ],
+      "implementation_note": "PA-07已实现确定性Decimal比例/百分比/合计/差值复算、单位/币种/期间及数量冲突检查、原文引用锚定与可修订报告；机械结果不伪装语义通过，所有声明independently_verified=False。真实主Agent工具、修订和报告闭环待本轮主Agent补齐；独立语义复核者尚未实现，完整能力保持partial。",
+      "implementation_record": "../../development/personal-agent/PA-07.md"
     },
     {
       "id": "VID-22",

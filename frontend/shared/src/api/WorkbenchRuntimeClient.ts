@@ -1,4 +1,5 @@
 import type { FollowupArguments, FollowupContext, FollowupResponses } from './personalFollowups'
+import type { ResearchContext, ResearchHistory, ResearchPage, ResearchRequest, ResearchResult, ResearchSourceView, ResearchView } from './personalResearch'
 import type { WorkspaceArguments, WorkspaceContext, WorkspaceOperation, WorkspaceResponses } from './personalWorkspaces'
 import type { NotificationBatch, NotificationClaim, NotificationContext, NotificationMutation, NotificationPage, NotificationPreferencesView, NotificationPreferenceWrite, NotificationPresentation, NotificationPrompt, NotificationQuery, NotificationRead, NotificationRequest } from './personalNotifications'
 import type { TodayContext, TodayDayView, TodayHistory, TodayMetadataView, TodayMutation, TodayOperation, TodayQuery, TodayRequest, TodaySources, TodayWriteBodies } from './personalToday'
@@ -534,6 +535,31 @@ export class WorkbenchRuntimeClient extends WorkbenchApiClient {
   }
   async getPersonalFollowupContext(signal?: AbortSignal): Promise<FollowupContext> {
     return (await this.fetch('/personal/followups/context', { signal, cache: 'no-store' })).json()
+  }
+  async getPersonalResearchContext(signal?: AbortSignal): Promise<ResearchContext> {
+    return (await this.fetch('/personal/research/context', { signal, cache: 'no-store' })).json()
+  }
+  async listPersonalResearch(query: { limit?: number; after?: string } = {}, signal?: AbortSignal): Promise<ResearchPage> {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(query)) if (value !== undefined) params.set(key, String(value))
+    return (await this.fetch(`/personal/research${params.size ? `?${params}` : ''}`, { signal, cache: 'no-store' })).json()
+  }
+  async getPersonalResearch(id: string, revision?: number, signal?: AbortSignal): Promise<ResearchView> {
+    return (await this.fetch(`/personal/research/${encodeURIComponent(id)}${revision === undefined ? '' : `?revision=${revision}`}`, { signal, cache: 'no-store' })).json()
+  }
+  async executePersonalResearch(operation: string, payload: Record<string, unknown>, signal?: AbortSignal): Promise<ResearchResult> {
+    return (await this.fetch(`/personal/research/operations/${encodeURIComponent(operation)}`, { method: 'POST', signal: signal ?? AbortSignal.timeout(120000), cache: 'no-store', body: JSON.stringify(payload) })).json()
+  }
+  async getPersonalResearchSource(id: string, revision?: number, signal?: AbortSignal): Promise<ResearchSourceView> {
+    return (await this.fetch(`/personal/research/sources/${encodeURIComponent(id)}${revision === undefined ? '' : `?revision=${revision}`}`, { signal, cache: 'no-store' })).json()
+  }
+  async getPersonalResearchHistory(id: string, query: { limit?: number; after_revision?: number } = {}, signal?: AbortSignal): Promise<ResearchHistory> {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(query)) if (value !== undefined) params.set(key, String(value))
+    return (await this.fetch(`/personal/research/${encodeURIComponent(id)}/history${params.size ? `?${params}` : ''}`, { signal, cache: 'no-store' })).json()
+  }
+  async getPersonalResearchRequest(id: string, signal?: AbortSignal): Promise<ResearchRequest> {
+    return (await this.fetch(`/personal/research/requests/${encodeURIComponent(id)}`, { signal, cache: 'no-store' })).json()
   }
   async executePersonalFollowupOperation<K extends keyof FollowupArguments>(operation: K, args: FollowupArguments[K], signal?: AbortSignal): Promise<FollowupResponses[K]> {
     return (await this.fetch('/personal/followups/operations', { method: 'POST', signal: signal ?? AbortSignal.timeout(180000), cache: 'no-store', body: JSON.stringify({ operation, ...args }) })).json()

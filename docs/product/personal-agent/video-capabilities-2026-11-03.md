@@ -219,7 +219,13 @@ NaumiAgent 的 Team 因此要明确成员关系和真实 Run，不根据命名�
 
 ### VID-11 · 有来源的调研、趋势和竞品研究
 
-模块：PA-07；状态：planned。
+模块：PA-07；状态：partial。
+
+**当前实现**：PA-07 已接通持久研究、搜索发现与显式正文采集、确切版本引用、
+有效期、声明判断及报告；26 项研究前端测试通过。真实公网、模型与 HTTP/浏览器
+研究闭环待本轮主 Agent 补齐；自主外发审批及独立语义复核仍未完成，
+`semantic_verification=not_performed`。完整 24 项目标与原验收不变。
+见 [PA-07 实施记录](../../development/personal-agent/PA-07.md)。
 
 **视频证据**
 
@@ -340,7 +346,14 @@ NaumiAgent 的 Team 因此要明确成员关系和真实 Run，不根据命名�
 
 ### VID-18 · 引用卡、事实/估算/未知与研究判断
 
-模块：PA-07、PA-08；状态：planned。
+模块：PA-07、PA-08；状态：partial。
+
+**当前实现**：PA-08 的不可变来源卡、确切版本与撤权约束保持；PA-07 补充
+研究声明、估算前提、判断及失效条件、确切引文与字符/UTF-8 字节锚点，
+下游继续保留上游未核实状态。26 项研究前端测试通过，实际研究闭环待本轮补齐。
+原文存在不等于语义支持，`semantic_verification` 保持 `not_performed`。
+见 [PA-07 实施记录](../../development/personal-agent/PA-07.md)及
+[PA-08 实施记录](../../development/personal-agent/PA-08.md)。
 
 **视频证据**
 
@@ -390,7 +403,13 @@ NaumiAgent 的 Team 因此要明确成员关系和真实 Run，不根据命名�
 
 ### VID-21 · 主 Agent 复核其他 Agent 的结果并指出矛盾
 
-模块：PA-06、PA-07；状态：planned。
+模块：PA-06、PA-07；状态：partial。
+
+**当前实现**：PA-07 已实现 Decimal 比例、百分比、合计和差值复算，以及单位、
+币种、期间、数量冲突与原文引用检查；研究和报告可修订并保留版本。
+真实主 Agent 工具、修订和报告闭环待本轮主 Agent 补齐。
+机械检查不冒充独立语义核实，声明 `independently_verified=False`，
+独立语义复核者仍未完成。见 [PA-07 实施记录](../../development/personal-agent/PA-07.md)。
 
 **视频证据**
 

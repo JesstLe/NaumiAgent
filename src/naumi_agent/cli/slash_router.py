@@ -189,6 +189,18 @@ async def _run_single_slash_command(
     frontend: Any | None = None,
 ) -> str:
     """Run one normalized slash command through `_handle_command`."""
+    pieces = command.split(maxsplit=1)
+    if pieces and pieces[0] == "/research":
+        from naumi_agent.personal.research_commands import run_research_command
+
+        channel = getattr(engine, "_personal_research_manual_channel", None)
+        if channel is None:
+            channel = (
+                "tui" if type(frontend).__module__.startswith("naumi_agent.tui.") else "cli"
+            )
+        return await run_research_command(
+            engine, pieces[1] if len(pieces) > 1 else "", trusted_channel=channel,
+        )
     capture_async = getattr(engine_main, "_capture_async", None)
     if callable(capture_async):
         async def _run() -> None:

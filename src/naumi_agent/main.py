@@ -3355,6 +3355,7 @@ def _print_help() -> None:
         ("/notifications [子命令]", "通知 — 列表、勿扰、呈现与独立已读确认"),
         ("/workspaces [子命令]", "工作区 — 授权、连接、事项汇总与原结果读取"),
         ("/followups [子命令]", "跟进 — 规则、原建议、采纳、忽略与稍后提醒"),
+        ("/research [子命令]", "研究 — 来源、引用、主张、数值复核与报告"),
         (
             "/agents result ack <投递ID> <SHA256>",
             "Agent Control — 确认一条持久结果已读",

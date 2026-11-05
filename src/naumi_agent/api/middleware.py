@@ -17,7 +17,7 @@ def _routine_headers(request: Request) -> dict[str, str]:
     path = request.url.path
     prefixes = ("/api/v1/personal/routines", "/api/v1/personal/today",
                 "/api/v1/personal/notifications", "/api/v1/personal/workspaces",
-                "/api/v1/personal/followups")
+                "/api/v1/personal/followups", "/api/v1/personal/research")
     if any(path == prefix or path.startswith(prefix + "/") for prefix in prefixes):
         return {"Cache-Control": "no-store", "Pragma": "no-cache"}
     return {}
@@ -60,7 +60,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         if any(request.url.path == prefix or request.url.path.startswith(prefix + "/")
-               for prefix in ("/api/v1/personal/workspaces", "/api/v1/personal/followups")):
+               for prefix in ("/api/v1/personal/workspaces", "/api/v1/personal/followups",
+                              "/api/v1/personal/research")):
             upstream = call_next
 
             async def workspace_next(incoming):

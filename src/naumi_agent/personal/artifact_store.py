@@ -102,6 +102,12 @@ def _followup_evidence(evidence):
     return found
 
 
+def _research_evidence(evidence):
+    from naumi_agent.personal.research_authority import research_evidence
+
+    return research_evidence(evidence)
+
+
 _VERSION_FIELDS = {
     "artifact_id",
     "workspace_key",
@@ -334,17 +340,18 @@ class ArtifactStore:
             routine_bound = _routine_evidence(value["evidence"])
             workspace_bound = _workspace_evidence(value["evidence"])
             followup_bound = _followup_evidence(value["evidence"])
+            research_bound = _research_evidence(value["evidence"])
         except PersonalAgentError:
             raise _broken() from None
         expected_authority = (
-            5 if followup_bound else 4 if workspace_bound else
+            6 if research_bound else 5 if followup_bound else 4 if workspace_bound else
             3 if routine_bound else 2 if connection_bound else None
         )
         if value.get("authority_version") != expected_authority:
             raise _broken()
         if "authority_version" in value and (
             type(value["authority_version"]) is not int
-            or value["authority_version"] not in {2, 3, 4, 5}
+            or value["authority_version"] not in {2, 3, 4, 5, 6}
         ):
             raise _broken()
         if (
@@ -680,7 +687,8 @@ class ArtifactStore:
                     }
                 )
                 if (_workspace_evidence(previous_record["evidence"])
-                        or _followup_evidence(previous_record["evidence"])):
+                        or _followup_evidence(previous_record["evidence"])
+                        or _research_evidence(previous_record["evidence"])):
                     # Revisions cannot erase an opaque external read by omitting evidence.
                     previous_ref = {
                         key: previous_record[key] for key in ("artifact_id", "version", "sha256")
@@ -716,7 +724,10 @@ class ArtifactStore:
             connection_bound = _connection_evidence(evidence)
             workspace_bound = _workspace_evidence(evidence)
             followup_bound = _followup_evidence(evidence)
-            if followup_bound:
+            research_bound = _research_evidence(evidence)
+            if research_bound:
+                record["authority_version"] = 6
+            elif followup_bound:
                 record["authority_version"] = 5
             elif workspace_bound:
                 record["authority_version"] = 4

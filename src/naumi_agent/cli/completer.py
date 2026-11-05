@@ -177,6 +177,11 @@ def _build_commands() -> list[CommandMeta]:
         CommandMeta("/notifications", "通知 — 合并、勿扰与确切已读确认", takes_arg=True, arg_hint="[context|list|get-batch|preferences|requests|preferences-json|claim-json|present-json|read-json] [参数]", readonly=False, category="元命令"),
         CommandMeta("/workspaces", "工作区 — 授权、连接与只读汇总", takes_arg=True, arg_hint="[context|list|recipient|grants|requests|overview|result|issue-json|revoke-json|connect-json|disconnect-json] [参数]", readonly=False, category="元命令"),
         CommandMeta("/followups", "跟进 — 规则与原建议决策", takes_arg=True, arg_hint="[context|rules|list|get|requests|create-rule-json|update-rule-json|set-status-json|accept-json|dismiss-json|snooze-json|reconcile-json] [参数]", readonly=False, category="元命令"),
+        CommandMeta(
+            "/research", "研究 — 来源、主张、机械复核与确切报告", takes_arg=True,
+            arg_hint="[context|list|get|source|history|request|操作-json] [参数]",
+            readonly=False, category="元命令",
+        ),
         CommandMeta("/actions", "日历行动 — 草稿、确切批准与原事件读回", takes_arg=True, arg_hint="[list|get|propose|approve|reject|reconcile] [参数]", readonly=False, category="元命令"),
         CommandMeta("/runtime", "运行时状态 — all/context/todo/team/subagent/hooks/resources", takes_arg=True, arg_hint="[分区]", readonly=True, category="元命令"),
         CommandMeta("/browse", "打开 URL 并显示 SoM 元素", takes_arg=True, arg_hint="<url>", readonly=False, category="元命令"),

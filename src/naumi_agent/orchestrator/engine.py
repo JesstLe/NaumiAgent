@@ -4278,6 +4278,9 @@ class AgentEngine:
         from naumi_agent.personal.followups import PersonalFollowupService
 
         self.personal_followups = PersonalFollowupService(self)
+        from naumi_agent.personal.research import PersonalResearchService
+
+        self.personal_research = PersonalResearchService(self)
         from naumi_agent.personal.memories import PersonalMemoryService
         from naumi_agent.personal.memory_adapter import ScopedMemoryAdapter
         from naumi_agent.personal.memory_runtime import PersonalMemoryRuntime
@@ -4454,6 +4457,9 @@ class AgentEngine:
 
         self._tool_registry.register(PersonalConnectionsTool(self.personal_connections))
         self._tool_registry.register(PersonalActionsTool(self.personal_connections))
+        from naumi_agent.personal.research_tools import PersonalResearchTool
+
+        self._tool_registry.register(PersonalResearchTool(self.personal_research))
         self._tool_registry.register(OutputPublishTool(self))
         self._tool_registry.register(OutputAssetRetentionPreviewTool(self))
         self._tool_registry.register(OutputAssetRetentionRunTool(self))
