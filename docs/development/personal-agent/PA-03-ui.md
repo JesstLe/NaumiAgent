@@ -1,5 +1,10 @@
 # PA-03 — 连接工作区与日历动作审批
 
+2026-11-05 撤销反馈收口：UI 同时识别后端 canonical `confirmed/error/unknown/not_requested`，
+以及兼容的 `revoked/failed/requested/none`；未来未知状态保留“待核对”，没有状态不显示撤销行。
+此修订不改变协议状态、授权、审批、写入或远端重试。真实账户准备与独立证据见
+[Google 接入记录](PA-03-google-live-20261105.md)。
+
 ## 当前实现
 
 - 独立浅色「连接」工作区加入 Web2 主导航，`?connections=1` 可冷启动打开。

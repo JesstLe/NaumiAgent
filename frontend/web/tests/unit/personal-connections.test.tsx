@@ -114,6 +114,36 @@ describe('calendar request identity recovery', () => {
   })
 })
 
+describe('remote revocation state feedback', () => {
+  it.each([
+    ['confirmed', '已撤销'],
+    ['error', '撤销失败'],
+    ['unknown', '结果待核对'],
+    ['not_requested', '未请求'],
+    ['revoked', '已撤销'],
+    ['failed', '撤销失败'],
+    ['requested', '已请求'],
+    ['none', '未请求'],
+    ['future_revoke_state', '待核对'],
+  ])('renders %s as %s without issuing calendar writes', async (revoke_status, label) => {
+    const api = apiMock(connection({ status: 'disconnected', revoke_status }))
+    mount(api)
+    expect(await screen.findByText(`远端撤销：${label}`)).toBeInTheDocument()
+    for (const mutation of ['disconnectPersonalCalendar', 'beginPersonalCalendarOAuth', 'syncPersonalCalendar',
+      'grantPersonalCalendar', 'revokePersonalCalendarGrant', 'createPersonalCalendarAction',
+      'approvePersonalCalendarAction', 'reconcilePersonalCalendarAction'] as const)
+      expect(api[mutation]).not.toHaveBeenCalled()
+  })
+  it.each([null, undefined, ''])('does not invent remote revocation feedback for an absent status (%s)', async revoke_status => {
+    const api = apiMock(connection({ status: 'disconnected', revoke_status }))
+    mount(api)
+    await screen.findByRole('button', { name: /calendar@example\.test/ })
+    expect(screen.queryByText(/远端撤销：/)).not.toBeInTheDocument()
+    expect(api.disconnectPersonalCalendar).not.toHaveBeenCalled()
+    expect(api.beginPersonalCalendarOAuth).not.toHaveBeenCalled()
+  })
+})
+
 describe('operative light calendar workspace', () => {
   it('starts a new read-only account connection without rebinding the selected existing account', async () => {
     const { api } = mount(); const button = await screen.findByRole('button', { name: '连接 Google 日历' })
