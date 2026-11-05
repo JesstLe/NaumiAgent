@@ -20,7 +20,7 @@ from naumi_agent.personal.followup_models import (
 )
 from naumi_agent.personal.item_models import canonical, digest
 from naumi_agent.personal.models import PersonalAgentError
-from naumi_agent.personal.today_models import metadata_identity, placement_identity
+from naumi_agent.personal.today_models import metadata_identity, placement_identity, record_digest
 
 _APPLY = ContextVar("personal_followup_apply_proof", default=None)
 _MUTABLE = frozenset(
@@ -334,11 +334,9 @@ class FollowupEffectsMixin:
         await self._accepted_effect(initial["id"])
         return current
 
-    async def _effect_artifact(self, effect):
-        current, initial, proposal = await self._accepted_effect(effect["id"])
-        ref = reference(initial, "effect")
-        await self._authorize_effect_ref(ref, initial["actor_id"])
-        content = canonical(
+    @staticmethod
+    def _effect_artifact_content(initial, proposal):
+        return canonical(
             {
                 "effect_id": initial["id"],
                 "proposal_ref": initial["proposal_ref"],
@@ -346,7 +344,32 @@ class FollowupEffectsMixin:
                 "source": proposal["source"],
                 "target": initial["target"],
             }
-        ).encode()
+        ).encode("utf-8")
+
+    async def _read_existing_effect_artifact(self, current, initial, proposal):
+        artifact_ref = current["artifact_ref"]
+        if artifact_ref is None:
+            raise error("source_stale")
+        content = self._effect_artifact_content(initial, proposal)
+        ref = reference(initial, "effect")
+        snapshot, actual = await self.artifacts.read(
+            actor_id=initial["actor_id"],
+            artifact_id=artifact_ref["artifact_id"],
+            version=artifact_ref["version"],
+        )
+        if (
+            actual != content
+            or snapshot["sha256"] != hashlib.sha256(content).hexdigest()
+            or snapshot["evidence"].get("followup_effect_refs") != [ref]
+            or self.artifacts.reference(snapshot) != artifact_ref
+        ):
+            raise error("storage_error")
+        return artifact_ref
+
+    async def _effect_artifact(self, effect):
+        current, initial, proposal = await self._accepted_effect(effect["id"])
+        ref = reference(initial, "effect")
+        await self._authorize_effect_ref(ref, initial["actor_id"])
         if current["artifact_ref"] is None:
             snapshot = await self.artifacts.publish(
                 actor_id=initial["actor_id"],
@@ -354,7 +377,7 @@ class FollowupEffectsMixin:
                 title="已确认的跟进安排",
                 kind="material",
                 filename="followup-effect.txt",
-                content=content,
+                content=self._effect_artifact_content(initial, proposal),
                 evidence={"source_kind": "followup_effect", "followup_effect_refs": [ref]},
             )
             artifact_ref = self.artifacts.reference(snapshot)
@@ -373,19 +396,9 @@ class FollowupEffectsMixin:
             await self._write(save)
         else:
             artifact_ref = current["artifact_ref"]
-        snapshot, actual = await self.artifacts.read(
-            actor_id=initial["actor_id"],
-            artifact_id=artifact_ref["artifact_id"],
-            version=artifact_ref["version"],
+        return await self._read_existing_effect_artifact(
+            {**current, "artifact_ref": artifact_ref}, initial, proposal
         )
-        if (
-            actual != content
-            or snapshot["sha256"] != hashlib.sha256(content).hexdigest()
-            or snapshot["evidence"].get("followup_effect_refs") != [ref]
-            or self.artifacts.reference(snapshot) != artifact_ref
-        ):
-            raise error("storage_error")
-        return artifact_ref
 
     def check_effect_commit(self, effect_id, proof, payload):
         if type(proof) is not dict or set(proof) != {"holder", "fence"}:
@@ -473,7 +486,7 @@ class FollowupEffectsMixin:
         request = await self._target_request(initial)
         if request is None:
             raise error("source_stale")
-        artifact = await self._effect_artifact(current)
+        artifact = await self._read_existing_effect_artifact(current, initial, proposal)
         payload, actor = initial["target_payload"], initial["actor_id"]
         if initial["kind"] == "today_place":
             identity_value = request["result"]["identity"]
@@ -498,6 +511,7 @@ class FollowupEffectsMixin:
                 or day["timezone"] != payload["timezone"]
             ):
                 raise error("storage_error")
+            source_snapshots = {}
             for value in (historical, day):
                 placement = next((v for v in value["placements"] if v["id"] == placement_id), None)
                 if (
@@ -514,6 +528,14 @@ class FollowupEffectsMixin:
                 ]
                 if artifact not in refs:
                     raise error("storage_error")
+                key = (
+                    value["workspace_key"],
+                    value["id"],
+                    value["revision"],
+                    record_digest(value),
+                )
+                source_snapshots[key] = value
+            for value in source_snapshots.values():
                 await self.today._authorize_metadata_sources(value, actor)
             await self.today._authorize_item(payload["source_ref"], actor)
             result = {

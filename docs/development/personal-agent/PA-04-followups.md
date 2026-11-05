@@ -112,6 +112,13 @@ approval / execution 仍为空，原 Item 与完整 scheduler facts 摘要一致
 - 撤销原 Calendar 连接后，已编辑的私密预填表单被清除；真实模型来源材料、独立派生资料及 next-send 重新授权均阻断。最终两条规则由原 UI 归档，不删除历史目标。
 - 首次失败、脚本等待预算错误及每个续跑 checkpoint 均保留；最终成功以 `followup-ui-targets17.json`、`followup-ui-tail18.json` 为证，不把首轮改写为 PASS。
 
+## 后续读路径优化（2026-11-06）
+
+独立[读路径模块](PA-04-followup-readpath.md)已完成：纯读取既有 effect 资料、完整相同 day 快照
+去重、原 metadata/Item 单次证明，以及与写入状态分离的前台读取生命周期。同一新 fixture 的原
+Today / Calendar 建议中位数分别减少 33.48% / 12.60%，正常 wire bytes、全部逻辑事实与原目标
+证明不变；不把本页历史不同样本的 24～29 秒当同对象基线，也不称完整性能或全仓发布验收。
+
 ## 全仓测试与基线对照
 
 实际执行 `python -m pytest tests/ -x -q --tb=short`，首个

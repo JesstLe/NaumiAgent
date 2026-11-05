@@ -402,8 +402,11 @@ class PersonalFollowupService(
 
             if not isinstance(exc, PersonalAgentError):
                 raise
-            if exc.code in {"source_stale", "version_conflict", "timezone_data_changed"}:
-                result["availability"] = "source_stale"
+            result["availability"] = (
+                "source_stale"
+                if exc.code in {"source_stale", "version_conflict", "timezone_data_changed"}
+                else "source_unavailable"
+            )
             result.update(title=None, reason=None, rule=None, source=None, target=None)
         return result
 

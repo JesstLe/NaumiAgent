@@ -23,14 +23,19 @@ export function PersonalToday({ api, namespace, connected, onClose, onOpenItem, 
   api: PersonalTodayApi & Partial<FollowupApi>; namespace: string; connected: boolean; onClose: () => void
   onOpenItem: (itemId: string) => void; onOpenResult: (occurrenceId: string) => void; onOpenRoutine: (routineId: string) => void; onOpenAction?: (actionId: string) => void; initialFollowupId?: string | null
 }) {
-  const state = usePersonalToday({ api, namespace, connected })
   const hasFollowups = typeof api.getPersonalFollowupContext === 'function' && typeof api.executePersonalFollowupOperation === 'function'
-  const [followupsOpen, setFollowupsOpen] = useState(() => new URLSearchParams(location.search).get('today_view') === 'followups' || Boolean(initialFollowupId))
+  const [followupsOpen, setFollowupsOpen] = useState(() => new URLSearchParams(location.search).get('today_view') === 'followups' || Boolean(initialFollowupId) || Boolean(readFollowupLocation()))
+  const handledFollowupId = useRef(initialFollowupId)
+  const followupVisible = hasFollowups && (followupsOpen || Boolean(initialFollowupId && initialFollowupId !== handledFollowupId.current))
+  const state = usePersonalToday({ api, namespace, connected, readActive: !followupVisible })
   const [followupSeed, setFollowupSeed] = useState<FollowupRuleSeed | null>(null)
   const followupNavigation = useRef(namespace); followupNavigation.current = namespace
-  useEffect(() => () => { followupNavigation.current = '' }, [namespace])
-  useEffect(() => { if (initialFollowupId) setFollowupsOpen(true) }, [initialFollowupId])
+  const navigationConnected = useRef(connected), navigationRead = useRef<AbortController | null>(null); navigationConnected.current = connected
+  useEffect(() => { followupNavigation.current = namespace; return () => { followupNavigation.current = ''; navigationRead.current?.abort() } }, [namespace])
+  useEffect(() => { if (!connected) navigationRead.current?.abort() }, [connected])
+  useEffect(() => { handledFollowupId.current = initialFollowupId; if (initialFollowupId) setFollowupsOpen(true) }, [initialFollowupId])
   const switchView = (followups: boolean) => requestArtifactNavigation(() => {
+    navigationRead.current?.abort()
     setEditor(null); setPicker(false); setFollowupSeed(null); setFollowupsOpen(followups)
     const url = new URL(location.href); if (followups) url.searchParams.set('today_view', 'followups'); else { url.searchParams.delete('today_view'); url.searchParams.delete('followup_id') }; window.history.replaceState({}, '', url)
   })
@@ -40,9 +45,9 @@ export function PersonalToday({ api, namespace, connected, onClose, onOpenItem, 
   const [leave, setLeave] = useState<ArtifactNavigation | null>(null), [notice, setNotice] = useState('')
   const [zone, setZone] = useState(state.query.timezone), [history, setHistory] = useState<Record<string, unknown>[] | null>(null)
   const [historyAfter, setHistoryAfter] = useState<number | null>(null), [historyLoading, setHistoryLoading] = useState(false)
-  const historyIdentity = useRef('')
-  historyIdentity.current = `${namespace}:${state.view?.day.id || ''}`
   const [historyOpen, setHistoryOpen] = useState(false)
+  const historyIdentity = useRef(''), historyMoreController = useRef<AbortController | null>(null)
+  historyIdentity.current = `${namespace}:${!followupVisible && connected && historyOpen ? `${state.view?.day.id || ''}:${state.view?.day.revision ?? ''}` : 'inactive'}`
   const dragged = useRef<string | null>(null)
   const dirty = editorDirty || Boolean(order)
   useEffect(() => {
@@ -53,23 +58,26 @@ export function PersonalToday({ api, namespace, connected, onClose, onOpenItem, 
   }, [dirty])
   useEffect(() => { setZone(state.query.timezone) }, [state.query.timezone])
   useEffect(() => {
-    if (!historyOpen || !state.view) return
-    const controller = new AbortController(); setHistory(null); setHistoryAfter(null)
+    historyMoreController.current?.abort(); historyMoreController.current = null
+    setHistory(null); setHistoryAfter(null); setHistoryLoading(false)
+    if (followupVisible || !connected || !historyOpen || !state.view) return
+    const controller = new AbortController()
     void api.getPersonalTodayHistory('day', state.view.day.id, { limit: 20 }, controller.signal).then(page => { if (!controller.signal.aborted) { setHistory(page.history); setHistoryAfter(page.next_after_revision ?? null) } })
       .catch(cause => { if (!controller.signal.aborted) setNotice(todayError(cause)) })
-    return () => controller.abort()
-  }, [api, namespace, historyOpen, state.view?.day.id, state.view?.day.revision])
+    return () => { controller.abort(); historyMoreController.current?.abort(); historyMoreController.current = null }
+  }, [api, namespace, connected, followupVisible, historyOpen, state.view?.day.id, state.view?.day.revision])
   const moreHistory = async () => {
-    if (historyAfter === null || historyLoading || !state.view) return
+    if (followupVisible || !connected || !historyOpen || historyAfter === null || historyLoading || !state.view || historyMoreController.current) return
     const key = historyIdentity.current
+    const controller = new AbortController(); historyMoreController.current = controller
     setHistoryLoading(true)
     try {
-      const page = await api.getPersonalTodayHistory('day', state.view.day.id, { limit: 20, after_revision: historyAfter })
-      if (historyIdentity.current !== key) return
+      const page = await api.getPersonalTodayHistory('day', state.view.day.id, { limit: 20, after_revision: historyAfter }, controller.signal)
+      if (controller.signal.aborted || historyIdentity.current !== key) return
       setHistory(previous => [...(previous || []), ...page.history.filter(record => !previous?.some(old => old.revision === record.revision))])
       setHistoryAfter(page.next_after_revision ?? null)
-    } catch (cause) { if (historyIdentity.current === key) { setHistory(null); setNotice(todayError(cause)) } }
-    finally { if (historyIdentity.current === key) setHistoryLoading(false) }
+    } catch (cause) { if (!controller.signal.aborted && historyIdentity.current === key) { setHistory(null); setNotice(todayError(cause)) } }
+    finally { if (historyMoreController.current === controller) historyMoreController.current = null; if (!controller.signal.aborted && historyIdentity.current === key) setHistoryLoading(false) }
   }
   const navigate = (proceed: () => void) => requestArtifactNavigation(proceed)
   const changeQuery = (query: TodayQuery) => navigate(() => { setEditor(null); setOrder(null); setEditorDirty(false); state.changeQuery(query); writeTodayLocation(query) })
@@ -113,10 +121,11 @@ export function PersonalToday({ api, namespace, connected, onClose, onOpenItem, 
       </div>
     </article>
   }
-  return <section className="pt-workspace" aria-label="今日安排"><header className="pt-heading"><div className="pt-title"><CalendarDays size={25} /><h1>今日</h1></div><div><button aria-label="刷新今日安排" disabled={state.loading || !connected} onClick={() => navigate(() => { state.refresh(); setOrder(null) })}><RefreshCw size={16} className={state.loading ? 'pa-spin' : ''} /></button><button aria-label="关闭今日安排" onClick={() => navigate(onClose)}><X size={19} /></button></div></header>
-    {hasFollowups && <div className="pt-followup-tabs" role="tablist" aria-label="今日视图"><button role="tab" aria-selected={!followupsOpen} onClick={() => switchView(false)}>安排</button><button role="tab" aria-selected={followupsOpen} onClick={() => switchView(true)}>跟进</button></div>}
-    {followupsOpen && hasFollowups ? <Followups api={api as FollowupApi} namespace={namespace} connected={connected} initialProposalId={initialFollowupId || readFollowupLocation()} defaultDate={state.query.date} defaultTimezone={state.query.timezone} onOpenAction={onOpenAction} onAccepted={state.refresh} onOpenToday={id => {
-      void api.getPersonalTodayDay(id).then(value => { if (followupNavigation.current !== namespace) return; navigate(() => { state.changeQuery({ date: value.day.date, timezone: value.day.timezone, planner_id: value.day.planner_id }); writeTodayLocation({ date: value.day.date, timezone: value.day.timezone, planner_id: value.day.planner_id }); setFollowupsOpen(false); const url = new URL(location.href); url.searchParams.delete('today_view'); url.searchParams.delete('followup_id'); window.history.replaceState({}, '', url) }) }).catch(cause => { if (followupNavigation.current === namespace) setNotice(todayError(cause)) })
+  return <section className="pt-workspace" aria-label="今日安排"><header className="pt-heading"><div className="pt-title"><CalendarDays size={25} /><h1>今日</h1></div><div><button aria-label="刷新今日安排" disabled={state.loading || !connected || followupVisible} onClick={() => navigate(() => { state.refresh(); setOrder(null) })}><RefreshCw size={16} className={state.loading ? 'pa-spin' : ''} /></button><button aria-label="关闭今日安排" onClick={() => navigate(onClose)}><X size={19} /></button></div></header>
+    {hasFollowups && <div className="pt-followup-tabs" role="tablist" aria-label="今日视图"><button role="tab" aria-selected={!followupVisible} onClick={() => switchView(false)}>安排</button><button role="tab" aria-selected={followupVisible} onClick={() => switchView(true)}>跟进</button></div>}
+    {followupVisible ? <Followups api={api as FollowupApi} namespace={namespace} connected={connected} initialProposalId={initialFollowupId || readFollowupLocation()} defaultDate={state.query.date} defaultTimezone={state.query.timezone} onOpenAction={onOpenAction} onAccepted={state.refresh} onOpenToday={id => {
+      navigationRead.current?.abort(); const controller = new AbortController(); navigationRead.current = controller
+      void api.getPersonalTodayDay(id, undefined, controller.signal).then(value => { if (controller.signal.aborted || followupNavigation.current !== namespace || !navigationConnected.current) return; navigate(() => { state.changeQuery({ date: value.day.date, timezone: value.day.timezone, planner_id: value.day.planner_id }); writeTodayLocation({ date: value.day.date, timezone: value.day.timezone, planner_id: value.day.planner_id }); setFollowupsOpen(false); const url = new URL(location.href); url.searchParams.delete('today_view'); url.searchParams.delete('followup_id'); window.history.replaceState({}, '', url) }) }).catch(cause => { if (!controller.signal.aborted && followupNavigation.current === namespace && navigationConnected.current) setNotice(todayError(cause)) }).finally(() => { if (navigationRead.current === controller) navigationRead.current = null })
     }} /> : <>
     <div className="pt-toolbar"><div className="pt-date"><button aria-label="前一天" onClick={() => changeDate(-1)}><ChevronLeft size={17} /></button><input aria-label="安排日期" type="date" value={state.query.date} onChange={event => { if (event.target.value) changeQuery({ ...state.query, date: event.target.value }) }} /><button aria-label="后一天" onClick={() => changeDate(1)}><ChevronRight size={17} /></button><button onClick={() => changeQuery({ ...state.query, date: todayDate(new Date(), state.query.timezone) })}>今天</button></div>
       <label className="pt-zone"><Clock3 size={14} /><input aria-label="安排时区" list="pt-timezones" value={zone} onChange={event => setZone(event.target.value)} /><datalist id="pt-timezones">{['Asia/Shanghai', 'Asia/Tokyo', 'America/New_York', 'Europe/London', 'UTC'].map(value => <option key={value} value={value} />)}</datalist>{zone !== state.query.timezone && <button onClick={() => { try { new Intl.DateTimeFormat('zh-CN', { timeZone: zone }).format(); changeQuery({ ...state.query, timezone: zone }) } catch { setNotice('请选择有效的 IANA 时区') } }}>切换</button>}</label>

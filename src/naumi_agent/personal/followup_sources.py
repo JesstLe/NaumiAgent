@@ -253,12 +253,12 @@ class FollowupSourcesMixin:
         actor, source = proposal["actor_id"], proposal["source"]
         await self._binding_authority(rule, fresh=fresh)
         if source["kind"] == "deadline":
-            old = await self.today._authorized_metadata_ref(source["metadata_ref"], actor)
+            old, original, actual = await self.today._authorized_metadata_source(
+                source["metadata_ref"], actor,
+                expected_item_ref=source["item_ref"], require_current=current,
+            )
             if old["deadline"] != source["deadline"]:
                 raise error("storage_error")
-            original, actual = await self.today._authorize_item(
-                source["item_ref"], actor, require_current=current
-            )
             metadata = await self.today._metadata_for(source["item_ref"])
             if current:
                 await self.today._authorize_metadata_sources(metadata, actor)

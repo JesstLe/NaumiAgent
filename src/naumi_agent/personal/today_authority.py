@@ -176,7 +176,19 @@ class TodayAuthorityMixin:
         return value
 
     async def _authorized_metadata_ref(self, raw, reader):
+        value, _, _ = await self._authorized_metadata_source(raw, reader)
+        return value
+
+    async def _authorized_metadata_source(
+        self, raw, reader, *, expected_item_ref=None, require_current=False
+    ):
+        """Prove exact metadata and its original/current Item in one authority walk."""
         ref = normalize_metadata_ref(raw)
+        if (
+            expected_item_ref is not None
+            and normalize_item_ref(expected_item_ref) != ref["item_ref"]
+        ):
+            raise PersonalAgentError("source_unavailable", "计划字段与原事项引用不一致")
         value = (
             (await self._record("metadata", ref["metadata_id"], revision=ref["metadata_revision"]))
             if ref["metadata_revision"]
@@ -185,8 +197,10 @@ class TodayAuthorityMixin:
         if self._metadata_reference(self._metadata_scope(value)) != ref:
             raise PersonalAgentError("source_unavailable", "计划字段与原确切修订不一致")
         await self._authorize_metadata_sources(value, reader)
-        await self._authorize_item(ref["item_ref"], reader)
-        return value
+        original, current = await self._authorize_item(
+            ref["item_ref"], reader, require_current=require_current
+        )
+        return value, original, current
 
     async def _read_authority(self, record, reader):
         if record["workspace_key"] != self.workspace_key or record["actor_id"] != reader:

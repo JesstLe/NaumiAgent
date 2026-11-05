@@ -4,7 +4,7 @@ import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { WorkbenchRequestError, WorkbenchRuntimeClient } from '@naumi/shared/api/WorkbenchRuntimeClient'
 import type { FollowupContext, FollowupMutation, FollowupProposal, FollowupRule, FollowupRuleBody } from '@naumi/shared/api/personalFollowups'
-import type { TodayDayView, TodayEntry, TodayItemRef } from '@naumi/shared/api/personalToday'
+import type { TodayDayView, TodayEntry, TodayItemRef, TodayQuery } from '@naumi/shared/api/personalToday'
 import type { CalendarAction } from '@naumi/shared/api/personalConnections'
 import { Followups, FollowupRuleLauncher } from '../../../web2/src/personal/followups/Followups'
 import { validateFollowupProposal, validateFollowupRuleBody, validateFollowupPage, validateFollowupTarget } from '../../../web2/src/personal/followups/followupValidation'
@@ -40,6 +40,16 @@ function apiMock(initial = proposal()) {
     throw new Error('unexpected ' + name)
   })
   return { getPersonalFollowupContext: vi.fn().mockResolvedValue(context), executePersonalFollowupOperation: operation, getPersonalToday: vi.fn().mockResolvedValue(day()), getPersonalTodayMetadata: vi.fn().mockResolvedValue({ metadata: null, entry: entry(), metadata_id: metadataId, revision: 3, digest: sha }), getPersonalTodayDay: vi.fn().mockResolvedValue(day(true)), personalCalendarAction: vi.fn().mockResolvedValue(action()), getPersonalTodaySources: vi.fn().mockResolvedValue({ entries: [entry()], next_after: null, partial: false, consistency: 'live_keyset' }), personalCalendarEvents: vi.fn().mockResolvedValue({ events: [], next_offset: null, offset: 0, limit: 50 }) } as unknown as FollowupApi & { executePersonalFollowupOperation: typeof operation }
+}
+function todayHostApi(initial = proposal()) {
+  const base = apiMock(initial), original = base.executePersonalFollowupOperation.getMockImplementation()!
+  let placed = initial.target?.kind === 'today_place'
+  base.executePersonalFollowupOperation.mockImplementation(async (name: string, args: any) => { const value = await original(name, args); if (name === 'accept' && args.payload.target.kind === 'today_place') placed = true; return value })
+  return { ...base,
+    getPersonalTodayContext: vi.fn().mockResolvedValue({ workspace_key: workspace, default_planner: 'main', planners: [{ id: 'main', name: '主 Agent', version: 0 }], limits: {}, server_now: now }),
+    getPersonalToday: vi.fn().mockImplementation(async (query: TodayQuery, _signal?: AbortSignal) => { const value = day(placed); return { ...value, day: { ...value.day, date: query.date, timezone: query.timezone, planner_id: query.planner_id || 'main' } } }),
+    getPersonalTodayHistory: vi.fn().mockResolvedValue({ history: [], next_after_revision: null }), getPersonalTodayRequest: vi.fn(), mutatePersonalToday: vi.fn(), personalItem: vi.fn(), personalItemResult: vi.fn(), readPersonalItemResult: vi.fn(),
+  }
 }
 function mount(api = apiMock(), options: Partial<{ connected: boolean; namespace: string }> = {}) { return { api, ...render(<Followups api={api} namespace={options.namespace || 'followup-A'} connected={options.connected !== false} defaultDate="2026-11-05" defaultTimezone="UTC" onOpenAction={vi.fn()} />) } }
 async function selectProposal() { const list = await screen.findByLabelText('跟进建议列表'); fireEvent.click(within(list).getByText(/核对预算|评审已顺延/)); await screen.findByLabelText('跟进来源证据') }
@@ -99,4 +109,63 @@ describe('followup host, notifications and HTTP adapters', () => {
   it('opens the same rule form from an existing source seed', async () => { const api = apiMock(); render(<FollowupRuleLauncher api={api} namespace="A" connected seed={{ kind: 'deadline', item_id: itemId }} onClose={vi.fn()} />); await screen.findByLabelText('跟进规则名称'); expect(((await screen.findByText('核对预算', { selector: 'label' })).querySelector('input') as HTMLInputElement).checked).toBe(true) })
   it('validates the genuine followup notification kind and jump, clearing links on loss of source', () => { const notice = { id: `ne_${'7'.repeat(32)}`, event_digest: sha, kind: 'followup_proposal' as const, actor_id: 'main', actor_name: '主 Agent', title: '核对预算', occurred_at: now, availability: 'available' as const, priority: 'normal' as const, unread: true, notice_read: null, source_ref: { proposal_id: proposalId }, jump: { kind: 'followup' as const, id: proposalId }, batch_id: null }; expect(validateNotificationEntry(notice).jump?.kind).toBe('followup'); expect(validateNotificationEntry({ ...notice, availability: 'source_unavailable' }).jump).toBeNull(); expect(() => validateNotificationEntry({ ...notice, jump: { kind: 'followup', id: 'other' } })).toThrow() })
   it('sends exact flat human operations to the current hub, with no nested args or source credentials', async () => { const seen: unknown[] = []; const server = setupServer(http.get('http://127.0.0.1:8765/personal/followups/context', () => HttpResponse.json(context)), http.post('http://127.0.0.1:8765/personal/followups/operations', async ({ request }) => { seen.push(await request.json()); expect(request.headers.get('authorization')).toBe('Bearer current-token'); return HttpResponse.json({ proposals: [], next_after: null, partial: false, server_now: now }) })); server.listen({ onUnhandledRequest: 'error' }); try { const client = new WorkbenchRuntimeClient('http://127.0.0.1:8765', async () => 'current-token'); await client.getPersonalFollowupContext(); await client.executePersonalFollowupOperation('list', { status: 'pending', limit: 50 }); expect(seen).toEqual([{ operation: 'list', status: 'pending', limit: 50 }]) } finally { server.close() } })
+})
+
+
+describe('Today followup foreground ownership', () => {
+  it.each(['url', 'notification'] as const)('starts directly in followups from %s without launching a hidden Today context or bulk day read', async entrypoint => {
+    history.replaceState({}, '', `/web2?today=1&today_date=2026-11-05&today_timezone=UTC${entrypoint === 'url' ? '&today_view=followups' : ''}`)
+    const api = todayHostApi(), props = { api, namespace: 'foreground-A', connected: true, initialFollowupId: entrypoint === 'notification' ? proposalId : null, onClose: vi.fn(), onOpenItem: vi.fn(), onOpenResult: vi.fn(), onOpenRoutine: vi.fn() }
+    const ui = render(<PersonalToday {...props} />); await screen.findByLabelText('跟进建议列表'); await waitFor(() => expect(api.getPersonalFollowupContext).toHaveBeenCalled())
+    expect(api.getPersonalTodayContext).not.toHaveBeenCalled(); expect(api.getPersonalToday).not.toHaveBeenCalled(); expect(screen.getByRole('button', { name: '刷新今日安排' })).toBeDisabled()
+    expect(screen.queryByText('本地服务已断开，来源正文已清除')).toBeNull()
+    ui.rerender(<PersonalToday {...props} connected={false} />); expect(api.getPersonalTodayContext).not.toHaveBeenCalled()
+    ui.rerender(<PersonalToday {...props} />); await screen.findByLabelText('跟进建议列表'); expect(api.getPersonalToday).not.toHaveBeenCalled()
+  })
+  it('takes a new notification selection into the foreground immediately and still allows returning to arrange', async () => {
+    const api = todayHostApi(), props = { api, namespace: 'foreground-A', connected: true, onClose: vi.fn(), onOpenItem: vi.fn(), onOpenResult: vi.fn(), onOpenRoutine: vi.fn() }
+    const ui = render(<PersonalToday {...props} />); await screen.findByRole('button', { name: '核对预算', exact: true }); api.getPersonalTodayContext.mockClear(); api.getPersonalToday.mockClear()
+    ui.rerender(<PersonalToday {...props} initialFollowupId={proposalId} />)
+    await screen.findByLabelText('跟进来源证据'); expect(api.getPersonalTodayContext).not.toHaveBeenCalled(); expect(api.getPersonalToday).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('tab', { name: '安排', exact: true })); await screen.findByRole('button', { name: '核对预算', exact: true })
+    expect(api.getPersonalTodayContext).toHaveBeenCalledTimes(1); expect(api.getPersonalToday).toHaveBeenCalledTimes(1); expect(screen.getByRole('tab', { name: '安排', exact: true })).toHaveAttribute('aria-selected', 'true')
+  })
+  it('defers the accepted refresh while hidden but preserves the explicit acceptance preflight and exact original-target readback', async () => {
+    history.replaceState({}, '', '/web2?today=1&today_view=followups&today_date=2026-11-05&today_timezone=UTC')
+    const api = todayHostApi(); render(<PersonalToday api={api} namespace="foreground-A" connected onClose={vi.fn()} onOpenItem={vi.fn()} onOpenResult={vi.fn()} onOpenRoutine={vi.fn()} />)
+    await selectProposal(); fireEvent.click(screen.getByRole('button', { name: '加入安排', exact: true })); fireEvent.click(screen.getByRole('button', { name: '采纳并安排', exact: true }))
+    await screen.findByText('原安排已读回', { selector: '.pf-notice', exact: true })
+    expect(api.getPersonalTodayContext).not.toHaveBeenCalled(); expect(api.getPersonalToday).toHaveBeenCalledTimes(1)
+    expect(api.getPersonalTodayDay).toHaveBeenCalledWith(dayId, undefined, expect.any(AbortSignal))
+    expect(api.executePersonalFollowupOperation.mock.calls.filter(([name]) => name === 'accept')).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: '查看安排', exact: true })); await screen.findByRole('button', { name: '核对预算', exact: true })
+    expect(api.getPersonalTodayContext).toHaveBeenCalledTimes(1); expect(api.getPersonalToday).toHaveBeenCalledTimes(2)
+    expect(api.mutatePersonalToday).not.toHaveBeenCalled(); expect(api.readPersonalItemResult).not.toHaveBeenCalled()
+  })
+  it('keeps the original Today dirty guard in front of a followup-tab transition', async () => {
+    const api = todayHostApi(); render(<PersonalToday api={api} namespace="foreground-A" connected onClose={vi.fn()} onOpenItem={vi.fn()} onOpenResult={vi.fn()} onOpenRoutine={vi.fn()} />)
+    await screen.findByRole('button', { name: '核对预算', exact: true }); fireEvent.click(screen.getByRole('button', { name: '设置', exact: true })); fireEvent.change(screen.getByLabelText('安排优先级'), { target: { value: 'high' } })
+    fireEvent.click(screen.getByRole('tab', { name: '跟进', exact: true })); expect(screen.getByRole('alertdialog', { name: '保留未保存安排' })).toBeInTheDocument(); expect(api.getPersonalFollowupContext).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '继续编辑', exact: true })); expect(screen.getByLabelText('安排优先级')).toHaveValue('high')
+    fireEvent.click(screen.getByRole('tab', { name: '跟进', exact: true })); fireEvent.click(screen.getByRole('button', { name: '放弃修改并继续', exact: true })); await screen.findByLabelText('跟进建议列表'); expect(api.mutatePersonalToday).not.toHaveBeenCalled()
+  })
+  it('keeps the explicit rule launcher connected with its original source while arrange is foreground', async () => {
+    const api = todayHostApi(); render(<PersonalToday api={api} namespace="foreground-A" connected onClose={vi.fn()} onOpenItem={vi.fn()} onOpenResult={vi.fn()} onOpenRoutine={vi.fn()} />)
+    await screen.findByRole('button', { name: '核对预算', exact: true }); fireEvent.click(screen.getByRole('button', { name: '跟进', exact: true }))
+    await screen.findByLabelText('跟进规则名称'); const dialog = screen.getByRole('dialog', { name: '新建跟进规则' }); expect(within(dialog).getByLabelText('跟进规则名称')).toBeEnabled()
+    await waitFor(() => expect(within(dialog).getByRole('checkbox', { name: '核对预算', exact: true })).toBeChecked())
+    expect(api.getPersonalFollowupContext).toHaveBeenCalled(); expect(api.getPersonalTodayContext).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText('本地服务已断开，来源正文已清除')).toBeNull(); expect(api.executePersonalFollowupOperation.mock.calls.some(([name]) => name === 'create_rule')).toBe(false)
+  })
+  it('aborts history pagination on hiding the arrange view and never merges its late private page after return', async () => {
+    const api = todayHostApi(); let release!: (value: { history: Record<string, unknown>[]; next_after_revision: null }) => void, signal!: AbortSignal
+    api.getPersonalTodayHistory.mockResolvedValueOnce({ history: [{ revision: 2 }], next_after_revision: 1 })
+    api.getPersonalTodayHistory.mockImplementationOnce((_kind: string, _id: string, _query: unknown, passed?: AbortSignal) => { signal = passed!; return new Promise(resolve => { release = resolve }) })
+    render(<PersonalToday api={api} namespace="foreground-A" connected onClose={vi.fn()} onOpenItem={vi.fn()} onOpenResult={vi.fn()} onOpenRoutine={vi.fn()} />)
+    await screen.findByRole('button', { name: '核对预算', exact: true }); fireEvent.click(screen.getByRole('button', { name: '历史', exact: true })); fireEvent.click(await screen.findByRole('button', { name: '更多日计划修订', exact: true }))
+    await waitFor(() => expect(signal).toBeDefined()); fireEvent.click(screen.getByRole('tab', { name: '跟进', exact: true })); expect(signal.aborted).toBe(true)
+    await screen.findByLabelText('跟进建议列表'); fireEvent.click(screen.getByRole('tab', { name: '安排', exact: true })); await screen.findByText('尚无日计划修订')
+    await act(async () => { release({ history: [{ revision: 'LATE_PRIVATE_HISTORY' }], next_after_revision: null }); await Promise.resolve() })
+    expect(document.body.textContent).not.toContain('LATE_PRIVATE_HISTORY'); expect(api.getPersonalTodayContext).toHaveBeenCalledTimes(2)
+  })
 })

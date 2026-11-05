@@ -77,6 +77,95 @@ describe('Today exact identity and request state', () => {
   })
 })
 
+describe('Today foreground read subscription', () => {
+  it('restores opaque pending state while inactive and defers refresh/query reads until foreground returns', async () => {
+    const requestId = '6'.repeat(32), saved = { version: 1, request_id: requestId, operation: 'check', workspace_key: workspace, metadata_id: metadataId }
+    localStorage.setItem(todayPendingKey('workspace-A'), JSON.stringify(saved))
+    const api = apiMock(), ui = renderHook(({ readActive }) => usePersonalToday({ api, namespace: 'workspace-A', connected: true, readActive }), { initialProps: { readActive: false } })
+    await waitFor(() => expect(ui.result.current.pending?.request_id).toBe(requestId))
+    act(() => { ui.result.current.refresh(); ui.result.current.changeQuery({ ...query, date: '2026-11-06' }) })
+    expect(api.getPersonalTodayContext).not.toHaveBeenCalled(); expect(api.getPersonalToday).not.toHaveBeenCalled(); expect(ui.result.current.context).toBeNull(); expect(ui.result.current.view).toBeNull()
+    ui.rerender({ readActive: true })
+    await waitFor(() => expect(ui.result.current.view?.day.date).toBe('2026-11-06'))
+    expect(api.getPersonalTodayContext).toHaveBeenCalledTimes(1); expect(api.getPersonalToday).toHaveBeenCalledTimes(1)
+    expect(ui.result.current.pending?.request_id).toBe(requestId); expect(localStorage.getItem(todayPendingKey('workspace-A'))).toBe(JSON.stringify(saved))
+  })
+  it('aborts a hidden context read and ignores its late response across a namespace change', async () => {
+    const api = apiMock(); let release!: (value: TodayContext) => void, originalSignal!: AbortSignal
+    api.getPersonalTodayContext.mockImplementationOnce((signal?: AbortSignal) => { originalSignal = signal!; return new Promise<TodayContext>(resolve => { release = resolve }) })
+    const ui = renderHook(({ namespace, readActive }) => usePersonalToday({ api, namespace, connected: true, readActive }), { initialProps: { namespace: 'workspace-A', readActive: true } })
+    await waitFor(() => expect(api.getPersonalTodayContext).toHaveBeenCalledTimes(1))
+    ui.rerender({ namespace: 'workspace-B', readActive: false }); expect(originalSignal.aborted).toBe(true)
+    await act(async () => { release({ ...context, default_planner: 'OLD_PRIVATE_PLANNER' }); await Promise.resolve() })
+    expect(api.getPersonalToday).not.toHaveBeenCalled(); expect(ui.result.current.context).toBeNull()
+    ui.rerender({ namespace: 'workspace-B', readActive: true })
+    await waitFor(() => expect(ui.result.current.view).not.toBeNull())
+    expect(api.getPersonalTodayContext).toHaveBeenCalledTimes(2); expect(api.getPersonalToday).toHaveBeenCalledTimes(1)
+    expect(ui.result.current.query.planner_id).toBe('main')
+  })
+  it('aborts and fences a hidden day read even when its transport resolves after reactivation', async () => {
+    const api = apiMock(); let release!: (value: TodayDayView) => void, signal!: AbortSignal
+    api.getPersonalToday.mockImplementationOnce((_q: TodayQuery, passed?: AbortSignal) => { signal = passed!; return new Promise<TodayDayView>(resolve => { release = resolve }) })
+    const ui = renderHook(({ readActive }) => usePersonalToday({ api, namespace: 'workspace-A', connected: true, readActive }), { initialProps: { readActive: true } })
+    await waitFor(() => expect(api.getPersonalToday).toHaveBeenCalledTimes(1)); ui.rerender({ readActive: false })
+    expect(signal.aborted).toBe(true); expect(ui.result.current.view).toBeNull(); expect(ui.result.current.loading).toBe(false)
+    ui.rerender({ readActive: true }); await waitFor(() => expect(ui.result.current.view?.entries[0].title).toBe('核对项目资料'))
+    await act(async () => { release(day({ entries: [entry({ title: 'LATE_HIDDEN_SOURCE' })] })); await Promise.resolve() })
+    expect(ui.result.current.view?.entries[0].title).toBe('核对项目资料'); expect(api.getPersonalTodayContext).toHaveBeenCalledTimes(2)
+  })
+  it('keeps an in-flight original human write and its lock while pausing only reads', async () => {
+    const api = apiMock(); let release!: (value: TodayMutation) => void
+    api.mutatePersonalToday.mockImplementationOnce(() => new Promise<TodayMutation>(resolve => { release = resolve }))
+    const ui = renderHook(({ readActive }) => usePersonalToday({ api, namespace: 'workspace-A', connected: true, readActive }), { initialProps: { readActive: true } })
+    await waitFor(() => expect(ui.result.current.view).not.toBeNull())
+    const originalSubmit = ui.result.current.submit, requestId = '6'.repeat(32), write = { operation: 'check' as const, body: { request_id: requestId, metadata_id: metadataId, expected_revision: 1, source_ref: source, checked: true } }
+    let submitted!: Promise<boolean>; act(() => { submitted = originalSubmit(write) })
+    ui.rerender({ readActive: false }); expect(ui.result.current.posting).toBe(true); expect(ui.result.current.pending?.request_id).toBe(requestId)
+    await act(async () => { expect(await originalSubmit({ ...write, body: { ...write.body, request_id: '7'.repeat(32) } })).toBe(false) })
+    await act(async () => { release(receipt(requestId, 'check')); expect(await submitted).toBe(true) })
+    expect(ui.result.current.pending).toBeNull(); expect(ui.result.current.posting).toBe(false); expect(api.mutatePersonalToday).toHaveBeenCalledTimes(1)
+    expect(api.getPersonalTodayContext).toHaveBeenCalledTimes(1); expect(api.getPersonalToday).toHaveBeenCalledTimes(1)
+    ui.rerender({ readActive: true }); await waitFor(() => expect(api.getPersonalToday).toHaveBeenCalledTimes(2)); expect(api.getPersonalTodayContext).toHaveBeenCalledTimes(2)
+  })
+  it('retains UNKNOWN from a paused original write and reconciles only its original request after return', async () => {
+    const api = apiMock(); let fail!: (cause: Error) => void
+    api.mutatePersonalToday.mockImplementationOnce(() => new Promise<TodayMutation>((_resolve, reject) => { fail = reject }))
+    const ui = renderHook(({ readActive }) => usePersonalToday({ api, namespace: 'workspace-A', connected: true, readActive }), { initialProps: { readActive: true } })
+    await waitFor(() => expect(ui.result.current.view).not.toBeNull()); const requestId = '6'.repeat(32)
+    let submitted!: Promise<boolean>; act(() => { submitted = ui.result.current.submit({ operation: 'check', body: { request_id: requestId, metadata_id: metadataId, expected_revision: 1, source_ref: source, checked: true } }) })
+    ui.rerender({ readActive: false }); await act(async () => { fail(new WorkbenchRequestError('original response UNKNOWN', 503)); expect(await submitted).toBe(false) })
+    expect(ui.result.current.pending?.request_id).toBe(requestId); expect(api.getPersonalTodayRequest).not.toHaveBeenCalled(); expect(api.getPersonalToday).toHaveBeenCalledTimes(1)
+    api.getPersonalTodayRequest.mockResolvedValueOnce({ status: 'accepted', ...receipt(requestId, 'check') })
+    ui.rerender({ readActive: true }); await waitFor(() => expect(ui.result.current.context).not.toBeNull())
+    await act(async () => { expect(await ui.result.current.reconcile()).toBe(true) })
+    expect(api.getPersonalTodayRequest).toHaveBeenCalledWith(requestId); expect(api.mutatePersonalToday).toHaveBeenCalledTimes(1); expect(ui.result.current.pending).toBeNull()
+  })
+  it('aborts pagination and rejects old more callbacks while hidden without merging a late page', async () => {
+    const api = apiMock(); let release!: (value: TodayDayView) => void, pagingSignal!: AbortSignal
+    api.getPersonalToday.mockImplementation((q: TodayQuery, signal?: AbortSignal) => q.cursor ? new Promise<TodayDayView>(resolve => { pagingSignal = signal!; release = resolve }) : Promise.resolve(day({ next_cursor: 'original-cursor' })))
+    const ui = renderHook(({ readActive }) => usePersonalToday({ api, namespace: 'workspace-A', connected: true, readActive }), { initialProps: { readActive: true } })
+    await waitFor(() => expect(ui.result.current.view?.next_cursor).toBe('original-cursor'))
+    const oldMore = ui.result.current.more; let paging!: Promise<void>; act(() => { paging = oldMore() })
+    await waitFor(() => expect(pagingSignal).toBeDefined()); ui.rerender({ readActive: false }); expect(pagingSignal.aborted).toBe(true)
+    await act(async () => { await oldMore() }); expect(api.getPersonalToday).toHaveBeenCalledTimes(2)
+    ui.rerender({ readActive: true }); await waitFor(() => expect(ui.result.current.view).not.toBeNull())
+    await act(async () => { release(day({ entries: [entry({ metadata_id: `tm_${'8'.repeat(32)}`, title: 'LATE_PRIVATE_PAGE' })] })); await paging })
+    expect(ui.result.current.view?.entries.some(value => value.title === 'LATE_PRIVATE_PAGE')).toBe(false); expect(ui.result.current.loading).toBe(false)
+  })
+  it('keeps real disconnect distinct from read pause and reacquires the original context on reconnect', async () => {
+    const api = apiMock(), ui = renderHook(({ connected, readActive }) => usePersonalToday({ api, namespace: 'workspace-A', connected, readActive }), { initialProps: { connected: true, readActive: true } })
+    await waitFor(() => expect(ui.result.current.view).not.toBeNull()); ui.rerender({ connected: false, readActive: true })
+    act(() => ui.result.current.refresh()); expect(ui.result.current.view).toBeNull(); expect(ui.result.current.context).toBeNull(); expect(api.getPersonalTodayContext).toHaveBeenCalledTimes(1)
+    ui.rerender({ connected: true, readActive: false }); expect(api.getPersonalTodayContext).toHaveBeenCalledTimes(1)
+    ui.rerender({ connected: true, readActive: true }); await waitFor(() => expect(ui.result.current.view).not.toBeNull()); expect(api.getPersonalTodayContext).toHaveBeenCalledTimes(2); expect(api.getPersonalToday).toHaveBeenCalledTimes(2)
+  })
+  it('does not reuse a pre-pause private projection when fresh context authorization fails', async () => {
+    const api = apiMock(), ui = renderHook(({ readActive }) => usePersonalToday({ api, namespace: 'workspace-A', connected: true, readActive }), { initialProps: { readActive: true } })
+    await waitFor(() => expect(ui.result.current.view).not.toBeNull()); ui.rerender({ readActive: false }); api.getPersonalTodayContext.mockRejectedValueOnce(new WorkbenchRequestError('原工作区权限已变化', 403)); ui.rerender({ readActive: true })
+    await waitFor(() => expect(ui.result.current.error).toBe('原工作区权限已变化')); expect(ui.result.current.view).toBeNull(); expect(ui.result.current.context).toBeNull(); expect(api.getPersonalToday).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('Today operative light workspace', () => {
   it('requires a human click to confirm an empty opaque day with the full empty placement CAS set', async () => {
     let confirmed = false

@@ -50,46 +50,57 @@ export function validateTodayView(value: TodayDayView, workspace: string, query:
   return { ...value, entries, routines: value.routines.map(routine => routine.availability === 'available' ? routine : { ...routine, title: null }), deliveries: value.deliveries.map(validateTodayDelivery) }
 }
 
-export function usePersonalToday({ api, namespace, connected }: { api: PersonalTodayApi; namespace: string; connected: boolean }) {
+export function usePersonalToday({ api, namespace, connected, readActive = true }: { api: PersonalTodayApi; namespace: string; connected: boolean; readActive?: boolean }) {
   const [query, setQuery] = useState<TodayQuery>(readTodayLocation)
-  const [context, setContext] = useState<TodayContext | null>(null), [view, setView] = useState<TodayDayView | null>(null)
+  const [contextSnapshot, setContext] = useState<TodayContext | null>(null), [contextKey, setContextKey] = useState(''), [view, setView] = useState<TodayDayView | null>(null)
+  const [contextLoading, setContextLoading] = useState(false)
   const [loading, setLoading] = useState(false), [posting, setPosting] = useState(false), [error, setError] = useState('')
   const [writeError, setWriteError] = useState('')
   const [pending, setPending] = useState<TodayPending | null>(null), [identityError, setIdentityError] = useState('')
   const [token, setToken] = useState(0)
   const active = useRef(''), sequence = useRef(0), writeLock = useRef(false)
+  const moreController = useRef<AbortController | null>(null), reading = useRef(false)
   const storageKey = todayPendingKey(namespace)
-  active.current = storageKey
+  const foreground = connected && readActive
+  active.current = storageKey; reading.current = foreground
+  const context = foreground && contextKey === storageKey ? contextSnapshot : null
   const refresh = useCallback(() => setToken(value => value + 1), [])
   useEffect(() => {
-    const controller = new AbortController(), key = storageKey
-    setContext(null); setView(null); setError(''); setWriteError(''); setPosting(false); writeLock.current = false
+    const key = storageKey
+    setContext(null); setContextKey(''); setView(null); setError(''); setWriteError(''); setPosting(false); writeLock.current = false
     const reload = () => {
       if (active.current !== key) return
       try { const raw = localStorage.getItem(key); setPending(raw ? parseTodayPending(raw) : null); setIdentityError('') }
       catch { setIdentityError('原请求身份存储待核对'); setPending(null) }
     }
     reload(); window.addEventListener('storage', reload)
-    if (connected) void api.getPersonalTodayContext(controller.signal).then(value => {
-      if (controller.signal.aborted || active.current !== key) return
+    return () => { sequence.current++; window.removeEventListener('storage', reload) }
+  }, [storageKey])
+  useEffect(() => {
+    const controller = new AbortController(), key = storageKey
+    setContext(null); setContextKey(''); setView(null); setError(''); setContextLoading(foreground)
+    if (foreground) void api.getPersonalTodayContext(controller.signal).then(value => {
+      if (controller.signal.aborted || active.current !== key || !reading.current) return
       if (!value || !hash(value.workspace_key) || !Array.isArray(value.planners) || typeof value.default_planner !== 'string') throw new Error('工作区身份待核对')
-      setContext(value)
+      setContext(value); setContextKey(key)
       setQuery(previous => ({ ...previous, planner_id: previous.planner_id && value.planners.some(planner => planner.id === previous.planner_id) ? previous.planner_id : value.default_planner }))
-    }).catch(cause => { if (!controller.signal.aborted && active.current === key) setError(todayError(cause)) })
-    return () => { controller.abort(); sequence.current++; window.removeEventListener('storage', reload) }
-  }, [api, connected, storageKey])
+    }).catch(cause => { if (!controller.signal.aborted && active.current === key && reading.current) setError(todayError(cause)) })
+      .finally(() => { if (!controller.signal.aborted && active.current === key && reading.current) setContextLoading(false) })
+    return () => { controller.abort(); moreController.current?.abort(); moreController.current = null }
+  }, [api, foreground, storageKey])
   useEffect(() => {
     const controller = new AbortController(), run = ++sequence.current, key = storageKey
+    moreController.current?.abort(); moreController.current = null
     setView(null)
-    if (!connected || !context || !query.planner_id) { setLoading(false); return () => controller.abort() }
+    if (!foreground || !context || !query.planner_id) { setLoading(false); return () => controller.abort() }
     setLoading(true)
     void api.getPersonalToday({ ...query, limit: 50 }, controller.signal).then(value => {
-      if (controller.signal.aborted || run !== sequence.current || active.current !== key) return
+      if (controller.signal.aborted || run !== sequence.current || active.current !== key || !reading.current) return
       setView(validateTodayView(value, context.workspace_key, query)); setError('')
-    }).catch(cause => { if (!controller.signal.aborted && run === sequence.current && active.current === key) { setView(null); setError(todayError(cause)) } })
-      .finally(() => { if (!controller.signal.aborted && run === sequence.current && active.current === key) setLoading(false) })
-    return () => controller.abort()
-  }, [api, connected, context, query, token, storageKey])
+    }).catch(cause => { if (!controller.signal.aborted && run === sequence.current && active.current === key && reading.current) { setView(null); setError(todayError(cause)) } })
+      .finally(() => { if (!controller.signal.aborted && run === sequence.current && active.current === key && reading.current) setLoading(false) })
+    return () => { controller.abort(); moreController.current?.abort(); moreController.current = null }
+  }, [api, foreground, context, query, token, storageKey])
   const changeQuery = (value: TodayQuery) => { setView(null); setQuery(value) }
   const accept = (value: TodayMutation, identity: TodayPending, key: string): boolean => {
     if (active.current !== key) return false
@@ -113,7 +124,7 @@ export function usePersonalToday({ api, namespace, connected }: { api: PersonalT
     setView(null); refresh(); return true
   }
   const submit = async (write: TodayWrite): Promise<boolean> => {
-    if (writeLock.current || pending || identityError || !connected || !context) return false
+    if (writeLock.current || pending || identityError || !connected || !context || !reading.current) return false
     const key = storageKey, scope = context.workspace_key
     writeLock.current = true; setPosting(true); setWriteError('')
     try {
@@ -133,7 +144,7 @@ export function usePersonalToday({ api, namespace, connected }: { api: PersonalT
     } finally { if (active.current === key) { writeLock.current = false; setPosting(false) } }
   }
   const reconcile = async () => {
-    if (!pending || !context || writeLock.current || !connected) return false
+    if (!pending || !context || writeLock.current || !connected || !reading.current) return false
     if (pending.workspace_key !== context.workspace_key) { setIdentityError('原请求属于其他工作区'); return false }
     const key = storageKey, identity = pending
     writeLock.current = true; setPosting(true)
@@ -146,19 +157,20 @@ export function usePersonalToday({ api, namespace, connected }: { api: PersonalT
     finally { if (active.current === key) { writeLock.current = false; setPosting(false) } }
   }
   const more = async () => {
-    if (!view?.next_cursor || !context || loading) return
+    if (!reading.current || !view?.next_cursor || !context || loading || contextLoading || moreController.current) return
     const run = sequence.current, key = storageKey
+    const controller = new AbortController(); moreController.current = controller
     setLoading(true)
     try {
-      const page = validateTodayView(await api.getPersonalToday({ ...query, limit: 50, cursor: view.next_cursor }), context.workspace_key, query)
-      if (run !== sequence.current || active.current !== key) return
+      const page = validateTodayView(await api.getPersonalToday({ ...query, limit: 50, cursor: view.next_cursor }, controller.signal), context.workspace_key, query)
+      if (controller.signal.aborted || run !== sequence.current || active.current !== key || !reading.current) return
       setView(previous => previous ? { ...page, entries: [...previous.entries, ...page.entries.filter(entry => !previous.entries.some(old => old.metadata_id === entry.metadata_id))],
         routines: [...previous.routines, ...page.routines.filter(entry => !previous.routines.some(old => old.id === entry.id))],
         deliveries: [...previous.deliveries, ...page.deliveries.filter(entry => !previous.deliveries.some(old => old.delivery_id === entry.delivery_id))] } : null)
-    } catch (cause) { if (run === sequence.current && active.current === key) { setView(null); setError(todayError(cause)) } }
-    finally { if (run === sequence.current && active.current === key) setLoading(false) }
+    } catch (cause) { if (!controller.signal.aborted && run === sequence.current && active.current === key && reading.current) { setView(null); setError(todayError(cause)) } }
+    finally { if (moreController.current === controller) moreController.current = null; if (!controller.signal.aborted && run === sequence.current && active.current === key && reading.current) setLoading(false) }
   }
-  return { query, context, view, loading, posting, pending, identityError, error: writeError || error, refresh, changeQuery, submit, reconcile, more,
-    locked: posting || Boolean(pending) || Boolean(identityError) || !connected || !view }
+  return { query, context, view: foreground && context ? view : null, loading: foreground && (contextLoading || loading), posting, pending, identityError, error: writeError || error, refresh, changeQuery, submit, reconcile, more,
+    locked: posting || Boolean(pending) || Boolean(identityError) || !foreground || !view }
 }
 export type PersonalTodayState = ReturnType<typeof usePersonalToday>
