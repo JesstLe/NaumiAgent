@@ -15,7 +15,8 @@ import pytest
 from naumi_agent.agents.base import AgentResult
 from naumi_agent.config.settings import AppConfig, MemoryConfig
 from naumi_agent.orchestrator.engine import AgentEngine
-from naumi_agent.orchestrator.subagent_manager import SubTask
+from naumi_agent.orchestrator.subagent_manager import SubAgentManager, SubTask
+from naumi_agent.tools.analysis import set_analysis_subagent_manager
 from naumi_agent.tui.agent_control import format_agent_control_markdown
 from naumi_agent.ui.bridge import JsonlEngineBridge
 
@@ -88,6 +89,16 @@ async def test_real_manager_bridge_node_stop_and_textual_parity(
     sibling_delegate: asyncio.Task[AgentResult] | None = None
     try:
         session = await engine.get_or_create_session(title="Agent Control 真实验收")
+        assert engine.agent_worker_process_factory.model_execution_enabled
+        # This scenario patches BaseAgent.execute; select its embedded contract
+        # explicitly instead of silently expecting a spawned worker to inherit it.
+        manager = SubAgentManager(
+            engine,
+            heartbeat_factory=engine.agent_execution_heartbeat_factory,
+            agent_job_store=engine._resources.agent_job_store,
+        )
+        engine.subagent_manager = manager
+        set_analysis_subagent_manager(manager)
         target_agent = engine.subagent_manager.get_agent("coder")
         sibling_agent = engine.subagent_manager.get_agent("researcher")
         assert target_agent is not None
@@ -159,7 +170,8 @@ async def test_real_manager_bridge_node_stop_and_textual_parity(
             for item in opened["payload"]["executions"]
         )
         assert all(
-            item["worker_job_state"] == "running"
+            item["worker_backend"] == "embedded"
+            and item["worker_job_state"] == "running"
             and item["worker_claim_epoch"] == 1
             and item["worker_job_id"].startswith("agent-job-")
             for item in opened["payload"]["executions"]
